@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/soulteary/yunqi/internal/config"
@@ -640,5 +641,20 @@ func TestChatClaudeStructuredOutputWireOrder(t *testing.T) {
 	}
 	if got := gjson.GetBytes(wire, "output_config.format.schema").Raw; got != schema {
 		t.Fatalf("schema order %s in %s", got, wire)
+	}
+}
+
+func TestChatClaudePreservesToolMedia(t *testing.T) {
+	raw := []byte(`{"messages":[{"role":"tool","tool_call_id":"a","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,aW1hZ2U="}}]}]}`)
+	converted, err := convertChatToClaudeRequest(raw, "m", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(converted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"media_type":"image/png"`) || !strings.Contains(string(encoded), `"data":"aW1hZ2U="`) {
+		t.Fatalf("tool media lost %s", encoded)
 	}
 }

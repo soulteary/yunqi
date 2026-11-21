@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -268,6 +269,16 @@ func ObserveJSON(data []byte) {
 			}
 		case map[string]any:
 			for key, item := range v {
+				if strings.EqualFold(key, "customHeaders") {
+					if headers, ok := item.(map[string]any); ok {
+						for name, value := range headers {
+							if SensitiveHeader(name) {
+								collect(value, true)
+							}
+						}
+					}
+					continue
+				}
 				collect(item, secret || sensitiveField(key))
 			}
 		}
@@ -476,4 +487,47 @@ func publicProtocolType(value any) bool {
 		return true
 	}
 	return false
+}
+
+// BodyJSON is stricter than client-error redaction: logging never needs binary
+// media or common structured personal identifiers, even after explicit opt-in.
+func BodyJSON(data []byte) []byte {
+	value, err := decode(data)
+	if err != nil {
+		return []byte("[OMITTED: non-JSON body, " + strconv.Itoa(len(data)) + " bytes]")
+	}
+	var scrub func(any) any
+	scrub = func(value any) any {
+		switch v := value.(type) {
+		case map[string]any:
+			for key, item := range v {
+				name := strings.ToLower(strings.NewReplacer("_", "", "-", "").Replace(key))
+				switch name {
+				case "data", "b64json", "base64", "inlinedata", "filedata", "imageurl", "inputaudio", "audiodata", "attachments":
+					v[key] = "[OMITTED:media]"
+				case "email", "phone", "phonenumber", "address", "ssn", "creditcard", "creditcardnumber":
+					v[key] = Mask
+				default:
+					v[key] = scrub(item)
+				}
+			}
+		case []any:
+			for i := range v {
+				v[i] = scrub(v[i])
+			}
+		}
+		return value
+	}
+	value = scrub(value)
+	value, _ = sanitize(value)
+	result, err := json.Marshal(value)
+	if err != nil {
+		return []byte(Mask)
+	}
+	return result
+}
+
+func SensitiveHeader(name string) bool {
+	name = strings.ToLower(name)
+	return name == "cookie" || name == "set-cookie" || strings.Contains(name, "auth") || strings.Contains(name, "credential") || strings.HasSuffix(name, "-key") || strings.HasSuffix(name, "-token") || strings.HasSuffix(name, "-secret")
 }

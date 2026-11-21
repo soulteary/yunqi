@@ -666,7 +666,7 @@ type CollectedUsageData struct {
 // NewStreamContext 创建流处理上下文
 func NewStreamContext(envCfg *config.EnvConfig) *StreamContext {
 	ctx := &StreamContext{
-		LoggingEnabled:    envCfg.IsDevelopment() && envCfg.EnableResponseLogs,
+		LoggingEnabled:    envCfg.ShouldLogResponseBodies(),
 		ContentBlockTypes: make(map[int]string),
 		ToolCallTracker:   NewStreamToolCallTracker(),
 		LogBuffer:         NewLimitedLogBuffer(MaxUpstreamResponseLogBytes),
@@ -928,8 +928,8 @@ func ProcessStreamEvent(
 			RequestLogf(c, "[Messages-Stream-Event] #%d 类型=%s 长度=%d block_index=%d block_type=%s",
 				ctx.EventCount, eventType, len(event), blockIndex, blockType)
 			// 对于 content_block 相关事件，记录详细内容
-			if strings.Contains(event, "content_block") {
-				RequestLogf(c, "[Messages-Stream-Event] 详情: %s", truncateForLog(event, 500))
+			if envCfg.ShouldLogResponseBodies() && strings.Contains(event, "content_block") {
+				RequestLogf(c, "[Messages-Stream-Event] 详情: %s", truncateForLog(ResponseBodyTextForLog(event), 500))
 			}
 		}
 	}
@@ -1299,7 +1299,7 @@ func storeStreamThinkingCache(ctx *StreamContext, envCfg *config.EnvConfig) {
 
 // logPartialResponse 记录部分响应日志
 func logPartialResponse(ctx *StreamContext, envCfg *config.EnvConfig) {
-	if envCfg.EnableResponseLogs && envCfg.IsDevelopment() {
+	if envCfg.ShouldLogResponseBodies() {
 		logSynthesizedContent(ctx)
 	}
 }
@@ -1314,6 +1314,9 @@ func streamLogf(ctx *StreamContext, format string, args ...interface{}) {
 
 // logSynthesizedContent 记录合成内容
 func logSynthesizedContent(ctx *StreamContext) {
+	if !config.RuntimeBodyLogging().ResponseBodies {
+		return
+	}
 	if ctx.Synthesizer != nil {
 		content := ctx.Synthesizer.GetSynthesizedContent()
 		if content != "" && !ctx.Synthesizer.IsParseFailed() {
@@ -1327,12 +1330,12 @@ func logSynthesizedContent(ctx *StreamContext) {
 				}
 			}
 
-			streamLogf(ctx, "[Messages-Stream] 上游流式响应合成内容:\n%s", strings.TrimSpace(trimmed))
+			streamLogf(ctx, "[Messages-Stream] 上游流式响应合成内容:\n%s", ResponseBodyTextForLog(strings.TrimSpace(trimmed)))
 			return
 		}
 	}
 	if ctx.LogBuffer.Len() > 0 {
-		streamLogf(ctx, "[Messages-Stream] 上游流式响应原始内容:\n%s", ctx.LogBuffer.String())
+		streamLogf(ctx, "[Messages-Stream] 上游流式响应原始内容:\n%s", ResponseBodyTextForLog(ctx.LogBuffer.String()))
 	}
 }
 
@@ -1391,7 +1394,7 @@ func HandleStreamResponse(
 		RequestLogf(c, "[Messages-EmptyResponse] 上游返回空响应 (缓冲事件数: %d, 诊断: %s)，触发重试", len(preflight.BufferedEvents), preflight.Diagnostic)
 		RequestLogf(c, "[Messages-EmptyResponse-Debug] %s", buildStreamPreflightDetail(preflight))
 		if rawLog := buildStreamPreflightRawLog(preflight.BufferedEvents); rawLog != "" {
-			RequestLogf(c, "[Messages-EmptyResponse-Raw] 上游流式响应原始内容:\n%s", rawLog)
+			RequestLogf(c, "[Messages-EmptyResponse-Raw] 上游流式响应原始内容:\n%s", ResponseBodyTextForLog(rawLog))
 		}
 		drainChannels(eventChan, errChan)
 		// 如果同时检测到拉黑条件，优先返回拉黑错误

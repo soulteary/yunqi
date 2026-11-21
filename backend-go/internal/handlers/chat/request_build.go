@@ -455,9 +455,9 @@ func convertChatToClaudeRequest(bodyBytes []byte, model string, isStream bool) (
 			case "tool":
 				// OpenAI tool result → Claude tool_result（作为 user 消息）
 				toolCallID, _ := m["tool_call_id"].(string)
-				contentStr := ""
-				if s, ok := content.(string); ok {
-					contentStr = s
+				toolContent, err := converters.ConvertToolOutputToClaude(content)
+				if err != nil {
+					return nil, err
 				}
 				claudeMessages = append(claudeMessages, map[string]interface{}{
 					"role": "user",
@@ -465,7 +465,7 @@ func convertChatToClaudeRequest(bodyBytes []byte, model string, isStream bool) (
 						{
 							"type":        "tool_result",
 							"tool_use_id": toolCallID,
-							"content":     contentStr,
+							"content":     toolContent,
 						},
 					},
 				})

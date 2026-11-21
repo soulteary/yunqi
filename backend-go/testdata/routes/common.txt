@@ -112,6 +112,8 @@ GET /api/images/ping
 GET /api/images/ping/:id
 GET /api/local-runtimes
 GET /api/local-runtimes/:uid
+GET /api/logging/body
+GET /api/logging/body/export
 GET /api/logical-channels
 GET /api/logical-channels/:uid
 GET /api/logical-channels/dashboard
@@ -423,6 +425,7 @@ PUT /api/entry-keys/:id
 PUT /api/gemini/channels/:id
 PUT /api/identity-proxy
 PUT /api/images/channels/:id
+PUT /api/logging/body
 PUT /api/logical-channels/:uid
 PUT /api/messages/channels/:id
 PUT /api/racing/config
