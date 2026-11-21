@@ -1,3 +1,8 @@
+export interface CodexAutoReviewMapping {
+  enabled: boolean
+  targetModel: string
+}
+
 export interface CopilotDeviceCodeResponse {
   deviceCode: string
   userCode: string

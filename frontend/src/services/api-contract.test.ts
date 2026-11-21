@@ -44,10 +44,7 @@ describe('public API compatibility', () => {
     const { getChannels } = first
     await getChannels()
     await second.getChannels()
-    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
-      '/api/messages/channels',
-      '/api/messages/channels'
-    ])
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(['/api/messages/channels', '/api/messages/channels'])
   })
   const protocols = [
     ['messages', 'addChannel', 'updateChannel', 'deleteChannel', 'getChannelMetricsHistory'],
@@ -118,6 +115,12 @@ describe('public API compatibility', () => {
     expect(fetchMock.mock.calls[7][0]).toBe('/api/reports/cost?groupBy=user&duration=7d&type=messages')
     await service.getConsoleStatus()
     expect(fetchMock.mock.calls[8][0]).toBe('/api/console/status')
+    await service.getCodexAutoReviewMapping()
+    expect(fetchMock.mock.calls[9][0]).toBe('/api/console/codex-auto-review')
+    await service.setCodexAutoReviewMapping({ enabled: true, targetModel: 'working-model' })
+    expect(fetchMock.mock.calls[10][0]).toBe('/api/console/codex-auto-review')
+    expect(fetchMock.mock.calls[10][1].method).toBe('PUT')
+    expect(JSON.parse(fetchMock.mock.calls[10][1].body)).toEqual({ enabled: true, targetModel: 'working-model' })
   })
 })
 describe('shared request behavior', () => {

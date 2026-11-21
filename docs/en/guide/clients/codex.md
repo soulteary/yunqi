@@ -85,6 +85,20 @@ Do not only map `gpt-5` and forget `gpt-5-mini`. Yunqi prefers longer matching k
 
 ## Troubleshooting
 
+### How do I quickly configure the auto-review model?
+
+Select Codex in **Service & client setup**, then open **Codex auto-review mapping → Quick setup**. The target defaults to the request model entered above. Choose a working model and click **Enable and save**; reopen to inspect or disable the mapping.
+
+This optional mapping applies globally to this gateway's Responses requests for `codex-auto-review`, changing only the model name. The target uses normal routing, capability checks and failover. It is disabled by default, and does not change Codex approval settings. Opening the form is read-only; saving requires an administrator key.
+
+The management API is `GET/PUT /api/console/codex-auto-review`, with this save payload:
+
+```json
+{ "enabled": true, "targetModel": "your-working-model" }
+```
+
+The setting is persisted as `codexAutoReview` in `config.json` and applies without a service restart. Self-mapping to `codex-auto-review` is rejected.
+
 ### Why does a larger channel window not change the Codex limit?
 
 Yunqi channel capabilities validate the actual upstream model. Codex has a separate local context-window setting. Changing a channel or mapping a GPT name to another model does not update Codex configuration or increase upstream capacity.

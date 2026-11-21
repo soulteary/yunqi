@@ -65,6 +65,7 @@ GET /api/chat/ping
 GET /api/chat/ping/:id
 GET /api/cockpit/overview
 GET /api/compat-cache
+GET /api/console/codex-auto-review
 GET /api/console/status
 GET /api/conversations
 GET /api/conversations/settings
@@ -394,6 +395,7 @@ PUT /api/accounts/:accountUid/credentials/:credentialUid/volcengine-access-key
 PUT /api/autopilot/cost/exchange-rates
 PUT /api/channels/:uid
 PUT /api/chat/channels/:id
+PUT /api/console/codex-auto-review
 PUT /api/conversations/settings
 PUT /api/gemini/channels/:id
 PUT /api/images/channels/:id

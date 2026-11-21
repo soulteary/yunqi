@@ -83,6 +83,20 @@ Codex 默认可能请求 GPT 模型名。如果上游使用不同模型名，建
 
 ## 常见问题
 
+### 如何快速配置自动审批模型？
+
+如果 Codex 使用 `codex-auto-review` 发起审查，但需要交给已有模型处理，可在管理界面的「服务与客户端接入」选择 Codex，点击「Codex 自动审批映射 → 快速配置」。目标默认带入上方已填写的请求模型，核对后点击「启用并保存」；再次打开可查看设置或「停用映射」。
+
+该映射全局作用于此网关的 `codex-auto-review` Responses 请求，仅改写模型名，目标仍走现有渠道、能力检查及故障转移。默认不启用，停用后恢复自动路由；它不会修改 Codex 客户端的审批设置。请先确认目标模型通过正常请求可用。查看配置不会写入，保存需要管理员权限。
+
+管理 API 为 `GET/PUT /api/console/codex-auto-review`，保存请求示例：
+
+```json
+{ "enabled": true, "targetModel": "your-working-model" }
+```
+
+配置保存在 `config.json` 的 `codexAutoReview` 中，保存后生效，无需重启服务。目标不能是 `codex-auto-review` 自身。
+
 ### 渠道设置了更大的窗口，为什么 Codex 显示的上限没有变化？
 
 Yunqi 的渠道能力用于判断实际模型能否承载请求；Codex 使用自己的本地模型窗口设置。修改渠道能力或将 GPT 模型名映射到其他模型，不会自动修改 Codex 的本地配置，也不会扩大上游模型的实际容量。

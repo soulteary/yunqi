@@ -5,6 +5,7 @@ import { api } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import type { ConsoleStatus } from '@/services/console-types'
 import { clientConfig, type ClientKind } from '@/utils/client-setup'
+import CodexAutoReviewSetup from '@/components/CodexAutoReviewSetup.vue'
 const { locale } = useI18n()
 const zh = computed(() => locale.value === 'zh-CN')
 const auth = useAuthStore()
@@ -165,6 +166,7 @@ function diagnostics() {
           "
           persistent-hint
         />
+        <CodexAutoReviewSetup v-if="kind === 'codex'" :model="model" />
         <v-alert type="info" variant="tonal">{{
           zh
             ? '远程访问时请填写客户端能连接的网关地址。代理密钥与管理密钥可能不同，配置中只使用 PROXY_ACCESS_KEY。'
