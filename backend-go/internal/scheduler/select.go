@@ -152,6 +152,9 @@ func (s *ChannelScheduler) federateDefaultCandidates(ctx context.Context, reques
 	if !s.protocolFederationApplicable(requestKind) {
 		return channels
 	}
+	s.mu.RLock()
+	resolver := s.modelSupportResolverFunc
+	s.mu.RUnlock()
 	seen := make(map[ChannelRouteKey]struct{}, len(channels))
 	accountUIDs := make(map[string]struct{})
 	for i := range channels {
@@ -186,8 +189,8 @@ func (s *ChannelScheduler) federateDefaultCandidates(ctx context.Context, reques
 				continue
 			}
 			actualModel := model
-			if s.modelSupportResolverFunc != nil {
-				supported, resolvedModel, _, _ := s.modelSupportResolverFunc(ctx, kind, upstream, model)
+			if resolver != nil {
+				supported, resolvedModel, _, _ := resolver(ctx, kind, upstream, model)
 				if !supported || resolvedModel == "" {
 					trace.skipChannel(sibling, "protocol_federation", "unsupported_model", model)
 					continue
@@ -233,8 +236,12 @@ func (s *ChannelScheduler) SelectChannel(
 }
 
 func (s *ChannelScheduler) SelectChannelWithOptions(ctx context.Context, opts SelectionOptions) (*SelectionResult, error) {
+	// Hold the provider lock only while copying references. Callbacks may update
+	// providers themselves, and nested readers can deadlock behind a queued writer.
 	s.mu.RLock()
-	defer s.mu.RUnlock()
+	overflowProvider := s.overflowCandidateProvider
+	quotaManager := s.quotaManager
+	s.mu.RUnlock()
 
 	userID := opts.UserID
 	// subagent 使用隔离的亲和 key，避免被主对话亲和拉到贵渠道；
@@ -260,7 +267,7 @@ func (s *ChannelScheduler) SelectChannelWithOptions(ctx context.Context, opts Se
 	// 若 opts.SmartFilter 未显式设置但全局 provider 已注册，自动注入。
 	// 这样 handler 不需要感知 SmartRouter，由 main.go 统一注册。
 	var candidateSelectionObserver CandidateSelectionObserver
-	if opts.SmartFilter == nil && s.candidateFilterProvider != nil {
+	if opts.SmartFilter == nil {
 		opts.SmartFilter, candidateSelectionObserver = s.buildSmartFilterFromProvider(ctx, kind, model)
 	}
 
@@ -426,9 +433,7 @@ func (s *ChannelScheduler) SelectChannelWithOptions(ctx context.Context, opts Se
 		// 注入后沿用后续管线（key 可用性 / SmartFilter / 优先级遍历），
 		// SmartFilter 对请求模型不支持的注入候选返回空时会 fail-open 保留原列表。
 		if capErr, ok := AsContextCapacityError(err); ok && opts.ChannelName == "" && opts.RoutePrefix == "" {
-			s.mu.RLock()
-			provider := s.overflowCandidateProvider
-			s.mu.RUnlock()
+			provider := overflowProvider
 			if provider != nil {
 				if injected := provider(ctx, kind, model, capErr.InputTokens); len(injected) > 0 {
 					log.Printf("[Scheduler-Overflow] %s 模型 %q 上下文 %d tokens 全灭，注入 %d 个跨协议重定向候选",
@@ -734,10 +739,10 @@ func (s *ChannelScheduler) SelectChannelWithOptions(ctx context.Context, opts Se
 
 		// 配额饱和沉底：配额接近耗尽或已耗尽的渠道沉到非饱和渠道之后，
 		// 不剔除（fail-open）。全员饱和时全体回候选。
-		if s.quotaManager != nil && upstream.ChannelUID != "" {
-			if s.quotaManager.IsChannelSaturated(upstream.ChannelUID, time.Now().UnixMilli()) {
+		if quotaManager != nil && upstream.ChannelUID != "" {
+			if quotaManager.IsChannelSaturated(upstream.ChannelUID, time.Now().UnixMilli()) {
 				prefix := kindSchedulerLogPrefix(kind)
-				truth := s.quotaManager.GetChannelTruth(upstream.ChannelUID)
+				truth := quotaManager.GetChannelTruth(upstream.ChannelUID)
 				log.Printf("[%s-Quota] 配额饱和沉底: [%d] %s truth=%s (非饱和渠道耗尽后回退)",
 					prefix, ch.Index, upstream.Name, truth)
 				quotaSunk = append(quotaSunk, softSkippedChannel{
@@ -1772,11 +1777,14 @@ func (s *ChannelScheduler) buildSmartFilterFromProvider(
 	kind ChannelKind,
 	model string,
 ) (func(context.Context, []ChannelInfo) []ChannelInfo, CandidateSelectionObserver) {
-	if s.candidateFilterProvider == nil {
+	s.mu.RLock()
+	provider := s.candidateFilterProvider
+	s.mu.RUnlock()
+	if provider == nil {
 		return nil, nil
 	}
 
-	filter, observer := s.candidateFilterProvider(ctx, kind, model)
+	filter, observer := provider(ctx, kind, model)
 	if filter == nil {
 		return nil, nil // off / kill switch
 	}

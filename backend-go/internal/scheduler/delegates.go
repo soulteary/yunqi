@@ -242,8 +242,11 @@ func (s *ChannelScheduler) DeleteChannelMetrics(upstream *config.UpstreamConfig,
 	// 配额状态同样按 ChannelUID 清理：配额观测是纯内存态且原先没有删除路径，
 	// 已删渠道会永远留在 GET /api/quota/channels 输出里，运维会误判
 	// 「这渠道为什么还被压分」。放在同一个汇聚点，未来新调用点不会漏接。
-	if upstream.ChannelUID != "" && s.quotaManager != nil {
-		s.quotaManager.RemoveChannel(upstream.ChannelUID)
+	s.mu.RLock()
+	quotaManager := s.quotaManager
+	s.mu.RUnlock()
+	if upstream.ChannelUID != "" && quotaManager != nil {
+		quotaManager.RemoveChannel(upstream.ChannelUID)
 	}
 
 	prefix := kindSchedulerLogPrefix(kind)
