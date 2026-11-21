@@ -88,7 +88,16 @@ func TestRequestHistoryCursorAndFilters(t *testing.T) {
 func TestRequestHistoryQueryPlans(t *testing.T) {
 	s := historyTestStore(t)
 	for _, column := range []string{"", "model", "channel_uid", "correlation_id"} {
-		query := "EXPLAIN QUERY PLAN SELECT id,timestamp,api_type,model,channel_uid,correlation_id,success,input_tokens,output_tokens FROM request_records WHERE api_type='messages' AND timestamp>=0 AND timestamp<=9999999999 AND id<=99999"
+		q := RequestHistoryQuery{}
+		switch column {
+		case "model":
+			q.Model = "x"
+		case "channel_uid":
+			q.ChannelUID = "x"
+		case "correlation_id":
+			q.CorrelationID = "x"
+		}
+		query := "EXPLAIN QUERY PLAN SELECT id,timestamp,api_type,model,channel_uid,correlation_id,success,input_tokens,output_tokens FROM " + historyTable(q) + " WHERE api_type='messages' AND timestamp>=0 AND timestamp<=9999999999 AND id<=99999"
 		if column != "" {
 			query += " AND " + column + "='x'"
 		}
@@ -107,7 +116,9 @@ func TestRequestHistoryQueryPlans(t *testing.T) {
 			plan += d
 		}
 		rows.Close()
-		t.Logf("%s: %s", column, plan)
+		if column != "" && !strings.Contains(plan, "idx_history_"+column) {
+			t.Fatalf("filter index unused: %s", plan)
+		}
 		if !strings.Contains(plan, "INDEX idx_") || strings.Contains(plan, "TEMP B-TREE") || strings.Contains(plan, "SCAN request_records") {
 			t.Fatalf("%s: %s", column, plan)
 		}

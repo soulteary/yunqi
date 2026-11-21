@@ -93,7 +93,7 @@ func (s *SQLiteStore) QueryRequestHistory(ctx context.Context, q RequestHistoryQ
 		args = append(args, cur.Timestamp, cur.ID)
 	}
 	args = append(args, q.Limit+1)
-	rows, err := s.db.QueryContext(ctx, `SELECT id,timestamp,api_type,model,channel_uid,correlation_id,success,input_tokens,output_tokens FROM request_records WHERE `+strings.Join(where, " AND ")+` ORDER BY timestamp DESC,id DESC LIMIT ?`, args...)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,timestamp,api_type,model,channel_uid,correlation_id,success,input_tokens,output_tokens FROM `+historyTable(q)+` WHERE `+strings.Join(where, " AND ")+` ORDER BY timestamp DESC,id DESC LIMIT ?`, args...)
 	if err != nil {
 		return page, err
 	}
@@ -117,4 +117,19 @@ func (s *SQLiteStore) QueryRequestHistory(ctx context.Context, q RequestHistoryQ
 		page.NextCursor = base64.RawURLEncoding.EncodeToString(b)
 	}
 	return page, nil
+}
+
+// With no ANALYZE statistics SQLite can prefer the broad time index even for an
+// exact correlation/model filter. Use only fixed, known indexes for each query.
+func historyTable(q RequestHistoryQuery) string {
+	switch {
+	case q.CorrelationID != "":
+		return "request_records INDEXED BY idx_history_correlation_id"
+	case q.ChannelUID != "":
+		return "request_records INDEXED BY idx_history_channel_uid"
+	case q.Model != "":
+		return "request_records INDEXED BY idx_history_model"
+	default:
+		return "request_records"
+	}
 }
