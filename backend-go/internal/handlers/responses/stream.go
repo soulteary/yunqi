@@ -220,7 +220,9 @@ func handleStreamSuccess(
 
 			// 处理转换后的事件用于文本提取
 			var eventsToCheck []string
-			if needConvert {
+			if info, ok := detectAnyUpstreamStreamError(line, currentSSEEventName); ok {
+				eventsToCheck = []string{buildResponsesFailureEvent(info, "upstream", 0, "")}
+			} else if needConvert {
 				switch upstreamType {
 				case "claude":
 					eventsToCheck = converters.ConvertClaudeMessagesToResponses(httpbridge.Request(c).Context(), originalReq.Model,
@@ -473,8 +475,15 @@ func handleStreamSuccess(
 	// 收集 reasoning encrypted_content 到 thinkingcache，供未来续接重放使用
 	reasoningCollector := thinkingcache.NewResponsesStreamCollector()
 
+	var committedStreamErr error
+	committedEventName := ""
 	// processLine 处理单行数据（复用于缓冲行回放和后续读取），并返回转换后的 Responses 事件用于 watchdog 状态判断。
 	processLine := func(line string) []string {
+		if strings.TrimSpace(line) == "" {
+			committedEventName = ""
+		} else if strings.HasPrefix(line, "event:") {
+			committedEventName = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+		}
 
 		if streamLoggingEnabled {
 			_, _ = logBuffer.WriteString(line + "\n")
@@ -486,7 +495,10 @@ func handleStreamSuccess(
 		// 处理转换后的事件
 		var eventsToProcess []string
 
-		if needConvert {
+		if info, ok := detectAnyUpstreamStreamError(line, committedEventName); ok {
+			committedStreamErr = fmt.Errorf("upstream stream failure: %s", formatResponsesErrorDiagnostic(info))
+			eventsToProcess = []string{buildResponsesFailureEvent(info, "upstream", eventsSentCount+1, outputCollector.responseID)}
+		} else if needConvert {
 			var events []string
 			switch upstreamType {
 			case "claude":
@@ -644,6 +656,10 @@ func handleStreamSuccess(
 	// 回放预检测期间缓冲的行
 	for _, bufferedLine := range bufferedLines {
 		observePostCommitEvents(processLine(bufferedLine))
+		if committedStreamErr != nil {
+			close(scanDone)
+			return nil, committedStreamErr
+		}
 	}
 
 	// 继续从 lineChan 读取剩余的流数据（带 SSE keep-alive 防止下游 idle timeout）
@@ -703,6 +719,11 @@ func handleStreamSuccess(
 				goto streamEnd
 			}
 			events := processLine(sl.text)
+			if committedStreamErr != nil {
+				close(scanDone)
+				progress.Finish("error")
+				return nil, committedStreamErr
+			}
 			if severityScanner.Feed(sl.text) {
 				common.MarkStreamSeverityTag(c)
 			}

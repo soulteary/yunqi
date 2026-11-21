@@ -2,6 +2,7 @@ package responses
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/soulteary/yunqi/internal/handlers/common"
@@ -328,7 +329,8 @@ func extractResponsesErrorInfo(data map[string]interface{}) responsesStreamError
 		return responsesStreamErrorInfo{Message: errMsg}
 	}
 	if msg, ok := data["message"].(string); ok {
-		return responsesStreamErrorInfo{Message: msg}
+		code, _ := data["code"].(string)
+		return responsesStreamErrorInfo{Message: msg, Code: code}
 	}
 	return responsesStreamErrorInfo{}
 }
@@ -402,4 +404,59 @@ func formatResponsesErrorDiagnostic(info responsesStreamErrorInfo) string {
 		return "上游返回 Responses 错误: " + info.Message
 	}
 	return "上游返回 Responses 错误: " + info.Message + " (" + strings.Join(parts, "/") + ")"
+}
+
+// detectAnyUpstreamStreamError classifies wire errors before protocol conversion
+// so ignored Claude/Chat/Gemini errors cannot become fabricated completion.
+func detectAnyUpstreamStreamError(event, eventName string) (responsesStreamErrorInfo, bool) {
+	if info, ok := detectResponsesStreamError(event, eventName); ok {
+		return info, true
+	}
+	for _, line := range strings.Split(event, "\n") {
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		raw := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		var data map[string]interface{}
+		if json.Unmarshal([]byte(raw), &data) != nil {
+			continue
+		}
+		if response, ok := data["response"].(map[string]interface{}); ok {
+			if object, ok := response["error"].(map[string]interface{}); ok && len(object) > 0 {
+				return responsesErrorInfoFromMap(object), true
+			}
+			if response["status"] == "failed" {
+				return responsesStreamErrorInfo{Message: "upstream response failed"}, true
+			}
+		}
+		if reason, message, _, ok := common.DetectStreamDataError(raw); ok {
+			info := extractResponsesErrorInfo(data)
+			if info.Message == "" {
+				info.Message = message
+			}
+			if info.Code == "" {
+				if code, present := data["code"]; present {
+					info.Code = fmt.Sprint(code)
+				} else {
+					info.Code = reason
+				}
+			}
+			return info, true
+		}
+	}
+	return responsesStreamErrorInfo{}, false
+}
+
+func buildResponsesFailureEvent(info responsesStreamErrorInfo, source string, sequence int, responseID string) string {
+	if info.Code == "" {
+		info.Code = "upstream_error"
+	}
+	if info.Type == "" {
+		info.Type = "server_error"
+	}
+	if info.Message == "" {
+		info.Message = "upstream generation failed"
+	}
+	payload, _ := json.Marshal(map[string]interface{}{"type": "response.failed", "sequence_number": sequence, "response": map[string]interface{}{"id": responseID, "object": "response", "status": "failed", "error": map[string]interface{}{"type": info.Type, "code": info.Code, "message": info.Message, "source": source}}})
+	return "event: response.failed\ndata: " + string(payload) + "\n\n"
 }
