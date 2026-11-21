@@ -36,3 +36,19 @@ func TestToolCallIsDeliverableFirstContent(t *testing.T) {
 		t.Fatalf("tool TTFT=%d", got)
 	}
 }
+
+func TestPrecontentTransportDoesNotPollutePostcontentIdle(t *testing.T) {
+	start := time.Unix(100, 0)
+	observer := &StreamTimeoutObserver{startedAt: start}
+	observer.MarkStreamActivity(start.Add(time.Second))
+	observer.MarkStreamActivity(start.Add(30 * time.Second))
+	observer.MarkFirstContent(start.Add(31 * time.Second))
+	observer.MarkStreamActivity(start.Add(31*time.Second + 10*time.Millisecond))
+	observer.Finish(start.Add(31*time.Second + 20*time.Millisecond))
+	if observer.maxStreamIdleMs != 10 {
+		t.Fatalf("post-content max idle=%d want=10", observer.maxStreamIdleMs)
+	}
+	if observer.FirstContentMs() != 31000 {
+		t.Fatalf("TTFT %d", observer.FirstContentMs())
+	}
+}

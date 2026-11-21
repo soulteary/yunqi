@@ -156,6 +156,9 @@ func (o *StreamTimeoutObserver) markStreamActivityLocked(now time.Time) {
 	if now.IsZero() {
 		now = time.Now()
 	}
+	if o.firstContentAt.IsZero() {
+		return
+	}
 	// Transport activity (metadata, comments, heartbeats) must not end TTFT.
 	// Only MarkFirstContent or a deliverable tool call establishes that clock.
 	if !o.lastStreamActivityAt.IsZero() {
