@@ -161,6 +161,7 @@ func serveResponsesWebSocketBridgeLoop(
 	// Read independently of HTTP/SSE processing so a disconnected client cancels
 	// even an upstream that has not sent headers or content yet.
 	ctx, cancel := context.WithCancel(httpbridge.Request(c).Context())
+	var active webSocketActiveTurn
 	messages := make(chan webSocketClientMessage, 1)
 	readerDone := make(chan struct{})
 	go func() {
@@ -170,6 +171,17 @@ func serveResponsesWebSocketBridgeLoop(
 			kind, body, err := conn.ReadMessage()
 			if err != nil {
 				return
+			}
+			if kind == websocket.TextMessage {
+				var control struct {
+					Type       string `json:"type"`
+					ResponseID string `json:"response_id"`
+				}
+				if json.Unmarshal(body, &control) == nil && (control.Type == "response.cancel" || control.Type == "response.interrupt") {
+					if active.interrupt(control.ResponseID) {
+						continue
+					}
+				}
 			}
 			select {
 			case messages <- webSocketClientMessage{kind, body}:
@@ -204,6 +216,14 @@ func serveResponsesWebSocketBridgeLoop(
 		if ctx.Err() != nil {
 			return
 		}
+		var control struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(payload, &control) == nil && (control.Type == "response.cancel" || control.Type == "response.interrupt") {
+			payload = nil
+			_ = writeWebSocketError(conn, http.StatusBadRequest, "response_not_active", "the requested response is not active")
+			continue
+		}
 		requestBody, warmup, err := normalizeWebSocketResponseCreatePayload(payload)
 		payload = nil
 		if err != nil {
@@ -218,7 +238,17 @@ func serveResponsesWebSocketBridgeLoop(
 		}
 
 		requestBody, input, replayable := continuation.prepare(requestBody)
-		turn, err := serveResponseCreateOverWebSocket(ctx, c, conn, bridgeRouter, requestBody)
+		turn, err := serveResponseCreateOverWebSocketWithControl(ctx, c, conn, bridgeRouter, requestBody, &active)
+		if responseID, interrupted := active.result(); interrupted && ctx.Err() == nil {
+			// The HTTP bridge cannot undo tokens already generated. Cancel upstream,
+			// discard late frames, and acknowledge before accepting the next turn.
+			event, _ := json.Marshal(map[string]interface{}{"type": "response.cancelled", "response": map[string]interface{}{"id": responseID, "status": "cancelled"}})
+			_ = conn.SetWriteDeadline(time.Now().Add(responsesWebSocketWriteTimeout))
+			if conn.WriteMessage(websocket.TextMessage, event) != nil {
+				return
+			}
+			continue
+		}
 		if err != nil {
 			if ctx.Err() != nil || errors.Is(err, context.Canceled) || isWebSocketClosed(err) {
 				return
@@ -242,8 +272,16 @@ func serveResponseCreateOverWebSocket(
 	httpHandler http.Handler,
 	requestBody []byte,
 ) (*responsesWebSocketTurn, error) {
+	return serveResponseCreateOverWebSocketWithControl(ctx, parent, conn, httpHandler, requestBody, nil)
+}
+
+func serveResponseCreateOverWebSocketWithControl(ctx context.Context, parent fiber.Ctx, conn *websocket.Conn, httpHandler http.Handler, requestBody []byte, active *webSocketActiveTurn) (*responsesWebSocketTurn, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	if active != nil {
+		active.start(cancel)
+		defer active.finish()
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, httpbridge.Request(parent).URL.RequestURI(), bytes.NewReader(requestBody))
 	if err != nil {
 		return nil, err
@@ -255,8 +293,12 @@ func serveResponseCreateOverWebSocket(
 	writer := newResponsesWebSocketWriter(conn)
 	writer.context = ctx
 	writer.cancel = cancel
+	writer.active = active
 	httpHandler.ServeHTTP(writer, req)
 	err = writer.finish()
+	if ctx.Err() != nil {
+		err = ctx.Err()
+	}
 	return &writer.continuation, err
 }
 
@@ -273,6 +315,7 @@ func copyWebSocketRequestHeaders(src http.Header, dst http.Header) {
 }
 
 type responsesWebSocketWriter struct {
+	active       *webSocketActiveTurn
 	conn         *websocket.Conn
 	context      context.Context
 	cancel       context.CancelFunc
@@ -434,6 +477,13 @@ func (w *responsesWebSocketWriter) sendCurrentData() {
 		return
 	}
 
+	if w.context != nil && w.context.Err() != nil {
+		w.writeErr = w.context.Err()
+		return
+	}
+	if w.active != nil {
+		w.active.observe(data)
+	}
 	_ = w.conn.SetWriteDeadline(time.Now().Add(responsesWebSocketWriteTimeout))
 	w.setWriteError(w.conn.WriteMessage(websocket.TextMessage, []byte(data)))
 	if w.writeErr == nil {
@@ -524,4 +574,55 @@ func closeWithWebSocketError(conn *websocket.Conn, status int, code, message str
 func isWebSocketClosed(err error) bool {
 	return websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) ||
 		errors.Is(err, net.ErrClosed)
+}
+
+// webSocketActiveTurn has no connection writes: the reader may only cancel the
+// current worker. All data frames remain serialized through that worker.
+type webSocketActiveTurn struct {
+	mu          sync.Mutex
+	cancel      context.CancelFunc
+	responseID  string
+	interrupted bool
+}
+
+func (a *webSocketActiveTurn) start(cancel context.CancelFunc) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.cancel = cancel
+	a.responseID = ""
+	a.interrupted = false
+}
+func (a *webSocketActiveTurn) finish() { a.mu.Lock(); defer a.mu.Unlock(); a.cancel = nil }
+func (a *webSocketActiveTurn) observe(data string) {
+	var event struct {
+		Type     string `json:"type"`
+		Response struct {
+			ID string `json:"id"`
+		} `json:"response"`
+	}
+	if json.Unmarshal([]byte(data), &event) != nil || event.Response.ID == "" {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.responseID = event.Response.ID
+	switch event.Type {
+	case "response.completed", "response.failed", "response.incomplete":
+		a.cancel = nil
+	}
+}
+func (a *webSocketActiveTurn) interrupt(id string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.cancel == nil || (id != "" && id != a.responseID) {
+		return false
+	}
+	a.interrupted = true
+	a.cancel()
+	return true
+}
+func (a *webSocketActiveTurn) result() (string, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.responseID, a.interrupted
 }
