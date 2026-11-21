@@ -309,6 +309,14 @@ func (s *ChannelScheduler) SelectChannelWithOptions(ctx context.Context, opts Se
 		}
 		result := s.selectionResultWithRecord(executionKind, upstream, channelIndex, reason, !opts.DryRun)
 		result.CandidateCount = candidateCount
+		if result.CandidateCount == 0 {
+			// Explicit/promotion selections return before SmartFilter computes the
+			// count. Include future federated routes in the default failover budget.
+			result.CandidateCount = len(activeChannels)
+			if defaultFederation {
+				result.CandidateCount = len(federate(append([]ChannelInfo(nil), activeChannels...)))
+			}
+		}
 		result.ExecutionModel = executionModel
 		result.ExecutionKeyIdentity = executionKeyIdentity
 		result.ExecutionEffort = executionEffort
