@@ -31,6 +31,7 @@ type claudeToResponsesState struct {
 	ReasoningBuf       strings.Builder
 	ToolArgsBuf        strings.Builder
 	CompletedOutput    []interface{}
+	HostedQueries      map[string]string
 	SourceFallback     bool
 	InputTokens        int64
 	OutputTokens       int64
@@ -125,9 +126,19 @@ func ConvertClaudeMessagesToResponses(ctx context.Context, modelName string, ori
 					st.SourceFallback = true
 				}
 			}
+		case "server_tool_use":
+			if root.Get("content_block.name").String() == "web_search" {
+				if st.HostedQueries == nil {
+					st.HostedQueries = map[string]string{}
+				}
+				st.HostedQueries[root.Get("content_block.id").String()] = root.Get("content_block.input.query").String()
+			}
 		case "web_search_tool_result", "search_result":
 			var block map[string]interface{}
 			if json.Unmarshal([]byte(root.Get("content_block").Raw), &block) == nil {
+				if block["type"] == "web_search_tool_result" {
+					out = append(out, st.hostedSearchItemEvents(block, nextSeq)...)
+				}
 				if text := ClaudeSearchSourceText(block); text != "" {
 					out = append(out, st.startText(nextSeq)...)
 					out = append(out, st.appendTextDelta(text, nextSeq)...)
@@ -597,4 +608,28 @@ func (st *claudeToResponsesState) completedEvent(modelName string, originalReque
 	}
 
 	return emitResponsesEvent("response.completed", completed)
+}
+
+func (st *claudeToResponsesState) hostedSearchItemEvents(block map[string]interface{}, nextSeq func() int) []string {
+	id, _ := block["tool_use_id"].(string)
+	if id == "" {
+		return nil
+	}
+	action := map[string]interface{}{"type": "search"}
+	if query := st.HostedQueries[id]; query != "" {
+		action["query"] = query
+	}
+	item := map[string]interface{}{"type": "web_search_call", "id": id, "status": "completed", "action": action}
+	if code, failed := ClaudeHostedSearchError(block); failed {
+		item["status"] = "failed"
+		item["error"] = map[string]interface{}{"code": code, "source": "upstream"}
+	}
+	index := st.NextOutputIndex
+	st.NextOutputIndex++
+	st.CompletedOutput = append(st.CompletedOutput, item)
+	added := map[string]interface{}{"type": "response.output_item.added", "sequence_number": nextSeq(), "output_index": index, "item": item}
+	done := map[string]interface{}{"type": "response.output_item.done", "sequence_number": nextSeq(), "output_index": index, "item": item}
+	first, _ := json.Marshal(added)
+	last, _ := json.Marshal(done)
+	return []string{emitResponsesEvent("response.output_item.added", string(first)), emitResponsesEvent("response.output_item.done", string(last))}
 }

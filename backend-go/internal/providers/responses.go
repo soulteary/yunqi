@@ -491,10 +491,12 @@ func (p *ResponsesProvider) buildResponsesRequestFromClaude(c fiber.Ctx, bodyByt
 						})
 					}
 				case "text":
-					if text, ok := block["text"].(string); ok && text != "" {
+					text, _ := block["text"].(string)
+					text += converters.ClaudeSearchSourceText(block)
+					if text != "" {
 						contentBlocks = append(contentBlocks, map[string]interface{}{
 							"type": responsesTextContentType(role),
-							"text": text + converters.ClaudeSearchSourceText(block),
+							"text": text,
 						})
 					}
 				case "search_result", "web_search_tool_result":

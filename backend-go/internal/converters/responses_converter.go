@@ -352,7 +352,12 @@ func ClaudeResponseToResponses(claudeResp map[string]interface{}, sessionID stri
 			if input, ok := hostedQueries[id].(map[string]interface{}); ok {
 				action["query"] = input["query"]
 			}
-			output = append(output, types.ResponsesItem{ID: id, Type: "web_search_call", Status: "completed", Action: action})
+			item := types.ResponsesItem{ID: id, Type: "web_search_call", Status: "completed", Action: action}
+			if code, failed := ClaudeHostedSearchError(contentBlock); failed {
+				item.Status = "failed"
+				item.Error = map[string]interface{}{"code": code, "source": "upstream"}
+			}
+			output = append(output, item)
 			if text := ClaudeSearchSourceText(contentBlock); text != "" {
 				output = append(output, types.ResponsesItem{Type: "text", Content: text})
 				sourceFallback = true

@@ -70,3 +70,36 @@ func TestClaudeSearchCitationsStreamFallback(t *testing.T) {
 		t.Fatalf("search semantics corrupted %s", joined)
 	}
 }
+
+func TestHostedSearchFailureIsNotCompletedOrSwallowed(t *testing.T) {
+	for _, code := range []string{"max_uses_exceeded", "providersecretvalue"} {
+		block := map[string]interface{}{"type": "web_search_tool_result", "tool_use_id": "srv_failed", "content": map[string]interface{}{"type": "web_search_tool_result_error", "error_code": code}}
+		response, err := ClaudeResponseToResponses(map[string]interface{}{"content": []interface{}{block}}, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(response.Output) < 1 || response.Output[0].Type != "web_search_call" || response.Output[0].Status != "failed" {
+			t.Fatalf("hosted error marked completed %#v", response.Output)
+		}
+		expected := "max_uses_exceeded"
+		if code != "max_uses_exceeded" {
+			expected = "hosted_search_error"
+		}
+		if response.Output[0].Error["code"] != expected {
+			t.Fatalf("wrong error %#v", response.Output[0])
+		}
+		raw, _ := json.Marshal(map[string]interface{}{"type": "content_block_start", "content_block": block})
+		var state any
+		events := ConvertClaudeMessagesToResponses(context.Background(), "m", nil, nil, append([]byte("data: "), raw...), &state)
+		joined := strings.Join(events, "")
+		if !strings.Contains(joined, `"status":"failed"`) || !strings.Contains(joined, expected) || !strings.Contains(joined, "srv_failed") {
+			t.Fatalf("stream error lost %s", joined)
+		}
+		if code == "providersecretvalue" {
+			out, _ := json.Marshal(response)
+			if strings.Contains(string(out), code) || strings.Contains(joined, code) {
+				t.Fatal("unsafe provider code exposed")
+			}
+		}
+	}
+}

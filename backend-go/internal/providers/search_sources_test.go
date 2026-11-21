@@ -38,3 +38,19 @@ func TestClaudeHostedSearchNeverBecomesClientFunctionTool(t *testing.T) {
 		t.Fatal("hosted tool silently converted to client function")
 	}
 }
+
+func TestClaudeCitationsOnlyTextStillKeepsSourceInActualRequest(t *testing.T) {
+	raw := []byte(`{"model":"m","messages":[{"role":"assistant","content":[{"type":"text","text":"","citations":[{"url":"https://example.com/citation","title":"Citation","cited_text":"Quoted source"}]}]}]}`)
+	c := newFiberContext(http.MethodPost, "/v1/messages", raw, context.Background())
+	req, _, err := (&ResponsesProvider{}).ConvertToProviderRequest(c, &config.UpstreamConfig{BaseURL: "https://example.invalid", ServiceType: "responses"}, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "https://example.com/citation") || !strings.Contains(string(body), "Quoted source") {
+		t.Fatalf("citation-only source lost %s", body)
+	}
+}

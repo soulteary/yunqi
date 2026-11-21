@@ -25,6 +25,9 @@ func ClaudeSearchSourceText(block map[string]interface{}) string {
 		return renderSearchSource(block)
 	case "web_search_tool_result":
 		id, _ := block["tool_use_id"].(string)
+		if code, failed := ClaudeHostedSearchError(block); failed {
+			return "\n[Hosted web search result " + id + " failed: " + code + "]\n"
+		}
 		var out strings.Builder
 		out.WriteString("\n[Hosted web search result " + id + "]\n")
 		if results, ok := block["content"].([]interface{}); ok {
@@ -96,4 +99,25 @@ func HasClaudeSearchAttribution(value interface{}) bool {
 		}
 	}
 	return false
+}
+
+// ClaudeHostedSearchError exposes only allowlisted public error codes, never
+// arbitrary provider error messages or opaque payloads.
+func ClaudeHostedSearchError(block map[string]interface{}) (string, bool) {
+	if block["type"] != "web_search_tool_result" {
+		return "", false
+	}
+	content, ok := block["content"].(map[string]interface{})
+	if !ok {
+		return "", false
+	}
+	code, _ := content["error_code"].(string)
+	if content["type"] != "web_search_tool_result_error" {
+		return "invalid_hosted_search_result", true
+	}
+	switch code {
+	case "max_uses_exceeded", "too_many_requests", "invalid_input", "query_too_long", "unavailable":
+		return code, true
+	}
+	return "hosted_search_error", true
 }
