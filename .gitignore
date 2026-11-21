@@ -2,7 +2,6 @@
 
 logs/
 scripts/*
-!scripts/install-wails3.sh
 !scripts/embed-frontend.sh
 !scripts/container-stage-source.sh
 !scripts/container-verify.sh
@@ -195,8 +194,6 @@ node_modules
 .netlify
 .svelte-kit
 build
-!desktop/build/
-!desktop/build/**
 
 # OS
 .DS_Store

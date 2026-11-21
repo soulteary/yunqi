@@ -169,7 +169,7 @@ git commit -m "chore: bump version to v{新版本号}"
 
 1. **运行后端测试：**
    ```bash
-   cd backend-go && make test
+   make -C backend-go test
    ```
    - 测试失败 → ❌ 中止流程，提示用户修复测试后重试
 
@@ -226,7 +226,7 @@ git push origin v{新版本号}
 4. 将 `## [Unreleased]` 替换为 `## [v2.0.15] - YYYY-MM-DD`
 5. 更新 VERSION 文件
 6. 执行 git commit
-7. 本地编译验证（`make test` + `make build`）
+7. 本地编译验证（`make -C backend-go test` + `make build`）
 8. 创建 git tag: `v2.0.15`
 9. 推送 commit 和 tag 到远程
 
@@ -262,7 +262,7 @@ git push origin v{新版本号}
 2. 计算新版本: `v2.0.30`
 3. 更新 VERSION 文件
 4. 执行 git commit
-5. 本地编译验证（`make test` + `make build`）
+5. 本地编译验证（`make -C backend-go test` + `make build`）
 6. 创建 git tag: `v2.0.30`
 7. 推送 commit 和 tag 到远程
 8. GitHub Actions 自动触发，编译 6 平台版本并发布到 Releases
@@ -305,24 +305,18 @@ git push origin v{新版本号}
 是否推送到远程仓库? (Y/n)
   - 推送后将自动触发 GitHub Actions
   - 自动编译 Linux/Windows/macOS 版本
-  - 自动发布到 GitHub Releases
+  - 生成 Draft Release，由维护者确认后发布
 ```
 
 ## GitHub Actions 集成
 
-当推送 `v*` 格式的 tag 时，会自动触发 `release.yml` workflow，在三平台并行编译：
+当推送与根目录 `VERSION` 一致的 `v*` 标签时，`release.yml` 的 `build` 矩阵构建 Linux、macOS、Windows × amd64、arm64 六种服务二进制。唯一产品前端 `frontend/` 嵌入每个二进制；macOS codesign、Windows SignPath 和签名后的 SHA256 校验保持启用。
 
-| Job               | Runner              | 产物                                                      |
-| ----------------- | ------------------- | --------------------------------------------------------- |
-| `build-macos`     | macos-latest        | `yunqi-darwin-arm64`, `yunqi-darwin-amd64`, DMG 安装包        |
-| `build-windows`   | windows-latest      | `yunqi-windows-amd64.exe`, `yunqi-windows-arm64.exe`, NSIS 安装包 |
-| `build-linux`     | ubuntu-latest       | `yunqi-linux-amd64`, `yunqi-linux-arm64`, AppImage            |
-| `build-linux-arm64-desktop` | ubuntu-24.04-arm | `Yunqi-Desktop-linux-arm64.AppImage`              |
-| `docker-build`    | ubuntu-latest       | Docker 镜像 (阿里云容器镜像服务, linux/amd64 + linux/arm64) |
+全部矩阵任务成功后，`draft-release` 汇总产物，生成并通过 Sigstore 签名 `checksums.txt`，再创建 Draft Release。Docker 镜像由独立 `docker-build.yml` 处理。桌面安装包、MSIX 和应用商店上传已移除。
 
 ### Concurrency 配置
 
-构建 job 使用独立的 concurrency group，确保三平台**并行编译**：
+发布 workflow 使用标签级 concurrency group，六个平台矩阵任务并行构建：
 
 ```yaml
 concurrency:
@@ -334,8 +328,8 @@ concurrency:
 
 ### 发布内容
 
-- 6 个平台的可执行文件 + 安装包（三平台并行构建）
-- 各平台 checksum + cosign 签名文件
+- 六种服务二进制（内嵌 Web 控制台，无桌面安装包）
+- 单文件 SHA256、汇总 checksums.txt 与 Sigstore bundle
 - Docker 镜像（推送到阿里云容器镜像服务）
 - 发布为 **draft** 模式，需在 GitHub Releases 页面手动确认发布
 
@@ -345,7 +339,7 @@ concurrency:
 - 提交前会显示所有待提交的变更供用户确认
 - 如果工作区有其他未提交的修改，会询问用户是否一并提交
 - 遵循 Conventional Commits 规范，使用 `chore: bump version` 格式
-- **编译验证是强制步骤**：commit 后必须通过 `make test` 和 `make build`，否则不允许创建 tag 和推送
+- **编译验证是强制步骤**：commit 后必须通过 `make -C backend-go test` 和 `make build`，否则不允许创建 tag 和推送
 - 编译验证失败时，已提交的 commit 保留在本地，用户修复后可手动推送
 - 推送 tag 后，GitHub Actions 需要几分钟完成编译
 - 查看构建进度：`gh run list --limit 5`

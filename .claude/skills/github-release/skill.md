@@ -251,14 +251,4 @@ gh release view <tag> --json url,publishedAt,assets --jq '{url: .url, publishedA
 
 ## 后续步骤
 
-**Release 发布成功后，自动调用 store-update 技能**：
-
-```
-/store-update
-```
-
-此操作会：
-1. 从刚发布的 Release 下载 Store MSIX 包（amd64/arm64）
-2. 校验 SHA256 完整性
-3. 从 Release body 生成 Store 更新说明预览
-4. 输出手动上传到 Microsoft Partner Center 的指引
+发布完成后核对六种服务二进制、单文件 SHA256、`checksums.txt` 与 Sigstore bundle。桌面与应用商店发布流程已移除，不再调用额外的 Store 更新技能。
