@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/providers"
-	"github.com/BenedictKing/ccx/internal/types"
+	"github.com/soulteary/yunqi/internal/providers"
+	"github.com/soulteary/yunqi/internal/types"
 )
 
 func TestResponsesEntry_ResponseMatrix_AllFourUpstreams(t *testing.T) {

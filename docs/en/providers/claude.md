@@ -7,7 +7,7 @@
 3. Go to "API Keys" page
 4. Create a new API Key
 
-## Add Channel in CCX
+## Add Channel in Yunqi
 
 ### Messages Endpoint (Recommended)
 
@@ -20,7 +20,7 @@
 
 ### Steps
 
-1. Go to CCX admin console, select **Messages** endpoint
+1. Go to Yunqi admin console, select **Messages** endpoint
 2. Click "Add Channel"
 3. Set service type to `Claude`
 4. Set Base URL to `https://api.anthropic.com`
@@ -29,7 +29,7 @@
 
 ### Chat Endpoint (Protocol Translation)
 
-If your client uses OpenAI Chat protocol, you can add a Claude channel under the Chat endpoint — CCX handles protocol translation automatically:
+If your client uses OpenAI Chat protocol, you can add a Claude channel under the Chat endpoint — Yunqi handles protocol translation automatically:
 
 1. Select **Chat** endpoint
 2. Set service type to `claude`

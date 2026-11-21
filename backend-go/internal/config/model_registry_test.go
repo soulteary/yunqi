@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/presetstore"
+	"github.com/soulteary/yunqi/internal/presetstore"
 )
 
 func TestResolveAgentModelProfile_CodexBuiltins(t *testing.T) {

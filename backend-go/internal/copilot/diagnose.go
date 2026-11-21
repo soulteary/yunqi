@@ -4,7 +4,7 @@ package copilot
 import (
 	"context"
 	"fmt"
-	"github.com/BenedictKing/ccx/internal/errutil"
+	"github.com/soulteary/yunqi/internal/errutil"
 	"io"
 	"net/http"
 	"strings"

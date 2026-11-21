@@ -1,13 +1,13 @@
 ---
 name: store-update
-description: 在 CCX Desktop 发布后下载 Store MSIX 并生成发布公告。用户提到 Store 上架、MSIX、从 GitHub Release 下载 store.msix、发布后同步 Windows Store、从 release 填写商店更新内容时必须使用此技能。该技能会下载最新 GitHub Release 的 amd64/arm64 MSIX，校验 sha256，从 Release body 生成 Store listing releaseNotes 预览，并输出手动上传指引。
+description: 在 Yunqi Desktop 发布后下载 Store MSIX 并生成发布公告。用户提到 Store 上架、MSIX、从 GitHub Release 下载 store.msix、发布后同步 Windows Store、从 release 填写商店更新内容时必须使用此技能。该技能会下载最新 GitHub Release 的 amd64/arm64 MSIX，校验 sha256，从 Release body 生成 Store listing releaseNotes 预览，并输出手动上传指引。
 version: 2.0.0
-author: https://github.com/BenedictKing/ccx/
+author: https://github.com/soulteary/yunqi/
 allowed-tools: Bash, Read
 context: fork
 ---
 
-# CCX Desktop Store MSIX 下载与发布公告技能
+# Yunqi Desktop Store MSIX 下载与发布公告技能
 
 ## 适用场景
 
@@ -52,7 +52,7 @@ open ./store-msix
 - 从 Release body 生成的 Store 更新说明预览。
 - 手动操作指引：
   - 打开 [Partner Center](https://partner.microsoft.com/dashboard/products/9NR3N6RFNS5M/overview)
-  - 进入 CCX Desktop → Product release → 点击「Packages」行上传两个 MSIX
+  - 进入 Yunqi Desktop → Product release → 点击「Packages」行上传两个 MSIX
   - 点击「Store listings」行 → 选择语言 → 在「What's new in this version」粘贴更新说明
   - 返回后点击「Submit for certification」
 
@@ -60,8 +60,8 @@ open ./store-msix
 
 当前 release workflow 生成两个 Store MSIX：
 
-- `CCX-Desktop-${VERSION}-windows-amd64-store.msix`
-- `CCX-Desktop-${VERSION}-windows-arm64-store.msix`
+- `Yunqi-Desktop-${VERSION}-windows-amd64-store.msix`
+- `Yunqi-Desktop-${VERSION}-windows-arm64-store.msix`
 
 脚本要求最新 GitHub Release 中恰好匹配 amd64 与 arm64 两个 `.msix`，并优先读取同名 `.sha256` 进行校验。
 

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/ratelimit"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/ratelimit"
 )
 
 type Candidate struct {

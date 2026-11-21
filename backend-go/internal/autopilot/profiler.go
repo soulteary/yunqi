@@ -3,7 +3,7 @@ package autopilot
 import (
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/utils"
+	"github.com/soulteary/yunqi/internal/utils"
 )
 
 // ── MetricsProvider 接口 ──

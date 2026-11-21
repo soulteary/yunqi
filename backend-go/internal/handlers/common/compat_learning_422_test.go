@@ -8,12 +8,12 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/autopilot"
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/providers"
-	"github.com/BenedictKing/ccx/internal/scheduler"
-	"github.com/BenedictKing/ccx/internal/types"
-	"github.com/BenedictKing/ccx/internal/warmup"
+	"github.com/soulteary/yunqi/internal/autopilot"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/providers"
+	"github.com/soulteary/yunqi/internal/scheduler"
+	"github.com/soulteary/yunqi/internal/types"
+	"github.com/soulteary/yunqi/internal/warmup"
 	"github.com/gin-gonic/gin"
 )
 

@@ -1,18 +1,18 @@
-# Connect Claude Code to CCX
+# Connect Claude Code to Yunqi
 
-If you are using **CCX Desktop**, you can apply local CCX settings from [Agent configuration](/en/guide/desktop/#agent-configuration) first, then return here for protocol details.
+If you are using **Yunqi Desktop**, you can apply local Yunqi settings from [Agent configuration](/en/guide/desktop/#agent-configuration) first, then return here for protocol details.
 
-Claude Code uses the Anthropic Messages protocol. When connecting it to CCX, use the CCX **Messages** endpoint.
+Claude Code uses the Anthropic Messages protocol. When connecting it to Yunqi, use the Yunqi **Messages** endpoint.
 
 ## How it works
 
 ```text
-Claude Code  ->  CCX /v1/messages  ->  Messages channel  ->  upstream Anthropic-compatible endpoint
+Claude Code  ->  Yunqi /v1/messages  ->  Messages channel  ->  upstream Anthropic-compatible endpoint
 ```
 
-## 1. Configure a CCX channel
+## 1. Configure a Yunqi channel
 
-1. Open the CCX admin console and go to **Messages**
+1. Open the Yunqi admin console and go to **Messages**
 2. Click "Add Channel"
 3. Fill in the channel configuration for your upstream provider
 
@@ -34,7 +34,7 @@ For upstream API keys, model names, and special options, see the matching [provi
 Set these environment variables:
 
 ```bash
-export ANTHROPIC_API_KEY="your-ccx-proxy-key"
+export ANTHROPIC_API_KEY="your-yunqi-proxy-key"
 export ANTHROPIC_BASE_URL="http://localhost:3000"
 ```
 
@@ -45,7 +45,7 @@ claude "hello"
 ```
 
 ::: warning
-`ANTHROPIC_BASE_URL` should be the CCX gateway root. Do not append `/v1` or `/v1/messages`.
+`ANTHROPIC_BASE_URL` should be the Yunqi gateway root. Do not append `/v1` or `/v1/messages`.
 :::
 
 ## 3. Recommended model mapping
@@ -64,7 +64,7 @@ If the upstream is not Anthropic Claude, configure model mapping on the Messages
 | `sonnet` | upstream primary model |
 | `haiku` | upstream lightweight model |
 
-CCX prefers longer matching keys first. Use the actual upstream model names from your provider.
+Yunqi prefers longer matching keys first. Use the actual upstream model names from your provider.
 
 ## Troubleshooting
 
@@ -72,8 +72,8 @@ CCX prefers longer matching keys first. Use the actual upstream model names from
 
 Check:
 
-1. `ANTHROPIC_API_KEY` matches CCX `PROXY_ACCESS_KEY`
-2. CCX was started with the expected `PROXY_ACCESS_KEY`
+1. `ANTHROPIC_API_KEY` matches Yunqi `PROXY_ACCESS_KEY`
+2. Yunqi was started with the expected `PROXY_ACCESS_KEY`
 3. No old shell environment variable overrides the current value
 
 ### Claude Code still calls official Claude
@@ -120,9 +120,9 @@ If the upstream is not fully compatible with Claude thinking/signature behavior:
 
 ### Claude Code `/model` does not show expected models
 
-Confirm CCX has at least one available Messages channel and the model list includes the expected models. You can also verify the CCX models endpoint:
+Confirm Yunqi has at least one available Messages channel and the model list includes the expected models. You can also verify the Yunqi models endpoint:
 
 ```bash
 curl http://localhost:3000/v1/models \
-  -H "Authorization: Bearer your-ccx-proxy-key"
+  -H "Authorization: Bearer your-yunqi-proxy-key"
 ```

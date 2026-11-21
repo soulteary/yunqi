@@ -14,10 +14,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/eventbus"
-	"github.com/BenedictKing/ccx/internal/httpclient"
-	"github.com/BenedictKing/ccx/internal/utils"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/eventbus"
+	"github.com/soulteary/yunqi/internal/httpclient"
+	"github.com/soulteary/yunqi/internal/utils"
 )
 
 // DiscoveryStatus 发现任务状态枚举。

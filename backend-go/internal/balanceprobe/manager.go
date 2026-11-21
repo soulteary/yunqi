@@ -15,11 +15,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/metrics"
-	"github.com/BenedictKing/ccx/internal/quota"
-	"github.com/BenedictKing/ccx/internal/upstreamprobe"
-	"github.com/BenedictKing/ccx/internal/utils"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/metrics"
+	"github.com/soulteary/yunqi/internal/quota"
+	"github.com/soulteary/yunqi/internal/upstreamprobe"
+	"github.com/soulteary/yunqi/internal/utils"
 )
 
 // CheckKindBalance key_health 表中的余额探测记录类型。

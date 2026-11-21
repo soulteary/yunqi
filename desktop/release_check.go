@@ -13,7 +13,7 @@ import (
 const (
 	releasesCacheTTL      = 4 * time.Hour
 	releasesErrorCacheTTL = 30 * time.Minute
-	releasesAPIURL        = "https://api.github.com/repos/BenedictKing/ccx/releases?per_page=10"
+	releasesAPIURL        = "https://api.github.com/repos/soulteary/yunqi/releases?per_page=10"
 	releasesTimeout       = 10 * time.Second
 )
 

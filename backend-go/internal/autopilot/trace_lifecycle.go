@@ -5,7 +5,7 @@ import (
 	"log"
 	"sync"
 
-	"github.com/BenedictKing/ccx/internal/scheduler"
+	"github.com/soulteary/yunqi/internal/scheduler"
 )
 
 // ── Trace 生命周期回填（设计 §3.4/§3.5）──

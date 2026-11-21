@@ -1,6 +1,6 @@
-# CCX - Go 后端
+# Yunqi - Go 后端
 
-> CCX 的 Go 后端负责 HTTP API、上游适配、协议转换、多渠道调度、指标与日志记录，并嵌入前端管理界面。
+> Yunqi 的 Go 后端负责 HTTP API、上游适配、协议转换、多渠道调度、指标与日志记录，并嵌入前端管理界面。
 
 ## 特性
 
@@ -51,8 +51,8 @@ make test-cover
 ### 方式三：从源码构建
 
 ```bash
-git clone https://github.com/BenedictKing/ccx.git
-cd ccx
+git clone https://github.com/soulteary/yunqi.git
+cd yunqi
 cp backend-go/.env.example backend-go/.env
 make build
 ```
@@ -80,7 +80,7 @@ QUIET_POLLING_LOGS=true
 
 `EXTRA_PROXY_ACCESS_KEYS` 仅用于代理 API；启用后必须设置独立 `ADMIN_ACCESS_KEY`，管理接口不再回退到 `PROXY_ACCESS_KEY`。
 
-`ENABLE_HTTPS=true` 会让 CCX 在本地端口启用 HTTPS，同时保留同端口 HTTP 兼容；未配置 `TLS_CERT_FILE`/`TLS_KEY_FILE` 时默认自动生成 localhost 临时自签名证书。完整说明见 `../docs/guide/environment.md`。
+`ENABLE_HTTPS=true` 会让 Yunqi 在本地端口启用 HTTPS，同时保留同端口 HTTP 兼容；未配置 `TLS_CERT_FILE`/`TLS_KEY_FILE` 时默认自动生成 localhost 临时自签名证书。完整说明见 `../docs/guide/environment.md`。
 
 ### 运行时配置
 
@@ -91,7 +91,7 @@ QUIET_POLLING_LOGS=true
 命令行版可以用 `--config` 指定配置文件位置，用 `--statedir` 指定运行时状态目录，用 `--logdir` 指定日志目录：
 
 ```bash
-ccx --config ~/.config/ccx/config.json --statedir ~/.local/state/ccx --logdir ~/.local/state/ccx/logs
+yunqi --config ~/.config/yunqi/config.json --statedir ~/.local/state/yunqi --logdir ~/.local/state/yunqi/logs
 ```
 
 说明：`--config` 只改变配置文件位置；`--statedir` 会让 `metrics.db`、`conversation_state.json`、`scheduled_recovery_state.json` 写入指定目录，未指定时保持默认 `.config`；`--logdir` 只影响日志目录，优先级高于 `LOG_DIR` 环境变量。

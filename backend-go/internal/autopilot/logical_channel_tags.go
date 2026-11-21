@@ -3,7 +3,7 @@ package autopilot
 import (
 	"sync"
 
-	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/soulteary/yunqi/internal/config"
 )
 
 // logicalChannelTagState 缓存最近一次成功派生出的标签，用于避免无意义的 Rebuild。

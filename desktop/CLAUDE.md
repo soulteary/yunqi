@@ -4,7 +4,7 @@
 
 ## 模块职责
 
-CCX 桌面后台 App，基于 Wails 3 提供系统托盘、配置向导、Agent 配置管理、健康检查与本地网关控制入口。
+Yunqi 桌面后台 App，基于 Wails 3 提供系统托盘、配置向导、Agent 配置管理、健康检查与本地网关控制入口。
 
 ## 技术栈
 
@@ -53,6 +53,6 @@ bun audit --registry=https://registry.npmjs.org --cwd frontend
 
 桌面外壳不强制自己编译启动后端：`internal/backend/manager.go` 的 `doStart` 会先调 `findHealthyPort`，从桌面数据目录 `.env` 的 `PORT` 起向上扫 20 个端口（`PORT..PORT+20`），命中第一个 `/health` 为 `healthy` 的实例就以 **attached（附着）模式复用**外部进程，不再启动内置二进制。
 
-- 桌面数据目录（macOS）：`~/Library/Application Support/ccx-desktop/`，端口配置在其 `.env` 的 `PORT`。
+- 桌面数据目录（macOS）：`~/Library/Application Support/yunqi-desktop/`，端口配置在其 `.env` 的 `PORT`。
 - 本地想让 `make desktop-dev` 附着到某个已在跑的新版本调试实例时，把该 `.env` 的 `PORT` 改成目标端口即可（例如新版跑在 3399 就设 `PORT=3399`）。发现区间是 `PORT..PORT+20`，目标端口必须落在区间内、且前面没有更靠前的健康实例抢先占位。
 - 附着模式下该实例属「外部进程托管」，桌面外壳内的停止/重启会报错，需在原终端自行管理该进程。

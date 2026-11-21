@@ -3,7 +3,7 @@ package autopilot
 import (
 	"strings"
 
-	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/soulteary/yunqi/internal/config"
 )
 
 // RequestProfileFeatures 是协议层提取出的脱敏请求特征。

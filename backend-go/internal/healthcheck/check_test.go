@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/metrics"
-	"github.com/BenedictKing/ccx/internal/utils"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/metrics"
+	"github.com/soulteary/yunqi/internal/utils"
 )
 
 // fakeKeyHealthStore 内存版 KeyHealthStore，模拟 SQLite 的 upsert 语义

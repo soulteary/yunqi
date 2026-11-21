@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/metrics"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/metrics"
 )
 
 // ── CapabilityFloor 能力下界 ──

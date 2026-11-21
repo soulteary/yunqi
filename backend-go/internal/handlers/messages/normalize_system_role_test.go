@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/handlers/common"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/handlers/common"
 )
 
 // collectClaudeSystemBlockText 从顶层 system（应为 block 数组）里按序拼出各 text block 的文本，

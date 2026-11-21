@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/utils"
+	"github.com/soulteary/yunqi/internal/utils"
 )
 
 // ============== 工具函数 ==============

@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/BenedictKing/ccx/desktop/internal/appdirs"
+	"github.com/soulteary/yunqi/desktop/internal/appdirs"
 )
 
 const (

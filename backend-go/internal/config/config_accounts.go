@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/utils"
+	"github.com/soulteary/yunqi/internal/utils"
 )
 
 // AccountChannel 是账号级管理 API 使用的渠道快照。

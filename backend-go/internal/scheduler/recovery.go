@@ -4,9 +4,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/routingref"
-	"github.com/BenedictKing/ccx/internal/transitions"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/routingref"
+	"github.com/soulteary/yunqi/internal/transitions"
 )
 
 type ScheduledRecoveryResult struct {

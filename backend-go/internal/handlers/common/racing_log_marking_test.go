@@ -3,8 +3,8 @@ package common
 import (
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/metrics"
-	"github.com/BenedictKing/ccx/internal/racing"
+	"github.com/soulteary/yunqi/internal/metrics"
+	"github.com/soulteary/yunqi/internal/racing"
 	"github.com/gin-gonic/gin"
 )
 

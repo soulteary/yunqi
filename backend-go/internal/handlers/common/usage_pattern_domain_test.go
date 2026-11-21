@@ -3,8 +3,8 @@ package common
 import (
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/autopilot"
-	"github.com/BenedictKing/ccx/internal/scheduler"
+	"github.com/soulteary/yunqi/internal/autopilot"
+	"github.com/soulteary/yunqi/internal/scheduler"
 )
 
 // TestUsagePatternTaskDomain 钉住用量画像域维度握手：完成钩子从请求 context

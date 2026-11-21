@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/routingref"
+	"github.com/soulteary/yunqi/internal/routingref"
 )
 
 // affinityDebug 控制亲和性日志是否输出

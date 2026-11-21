@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/errutil"
+	"github.com/soulteary/yunqi/internal/errutil"
 )
 
 // newTestConfigManager 写入初始配置并返回 ConfigManager

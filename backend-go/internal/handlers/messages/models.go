@@ -16,13 +16,13 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/copilot"
-	"github.com/BenedictKing/ccx/internal/httpclient"
-	"github.com/BenedictKing/ccx/internal/keypool"
-	"github.com/BenedictKing/ccx/internal/middleware"
-	"github.com/BenedictKing/ccx/internal/scheduler"
-	"github.com/BenedictKing/ccx/internal/utils"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/copilot"
+	"github.com/soulteary/yunqi/internal/httpclient"
+	"github.com/soulteary/yunqi/internal/keypool"
+	"github.com/soulteary/yunqi/internal/middleware"
+	"github.com/soulteary/yunqi/internal/scheduler"
+	"github.com/soulteary/yunqi/internal/utils"
 	"github.com/gin-gonic/gin"
 )
 

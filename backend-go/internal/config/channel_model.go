@@ -17,7 +17,7 @@ import (
 	"encoding/hex"
 	"strings"
 
-	"github.com/BenedictKing/ccx/internal/utils"
+	"github.com/soulteary/yunqi/internal/utils"
 )
 
 // ChannelSchemaVersion 是 Channels 镜像结构的 schema 版本。

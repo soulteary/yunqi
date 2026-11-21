@@ -102,7 +102,7 @@ func NewEnvConfig() *EnvConfig {
 		ResponseHeaderTimeout: clampInt(getEnvAsInt("RESPONSE_HEADER_TIMEOUT", 120), 30, 300), // 30-300 秒
 		// 远程预置数据更新：默认每 6 小时检查；最短 30 分钟，最长 7 天。
 		PresetUpdateEnabled:         getEnv("PRESET_UPDATE_ENABLED", "true") != "false",
-		PresetUpdateURL:             strings.TrimSpace(getEnv("PRESET_UPDATE_URL", "https://benedictking.github.io/ccx/presets/index.json")),
+		PresetUpdateURL:             strings.TrimSpace(getEnv("PRESET_UPDATE_URL", "https://soulteary.github.io/yunqi/presets/index.json")),
 		PresetUpdateIntervalMinutes: clampInt(getEnvAsInt("PRESET_UPDATE_INTERVAL_MINUTES", 360), 30, 10080),
 		// 驾驶舱 override 默认有效期
 		OverrideTTLMinutes: clampInt(getEnvAsInt("OVERRIDE_TTL_MINUTES", 30), 1, 1440),

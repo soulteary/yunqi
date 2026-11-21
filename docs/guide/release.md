@@ -1,6 +1,6 @@
 # 发布指南
 
-本文档说明 CCX 的标准发布流程。
+本文档说明 Yunqi 的标准发布流程。
 
 ## 版本来源
 
@@ -127,7 +127,7 @@ git push origin vX.Y.Z
 正式 Release 同时使用两类签名：
 
 - [Sigstore](https://www.sigstore.dev/) / cosign keyless signing 签名 checksums 清单，用于验证 Release assets 的完整性和 CI 来源。
-- [SignPath Foundation](https://signpath.org/) 对 Windows GitHub 安装包链路做 Authenticode 代码签名。CI 会签名 Windows 后端 `ccx-windows-*.exe`、桌面主程序 `ccx-desktop.exe`，再生成并签名 `CCX-Desktop-*-windows-*-setup.exe`。
+- [SignPath Foundation](https://signpath.org/) 对 Windows GitHub 安装包链路做 Authenticode 代码签名。CI 会签名 Windows 后端 `yunqi-windows-*.exe`、桌面主程序 `yunqi-desktop.exe`，再生成并签名 `Yunqi-Desktop-*-windows-*-setup.exe`。
 
 推送 tag 后 CI 会自动完成以下步骤：
 
@@ -153,7 +153,7 @@ Windows SignPath 集成依赖以下 GitHub 配置：
 | Secret | `SIGNPATH_API_TOKEN` | SignPath API token，需具备对应项目/策略的 submitter 权限 |
 | Variable | `SIGNPATH_ARTIFACT_CONFIGURATION_SLUG` | 可选；为空时使用项目默认 artifact configuration |
 
-当前 workflow 固定使用 SignPath organization `4ffeb1d3-df31-4323-a3e9-15fecdcbaad2`、project `ccx`、signing policy `release_certificate_2026`（正式证书）。
+当前 workflow 固定使用 SignPath organization `4ffeb1d3-df31-4323-a3e9-15fecdcbaad2`、project `yunqi`、signing policy `release_certificate_2026`（正式证书）。
 
 `release_certificate_2026` 策略使用正式证书链，CI 会打印 Authenticode 证书详情，并强制要求签名校验返回 `Valid`；任何非 `Valid` 状态都会使发布失败。
 
@@ -163,8 +163,8 @@ SignPath artifact configuration 建议保持为单文件 Windows 可执行文件
 
 Windows release job 同时生成 Store/MSIX 验证产物：
 
-- `CCX-Desktop-{version}-windows-amd64-store.msix`
-- `CCX-Desktop-{version}-windows-arm64-store.msix`
+- `Yunqi-Desktop-{version}-windows-amd64-store.msix`
+- `Yunqi-Desktop-{version}-windows-arm64-store.msix`
 
 MSIX 包使用 `DISTRIBUTION=store` 构建，桌面端不会初始化 GitHub Releases 自动更新器，更新由 Microsoft Store 负责。正式提交 Store 前，需要在 GitHub repository variables 中配置 Partner Center 的包身份：
 

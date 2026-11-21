@@ -1,8 +1,8 @@
 # Troubleshooting
 
-This page collects common CCX Desktop issues and resolution steps.
+This page collects common Yunqi Desktop issues and resolution steps.
 
-For first-run setup or the full user flow, see [CCX Desktop](./index).
+For first-run setup or the full user flow, see [Yunqi Desktop](./index).
 
 ## First things to check
 
@@ -10,7 +10,7 @@ For first-run setup or the full user flow, see [CCX Desktop](./index).
 
 **This is the most common first troubleshooting step.**
 
-Global proxies and TUN mode (e.g. Clash TUN, Surge enhanced mode, v2rayN TUN) hijack all local network traffic, causing requests between CCX and upstream providers to be misrouted or intercepted.
+Global proxies and TUN mode (e.g. Clash TUN, Surge enhanced mode, v2rayN TUN) hijack all local network traffic, causing requests between Yunqi and upstream providers to be misrouted or intercepted.
 
 **Symptoms**:
 
@@ -21,14 +21,14 @@ Global proxies and TUN mode (e.g. Clash TUN, Surge enhanced mode, v2rayN TUN) hi
 **Resolution**:
 
 1. Disable the system proxy or switch to rule-based mode (PAC / Rule) to avoid global hijacking.
-2. Disable TUN mode, or add CCX-related addresses to the bypass list.
+2. Disable TUN mode, or add Yunqi-related addresses to the bypass list.
 3. Retry the request.
 
 ## Startup failures
 
 ### Binary not found
 
-**Symptom**: Starting the service reports that the CCX binary is missing.
+**Symptom**: Starting the service reports that the Yunqi binary is missing.
 
 **Resolution**:
 
@@ -38,8 +38,8 @@ Global proxies and TUN mode (e.g. Clash TUN, Surge enhanced mode, v2rayN TUN) hi
    cd backend-go && make build
    ```
 
-2. Confirm CCX Desktop can locate `ccx-go`.
-3. If the build output path changed, reopen CCX Desktop and try again.
+2. Confirm Yunqi Desktop can locate `yunqi`.
+3. If the build output path changed, reopen Yunqi Desktop and try again.
 
 ### Port conflict
 
@@ -79,7 +79,7 @@ Global proxies and TUN mode (e.g. Clash TUN, Surge enhanced mode, v2rayN TUN) hi
 
 ```bash
 # macOS / Linux
-chmod +x backend-go/ccx-go
+chmod +x backend-go/yunqi
 
 # Windows
 Run Desktop as administrator
@@ -99,8 +99,8 @@ This is a common source of mistakes. Always match the Base URL to the client typ
 
 Check in this order:
 
-1. The client API key matches CCX `PROXY_ACCESS_KEY`
-2. The running CCX Desktop instance was started with the expected `PROXY_ACCESS_KEY`
+1. The client API key matches Yunqi `PROXY_ACCESS_KEY`
+2. The running Yunqi Desktop instance was started with the expected `PROXY_ACCESS_KEY`
 3. No older environment variable is overriding the current configuration
 4. You did not enter the upstream provider API key by mistake
 
@@ -126,7 +126,7 @@ If stale values exist, clear them or test again in a clean shell session.
 
 ### `localhost` does not work on Windows
 
-If the client runs inside cmd, PowerShell, WSL, or Docker, `localhost` may not reach CCX.
+If the client runs inside cmd, PowerShell, WSL, or Docker, `localhost` may not reach Yunqi.
 
 Use the Windows host LAN IPv4 address instead, for example:
 
@@ -160,11 +160,11 @@ Different clients use different request paths:
 - Codex CLI / Codex App: `/v1/responses`
 - OpenCode: `/v1/chat/completions`
 
-If the log path does not match expectations, the client is not connected to CCX in the intended way. Recheck agent configuration and client provider settings.
+If the log path does not match expectations, the client is not connected to Yunqi in the intended way. Recheck agent configuration and client provider settings.
 
 ### Quick verify each endpoint with curl
 
-When requests fail or you are unsure whether the CCX path is healthy, test each endpoint directly with curl.
+When requests fail or you are unsure whether the Yunqi path is healthy, test each endpoint directly with curl.
 
 Replace `localhost:3688` with your actual address and port, and `your-proxy-key` with your `PROXY_ACCESS_KEY`.
 
@@ -208,7 +208,7 @@ curl -sS -i "http://localhost:3688/v1/chat/completions" \
 
 **How to interpret the result**:
 
-- `HTTP/1.1 200 OK` with valid response body → CCX path is healthy, the problem is in client configuration.
+- `HTTP/1.1 200 OK` with valid response body → Yunqi path is healthy, the problem is in client configuration.
 - `401` → Check that `PROXY_ACCESS_KEY` matches the client API key.
 - `400` with model not found → Check channel model mapping.
 - `502` or connection timeout → Upstream is unreachable, check channel configuration and network.
@@ -241,7 +241,7 @@ Troubleshooting steps:
 
 1. Check network connectivity.
 2. If you use a proxy, confirm GitHub Releases is reachable.
-3. If needed, download the update manually from the [Releases page](https://github.com/BenedictKing/ccx/releases).
+3. If needed, download the update manually from the [Releases page](https://github.com/soulteary/yunqi/releases).
 
 The Microsoft Store build is updated by the Store. If Store updates fail, retry from the library page or reinstall.
 
@@ -249,7 +249,7 @@ The Microsoft Store build is updated by the Store. If Store updates fail, retry 
 
 ### Window position or size is not restored
 
-CCX Desktop saves window state to the data directory.
+Yunqi Desktop saves window state to the data directory.
 
 If the saved state becomes invalid:
 

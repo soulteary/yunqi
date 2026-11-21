@@ -1,4 +1,4 @@
-module github.com/BenedictKing/ccx/desktop
+module github.com/soulteary/yunqi/desktop
 
 go 1.25.11
 

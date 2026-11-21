@@ -2,7 +2,7 @@ package config
 
 import (
 	"encoding/json"
-	"github.com/BenedictKing/ccx/internal/errutil"
+	"github.com/soulteary/yunqi/internal/errutil"
 	"os"
 	"path/filepath"
 	"testing"

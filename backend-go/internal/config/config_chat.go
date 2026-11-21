@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/utils"
+	"github.com/soulteary/yunqi/internal/utils"
 )
 
 // ============== Chat 渠道方法 ==============

@@ -1,6 +1,6 @@
-# CCX Desktop
+# Yunqi Desktop
 
-CCX Desktop 是面向普通用户的本地管理客户端，可以在桌面端完成安装、密钥配置、服务管理、渠道添加和客户端接入。
+Yunqi Desktop 是面向普通用户的本地管理客户端，可以在桌面端完成安装、密钥配置、服务管理、渠道添加和客户端接入。
 
 推荐使用路径：
 
@@ -10,7 +10,7 @@ CCX Desktop 是面向普通用户的本地管理客户端，可以在桌面端�
 
 ### 下载
 
-Windows 用户推荐在 Microsoft Store 中搜索 **CCX Desktop** 安装，由 Store 负责签名与自动更新。
+Windows 用户推荐在 Microsoft Store 中搜索 **Yunqi Desktop** 安装，由 Store 负责签名与自动更新。
 
 macOS 用户也可通过 Homebrew 安装：
 
@@ -19,22 +19,22 @@ brew tap BenedictKing/ccx
 brew install --cask ccx-desktop
 ```
 
-开发者或无法使用 Store / Homebrew 的环境，可从 [GitHub Releases](https://github.com/BenedictKing/ccx/releases) 下载：
+开发者或无法使用 Store / Homebrew 的环境，可从 [GitHub Releases](https://github.com/soulteary/yunqi/releases) 下载：
 
 | 平台 | 文件名格式 |
 |------|-----------|
-| macOS (Apple Silicon) | `CCX-Desktop-{version}-darwin-arm64.dmg` |
-| macOS (Intel) | `CCX-Desktop-{version}-darwin-amd64.dmg` |
-| Windows (GitHub) | `CCX-Desktop-{version}-windows-{arch}-setup.exe` |
-| Windows (Store/MSIX) | `CCX-Desktop-{version}-windows-{arch}-store.msix` |
-| Linux | `CCX-Desktop-{version}-linux-amd64.AppImage` |
+| macOS (Apple Silicon) | `Yunqi-Desktop-{version}-darwin-arm64.dmg` |
+| macOS (Intel) | `Yunqi-Desktop-{version}-darwin-amd64.dmg` |
+| Windows (GitHub) | `Yunqi-Desktop-{version}-windows-{arch}-setup.exe` |
+| Windows (Store/MSIX) | `Yunqi-Desktop-{version}-windows-{arch}-store.msix` |
+| Linux | `Yunqi-Desktop-{version}-linux-amd64.AppImage` |
 
 `*-store.msix` 主要用于 Microsoft Store 提交与验证，公开安装优先使用 Store；直接 sideload `.msix` 仍可能需要受信任签名环境。
 
 可使用 Release 页面附带的 `.sha256` 校验文件验证下载完整性：
 
 ```bash
-shasum -a 256 -c CCX-Desktop-*.sha256
+shasum -a 256 -c Yunqi-Desktop-*.sha256
 ```
 
 ### 安装方式
@@ -42,43 +42,43 @@ shasum -a 256 -c CCX-Desktop-*.sha256
 #### macOS
 
 1. 双击 `.dmg` 文件。
-2. 将 `CCX Desktop` 拖入 `Applications` 文件夹。
-3. 打开 `Applications` 中的 `CCX Desktop`。macOS 版本已使用 Apple Developer ID 签名并完成公证，正常情况下可直接运行。
+2. 将 `Yunqi Desktop` 拖入 `Applications` 文件夹。
+3. 打开 `Applications` 中的 `Yunqi Desktop`。macOS 版本已使用 Apple Developer ID 签名并完成公证，正常情况下可直接运行。
 
 #### Windows
 
-1. 在 Microsoft Store 中搜索 **CCX Desktop** 安装，签名与更新由 Store 处理。
+1. 在 Microsoft Store 中搜索 **Yunqi Desktop** 安装，签名与更新由 Store 处理。
 2. 使用 GitHub 安装包时，双击 `-setup.exe` 并按提示完成安装。
 3. 如果触发 SmartScreen 警告，点击 **更多信息 → 仍要运行**。
 
 #### Linux
 
 ```bash
-chmod +x CCX-Desktop-*.AppImage
-./CCX-Desktop-*.AppImage
+chmod +x Yunqi-Desktop-*.AppImage
+./Yunqi-Desktop-*.AppImage
 ```
 
 AppImage 支持应用内自动更新。若通过 deb/rpm 安装，需通过系统包管理器更新。
 
 ## 配置密钥
 
-打开 CCX Desktop 后，首次启动向导会生成并写入 `PROXY_ACCESS_KEY`。
+打开 Yunqi Desktop 后，首次启动向导会生成并写入 `PROXY_ACCESS_KEY`。
 
-![CCX Desktop 首次启动向导](/images/desktop/setup-wizard.png)
+![Yunqi Desktop 首次启动向导](/images/desktop/setup-wizard.png)
 
 ### `PROXY_ACCESS_KEY` 的作用
 
-- 用于客户端访问 CCX 网关。
-- 配置 Agent 时，CCX Desktop 会把它写入客户端配置。
+- 用于客户端访问 Yunqi 网关。
+- 配置 Agent 时，Yunqi Desktop 会把它写入客户端配置。
 - 手动配置客户端时，应把客户端的 API Key 设为同一个 `PROXY_ACCESS_KEY`。
 
 ### 常见理解
 
 | 密钥类型 | 说明 |
 |---------|------|
-| `PROXY_ACCESS_KEY` | 客户端访问 CCX 的代理密钥 |
+| `PROXY_ACCESS_KEY` | 客户端访问 Yunqi 的代理密钥 |
 | `ADMIN_ACCESS_KEY` | 管理密钥，用于 Web UI 登录与管理接口 |
-| 上游 API Key | 上游服务商密钥，仅填写在 CCX 的渠道配置中 |
+| 上游 API Key | 上游服务商密钥，仅填写在 Yunqi 的渠道配置中 |
 
 可在托盘菜单或 **Gateway Monitor** 中复制当前 `PROXY_ACCESS_KEY`，再粘贴到客户端配置或环境变量中。
 
@@ -108,7 +108,7 @@ Gateway Monitor 还支持：
 
 ## Agent 配置
 
-进入 **Agent Config**，可一键将本地 CCX 配置写入对应 Agent 工具：
+进入 **Agent Config**，可一键将本地 Yunqi 配置写入对应 Agent 工具：
 
 ![Agent Config 配置界面](/images/desktop/agent-config.png)
 
@@ -116,11 +116,11 @@ Gateway Monitor 还支持：
 - **Codex**
 - **OpenCode**
 
-推荐使用 CCX 作为 Provider，这样请求会经过本地网关，支持多渠道调度与故障转移。
+推荐使用 Yunqi 作为 Provider，这样请求会经过本地网关，支持多渠道调度与故障转移。
 
-CCX Desktop 主要写入的内容包括：
+Yunqi Desktop 主要写入的内容包括：
 
-- 客户端应访问的 CCX 地址。
+- 客户端应访问的 Yunqi 地址。
 - 代理密钥（`PROXY_ACCESS_KEY`）。
 - 相关模型或 provider 配置。
 
@@ -150,7 +150,7 @@ CCX Desktop 主要写入的内容包括：
 - 相关兼容选项
 
 ::: tip
-上游 API Key 只填写在渠道中，客户端中的 API Key 应填写为 CCX 的 `PROXY_ACCESS_KEY`。
+上游 API Key 只填写在渠道中，客户端中的 API Key 应填写为 Yunqi 的 `PROXY_ACCESS_KEY`。
 :::
 
 添加渠道后，建议在 Web UI 或日志中确认渠道状态可用。
@@ -161,10 +161,10 @@ CCX Desktop 主要写入的内容包括：
 
 ### 方式一：使用客户端验证
 
-1. 启动 CCX Desktop 并确认服务已运行。
+1. 启动 Yunqi Desktop 并确认服务已运行。
 2. 重启对应客户端（Claude Code / Codex / OpenCode）。
 3. 发送一条测试消息，例如：`你好`。
-4. 在 CCX Desktop 的 Log Viewer 或 Web UI 中确认请求到达。
+4. 在 Yunqi Desktop 的 Log Viewer 或 Web UI 中确认请求到达。
 
 ### 方式二：使用命令行验证
 
@@ -187,13 +187,13 @@ curl http://localhost:3688/v1/models \
 
 ![Environment Params 环境参数](/images/desktop/env-params.png)
 
-安装包运行时，`.env` 位于 CCX Desktop 数据目录，不是源码目录的 `backend-go/.env`。可在 **Gateway Monitor** 的 **Data dir** 查看并打开该目录；如需给 Claude Desktop 启用本地 HTTPS，请参考 [环境配置 - 本地 HTTPS](../environment#本地-https)，并在 `TLS_CERT_FILE` / `TLS_KEY_FILE` 中使用实际绝对路径。
+安装包运行时，`.env` 位于 Yunqi Desktop 数据目录，不是源码目录的 `backend-go/.env`。可在 **Gateway Monitor** 的 **Data dir** 查看并打开该目录；如需给 Claude Desktop 启用本地 HTTPS，请参考 [环境配置 - 本地 HTTPS](../environment#本地-https)，并在 `TLS_CERT_FILE` / `TLS_KEY_FILE` 中使用实际绝对路径。
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `PORT` | 3688 | 网关端口 |
 | `BIND_HOST` | 未设置 | 监听主机；不设置时监听所有网卡，填 `127.0.0.1` 仅允许本机访问 |
-| `PROXY_ACCESS_KEY` | - | 客户端访问 CCX 的代理密钥 |
+| `PROXY_ACCESS_KEY` | - | 客户端访问 Yunqi 的代理密钥 |
 | `ADMIN_ACCESS_KEY` | - | 管理密钥 |
 | `LOG_LEVEL` | info | 日志级别 |
 
@@ -207,9 +207,9 @@ curl http://localhost:3688/v1/models \
 
 ### 系统托盘
 
-关闭窗口后，CCX Desktop 会最小化到系统托盘。
+关闭窗口后，Yunqi Desktop 会最小化到系统托盘。
 
-![CCX Desktop 侧边栏与守护面板](/images/desktop/sidebar.png)
+![Yunqi Desktop 侧边栏与守护面板](/images/desktop/sidebar.png)
 
 托盘菜单常用功能：
 
@@ -247,6 +247,6 @@ GitHub 版更新流程：
 - [ ] 网关已启动，Gateway Monitor 状态正常。
 - [ ] 至少一个目标渠道已添加并启用。
 - [ ] Agent 已写入配置并重启。
-- [ ] 客户端发送请求后，CCX Desktop 有对应日志。
+- [ ] 客户端发送请求后，Yunqi Desktop 有对应日志。
 
 更详细的启动失败、更新问题、Agent 配置无效等说明，请参考 [常见问题](./troubleshooting)。

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/utils"
+	"github.com/soulteary/yunqi/internal/utils"
 )
 
 // 逻辑渠道 schema 版本：首次引入为 1。变更字段时 bump，并在加载逻辑里处理兼容。

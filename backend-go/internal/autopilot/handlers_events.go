@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/errutil"
+	"github.com/soulteary/yunqi/internal/errutil"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 )

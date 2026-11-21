@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/soulteary/yunqi/internal/config"
 )
 
 // TestFilterChannelsByContextProbeFallback 验证溢出试探层：

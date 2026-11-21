@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/quota"
-	"github.com/BenedictKing/ccx/internal/session"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/quota"
+	"github.com/soulteary/yunqi/internal/session"
 )
 
 // 渠道删除时应同步清理指向它的会话亲和条目：亲和原本只能等 TTL

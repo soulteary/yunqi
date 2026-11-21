@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/errutil"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/errutil"
 )
 
 func TestApplyVolcengineSignature(t *testing.T) {

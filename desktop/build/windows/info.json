@@ -5,11 +5,11 @@
 	"info": {
 		"0000": {
 			"ProductVersion": "0.1.0",
-			"CompanyName": "CCX",
-			"FileDescription": "CCX Desktop",
-			"LegalCopyright": "© 2026, CCX",
-			"ProductName": "CCX Desktop",
-			"Comments": "CCX desktop service supervisor"
+			"CompanyName": "Yunqi",
+			"FileDescription": "Yunqi Desktop",
+			"LegalCopyright": "© 2026, Yunqi",
+			"ProductName": "Yunqi Desktop",
+			"Comments": "Yunqi desktop service supervisor"
 		}
 	}
 }

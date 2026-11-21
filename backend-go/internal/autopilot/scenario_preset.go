@@ -3,7 +3,7 @@ package autopilot
 import (
 	"strings"
 
-	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/soulteary/yunqi/internal/config"
 )
 
 // ── 任务场景预设 ──

@@ -2,12 +2,12 @@
 version: '3'
 
 info:
-  companyName: "CCX"
-  productName: "CCX Desktop"
-  productIdentifier: "com.benedictking.ccx"
-  description: "Desktop shell for the CCX core gateway service."
-  copyright: "(c) 2026, CCX"
-  comments: "CCX desktop service supervisor"
+  companyName: "Yunqi"
+  productName: "Yunqi Desktop"
+  productIdentifier: "com.soulteary.yunqi"
+  description: "Desktop shell for the Yunqi core gateway service."
+  copyright: "(c) 2026, Yunqi"
+  comments: "Yunqi desktop service supervisor"
   version: "1.0.0"
 
 dev_mode:
@@ -38,4 +38,4 @@ dev_mode:
 fileAssociations:
 
 other:
-  - name: CCX Desktop
+  - name: Yunqi Desktop

@@ -236,7 +236,7 @@ const isRedirectedModel = (modelResult: CapabilityModelJobResult): boolean => {
   return Boolean(modelResult.actualModel && modelResult.actualModel !== modelResult.model)
 }
 
-// isUpstreamModelRedirected 上游自报模型与预期（CCX 映射后模型或请求模型）不一致——厂商侧隐式重定向
+// isUpstreamModelRedirected 上游自报模型与预期（Yunqi 映射后模型或请求模型）不一致——厂商侧隐式重定向
 const isUpstreamModelRedirected = (modelResult: CapabilityModelJobResult): boolean => {
   if (!modelResult.upstreamModel) return false
   const expected = modelResult.actualModel || modelResult.model

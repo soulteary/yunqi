@@ -1,6 +1,6 @@
 # 验证发布产物
 
-CCX 的正式 Release 使用 [Sigstore](https://www.sigstore.dev/) keyless signing 对 checksums 清单签名。通过验证签名，可以确认发布产物确实由 `BenedictKing/ccx` 仓库的 GitHub Actions 工作流构建，而非被篡改或来自非官方渠道。
+Yunqi 的正式 Release 使用 [Sigstore](https://www.sigstore.dev/) keyless signing 对 checksums 清单签名。通过验证签名，可以确认发布产物确实由 `BenedictKing/yunqi` 仓库的 GitHub Actions 工作流构建，而非被篡改或来自非官方渠道。
 
 Windows GitHub 安装器同时使用 SignPath Foundation 做 Authenticode 代码签名。Sigstore 用于验证 Release 清单和 CI 来源，Authenticode 用于让 Windows 验证安装包发布者和文件完整性。
 
@@ -41,7 +41,7 @@ choco install cosign
 
 ### 1. 下载 checksums 和签名文件
 
-从 [GitHub Releases](https://github.com/BenedictKing/ccx/releases) 下载：
+从 [GitHub Releases](https://github.com/soulteary/yunqi/releases) 下载：
 
 - `checksums.txt` — 全平台 SHA256 清单
 - `checksums.txt.sigstore.json` — 对应的 Sigstore 签名 bundle
@@ -61,7 +61,7 @@ VERSION=v2.7.12  # 替换为要验证的版本
 
 cosign verify-blob \
   --bundle checksums.txt.sigstore.json \
-  --certificate-identity "https://github.com/BenedictKing/ccx/.github/workflows/release.yml@refs/tags/${VERSION}" \
+  --certificate-identity "https://github.com/soulteary/yunqi/.github/workflows/release.yml@refs/tags/${VERSION}" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
   checksums.txt
 ```
@@ -73,7 +73,7 @@ cosign verify-blob \
 ```bash
 cosign verify-blob \
   --bundle checksums.txt.sigstore.json \
-  --certificate-identity-regexp "^https://github\.com/BenedictKing/ccx/\.github/workflows/release\.yml@refs/tags/v.*$" \
+  --certificate-identity-regexp "^https://github\.com/BenedictKing/yunqi/\.github/workflows/release\.yml@refs/tags/v.*$" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
   checksums.txt
 ```
@@ -91,7 +91,7 @@ sha256sum -c checksums.txt --ignore-missing
 macOS（部分版本 `shasum` 不支持 `--ignore-missing`，可手动比对）：
 
 ```bash
-shasum -a 256 ccx-darwin-arm64
+shasum -a 256 yunqi-darwin-arm64
 # 将输出与 checksums.txt 中对应行比较
 ```
 
@@ -101,7 +101,7 @@ Windows GitHub 安装包可用 PowerShell 验证 SignPath 代码签名：
 
 ```powershell
 $version = "2.7.12"  # 替换为要验证的版本（不含 v）
-$signature = Get-AuthenticodeSignature ".\CCX-Desktop-$version-windows-amd64-setup.exe"
+$signature = Get-AuthenticodeSignature ".\Yunqi-Desktop-$version-windows-amd64-setup.exe"
 $signature.Status
 $signature.SignerCertificate.Subject
 ```
@@ -127,8 +127,8 @@ $signature.SignerCertificate.Subject
 | `checksums-{platform}.txt` | 单平台 SHA256 清单 |
 | `checksums-{platform}.txt.sigstore.json` | 单平台 Sigstore bundle |
 | `{artifact}.sha256` | 单个产物的 SHA256（仅含 hex hash，供 updater 自动校验） |
-| `CCX-Desktop-*-windows-*-setup.exe` | SignPath Authenticode 签名的 Windows GitHub 安装包 |
-| `CCX-Desktop-*-windows-*-store.msix` | Windows Store/MSIX 提交与验证包，公开安装优先使用 Microsoft Store |
+| `Yunqi-Desktop-*-windows-*-setup.exe` | SignPath Authenticode 签名的 Windows GitHub 安装包 |
+| `Yunqi-Desktop-*-windows-*-store.msix` | Windows Store/MSIX 提交与验证包，公开安装优先使用 Microsoft Store |
 
 ## 了解更多
 

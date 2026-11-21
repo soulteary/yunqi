@@ -12,11 +12,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/errutil"
-	"github.com/BenedictKing/ccx/internal/httpclient"
-	"github.com/BenedictKing/ccx/internal/upstreamprobe"
-	"github.com/BenedictKing/ccx/internal/utils"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/errutil"
+	"github.com/soulteary/yunqi/internal/httpclient"
+	"github.com/soulteary/yunqi/internal/upstreamprobe"
+	"github.com/soulteary/yunqi/internal/utils"
 )
 
 // verifyEndpointTimeout 单次端点验证探测的超时。

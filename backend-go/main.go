@@ -19,39 +19,39 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/autopilot"
-	"github.com/BenedictKing/ccx/internal/balanceprobe"
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/conversation"
-	"github.com/BenedictKing/ccx/internal/errutil"
-	"github.com/BenedictKing/ccx/internal/eventbus"
-	"github.com/BenedictKing/ccx/internal/guardrails"
-	"github.com/BenedictKing/ccx/internal/handlers"
-	"github.com/BenedictKing/ccx/internal/handlers/alpha"
-	channelsv2 "github.com/BenedictKing/ccx/internal/handlers/channels"
-	"github.com/BenedictKing/ccx/internal/handlers/chat"
-	"github.com/BenedictKing/ccx/internal/handlers/common"
-	"github.com/BenedictKing/ccx/internal/handlers/copilot"
-	"github.com/BenedictKing/ccx/internal/handlers/gemini"
-	"github.com/BenedictKing/ccx/internal/handlers/images"
-	"github.com/BenedictKing/ccx/internal/handlers/logicalchannels"
-	"github.com/BenedictKing/ccx/internal/handlers/messages"
-	"github.com/BenedictKing/ccx/internal/handlers/responses"
-	"github.com/BenedictKing/ccx/internal/handlers/vectors"
-	"github.com/BenedictKing/ccx/internal/healthcheck"
-	"github.com/BenedictKing/ccx/internal/logger"
-	"github.com/BenedictKing/ccx/internal/metrics"
-	"github.com/BenedictKing/ccx/internal/middleware"
-	"github.com/BenedictKing/ccx/internal/presetstore"
-	"github.com/BenedictKing/ccx/internal/quota"
-	"github.com/BenedictKing/ccx/internal/racing"
-	"github.com/BenedictKing/ccx/internal/ratelimit"
-	"github.com/BenedictKing/ccx/internal/scheduler"
-	"github.com/BenedictKing/ccx/internal/session"
-	"github.com/BenedictKing/ccx/internal/thinkingcache"
-	"github.com/BenedictKing/ccx/internal/upstreamprobe"
-	"github.com/BenedictKing/ccx/internal/utils"
-	"github.com/BenedictKing/ccx/internal/warmup"
+	"github.com/soulteary/yunqi/internal/autopilot"
+	"github.com/soulteary/yunqi/internal/balanceprobe"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/conversation"
+	"github.com/soulteary/yunqi/internal/errutil"
+	"github.com/soulteary/yunqi/internal/eventbus"
+	"github.com/soulteary/yunqi/internal/guardrails"
+	"github.com/soulteary/yunqi/internal/handlers"
+	"github.com/soulteary/yunqi/internal/handlers/alpha"
+	channelsv2 "github.com/soulteary/yunqi/internal/handlers/channels"
+	"github.com/soulteary/yunqi/internal/handlers/chat"
+	"github.com/soulteary/yunqi/internal/handlers/common"
+	"github.com/soulteary/yunqi/internal/handlers/copilot"
+	"github.com/soulteary/yunqi/internal/handlers/gemini"
+	"github.com/soulteary/yunqi/internal/handlers/images"
+	"github.com/soulteary/yunqi/internal/handlers/logicalchannels"
+	"github.com/soulteary/yunqi/internal/handlers/messages"
+	"github.com/soulteary/yunqi/internal/handlers/responses"
+	"github.com/soulteary/yunqi/internal/handlers/vectors"
+	"github.com/soulteary/yunqi/internal/healthcheck"
+	"github.com/soulteary/yunqi/internal/logger"
+	"github.com/soulteary/yunqi/internal/metrics"
+	"github.com/soulteary/yunqi/internal/middleware"
+	"github.com/soulteary/yunqi/internal/presetstore"
+	"github.com/soulteary/yunqi/internal/quota"
+	"github.com/soulteary/yunqi/internal/racing"
+	"github.com/soulteary/yunqi/internal/ratelimit"
+	"github.com/soulteary/yunqi/internal/scheduler"
+	"github.com/soulteary/yunqi/internal/session"
+	"github.com/soulteary/yunqi/internal/thinkingcache"
+	"github.com/soulteary/yunqi/internal/upstreamprobe"
+	"github.com/soulteary/yunqi/internal/utils"
+	"github.com/soulteary/yunqi/internal/warmup"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 )
@@ -228,7 +228,7 @@ func parseCLIArgs(args []string) (cliOptions, error) {
 		return opts, nil
 	}
 
-	fs := flag.NewFlagSet("ccx", flag.ContinueOnError)
+	fs := flag.NewFlagSet("yunqi", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	fs.Usage = func() {}
 
@@ -265,8 +265,8 @@ func parseCLIArgs(args []string) (cliOptions, error) {
 
 func writeCLIHelp(out io.Writer) {
 	_, _ = fmt.Fprint(out, `用法:
-  ccx [options]
-  ccx version
+  yunqi [options]
+  yunqi version
 
 选项:
   --help, -h          显示帮助并退出
@@ -278,8 +278,8 @@ func writeCLIHelp(out io.Writer) {
 	  --backupdir DIR     指定配置备份目录，默认 配置文件同级目录下的 backups
 
 示例:
-  ccx --config ~/.config/ccx/config.json --statedir ~/.local/state/ccx --logdir ~/.local/state/ccx/logs --backupdir ~/.local/state/ccx/backups
-  ccx --logdir none   # 禁用日志文件，仅输出到控制台
+  yunqi --config ~/.config/ccx/config.json --statedir ~/.local/state/ccx --logdir ~/.local/state/ccx/logs --backupdir ~/.local/state/ccx/backups
+  yunqi --logdir none   # 禁用日志文件，仅输出到控制台
 
 说明:
   --config 只改变配置文件位置。
@@ -291,7 +291,7 @@ func writeCLIHelp(out io.Writer) {
 }
 
 func printVersion(out io.Writer) {
-	_, _ = fmt.Fprintf(out, "ccx %s\n", Version)
+	_, _ = fmt.Fprintf(out, "yunqi %s\n", Version)
 	if BuildTime != "unknown" {
 		_, _ = fmt.Fprintf(out, "build time: %s\n", BuildTime)
 	}
@@ -1924,7 +1924,7 @@ func main() {
 		// 纯 API 模式
 		r.GET("/", func(c *gin.Context) {
 			c.JSON(200, gin.H{
-				"name":    "CCX API Proxy",
+				"name":    "Yunqi API Gateway",
 				"mode":    "API Only",
 				"version": "1.0.0",
 				"endpoints": gin.H{
@@ -1953,7 +1953,7 @@ func main() {
 		log.Fatalf("[Server-Fatal] HTTPS 配置无效: %v", err)
 	}
 
-	fmt.Printf("\n[Server-Startup] CCX API代理服务器已启动\n")
+	fmt.Printf("\n[Server-Startup] 云起 Yunqi API代理服务器已启动\n")
 	fmt.Printf("[Server-Info] 版本: %s\n", Version)
 	if BuildTime != "unknown" {
 		fmt.Printf("[Server-Info] 构建时间: %s\n", BuildTime)

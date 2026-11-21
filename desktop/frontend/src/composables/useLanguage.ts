@@ -6,7 +6,7 @@ import { defaultLocale, languageOptions } from '@/i18n/messages'
 import {
   GetLanguagePreference,
   SaveLanguagePreference,
-} from '@bindings/github.com/BenedictKing/ccx/desktop/desktopservice'
+} from '@bindings/github.com/soulteary/yunqi/desktop/desktopservice'
 
 const locale = ref<SupportedLocale>(defaultLocale)
 const languageReady = ref(false)

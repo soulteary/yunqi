@@ -1,4 +1,4 @@
-import { ReportFrontendError } from '@bindings/github.com/BenedictKing/ccx/desktop/desktopservice'
+import { ReportFrontendError } from '@bindings/github.com/soulteary/yunqi/desktop/desktopservice'
 
 type ReportSource = 'window-error' | 'unhandled-rejection' | 'console-error'
 

@@ -2,7 +2,7 @@
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { FolderOpen } from 'lucide-vue-next'
-import { OpenDirectory } from '@bindings/github.com/BenedictKing/ccx/desktop/desktopservice'
+import { OpenDirectory } from '@bindings/github.com/soulteary/yunqi/desktop/desktopservice'
 import type { DesktopStatus } from '@/types'
 import { useLanguage } from '@/composables/useLanguage'
 

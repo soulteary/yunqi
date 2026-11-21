@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/metrics"
-	"github.com/BenedictKing/ccx/internal/utils"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/metrics"
+	"github.com/soulteary/yunqi/internal/utils"
 	"github.com/gin-gonic/gin"
 )
 

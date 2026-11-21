@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/autopilot"
-	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/soulteary/yunqi/internal/autopilot"
+	"github.com/soulteary/yunqi/internal/config"
 )
 
 // keyHashForTest 与生产路径使用同一套 keyHash 计算，确保缓存键一致。

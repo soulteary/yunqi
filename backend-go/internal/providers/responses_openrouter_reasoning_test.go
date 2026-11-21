@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/types"
+	"github.com/soulteary/yunqi/internal/types"
 )
 
 // OpenRouter 非流式响应把思考文本放在非标准 content[reasoning_text]，

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/soulteary/yunqi/internal/config"
 )
 
 // newBalanceRestrictionManager 构造持有单渠道双 Key 的 ConfigManager，

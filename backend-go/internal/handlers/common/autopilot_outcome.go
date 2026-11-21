@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/autopilot"
-	"github.com/BenedictKing/ccx/internal/scheduler"
+	"github.com/soulteary/yunqi/internal/autopilot"
+	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/gin-gonic/gin"
 )
 

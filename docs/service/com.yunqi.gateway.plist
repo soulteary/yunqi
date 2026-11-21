@@ -3,15 +3,15 @@
 <plist version="1.0">
   <dict>
     <key>Label</key>
-    <string>com.ccx.gateway</string>
+    <string>com.yunqi.gateway</string>
 
     <key>ProgramArguments</key>
     <array>
-      <string>/Users/your-user/ccx/ccx-darwin-arm64</string>
+      <string>/Users/your-user/yunqi/yunqi-darwin-arm64</string>
     </array>
 
     <key>WorkingDirectory</key>
-    <string>/Users/your-user/ccx</string>
+    <string>/Users/your-user/yunqi</string>
 
     <key>EnvironmentVariables</key>
     <dict>
@@ -32,9 +32,9 @@
     <true/>
 
     <key>StandardOutPath</key>
-    <string>/Users/your-user/ccx/logs/stdout.log</string>
+    <string>/Users/your-user/yunqi/logs/stdout.log</string>
 
     <key>StandardErrorPath</key>
-    <string>/Users/your-user/ccx/logs/stderr.log</string>
+    <string>/Users/your-user/yunqi/logs/stderr.log</string>
   </dict>
 </plist>

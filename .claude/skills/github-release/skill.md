@@ -2,7 +2,7 @@
 name: github-release
 description: 发布 GitHub Release，从 CHANGELOG 生成发布公告并更新 Draft Release (project)
 version: 1.2.0
-author: https://github.com/BenedictKing/ccx/
+author: https://github.com/soulteary/yunqi/
 allowed-tools: Bash, Read
 context: fork
 ---
@@ -92,7 +92,7 @@ cat CHANGELOG.md
 
 ---
 
-**Full Changelog**: https://github.com/BenedictKing/ccx/compare/v2.3.5...v2.3.7
+**Full Changelog**: https://github.com/soulteary/yunqi/compare/v2.3.5...v2.3.7
 ```
 
 **注意事项**：
@@ -164,18 +164,18 @@ gh release view <tag> --json assets --jq '.assets[].name' | sort
 **预期 assets 列表**（12 个）：
 
 ```
-ccx-darwin-amd64
-ccx-darwin-amd64.sha256
-ccx-darwin-arm64
-ccx-darwin-arm64.sha256
-ccx-linux-amd64
-ccx-linux-amd64.sha256
-ccx-linux-arm64
-ccx-linux-arm64.sha256
-ccx-windows-amd64.exe
-ccx-windows-amd64.exe.sha256
-ccx-windows-arm64.exe
-ccx-windows-arm64.exe.sha256
+yunqi-darwin-amd64
+yunqi-darwin-amd64.sha256
+yunqi-darwin-arm64
+yunqi-darwin-arm64.sha256
+yunqi-linux-amd64
+yunqi-linux-amd64.sha256
+yunqi-linux-arm64
+yunqi-linux-arm64.sha256
+yunqi-windows-amd64.exe
+yunqi-windows-amd64.exe.sha256
+yunqi-windows-arm64.exe
+yunqi-windows-arm64.exe.sha256
 ```
 
 **如果 assets 不足**：
@@ -184,14 +184,14 @@ ccx-windows-arm64.exe.sha256
 
 ```bash
 # 查找残留的 draft release（可能包含缺失的 assets）
-gh api repos/BenedictKing/ccx/releases --jq '.[] | select(.draft == true) | {id, tag_name, assets: [.assets[].name]}'
+gh api repos/BenedictKing/yunqi/releases --jq '.[] | select(.draft == true) | {id, tag_name, assets: [.assets[].name]}'
 
 # 如果找到包含缺失文件的 draft，下载后上传到正式 release
-gh release download <draft-tag-or-id> -D /tmp/missing-assets -p '*' -R BenedictKing/ccx
+gh release download <draft-tag-or-id> -D /tmp/missing-assets -p '*' -R BenedictKing/yunqi
 gh release upload <tag> /tmp/missing-assets/<file1> /tmp/missing-assets/<file2> --clobber
 
 # 清理残留 draft
-gh api -X DELETE repos/BenedictKing/ccx/releases/<draft-id>
+gh api -X DELETE repos/BenedictKing/yunqi/releases/<draft-id>
 ```
 
 **重要**：下载大文件时如果网络不稳定，使用本地代理（询问用户代理端口）：
@@ -220,7 +220,7 @@ gh release view <tag> --json url,publishedAt,assets --jq '{url: .url, publishedA
 
 版本: v2.3.7
 状态: ✅ 已发布
-链接: https://github.com/BenedictKing/ccx/releases/tag/v2.3.7
+链接: https://github.com/soulteary/yunqi/releases/tag/v2.3.7
 
 已清理的 Draft: v2.3.5, v2.3.6（已合并到 v2.3.7 发布公告）
 
@@ -237,7 +237,7 @@ gh release view <tag> --json url,publishedAt,assets --jq '{url: .url, publishedA
 
 ---
 
-**Full Changelog**: https://github.com/BenedictKing/ccx/compare/v2.3.5...v2.3.7
+**Full Changelog**: https://github.com/soulteary/yunqi/compare/v2.3.5...v2.3.7
 ---
 ```
 

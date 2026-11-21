@@ -4,8 +4,8 @@ import (
 	"context"
 	"sort"
 
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/scheduler"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/scheduler"
 )
 
 // 溢出跨协议重定向（逃生阀兜底层，完全跨协议版）。

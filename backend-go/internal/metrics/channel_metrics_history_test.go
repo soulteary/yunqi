@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/utils"
+	"github.com/soulteary/yunqi/internal/utils"
 )
 
 func TestMultiURLHealthTreatsMissingKeyAsAvailableCandidate(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/soulteary/yunqi/internal/config"
 )
 
 // 流式要求错误信号识别。

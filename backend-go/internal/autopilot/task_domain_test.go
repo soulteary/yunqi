@@ -4,8 +4,8 @@ import (
 	"math"
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/presetstore"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/presetstore"
 )
 
 // ── DomainStrength 测试（种子矩阵回退链）──

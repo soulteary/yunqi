@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/types"
+	"github.com/soulteary/yunqi/internal/types"
 )
 
 func TestConversationTracker_Track(t *testing.T) {

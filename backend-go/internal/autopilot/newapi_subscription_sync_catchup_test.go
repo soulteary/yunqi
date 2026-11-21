@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/soulteary/yunqi/internal/config"
 )
 
 // catchUpFakeAdapter 同时满足 NewApiSyncAdapter 与 newApiGroupCatchUpper，

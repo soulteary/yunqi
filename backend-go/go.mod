@@ -1,4 +1,4 @@
-module github.com/BenedictKing/ccx
+module github.com/soulteary/yunqi
 
 go 1.25.11
 

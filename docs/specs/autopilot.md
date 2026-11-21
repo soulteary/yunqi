@@ -2,7 +2,7 @@
 
 ## 1. 总体架构
 
-Autopilot 是 CCX 的智能路由与渠道托管子系统，由 Manager + SmartRouter + EndpointPolicy + Trace 四层构成。
+Autopilot 是 Yunqi 的智能路由与渠道托管子系统，由 Manager + SmartRouter + EndpointPolicy + Trace 四层构成。
 
 ```text
 [Client Request]

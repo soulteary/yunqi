@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/metrics"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/metrics"
 )
 
 // 验证级别（key_health.check_kind），L2 由后续任务实现

@@ -2,7 +2,7 @@ package config
 
 import (
 	"bytes"
-	"github.com/BenedictKing/ccx/internal/errutil"
+	"github.com/soulteary/yunqi/internal/errutil"
 	"log"
 	"os"
 	"path/filepath"

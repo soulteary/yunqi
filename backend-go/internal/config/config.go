@@ -9,9 +9,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/eventbus"
-	"github.com/BenedictKing/ccx/internal/statelog"
-	"github.com/BenedictKing/ccx/internal/utils"
+	"github.com/soulteary/yunqi/internal/eventbus"
+	"github.com/soulteary/yunqi/internal/statelog"
+	"github.com/soulteary/yunqi/internal/utils"
 	"github.com/fsnotify/fsnotify"
 )
 

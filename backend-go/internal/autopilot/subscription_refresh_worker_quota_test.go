@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/quota"
+	"github.com/soulteary/yunqi/internal/quota"
 )
 
 // fakeBalanceFetcher 返回固定余额的测试 fetcher。

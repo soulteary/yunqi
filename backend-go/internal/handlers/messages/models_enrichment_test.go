@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/soulteary/yunqi/internal/config"
 )
 
 // TestModelsHandler_FillsMaxOutputTokensFromBuiltinRegistry 验证 /v1/models 响应中

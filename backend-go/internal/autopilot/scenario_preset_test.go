@@ -8,7 +8,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/soulteary/yunqi/internal/config"
 )
 
 func scenarioBoolPtr(v bool) *bool { return &v }

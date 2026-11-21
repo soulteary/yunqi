@@ -3,7 +3,7 @@ package autopilot
 import (
 	"log"
 
-	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/soulteary/yunqi/internal/config"
 )
 
 // ── 本地运行时候选提供器（设计 §4.7 TrustedRoutingAdvisor 执行面） ──

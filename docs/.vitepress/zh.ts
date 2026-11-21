@@ -1,7 +1,7 @@
 import type { DefaultTheme, LocaleSpecificConfig } from 'vitepress'
 
 export const zhConfig: LocaleSpecificConfig<DefaultTheme.Config> = {
-  title: 'CCX 文档',
+  title: 'Yunqi 文档',
   description: 'AI API 代理与协议转换网关',
   themeConfig: {
     nav: [
@@ -19,7 +19,7 @@ export const zhConfig: LocaleSpecificConfig<DefaultTheme.Config> = {
             { text: 'Claude Desktop', link: '/guide/clients/claude-desktop' },
             { text: 'Codex CLI / Codex App', link: '/guide/clients/codex' },
             { text: 'OpenCode', link: '/guide/clients/opencode' },
-            { text: 'CCX Desktop', link: '/guide/desktop/' },
+            { text: 'Yunqi Desktop', link: '/guide/desktop/' },
           ],
         },
       ],
@@ -27,8 +27,9 @@ export const zhConfig: LocaleSpecificConfig<DefaultTheme.Config> = {
         {
           text: '入门',
           items: [
+            { text: '名称、沿革与许可', link: '/guide/project-origin' },
             { text: '快速开始', link: '/guide/getting-started' },
-            { text: 'CCX Desktop', link: '/guide/desktop/' },
+            { text: 'Yunqi Desktop', link: '/guide/desktop/' },
             { text: 'Desktop 排障', link: '/guide/desktop/troubleshooting' },
             { text: '部署', link: '/guide/deployment' },
             { text: '环境变量', link: '/guide/environment' },

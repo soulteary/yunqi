@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/metrics"
-	"github.com/BenedictKing/ccx/internal/types"
-	"github.com/BenedictKing/ccx/internal/utils"
+	"github.com/soulteary/yunqi/internal/metrics"
+	"github.com/soulteary/yunqi/internal/types"
+	"github.com/soulteary/yunqi/internal/utils"
 	"github.com/gin-gonic/gin"
 )
 

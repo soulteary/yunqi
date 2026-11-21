@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/soulteary/yunqi/internal/config"
 )
 
 // 协议端点不支持信号识别（学习闭环的写入侧识别器）。

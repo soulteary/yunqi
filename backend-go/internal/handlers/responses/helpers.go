@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/BenedictKing/ccx/internal/handlers/common"
-	"github.com/BenedictKing/ccx/internal/types"
+	"github.com/soulteary/yunqi/internal/handlers/common"
+	"github.com/soulteary/yunqi/internal/types"
 )
 
 func parseInputToItems(input interface{}) ([]types.ResponsesItem, error) {

@@ -100,10 +100,10 @@
 9 个 `<router-link>` 平铺，`/` 分隔，顺序与移动端一致：
 
 ```
-渠道 / Images / Vectors / 驾驶舱 / 健康中心 / 订阅中心 / 总览 / Autopilot / 成本报表   API Proxy - CCX
+渠道 / Images / Vectors / 驾驶舱 / 健康中心 / 订阅中心 / 总览 / Autopilot / 成本报表   API Proxy - Yunqi
 ```
 
-i18n key 依次为 `app.tabs.{channels,images,vectors,conversations,healthCenter,subscriptions,cockpitOverview,autopilot,costReport}`。品牌文案 `API Proxy - CCX`（`d-none d-md-inline`）。
+i18n key 依次为 `app.tabs.{channels,images,vectors,conversations,healthCenter,subscriptions,cockpitOverview,autopilot,costReport}`。品牌文案 `API Proxy - Yunqi`（`d-none d-md-inline`）。
 
 > 已在 2026-08-09 修复（commit `d876784d`）：桌面导航末项"成本报表"改为 `t('app.tabs.costReport')`，不再硬编码中文。
 

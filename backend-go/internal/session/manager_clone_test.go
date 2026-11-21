@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/types"
+	"github.com/soulteary/yunqi/internal/types"
 )
 
 func TestGetSession_ReturnsClonedSession(t *testing.T) {

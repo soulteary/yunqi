@@ -64,7 +64,7 @@ func TestBinaryCandidates(t *testing.T) {
 	if len(candidates) == 0 {
 		t.Fatal("binaryCandidates should not be empty")
 	}
-	name := "ccx-go"
+	name := "yunqi"
 	if runtime.GOOS == "windows" {
 		name += ".exe"
 	}

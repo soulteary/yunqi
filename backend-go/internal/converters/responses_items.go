@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/BenedictKing/ccx/internal/types"
+	"github.com/soulteary/yunqi/internal/types"
 )
 
 func resolveFunctionCallItem(item types.ResponsesItem) (string, string, string, error) {

@@ -1,24 +1,24 @@
-# Codex CLI / Codex App 接入 CCX
+# Codex CLI / Codex App 接入 Yunqi
 
-如果你正在使用 **CCX Desktop**，可先在 [Agent Config](/guide/desktop/#agent-配置) 中写入 Codex 配置，再回到本页确认 Responses 入口和 Base URL 规则。
+如果你正在使用 **Yunqi Desktop**，可先在 [Agent Config](/guide/desktop/#agent-配置) 中写入 Codex 配置，再回到本页确认 Responses 入口和 Base URL 规则。
 
 ## 工作方式
 
 ```text
-Codex CLI / App  ->  CCX /v1/responses  ->  Responses 渠道  ->  上游 Responses 或 Chat 端点
+Codex CLI / App  ->  Yunqi /v1/responses  ->  Responses 渠道  ->  上游 Responses 或 Chat 端点
 ```
 
-## 一、配置 CCX 渠道
+## 一、配置 Yunqi 渠道
 
-1. 打开 CCX 管理界面，进入 **Responses** 入口
+1. 打开 Yunqi 管理界面，进入 **Responses** 入口
 2. 点击「添加渠道」
 3. 根据上游能力选择服务类型
 
 | 上游能力 | 服务类型 | 说明 |
 |----------|----------|------|
 | 原生 OpenAI Responses | `Responses` | 直接转发 Responses 协议 |
-| OpenAI Chat 兼容 | `OpenAI Chat` | CCX 将 Responses 转换为 Chat Completions |
-| Claude | `Claude` | CCX 将 Responses 转换为 Claude Messages |
+| OpenAI Chat 兼容 | `OpenAI Chat` | Yunqi 将 Responses 转换为 Chat Completions |
+| Claude | `Claude` | Yunqi 将 Responses 转换为 Claude Messages |
 
 如果上游是 Chat 兼容端点，且不支持 `developer` 等非标准 Chat role，建议编辑渠道并启用 **规范化非标准 Chat role**。
 
@@ -28,12 +28,12 @@ Codex CLI 和 Codex App 都使用下面这组值：
 
 | 配置项 | 值 |
 |--------|----|
-| API Key | `your-ccx-proxy-key` |
+| API Key | `your-yunqi-proxy-key` |
 | Base URL | `http://localhost:3000/v1` |
 | Model | 客户端请求模型名，例如 `gpt-5` |
 
 ::: tip
-这里的 API Key 是 CCX 的 `PROXY_ACCESS_KEY`，不是上游提供商的 API Key。上游 API Key 只配置在 CCX 渠道里。
+这里的 API Key 是 Yunqi 的 `PROXY_ACCESS_KEY`，不是上游提供商的 API Key。上游 API Key 只配置在 Yunqi 渠道里。
 :::
 
 ## 三、Codex CLI 配置
@@ -41,7 +41,7 @@ Codex CLI 和 Codex App 都使用下面这组值：
 在终端中设置：
 
 ```bash
-export OPENAI_API_KEY="your-ccx-proxy-key"
+export OPENAI_API_KEY="your-yunqi-proxy-key"
 export OPENAI_BASE_URL="http://localhost:3000/v1"
 ```
 
@@ -54,7 +54,7 @@ codex "你好"
 如果你的 Codex CLI 版本使用配置文件而不是环境变量，仍然填写同一组值：
 
 ```text
-API Key: your-ccx-proxy-key
+API Key: your-yunqi-proxy-key
 Base URL: http://localhost:3000/v1
 Model: gpt-5
 ```
@@ -65,7 +65,7 @@ Model: gpt-5
 
 | 设置项 | 值 |
 |--------|----|
-| API Key | `your-ccx-proxy-key` |
+| API Key | `your-yunqi-proxy-key` |
 | Base URL | `http://localhost:3000/v1` |
 | Model | `gpt-5` 或你的映射模型名 |
 
@@ -79,14 +79,14 @@ Codex 默认可能请求 GPT 模型名。如果上游使用不同模型名，建
 | `mini` | 上游轻量模型 |
 
 ::: tip
-不要只给 `gpt-5` 配高能力模型而忽略 `gpt-5-mini`。CCX 按更长匹配键优先匹配，通常可以用 `gpt` 和 `mini` 覆盖常见 Codex 模型名。
+不要只给 `gpt-5` 配高能力模型而忽略 `gpt-5-mini`。Yunqi 按更长匹配键优先匹配，通常可以用 `gpt` 和 `mini` 覆盖常见 Codex 模型名。
 :::
 
 ## 常见问题
 
 ### Codex CLI 和 Codex App 是否要分开配置？
 
-不需要。两者使用同一套 CCX OpenAI 兼容配置：
+不需要。两者使用同一套 Yunqi OpenAI 兼容配置：
 
 ```text
 API Key  = PROXY_ACCESS_KEY
@@ -106,9 +106,9 @@ Model    = 客户端请求模型名
    printenv OPENAI_API_KEY
    ```
 
-2. `OPENAI_API_KEY` 或 App 中的 API Key 是否等于 CCX 的 `PROXY_ACCESS_KEY`
+2. `OPENAI_API_KEY` 或 App 中的 API Key 是否等于 Yunqi 的 `PROXY_ACCESS_KEY`
 3. 是否误填了上游厂商 API Key
-4. CCX 服务是否使用了同一个 `PROXY_ACCESS_KEY` 启动
+4. Yunqi 服务是否使用了同一个 `PROXY_ACCESS_KEY` 启动
 
 ### 返回 404 或接口不存在
 
@@ -150,7 +150,7 @@ export OPENAI_BASE_URL="http://localhost:3000/v1/responses"
 
 ### 想确认请求是否走 Responses 入口
 
-查看 CCX 后端日志或渠道日志，请求路径应为：
+查看 Yunqi 后端日志或渠道日志，请求路径应为：
 
 ```text
 /v1/responses

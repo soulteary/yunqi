@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/thinkingcache"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/thinkingcache"
 	"github.com/gin-gonic/gin"
 )
 

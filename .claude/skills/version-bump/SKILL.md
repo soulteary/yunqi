@@ -2,7 +2,7 @@
 name: version-bump
 description: 升级项目版本号并提交git，支持patch/minor/major版本升级或指定具体版本号，自动从git log生成CHANGELOG
 version: 1.5.0
-author: https://github.com/BenedictKing/ccx/
+author: https://github.com/soulteary/yunqi/
 allowed-tools: Bash, Read, Write, Edit
 context: fork
 ---
@@ -182,7 +182,7 @@ git commit -m "chore: bump version to v{新版本号}"
 
 3. **验证构建产物：**
    ```bash
-   ls -lh dist/ccx-go
+   ls -lh dist/yunqi-go
    ```
    - 确认产物存在且大小合理
 
@@ -314,10 +314,10 @@ git push origin v{新版本号}
 
 | Job               | Runner              | 产物                                                      |
 | ----------------- | ------------------- | --------------------------------------------------------- |
-| `build-macos`     | macos-latest        | `ccx-darwin-arm64`, `ccx-darwin-amd64`, DMG 安装包        |
-| `build-windows`   | windows-latest      | `ccx-windows-amd64.exe`, `ccx-windows-arm64.exe`, NSIS 安装包 |
-| `build-linux`     | ubuntu-latest       | `ccx-linux-amd64`, `ccx-linux-arm64`, AppImage            |
-| `build-linux-arm64-desktop` | ubuntu-24.04-arm | `CCX-Desktop-linux-arm64.AppImage`              |
+| `build-macos`     | macos-latest        | `yunqi-darwin-arm64`, `yunqi-darwin-amd64`, DMG 安装包        |
+| `build-windows`   | windows-latest      | `yunqi-windows-amd64.exe`, `yunqi-windows-arm64.exe`, NSIS 安装包 |
+| `build-linux`     | ubuntu-latest       | `yunqi-linux-amd64`, `yunqi-linux-arm64`, AppImage            |
+| `build-linux-arm64-desktop` | ubuntu-24.04-arm | `Yunqi-Desktop-linux-arm64.AppImage`              |
 | `docker-build`    | ubuntu-latest       | Docker 镜像 (阿里云容器镜像服务, linux/amd64 + linux/arm64) |
 
 ### Concurrency 配置

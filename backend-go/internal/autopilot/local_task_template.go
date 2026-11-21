@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/errutil"
+	"github.com/soulteary/yunqi/internal/errutil"
 	"github.com/google/uuid"
 )
 

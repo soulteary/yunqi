@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/quota"
+	"github.com/soulteary/yunqi/internal/quota"
 	"github.com/gin-gonic/gin"
 )
 

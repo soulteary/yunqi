@@ -3,7 +3,7 @@ package handlers
 import (
 	"net/http"
 
-	"github.com/BenedictKing/ccx/internal/utils"
+	"github.com/soulteary/yunqi/internal/utils"
 )
 
 const (

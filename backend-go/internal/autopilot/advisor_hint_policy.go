@@ -3,7 +3,7 @@ package autopilot
 import (
 	"fmt"
 
-	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/soulteary/yunqi/internal/config"
 )
 
 // ── Advisor Hint 路由约束效果（§4.7.2 执行规则）──

@@ -1,6 +1,6 @@
 import { useAdminApi } from '@/composables/useAdminApi'
 import { useStatus } from '@/composables/useStatus'
-import { GetAdminAccessKey } from '@bindings/github.com/BenedictKing/ccx/desktop/desktopservice'
+import { GetAdminAccessKey } from '@bindings/github.com/soulteary/yunqi/desktop/desktopservice'
 import {
   HEALTH_CENTER_CHANGELOG_PATH,
   HEALTH_CENTER_EVENTS_WS_PATH,

@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/keypool"
-	"github.com/BenedictKing/ccx/internal/scheduler"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/keypool"
+	"github.com/soulteary/yunqi/internal/scheduler"
 )
 
 // ── 五元组候选身份：(渠道, 协议, key, 模型, effort) ──

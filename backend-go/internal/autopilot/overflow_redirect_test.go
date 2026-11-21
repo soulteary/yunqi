@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/scheduler"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/scheduler"
 )
 
 // TestContextProbeEligible 验证 resolver 地板层的试探放宽准入。

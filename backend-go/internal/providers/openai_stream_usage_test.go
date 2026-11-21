@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/types"
+	"github.com/soulteary/yunqi/internal/types"
 )
 
 func TestOpenAIProvider_HandleStreamResponse_DeepSeekCacheUsage(t *testing.T) {

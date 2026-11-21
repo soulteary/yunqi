@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/soulteary/yunqi/internal/config"
 )
 
 // ── EndpointAttemptPolicy（设计 §4.6.2 + §4.6.2a）──

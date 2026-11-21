@@ -1,4 +1,4 @@
-# CCX Makefile
+# Yunqi Makefile
 
 GREEN=\033[0;32m
 YELLOW=\033[0;33m
@@ -7,7 +7,7 @@ NC=\033[0m
 .PHONY: help install dev run build clean frontend-dev frontend-build embed-frontend desktop-dev desktop-build container-verify generate-preset-manifest benchmark-update benchmark-update-dry benchmark-chart
 
 help:
-	@echo "$(GREEN)CCX - 可用命令:$(NC)"
+	@echo "$(GREEN)Yunqi - 可用命令:$(NC)"
 	@echo ""
 	@echo "$(YELLOW)环境准备:$(NC)"
 	@echo "  make install        - 安装所有依赖（前端 + 后端 + 桌面端）"
@@ -16,7 +16,7 @@ help:
 	@echo "  make dev            - Go 后端热重载开发(不含前端)"
 	@echo "  make run            - 构建前端并运行 Go 后端"
 	@echo "  make frontend-dev   - 前端开发服务器"
-	@echo "  make desktop-dev    - 构建 CCX 核心并启动桌面外壳开发模式"
+	@echo "  make desktop-dev    - 构建 Yunqi 核心并启动桌面外壳开发模式"
 	@echo ""
 	@echo "$(YELLOW)构建:$(NC)"
 	@echo "  make build          - 构建前端并编译 Go 后端"

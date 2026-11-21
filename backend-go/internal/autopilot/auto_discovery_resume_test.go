@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/errutil"
-	"github.com/BenedictKing/ccx/internal/utils"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/errutil"
+	"github.com/soulteary/yunqi/internal/utils"
 	_ "modernc.org/sqlite"
 )
 

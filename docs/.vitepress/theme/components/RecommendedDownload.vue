@@ -64,8 +64,8 @@ const props = defineProps<{
   locale?: Locale
 }>()
 
-const releasesUrl = 'https://github.com/BenedictKing/ccx/releases/latest'
-const apiUrl = 'https://api.github.com/repos/BenedictKing/ccx/releases/latest'
+const releasesUrl = 'https://github.com/soulteary/yunqi/releases/latest'
+const apiUrl = 'https://api.github.com/repos/soulteary/yunqi/releases/latest'
 
 const platform = ref<PlatformInfo>({})
 const assetUrl = ref('')
@@ -76,8 +76,8 @@ const locale = computed<Locale>(() => props.locale ?? 'zh')
 const copy = {
   zh: {
     eyebrow: '桌面客户端下载',
-    title: '推荐下载 CCX Desktop',
-    fallbackTitle: '下载 CCX Desktop 最新版',
+    title: '推荐下载 Yunqi Desktop',
+    fallbackTitle: '下载 Yunqi Desktop 最新版',
     description: '自动识别你的系统，优先推荐适合当前设备的安装包。',
     fallbackDescription: '查看最新版本，并选择适合你系统的安装包。',
     allDownloads: '查看全部下载',
@@ -96,8 +96,8 @@ const copy = {
   },
   en: {
     eyebrow: 'Desktop app download',
-    title: 'Recommended CCX Desktop download',
-    fallbackTitle: 'Download the latest CCX Desktop',
+    title: 'Recommended Yunqi Desktop download',
+    fallbackTitle: 'Download the latest Yunqi Desktop',
     description: 'Detects your system and recommends the installer for this device.',
     fallbackDescription: 'Open the latest release and choose the installer for your system.',
     allDownloads: 'All downloads',
@@ -237,9 +237,9 @@ function matchesAsset(name: string, info: PlatformInfo): boolean {
   const archPattern = info.arch ?? '(?:arm64|amd64)'
   const escapedArch = typeof archPattern === 'string' ? archPattern : '(?:arm64|amd64)'
   const patterns: Record<Os, RegExp> = {
-    darwin: new RegExp(`^CCX-Desktop-.*-darwin-${escapedArch}\\.dmg$`),
-    windows: new RegExp(`^CCX-Desktop-.*-windows-${escapedArch}-setup\\.exe$`),
-    linux: new RegExp(`^CCX-Desktop-.*-linux-${escapedArch}\\.AppImage$`),
+    darwin: new RegExp(`^Yunqi-Desktop-.*-darwin-${escapedArch}\\.dmg$`),
+    windows: new RegExp(`^Yunqi-Desktop-.*-windows-${escapedArch}-setup\\.exe$`),
+    linux: new RegExp(`^Yunqi-Desktop-.*-linux-${escapedArch}\\.AppImage$`),
   }
 
   return patterns[info.os].test(name)

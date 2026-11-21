@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/errutil"
-	"github.com/BenedictKing/ccx/internal/presetstore"
+	"github.com/soulteary/yunqi/internal/errutil"
+	"github.com/soulteary/yunqi/internal/presetstore"
 )
 
 // ── 余额查询接口 ──

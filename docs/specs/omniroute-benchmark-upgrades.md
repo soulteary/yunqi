@@ -2,11 +2,11 @@
 
 > 范围：与 OmniRoute（本地快照 `/Users/petaflops/works/unsorted/OmniRoute`，v3.8.51）全面对比后沉淀的增强方向——Tier-1 四项详细设计（配额真相分级调度、请求侧工具输出压缩、guardrails 最小集、路由预演升级）、Tier-2 backlog、不跟进决策记录。
 > 状态：**部分实现**（2026-09-01 定稿；§2 配额分级调度 + §3 请求侧压缩 + §4 Guardrails 最小集 + §5 路由预演已落地，各拆独立 spec：[guardrails.md](./guardrails.md)、[request-compression.md](./request-compression.md)、[quota-truth-scheduling.md](./quota-truth-scheduling.md)、[route-preview.md](./route-preview.md)；其余项规划中）。各项落地后应拆出独立 spec 并回填状态。
-> 锚点约定：CCX 锚点为仓库相对路径；OmniRoute 锚点均为上述快照仓库内相对路径。
+> 锚点约定：Yunqi 锚点为仓库相对路径；OmniRoute 锚点均为上述快照仓库内相对路径。
 
 ## 1. 背景与对比结论
 
-OmniRoute 是 TS/Next.js 单体消费级网关（352 provider、19 种路由策略、免费额度目录、五套扩展系统）；CCX 是订阅型个人/小团队网关（订阅账号体系、场景化智能路由、能力自学习）。对比结论：**CCX 在调度智能（场景预设 + effort 分级 + benchmark 实测画像）、渠道实例级能力自学习（compat-cache）、协议联邦（跨协议同账号 failover）上占优，不必对标；真正的提升空间集中在配额驱动调度、网关侧 token 压缩、内容面防护、路由决策可解释性、管理面 MCP 化五块。**
+OmniRoute 是 TS/Next.js 单体消费级网关（352 provider、19 种路由策略、免费额度目录、五套扩展系统）；Yunqi 是订阅型个人/小团队网关（订阅账号体系、场景化智能路由、能力自学习）。对比结论：**Yunqi 在调度智能（场景预设 + effort 分级 + benchmark 实测画像）、渠道实例级能力自学习（compat-cache）、协议联邦（跨协议同账号 failover）上占优，不必对标；真正的提升空间集中在配额驱动调度、网关侧 token 压缩、内容面防护、路由决策可解释性、管理面 MCP 化五块。**
 
 | 方向 | 一句话 | 优先级 | 本文 |
 |---|---|---|---|
@@ -33,7 +33,7 @@ OmniRoute 蓝本：`src/lib/quota/`（`providerQuotaTelemetry.ts` 来源优先�
 
 ### 2.2 核心设计决策
 
-1. **配额真相 5 级 + 来源优先级**：`healthy / approaching_limit / exhausted / unavailable / unknown`，硬原则 **unknown ≠ exhausted，unknown 不禁用渠道**（fail-open）。来源优先级 `provider_api > response_headers > configured > estimated > unknown`，按维度逐项取最优；响应头只经显式 per-provider 映射解析（如 Anthropic `anthropic-ratelimit-input-tokens-*`、OpenAI `x-ratelimit-*-tokens`），绝不猜测通用头名。CCX 的 console 适配器归入 `provider_api`，newapi 倍率同步归入 `configured`。
+1. **配额真相 5 级 + 来源优先级**：`healthy / approaching_limit / exhausted / unavailable / unknown`，硬原则 **unknown ≠ exhausted，unknown 不禁用渠道**（fail-open）。来源优先级 `provider_api > response_headers > configured > estimated > unknown`，按维度逐项取最优；响应头只经显式 per-provider 映射解析（如 Anthropic `anthropic-ratelimit-input-tokens-*`、OpenAI `x-ratelimit-*-tokens`），绝不猜测通用头名。Yunqi 的 console 适配器归入 `provider_api`，newapi 倍率同步归入 `configured`。
 2. **懒重置饱和桶，无后台 cron**：每 `(账号UID, 窗口类型)` 一个桶（如 5h / 月度），读取时判断 `now >= resetsAtMs` 即清零。与现有定时恢复循环（`scheduler/recovery.go`）解耦，桶本身零调度成本。
 3. **两层接线，只降级不剔除**：
    - SmartRouter 层：`ScoreCandidate` 增加 `quotaHeadroom` 因子（归一化剩余额度，unknown 给中性分 0.5 不惩罚——对齐冷候选中性分纪律），进 `DefaultTaskWeights` 加权体系；与 TTFB 拥挤度合成"时效 × 余量"双维度。
@@ -73,7 +73,7 @@ OmniRoute 蓝本：`open-sse/services/compression/`（`engines/rtk/` 命令输�
 2. **分类器 + 结构化 filter 起步**：命令输出先分类（git / test / build / package / docker / 通用堆栈等 ~10 类起步，OmniRoute 49 类不必照搬），每类 filter 保错误/警告/摘要/变更文件/tail 上下文，剥进度条/重复行/ANSI 噪声。
 3. **保真门是红线**：压缩后校验受保护内容存活——JSON key 完整、数字字面量完整、diff hunk 完整、受保护 token 存活率阈值（≥95% 起步）；任一不达标**回退原文**。压缩后体积反而变大也整体回退（膨胀回退）。
 4. **fail-open**：压缩器 panic/超 CPU 预算时按原文放行，绝不因压缩失败拒绝请求。
-5. **开关层级**：全局默认关 → 渠道级开启 → 请求头 opt-out（`x-ccx-compression: off`）；场景预设联动（`batch_cheap` 等价格敏感预设建议默认开）。
+5. **开关层级**：全局默认关 → 渠道级开启 → 请求头 opt-out（`x-yunqi-compression: off`）；场景预设联动（`batch_cheap` 等价格敏感预设建议默认开）。
 6. **遥测闭环**：每次压缩记录原始/压缩后 token 估算与回退原因，进 metrics（request_records 扩列或独立表），成本报表（`CostReportView.vue`）展示节省。
 
 ### 3.3 实现要点
@@ -142,18 +142,18 @@ OmniRoute 蓝本：`POST /api/omniroute/route/preview`（零上游请求确定�
 
 ## 6. Tier-2 backlog（待排期，仅记方向）
 
-- **管理面 MCP 化**：REST 管理面已全，加一层 MCP server（渠道/配额/trace/健康查询 + 受控写操作），scope 鉴权 + 调用审计（蓝本 `open-sse/mcp-server/`）。价值：用 Claude Code 直接运维 CCX。
+- **管理面 MCP 化**：REST 管理面已全，加一层 MCP server（渠道/配额/trace/健康查询 + 受控写操作），scope 鉴权 + 调用审计（蓝本 `open-sse/mcp-server/`）。价值：用 Claude Code 直接运维 Yunqi。
 - **韧性错误分类补课**：错误先分类再决定作用域——401/403/429 属 key/模型级，**永不 trip 渠道级熔断**（核对 `failover.go` 与 `channel_metrics_circuit.go` 的现行映射）；模型级熔断引入"成功减半衰减"；客户端 abort 等本地流错误不计熔断（蓝本 `src/lib/resilience/failureClassification.ts`、`docs/architecture/RESILIENCE_GUIDE.md`）。
-- **context-relay 会话接力**：换渠道/上下文近满时生成结构化交接摘要（summary + keyDecisions + taskProgress）落库、下一跳注入，解决会话亲和失效时"粘不住"的连续性（蓝本 `open-sse/services/contextHandoff.ts`；CCX 锚点 `session/trace_affinity.go`、`conversation/tracker.go`）。
+- **context-relay 会话接力**：换渠道/上下文近满时生成结构化交接摘要（summary + keyDecisions + taskProgress）落库、下一跳注入，解决会话亲和失效时"粘不住"的连续性（蓝本 `open-sse/services/contextHandoff.ts`；Yunqi 锚点 `session/trace_affinity.go`、`conversation/tracker.go`）。
 - **doctor CLI**：薄 CLI 复用现有 handler——`doctor`（config/db/端口/运行时分级检查，`--json`，非零退出）、`channels test-all`（蓝本 `bin/cli/commands/doctor.mjs`）。
 
 ## 7. Tier-3 与不跟进决策记录
 
 | 项 | 决策 | 理由 |
 |---|---|---|
-| 路由决策矩阵测试 | **跟进**（低优先） | 调度器决策做成确定性矩阵回归（蓝本 `test:combo:matrix`），CCX 场景预设×effort 组合适合 |
-| 免费额度目录 | **不跟进** | CCX 是付费订阅场景；其"研究产物代码化 + CI 锁口径"做法已由 benchmark 注册表承担 |
-| TLS 指纹伪装 / CLI 指纹仿真 / WAF 对抗 | **不跟进** | ToS 灰色地带；CCX 走正规订阅 + newapi 通道，引入只增加封号与维护风险 |
+| 路由决策矩阵测试 | **跟进**（低优先） | 调度器决策做成确定性矩阵回归（蓝本 `test:combo:matrix`），Yunqi 场景预设×effort 组合适合 |
+| 免费额度目录 | **不跟进** | Yunqi 是付费订阅场景；其"研究产物代码化 + CI 锁口径"做法已由 benchmark 注册表承担 |
+| TLS 指纹伪装 / CLI 指纹仿真 / WAF 对抗 | **不跟进** | ToS 灰色地带；Yunqi 走正规订阅 + newapi 通道，引入只增加封号与维护风险 |
 | 352 provider 广度 | **不对标** | provider 模板 + newapi 代理通道 + compat-cache 自学习已覆盖长尾 |
 | Electron 桌面端 | **不跟进** | Wails + MSIX 方案更轻，已上线 |
 | 多语言 UI / 单体 Dashboard 架构 | **不跟进** | 自用场景无诉求；Go 前后端分离 + 嵌入交付更干净 |

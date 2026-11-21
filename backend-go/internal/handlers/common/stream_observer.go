@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/metrics"
+	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/gin-gonic/gin"
 )
 

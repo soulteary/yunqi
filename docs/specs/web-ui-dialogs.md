@@ -1,6 +1,6 @@
 # Web UI 对话框设计文档
 
-> 本文档覆盖 CCX Web 管理界面中所有对话框、弹窗、面板类组件的布局、交互、状态流转与后端调用关系。
+> 本文档覆盖 Yunqi Web 管理界面中所有对话框、弹窗、面板类组件的布局、交互、状态流转与后端调用关系。
 
 ## 0. 组件清单
 
@@ -398,7 +398,7 @@
 - 触发入口：`App.vue:378`（`v-model=systemStore.updateDialogOpen`）；版本徽标点击 `handleVersionClick`。
 - props：`modelValue`；emit `update:modelValue`。
 - 字段/内容：当前版本、最新版本 chip、状态 alert（error/hasUpdate/upToDate）。
-- 操作：检查更新（`handleCheck` 派发 `ccx-check-version` 事件）、下载（`releaseUrl` 外链）。
+- 操作：检查更新（`handleCheck` 派发 `yunqi-check-version` 事件）、下载（`releaseUrl` 外链）。
 
 布局示意图：
 
@@ -432,7 +432,7 @@
 │ [help-circle] 新用户指引     第 n / 4 步        [×] │ ← max-width 760 scrollable
 ├─────────────────────────────────────────────────────┤
 │ ● ○ ○ ○   ← 步骤进度点（可点击跳步）                 │
-│ Step1 欢迎使用 CCX: 正文 + 有序列表 3 项             │
+│ Step1 欢迎使用 Yunqi: 正文 + 有序列表 3 项             │
 │       （选协议标签→添加渠道填密钥→客户端指向网关）    │
 │ Step2 顶部切换协议: 自绘协议标签示意条                │
 │       （Claude 高亮/OpenAI Chat/Images/Codex/Gemini/Cockpit）│
@@ -501,7 +501,7 @@ AutopilotDiagnosePanel:
 ```
 认证登录（persistent 500）:            自动认证 overlay（persistent,black scrim）:
 ┌────────────────────────────┐        ┌──────────────────┐
-│    🔐 API Proxy - CCX      │        │      ◌ 64px       │
+│    🔐 API Proxy - Yunqi      │        │      ◌ 64px       │
 │ (error alert authError)    │        │  正在验证访问权限  │
 │ 管理访问密钥 [password]     │        │ 使用保存的访问密钥… │
 │ [访问管理界面 ⏎ block]      │        └──────────────────┘

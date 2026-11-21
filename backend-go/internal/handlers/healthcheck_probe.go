@@ -4,7 +4,7 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/soulteary/yunqi/internal/config"
 )
 
 // 渠道保活验证（internal/healthcheck）L2 真实调用验活复用能力测试的请求构建与发送路径。

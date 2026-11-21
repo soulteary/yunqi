@@ -1,4 +1,4 @@
-# CCX 实现设计文档
+# Yunqi 实现设计文档
 
 > 本文档集合基于当前代码实现整理，覆盖 Autopilot、LogicalChannel、New-API 集成、Healthcheck 四个子系统及其交互边界。
 > 目标：把代码现状沉淀为可审阅、可讨论、可改造的设计文档。

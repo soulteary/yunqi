@@ -76,7 +76,7 @@ jobs:
           VERSION: ${{ steps.release.outputs.version }}
         run: |
           for ARCH in arm64 amd64; do
-            ASSET_NAME="CCX-Desktop-${VERSION}-darwin-${ARCH}.dmg.sha256"
+            ASSET_NAME="Yunqi-Desktop-${VERSION}-darwin-${ARCH}.dmg.sha256"
             DOWNLOAD_URL=$(curl -sL -H "Authorization: token ${GH_TOKEN}" "$API" \
               | jq -r --arg name "$ASSET_NAME" '.assets[] | select(.name == $name) | .browser_download_url')
             if [ -z "$DOWNLOAD_URL" ] || [ "$DOWNLOAD_URL" = "null" ]; then

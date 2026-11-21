@@ -6,7 +6,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/BenedictKing/ccx/internal/types"
+	"github.com/soulteary/yunqi/internal/types"
 )
 
 // ErrEmptyNonStreamResponse 上游返回 HTTP 200 且 JSON 可解析，但语义内容为空。

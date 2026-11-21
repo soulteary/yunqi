@@ -15,7 +15,7 @@ func showErrorDialog(title, message string) {
 // recoverWithMessageBox 捕获未处理的 panic 并输出到 stderr。
 func recoverWithMessageBox() {
 	if r := recover(); r != nil {
-		fmt.Fprintf(os.Stderr, "[CCX Desktop - 启动失败] 发生未处理的异常: %v\n", r)
+		fmt.Fprintf(os.Stderr, "[Yunqi Desktop - 启动失败] 发生未处理的异常: %v\n", r)
 		os.Exit(1)
 	}
 }

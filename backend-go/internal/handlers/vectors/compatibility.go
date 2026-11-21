@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/handlers/common"
-	"github.com/BenedictKing/ccx/internal/scheduler"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/handlers/common"
+	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/gin-gonic/gin"
 )
 

@@ -8,7 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/soulteary/yunqi/internal/config"
 )
 
 func TestChatHandler_DeepSeekChatAndMessagesThinkingMatrix(t *testing.T) {

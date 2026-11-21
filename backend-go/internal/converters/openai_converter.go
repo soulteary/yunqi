@@ -1,8 +1,8 @@
 package converters
 
 import (
-	"github.com/BenedictKing/ccx/internal/session"
-	"github.com/BenedictKing/ccx/internal/types"
+	"github.com/soulteary/yunqi/internal/session"
+	"github.com/soulteary/yunqi/internal/types"
 )
 
 // ============== OpenAI Chat Completions 转换器 ==============

@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/scheduler"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/scheduler"
 )
 
 func newModelPreviewStore(t *testing.T, profiles ...ModelProfile) *ModelProfileStore {

@@ -1,16 +1,16 @@
-# OpenCode 接入 CCX
+# OpenCode 接入 Yunqi
 
-如果你正在使用 **CCX Desktop**，可先在 [Agent Config](/guide/desktop/#agent-配置) 中写入 OpenCode 配置，再回到本页确认 Chat 入口和 Base URL 规则。
+如果你正在使用 **Yunqi Desktop**，可先在 [Agent Config](/guide/desktop/#agent-配置) 中写入 OpenCode 配置，再回到本页确认 Chat 入口和 Base URL 规则。
 
 ## 工作方式
 
 ```text
-OpenCode  ->  CCX /v1/chat/completions  ->  Chat 渠道  ->  上游 Chat 兼容端点
+OpenCode  ->  Yunqi /v1/chat/completions  ->  Chat 渠道  ->  上游 Chat 兼容端点
 ```
 
-## 一、配置 CCX 渠道
+## 一、配置 Yunqi 渠道
 
-1. 打开 CCX 管理界面，进入 **Chat** 入口
+1. 打开 Yunqi 管理界面，进入 **Chat** 入口
 2. 点击「添加渠道」
 3. 添加一个 OpenAI Chat 兼容渠道
 
@@ -30,20 +30,20 @@ OpenCode  ->  CCX /v1/chat/completions  ->  Chat 渠道  ->  上游 Chat 兼容�
 
 ## 二、配置 OpenCode
 
-### 使用 CCX Desktop 自动配置
+### 使用 Yunqi Desktop 自动配置
 
-在 **Agent Config → OpenCode** 中，默认选择 **CCX 本地网关**。Desktop 会维护：
+在 **Agent Config → OpenCode** 中，默认选择 **Yunqi 本地网关**。Desktop 会维护：
 
-- `~/.config/opencode/opencode.jsonc`：写入 OpenAI 兼容自定义 provider，例如 `provider.ccx.options.baseURL`
-- `~/.local/share/opencode/auth.json`：写入对应 provider 的 API Key，例如 `auth.ccx.key`
+- `~/.config/opencode/opencode.jsonc`：写入 OpenAI 兼容自定义 provider，例如 `provider.yunqi.options.baseURL`
+- `~/.local/share/opencode/auth.json`：写入对应 provider 的 API Key，例如 `auth.yunqi.key`
 
-默认 CCX 模式写入的 Base URL 为：
+默认 Yunqi 模式写入的 Base URL 为：
 
 ```text
-http://127.0.0.1:<当前 CCX 端口>/v1
+http://127.0.0.1:<当前 Yunqi 端口>/v1
 ```
 
-OpenCode 使用模型时选择 `ccx/<model>`，请求会通过 Chat 协议进入 CCX，再由 CCX Chat 渠道路由到已配置的国内上游。
+OpenCode 使用模型时选择 `yunqi/<model>`，请求会通过 Chat 协议进入 Yunqi，再由 Yunqi Chat 渠道路由到已配置的国内上游。
 
 Agent Config 也提供直连选项，但只列出当前适合 OpenCode OpenAI Chat 协议的国内厂商，以及 OpenCode Zen / OpenCode Go。其它 provider 仍可按 OpenCode 官方方式手动添加。
 
@@ -53,14 +53,14 @@ Agent Config 也提供直连选项，但只列出当前适合 OpenCode OpenAI Ch
 
 | 设置项 | 值 |
 |--------|----|
-| API Key | `your-ccx-proxy-key` |
+| API Key | `your-yunqi-proxy-key` |
 | Base URL | `http://localhost:3000/v1` |
 | Model | 客户端请求模型名，例如 `gpt-5`、`deepseek-v4-pro` |
 
 如果你的 OpenCode 版本使用配置文件，核心仍是同一组值：
 
 ```text
-API Key: your-ccx-proxy-key
+API Key: your-yunqi-proxy-key
 Base URL: http://localhost:3000/v1
 Model: your-model-name
 ```
@@ -103,9 +103,9 @@ http://localhost:3000/v1/chat/completions
 
 检查：
 
-1. OpenCode 中的 API Key 是否等于 CCX 的 `PROXY_ACCESS_KEY`
+1. OpenCode 中的 API Key 是否等于 Yunqi 的 `PROXY_ACCESS_KEY`
 2. 是否误填了上游厂商 API Key
-3. CCX 是否使用同一个 `PROXY_ACCESS_KEY` 启动
+3. Yunqi 是否使用同一个 `PROXY_ACCESS_KEY` 启动
 
 ### 返回 404 或 Method Not Allowed
 
@@ -113,7 +113,7 @@ http://localhost:3000/v1/chat/completions
 
 1. OpenCode 选择的是 OpenAI Chat 兼容 Provider
 2. Base URL 是 `http://localhost:3000/v1`
-3. CCX 中已配置 **Chat** 渠道，而不是只配置了 Messages 或 Responses 渠道
+3. Yunqi 中已配置 **Chat** 渠道，而不是只配置了 Messages 或 Responses 渠道
 
 ### 返回 model_not_found
 
@@ -133,7 +133,7 @@ OpenCode 走 Chat Completions 协议，不同上游对工具调用、JSON 输出
 
 ### 请求没有出现在 Chat 渠道日志中
 
-检查 OpenCode 当前 Provider 是否仍指向其它服务。CCX 侧应看到请求路径：
+检查 OpenCode 当前 Provider 是否仍指向其它服务。Yunqi 侧应看到请求路径：
 
 ```text
 /v1/chat/completions

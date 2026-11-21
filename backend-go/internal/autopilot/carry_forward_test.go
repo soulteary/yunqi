@@ -1,7 +1,7 @@
 package autopilot
 
 import (
-	"github.com/BenedictKing/ccx/internal/errutil"
+	"github.com/soulteary/yunqi/internal/errutil"
 	"path/filepath"
 	"testing"
 	"time"

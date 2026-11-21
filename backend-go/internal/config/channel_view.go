@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/utils"
+	"github.com/soulteary/yunqi/internal/utils"
 )
 
 // channelViewMember 是参与合成的一个物理渠道引用。

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/soulteary/yunqi/internal/config"
 )
 
 // ── auto_mapping_applied 事件测试（直接调用 maybeAutoWriteChannelConfig，不涉及网络） ──

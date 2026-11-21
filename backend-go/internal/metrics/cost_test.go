@@ -4,7 +4,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/soulteary/yunqi/internal/config"
 )
 
 func floatPtr(v float64) *float64 { return &v }

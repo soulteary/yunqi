@@ -1,15 +1,15 @@
-cask "ccx-desktop" do
+cask "yunqi-desktop" do
   arch arm: "arm64", intel: "amd64"
 
   version "VERSION_PLACEHOLDER"
   sha256 arm:   "SHA_ARM_PLACEHOLDER",
          intel: "SHA_INTEL_PLACEHOLDER"
 
-  url "https://github.com/BenedictKing/ccx/releases/download/v#{version}/CCX-Desktop-#{version}-darwin-#{arch}.dmg",
-      verified: "github.com/BenedictKing/ccx/"
-  name "CCX Desktop"
+  url "https://github.com/soulteary/yunqi/releases/download/v#{version}/Yunqi-Desktop-#{version}-darwin-#{arch}.dmg",
+      verified: "github.com/soulteary/yunqi/"
+  name "Yunqi Desktop"
   desc "Multi-upstream AI API proxy and protocol conversion gateway"
-  homepage "https://github.com/BenedictKing/ccx"
+  homepage "https://github.com/soulteary/yunqi"
 
   livecheck do
     url :url
@@ -18,5 +18,5 @@ cask "ccx-desktop" do
 
   depends_on macos: :catalina
 
-  app "CCX Desktop.app"
+  app "Yunqi Desktop.app"
 end

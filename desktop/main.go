@@ -11,10 +11,10 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/BenedictKing/ccx/desktop/internal/appdirs"
-	"github.com/BenedictKing/ccx/desktop/internal/backend"
-	"github.com/BenedictKing/ccx/desktop/internal/singleinstance"
-	"github.com/BenedictKing/ccx/desktop/internal/windowstate"
+	"github.com/soulteary/yunqi/desktop/internal/appdirs"
+	"github.com/soulteary/yunqi/desktop/internal/backend"
+	"github.com/soulteary/yunqi/desktop/internal/singleinstance"
+	"github.com/soulteary/yunqi/desktop/internal/windowstate"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
 	"github.com/wailsapp/wails/v3/pkg/services/dock"
@@ -41,7 +41,7 @@ func init() {
 func main() {
 	defer recoverWithMessageBox()
 	if err := run(); err != nil {
-		showErrorDialog("CCX Desktop - 启动失败", err.Error())
+		showErrorDialog("Yunqi Desktop - 启动失败", err.Error())
 		os.Exit(1)
 	}
 }
@@ -65,7 +65,7 @@ func run() error {
 	lock, err := singleinstance.Acquire(singleInstanceArg(manager.DataDir()))
 	if err != nil {
 		if err == singleinstance.ErrAlreadyRunning {
-			showErrorDialog("CCX Desktop", "CCX Desktop 已经在运行中。\n\n请检查系统托盘或任务栏。")
+			showErrorDialog("Yunqi Desktop", "Yunqi Desktop 已经在运行中。\n\n请检查系统托盘或任务栏。")
 			os.Exit(0)
 		}
 		return fmt.Errorf("获取单实例锁失败: %w", err)
@@ -84,8 +84,8 @@ func run() error {
 
 	log.Printf("[Desktop-Boot] creating Wails application")
 	app := application.New(application.Options{
-		Name:        "CCX Desktop",
-		Description: "CCX desktop shell and core service supervisor",
+		Name:        "Yunqi Desktop",
+		Description: "Yunqi desktop shell and core service supervisor",
 		Services: []application.Service{
 			application.NewService(desktopService),
 			application.NewService(dockService),
@@ -103,7 +103,7 @@ func run() error {
 	// 应用持久化窗口状态（如存在），否则回退到默认 Center。
 	// X/Y 仅在 InitialPosition=WindowXY 时生效（go doc 确认）。
 	windowOpts := application.WebviewWindowOptions{
-		Title:     "CCX Desktop",
+		Title:     "Yunqi Desktop",
 		Width:     1180,
 		Height:    820,
 		MinWidth:  960,
@@ -232,7 +232,7 @@ func run() error {
 
 	tray := app.SystemTray.New()
 	log.Printf("[Desktop-Boot] system tray created")
-	tray.SetTooltip("CCX Desktop")
+	tray.SetTooltip("Yunqi Desktop")
 	if icon, err := assets.ReadFile("frontend/dist/tray-template.png"); err == nil && len(icon) > 0 {
 		tray.SetTemplateIcon(icon)
 	} else if icon, err := assets.ReadFile("frontend/dist/wails.png"); err == nil && len(icon) > 0 {
@@ -268,8 +268,8 @@ func run() error {
 		header.SetEnabled(false)
 		menu.AddSeparator()
 
-		menu.Add("打开 CCX Web UI").OnClick(func(ctx *application.Context) {
-			trayAction("打开 CCX Web UI", desktopService.ShowWebUITab)
+		menu.Add("打开 Yunqi Web UI").OnClick(func(ctx *application.Context) {
+			trayAction("打开 Yunqi Web UI", desktopService.ShowWebUITab)
 		})
 		menu.Add("显示状态页").OnClick(func(ctx *application.Context) {
 			showMainWindow(true)
@@ -360,7 +360,7 @@ func run() error {
 
 		menu.AddSeparator()
 
-		versionItem := menu.Add(fmt.Sprintf("CCX Desktop v%s", Version))
+		versionItem := menu.Add(fmt.Sprintf("Yunqi Desktop v%s", Version))
 		versionItem.SetEnabled(false)
 
 		menu.Add("退出").OnClick(func(ctx *application.Context) {
@@ -374,11 +374,11 @@ func run() error {
 	tooltipFor := func(st backend.Status) string {
 		switch {
 		case st.Running && st.Port > 0:
-			return fmt.Sprintf("CCX Desktop · 运行中 · :%d", st.Port)
+			return fmt.Sprintf("Yunqi Desktop · 运行中 · :%d", st.Port)
 		case st.Starting:
-			return "CCX Desktop · 启动中"
+			return "Yunqi Desktop · 启动中"
 		default:
-			return "CCX Desktop · 已停止"
+			return "Yunqi Desktop · 已停止"
 		}
 	}
 

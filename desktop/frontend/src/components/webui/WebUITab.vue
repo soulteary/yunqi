@@ -5,7 +5,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Globe } from 'lucide-vue-next'
 import type { DesktopStatus } from '@/types'
 import { useLanguage } from '@/composables/useLanguage'
-import { GetAdminAccessKey, OpenWebUIInBrowser } from '@bindings/github.com/BenedictKing/ccx/desktop/desktopservice'
+import { GetAdminAccessKey, OpenWebUIInBrowser } from '@bindings/github.com/soulteary/yunqi/desktop/desktopservice'
 
 const props = defineProps<{
   status: DesktopStatus
@@ -66,7 +66,7 @@ const openInBrowser = async () => {
         :src="iframeSrc"
         class="w-full h-full border-0 block"
         style="background: white"
-        title="CCX Web UI"
+        title="Yunqi Web UI"
         @load="postProxyAccessKey"
       />
     </div>

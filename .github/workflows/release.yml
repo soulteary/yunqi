@@ -201,8 +201,8 @@ jobs:
           MACOS_CODESIGN_IDENTITY: "Developer ID Application: Wang Zhiwei (PZV79TYXCR)"
         run: |
           mkdir -p bin
-          rm -f bin/ccx-go
-          cp "../backend-go/ccx-darwin-${{ matrix.arch }}" bin/ccx-go
+          rm -f bin/yunqi
+          cp "../backend-go/ccx-darwin-${{ matrix.arch }}" bin/yunqi
           BUILD_TIME=$(date -u '+%Y-%m-%d_%H:%M:%S')
           VERSION="${BUILD_VERSION#v}"
           wails3 task darwin:package:release ARCH=${{ matrix.arch }} BUILD_VERSION="${VERSION}" BUILD_TIME="${BUILD_TIME}" GIT_COMMIT="${GIT_COMMIT}" MACOS_CODESIGN_IDENTITY="${MACOS_CODESIGN_IDENTITY}" MACOS_NOTARIZE=false
@@ -213,8 +213,8 @@ jobs:
         with:
           name: macos-desktop-${{ matrix.arch }}-dmg
           path: |
-            desktop/bin/CCX-Desktop-*-darwin-${{ matrix.arch }}.dmg
-            desktop/bin/CCX-Desktop-*-darwin-${{ matrix.arch }}.zip
+            desktop/bin/Yunqi-Desktop-*-darwin-${{ matrix.arch }}.dmg
+            desktop/bin/Yunqi-Desktop-*-darwin-${{ matrix.arch }}.zip
           retention-days: 1
 
   notarize-macos-desktop:
@@ -255,7 +255,7 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
         run: |
-          ZIP_FILE=$(find desktop/bin -maxdepth 1 -name "CCX-Desktop-*-darwin-${{ matrix.arch }}.zip" -print -quit)
+          ZIP_FILE=$(find desktop/bin -maxdepth 1 -name "Yunqi-Desktop-*-darwin-${{ matrix.arch }}.zip" -print -quit)
           if [ -z "$ZIP_FILE" ]; then
             echo "Missing updater ZIP for ${{ matrix.arch }}" >&2
             exit 1
@@ -282,7 +282,7 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
         run: |
-          DMG_FILE=$(find desktop/bin -maxdepth 1 -name "CCX-Desktop-*-darwin-${{ matrix.arch }}.dmg" -print -quit)
+          DMG_FILE=$(find desktop/bin -maxdepth 1 -name "Yunqi-Desktop-*-darwin-${{ matrix.arch }}.dmg" -print -quit)
           if [ -z "$DMG_FILE" ]; then
             echo "Missing DMG for ${{ matrix.arch }}" >&2
             exit 1
@@ -297,10 +297,10 @@ jobs:
         with:
           name: macos-desktop-${{ matrix.arch }}-notarized
           path: |
-            desktop/bin/CCX-Desktop-*-darwin-${{ matrix.arch }}.dmg
-            desktop/bin/CCX-Desktop-*-darwin-${{ matrix.arch }}.dmg.sha256
-            desktop/bin/CCX-Desktop-*-darwin-${{ matrix.arch }}.zip
-            desktop/bin/CCX-Desktop-*-darwin-${{ matrix.arch }}.zip.sha256
+            desktop/bin/Yunqi-Desktop-*-darwin-${{ matrix.arch }}.dmg
+            desktop/bin/Yunqi-Desktop-*-darwin-${{ matrix.arch }}.dmg.sha256
+            desktop/bin/Yunqi-Desktop-*-darwin-${{ matrix.arch }}.zip
+            desktop/bin/Yunqi-Desktop-*-darwin-${{ matrix.arch }}.zip.sha256
           retention-days: 1
 
   finalize-macos:
@@ -333,7 +333,7 @@ jobs:
           {
             shasum -a 256 backend-go/ccx-darwin-arm64 backend-go/ccx-darwin-amd64 \
               | awk '{split($2,a,"/"); $2=a[length(a)]; print}'
-            for f in desktop/bin/CCX-Desktop-*-darwin-*.dmg desktop/bin/CCX-Desktop-*-darwin-*.zip; do
+            for f in desktop/bin/Yunqi-Desktop-*-darwin-*.dmg desktop/bin/Yunqi-Desktop-*-darwin-*.zip; do
               shasum -a 256 "$f" | awk '{split($2,a,"/"); $2=a[length(a)]; print}'
             done
           } > checksums-macos.txt
@@ -352,14 +352,14 @@ jobs:
             backend-go/ccx-darwin-amd64
             backend-go/ccx-darwin-arm64.sha256
             backend-go/ccx-darwin-amd64.sha256
-            desktop/bin/CCX-Desktop-*-darwin-arm64.dmg
-            desktop/bin/CCX-Desktop-*-darwin-amd64.dmg
-            desktop/bin/CCX-Desktop-*-darwin-arm64.zip
-            desktop/bin/CCX-Desktop-*-darwin-amd64.zip
-            desktop/bin/CCX-Desktop-*-darwin-arm64.dmg.sha256
-            desktop/bin/CCX-Desktop-*-darwin-amd64.dmg.sha256
-            desktop/bin/CCX-Desktop-*-darwin-arm64.zip.sha256
-            desktop/bin/CCX-Desktop-*-darwin-amd64.zip.sha256
+            desktop/bin/Yunqi-Desktop-*-darwin-arm64.dmg
+            desktop/bin/Yunqi-Desktop-*-darwin-amd64.dmg
+            desktop/bin/Yunqi-Desktop-*-darwin-arm64.zip
+            desktop/bin/Yunqi-Desktop-*-darwin-amd64.zip
+            desktop/bin/Yunqi-Desktop-*-darwin-arm64.dmg.sha256
+            desktop/bin/Yunqi-Desktop-*-darwin-amd64.dmg.sha256
+            desktop/bin/Yunqi-Desktop-*-darwin-arm64.zip.sha256
+            desktop/bin/Yunqi-Desktop-*-darwin-amd64.zip.sha256
             checksums-macos.txt
             checksums-macos.txt.sigstore.json
           draft: true
@@ -507,8 +507,8 @@ jobs:
           GIT_COMMIT: ${{ github.sha }}
         run: |
           mkdir -p bin
-          cp ../backend-go/ccx-windows-amd64.exe bin/ccx-go.exe
-          cp bin/ccx-go.exe build/windows/nsis/ccx-go.exe
+          cp ../backend-go/ccx-windows-amd64.exe bin/yunqi.exe
+          cp bin/yunqi.exe build/windows/nsis/yunqi.exe
           BUILD_TIME=$(date -u '+%Y-%m-%d_%H:%M:%S')
           VERSION="${BUILD_VERSION#v}"
           rm -f bin/*installer*.exe bin/*setup*.exe
@@ -518,7 +518,7 @@ jobs:
       - name: Sign Desktop amd64 executable
         uses: ./.github/actions/signpath-sign
         with:
-          file: desktop/bin/ccx-desktop.exe
+          file: desktop/bin/yunqi-desktop.exe
           output-directory: .signpath/desktop-amd64
           artifact-name: signpath-desktop-windows-amd64-exe
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -530,7 +530,7 @@ jobs:
       - name: Verify Desktop amd64 executable signature
         shell: powershell
         run: |
-          ./.github/scripts/assert-authenticode-signature.ps1 "desktop/bin/ccx-desktop.exe"
+          ./.github/scripts/assert-authenticode-signature.ps1 "desktop/bin/yunqi-desktop.exe"
 
       - name: Build Desktop amd64 NSIS
         env:
@@ -544,16 +544,16 @@ jobs:
             find bin -maxdepth 1 -type f -name '*.exe' -print
             exit 1
           fi
-          mv "$INSTALLER" "bin/CCX-Desktop-${VERSION}-windows-amd64-setup.exe"
+          mv "$INSTALLER" "bin/Yunqi-Desktop-${VERSION}-windows-amd64-setup.exe"
           # 立即移出 bin 目录，防止 arm64 步骤的 rm 清除
           mkdir -p release-staging
-          mv "bin/CCX-Desktop-${VERSION}-windows-amd64-setup.exe" "release-staging/"
+          mv "bin/Yunqi-Desktop-${VERSION}-windows-amd64-setup.exe" "release-staging/"
         working-directory: ./desktop
 
       - name: Sign Desktop amd64 NSIS
         uses: ./.github/actions/signpath-sign
         with:
-          file: desktop/release-staging/CCX-Desktop-*-windows-amd64-setup.exe
+          file: desktop/release-staging/Yunqi-Desktop-*-windows-amd64-setup.exe
           output-directory: .signpath/installer-amd64
           artifact-name: signpath-desktop-windows-amd64-nsis
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -567,7 +567,7 @@ jobs:
           BUILD_VERSION: ${{ github.ref_name }}
         run: |
           VERSION="${BUILD_VERSION#v}"
-          sha256sum "release-staging/CCX-Desktop-${VERSION}-windows-amd64-setup.exe" | awk '{print $1}' > "release-staging/CCX-Desktop-${VERSION}-windows-amd64-setup.exe.sha256"
+          sha256sum "release-staging/Yunqi-Desktop-${VERSION}-windows-amd64-setup.exe" | awk '{print $1}' > "release-staging/Yunqi-Desktop-${VERSION}-windows-amd64-setup.exe.sha256"
         working-directory: ./desktop
 
       - name: Build Desktop arm64 executable
@@ -575,8 +575,8 @@ jobs:
           BUILD_VERSION: ${{ github.ref_name }}
           GIT_COMMIT: ${{ github.sha }}
         run: |
-          cp ../backend-go/ccx-windows-arm64.exe bin/ccx-go.exe
-          cp bin/ccx-go.exe build/windows/nsis/ccx-go.exe
+          cp ../backend-go/ccx-windows-arm64.exe bin/yunqi.exe
+          cp bin/yunqi.exe build/windows/nsis/yunqi.exe
           BUILD_TIME=$(date -u '+%Y-%m-%d_%H:%M:%S')
           VERSION="${BUILD_VERSION#v}"
           rm -f bin/*installer*.exe bin/*setup*.exe
@@ -586,7 +586,7 @@ jobs:
       - name: Sign Desktop arm64 executable
         uses: ./.github/actions/signpath-sign
         with:
-          file: desktop/bin/ccx-desktop.exe
+          file: desktop/bin/yunqi-desktop.exe
           output-directory: .signpath/desktop-arm64
           artifact-name: signpath-desktop-windows-arm64-exe
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -598,7 +598,7 @@ jobs:
       - name: Verify Desktop arm64 executable signature
         shell: powershell
         run: |
-          ./.github/scripts/assert-authenticode-signature.ps1 "desktop/bin/ccx-desktop.exe"
+          ./.github/scripts/assert-authenticode-signature.ps1 "desktop/bin/yunqi-desktop.exe"
 
       - name: Build Desktop arm64 NSIS
         env:
@@ -612,16 +612,16 @@ jobs:
             find bin -maxdepth 1 -type f -name '*.exe' -print
             exit 1
           fi
-          mv "$INSTALLER" "bin/CCX-Desktop-${VERSION}-windows-arm64-setup.exe"
+          mv "$INSTALLER" "bin/Yunqi-Desktop-${VERSION}-windows-arm64-setup.exe"
           # 将 arm64 也移入 staging，与 amd64 汇合
           mkdir -p release-staging
-          mv "bin/CCX-Desktop-${VERSION}-windows-arm64-setup.exe" "release-staging/"
+          mv "bin/Yunqi-Desktop-${VERSION}-windows-arm64-setup.exe" "release-staging/"
         working-directory: ./desktop
 
       - name: Sign Desktop arm64 NSIS
         uses: ./.github/actions/signpath-sign
         with:
-          file: desktop/release-staging/CCX-Desktop-*-windows-arm64-setup.exe
+          file: desktop/release-staging/Yunqi-Desktop-*-windows-arm64-setup.exe
           output-directory: .signpath/installer-arm64
           artifact-name: signpath-desktop-windows-arm64-nsis
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -635,7 +635,7 @@ jobs:
           BUILD_VERSION: ${{ github.ref_name }}
         run: |
           VERSION="${BUILD_VERSION#v}"
-          sha256sum "release-staging/CCX-Desktop-${VERSION}-windows-arm64-setup.exe" | awk '{print $1}' > "release-staging/CCX-Desktop-${VERSION}-windows-arm64-setup.exe.sha256"
+          sha256sum "release-staging/Yunqi-Desktop-${VERSION}-windows-arm64-setup.exe" | awk '{print $1}' > "release-staging/Yunqi-Desktop-${VERSION}-windows-arm64-setup.exe.sha256"
         working-directory: ./desktop
 
       - name: Verify Windows Authenticode signatures
@@ -647,8 +647,8 @@ jobs:
           $files = @(
             "backend-go/ccx-windows-amd64.exe",
             "backend-go/ccx-windows-arm64.exe",
-            "desktop/release-staging/CCX-Desktop-$version-windows-amd64-setup.exe",
-            "desktop/release-staging/CCX-Desktop-$version-windows-arm64-setup.exe"
+            "desktop/release-staging/Yunqi-Desktop-$version-windows-amd64-setup.exe",
+            "desktop/release-staging/Yunqi-Desktop-$version-windows-arm64-setup.exe"
           )
           ./.github/scripts/assert-authenticode-signature.ps1 $files
 
@@ -656,42 +656,42 @@ jobs:
         env:
           BUILD_VERSION: ${{ github.ref_name }}
           GIT_COMMIT: ${{ github.sha }}
-          MSIX_PACKAGE_NAME: ${{ vars.MSIX_PACKAGE_NAME || 'CCX.Desktop' }}
-          MSIX_PUBLISHER: ${{ vars.MSIX_PUBLISHER || 'CN=CCX' }}
-          MSIX_PUBLISHER_DISPLAY_NAME: ${{ vars.MSIX_PUBLISHER_DISPLAY_NAME || 'CCX' }}
-          MSIX_DISPLAY_NAME: ${{ vars.MSIX_DISPLAY_NAME || 'CCX Desktop' }}
-          MSIX_DESCRIPTION: ${{ vars.MSIX_DESCRIPTION || 'Desktop shell for the CCX core gateway service.' }}
+          MSIX_PACKAGE_NAME: ${{ vars.MSIX_PACKAGE_NAME || 'Yunqi.Desktop' }}
+          MSIX_PUBLISHER: ${{ vars.MSIX_PUBLISHER || 'CN=Yunqi' }}
+          MSIX_PUBLISHER_DISPLAY_NAME: ${{ vars.MSIX_PUBLISHER_DISPLAY_NAME || 'Yunqi' }}
+          MSIX_DISPLAY_NAME: ${{ vars.MSIX_DISPLAY_NAME || 'Yunqi Desktop' }}
+          MSIX_DESCRIPTION: ${{ vars.MSIX_DESCRIPTION || 'Desktop shell for the Yunqi core gateway service.' }}
         run: |
-          cp ../backend-go/ccx-windows-amd64.exe bin/ccx-go.exe
+          cp ../backend-go/ccx-windows-amd64.exe bin/yunqi.exe
           BUILD_TIME=$(date -u '+%Y-%m-%d_%H:%M:%S')
           VERSION="${BUILD_VERSION#v}"
           rm -f bin/*.msix
           wails3 task windows:package FORMAT=msix ARCH=amd64 BUILD_VERSION="${VERSION}" BUILD_TIME="${BUILD_TIME}" GIT_COMMIT="${GIT_COMMIT}" DISTRIBUTION=store MSIX_PACKAGE_NAME="${MSIX_PACKAGE_NAME}" MSIX_PUBLISHER="${MSIX_PUBLISHER}" MSIX_PUBLISHER_DISPLAY_NAME="${MSIX_PUBLISHER_DISPLAY_NAME}" MSIX_DISPLAY_NAME="${MSIX_DISPLAY_NAME}" MSIX_DESCRIPTION="${MSIX_DESCRIPTION}"
-          mv "bin/ccx-desktop-amd64.msix" "bin/CCX-Desktop-${VERSION}-windows-amd64-store.msix"
+          mv "bin/yunqi-desktop-amd64.msix" "bin/Yunqi-Desktop-${VERSION}-windows-amd64-store.msix"
           mkdir -p release-staging
-          mv "bin/CCX-Desktop-${VERSION}-windows-amd64-store.msix" "release-staging/"
-          sha256sum "release-staging/CCX-Desktop-${VERSION}-windows-amd64-store.msix" | awk '{print $1}' > "release-staging/CCX-Desktop-${VERSION}-windows-amd64-store.msix.sha256"
+          mv "bin/Yunqi-Desktop-${VERSION}-windows-amd64-store.msix" "release-staging/"
+          sha256sum "release-staging/Yunqi-Desktop-${VERSION}-windows-amd64-store.msix" | awk '{print $1}' > "release-staging/Yunqi-Desktop-${VERSION}-windows-amd64-store.msix.sha256"
         working-directory: ./desktop
 
       - name: Build Desktop arm64 Store MSIX
         env:
           BUILD_VERSION: ${{ github.ref_name }}
           GIT_COMMIT: ${{ github.sha }}
-          MSIX_PACKAGE_NAME: ${{ vars.MSIX_PACKAGE_NAME || 'CCX.Desktop' }}
-          MSIX_PUBLISHER: ${{ vars.MSIX_PUBLISHER || 'CN=CCX' }}
-          MSIX_PUBLISHER_DISPLAY_NAME: ${{ vars.MSIX_PUBLISHER_DISPLAY_NAME || 'CCX' }}
-          MSIX_DISPLAY_NAME: ${{ vars.MSIX_DISPLAY_NAME || 'CCX Desktop' }}
-          MSIX_DESCRIPTION: ${{ vars.MSIX_DESCRIPTION || 'Desktop shell for the CCX core gateway service.' }}
+          MSIX_PACKAGE_NAME: ${{ vars.MSIX_PACKAGE_NAME || 'Yunqi.Desktop' }}
+          MSIX_PUBLISHER: ${{ vars.MSIX_PUBLISHER || 'CN=Yunqi' }}
+          MSIX_PUBLISHER_DISPLAY_NAME: ${{ vars.MSIX_PUBLISHER_DISPLAY_NAME || 'Yunqi' }}
+          MSIX_DISPLAY_NAME: ${{ vars.MSIX_DISPLAY_NAME || 'Yunqi Desktop' }}
+          MSIX_DESCRIPTION: ${{ vars.MSIX_DESCRIPTION || 'Desktop shell for the Yunqi core gateway service.' }}
         run: |
-          cp ../backend-go/ccx-windows-arm64.exe bin/ccx-go.exe
+          cp ../backend-go/ccx-windows-arm64.exe bin/yunqi.exe
           BUILD_TIME=$(date -u '+%Y-%m-%d_%H:%M:%S')
           VERSION="${BUILD_VERSION#v}"
           rm -f bin/*.msix
           wails3 task windows:package FORMAT=msix ARCH=arm64 BUILD_VERSION="${VERSION}" BUILD_TIME="${BUILD_TIME}" GIT_COMMIT="${GIT_COMMIT}" DISTRIBUTION=store MSIX_PACKAGE_NAME="${MSIX_PACKAGE_NAME}" MSIX_PUBLISHER="${MSIX_PUBLISHER}" MSIX_PUBLISHER_DISPLAY_NAME="${MSIX_PUBLISHER_DISPLAY_NAME}" MSIX_DISPLAY_NAME="${MSIX_DISPLAY_NAME}" MSIX_DESCRIPTION="${MSIX_DESCRIPTION}"
-          mv "bin/ccx-desktop-arm64.msix" "bin/CCX-Desktop-${VERSION}-windows-arm64-store.msix"
+          mv "bin/yunqi-desktop-arm64.msix" "bin/Yunqi-Desktop-${VERSION}-windows-arm64-store.msix"
           mkdir -p release-staging
-          mv "bin/CCX-Desktop-${VERSION}-windows-arm64-store.msix" "release-staging/"
-          sha256sum "release-staging/CCX-Desktop-${VERSION}-windows-arm64-store.msix" | awk '{print $1}' > "release-staging/CCX-Desktop-${VERSION}-windows-arm64-store.msix.sha256"
+          mv "bin/Yunqi-Desktop-${VERSION}-windows-arm64-store.msix" "release-staging/"
+          sha256sum "release-staging/Yunqi-Desktop-${VERSION}-windows-arm64-store.msix" | awk '{print $1}' > "release-staging/Yunqi-Desktop-${VERSION}-windows-arm64-store.msix.sha256"
         working-directory: ./desktop
 
       - name: Generate Windows checksums
@@ -699,7 +699,7 @@ jobs:
           {
             sha256sum backend-go/ccx-windows-amd64.exe backend-go/ccx-windows-arm64.exe \
               | awk '{split($2,a,"/"); $2=a[length(a)]; print}'
-            for f in desktop/release-staging/CCX-Desktop-*-windows-*-setup.exe desktop/release-staging/CCX-Desktop-*-windows-*-store.msix; do
+            for f in desktop/release-staging/Yunqi-Desktop-*-windows-*-setup.exe desktop/release-staging/Yunqi-Desktop-*-windows-*-store.msix; do
               sha256sum "$f" | awk '{split($2,a,"/"); $2=a[length(a)]; print}'
             done
           } > checksums-windows.txt
@@ -718,14 +718,14 @@ jobs:
             backend-go/ccx-windows-arm64.exe
             backend-go/ccx-windows-amd64.exe.sha256
             backend-go/ccx-windows-arm64.exe.sha256
-            desktop/release-staging/CCX-Desktop-*-windows-amd64-setup.exe
-            desktop/release-staging/CCX-Desktop-*-windows-arm64-setup.exe
-            desktop/release-staging/CCX-Desktop-*-windows-amd64-setup.exe.sha256
-            desktop/release-staging/CCX-Desktop-*-windows-arm64-setup.exe.sha256
-            desktop/release-staging/CCX-Desktop-*-windows-amd64-store.msix
-            desktop/release-staging/CCX-Desktop-*-windows-arm64-store.msix
-            desktop/release-staging/CCX-Desktop-*-windows-amd64-store.msix.sha256
-            desktop/release-staging/CCX-Desktop-*-windows-arm64-store.msix.sha256
+            desktop/release-staging/Yunqi-Desktop-*-windows-amd64-setup.exe
+            desktop/release-staging/Yunqi-Desktop-*-windows-arm64-setup.exe
+            desktop/release-staging/Yunqi-Desktop-*-windows-amd64-setup.exe.sha256
+            desktop/release-staging/Yunqi-Desktop-*-windows-arm64-setup.exe.sha256
+            desktop/release-staging/Yunqi-Desktop-*-windows-amd64-store.msix
+            desktop/release-staging/Yunqi-Desktop-*-windows-arm64-store.msix
+            desktop/release-staging/Yunqi-Desktop-*-windows-amd64-store.msix.sha256
+            desktop/release-staging/Yunqi-Desktop-*-windows-arm64-store.msix.sha256
             checksums-windows.txt
             checksums-windows.txt.sigstore.json
           draft: true
@@ -805,13 +805,13 @@ jobs:
           GIT_COMMIT: ${{ github.sha }}
         run: |
           mkdir -p bin
-          cp ../backend-go/ccx-linux-amd64 bin/ccx-go
+          cp ../backend-go/ccx-linux-amd64 bin/yunqi
           BUILD_TIME=$(date -u '+%Y-%m-%d_%H:%M:%S')
           VERSION="${BUILD_VERSION#v}"
           wails3 task linux:create:appimage ARCH=amd64 BUILD_VERSION="${VERSION}" BUILD_TIME="${BUILD_TIME}" GIT_COMMIT="${GIT_COMMIT}"
           APPIMAGE=$(find bin -maxdepth 1 -iname '*.AppImage' | head -1)
-          mv "$APPIMAGE" "bin/CCX-Desktop-${VERSION}-linux-amd64.AppImage"
-          sha256sum "bin/CCX-Desktop-${VERSION}-linux-amd64.AppImage" | awk '{print $1}' > "bin/CCX-Desktop-${VERSION}-linux-amd64.AppImage.sha256"
+          mv "$APPIMAGE" "bin/Yunqi-Desktop-${VERSION}-linux-amd64.AppImage"
+          sha256sum "bin/Yunqi-Desktop-${VERSION}-linux-amd64.AppImage" | awk '{print $1}' > "bin/Yunqi-Desktop-${VERSION}-linux-amd64.AppImage.sha256"
         working-directory: ./desktop
 
       - name: Generate Linux checksums
@@ -819,7 +819,7 @@ jobs:
           {
             sha256sum backend-go/ccx-linux-amd64 backend-go/ccx-linux-arm64 \
               | awk '{split($2,a,"/"); $2=a[length(a)]; print}'
-            for f in desktop/bin/CCX-Desktop-*-linux-*.AppImage; do
+            for f in desktop/bin/Yunqi-Desktop-*-linux-*.AppImage; do
               sha256sum "$f" | awk '{split($2,a,"/"); $2=a[length(a)]; print}'
             done
           } > checksums-linux.txt
@@ -838,8 +838,8 @@ jobs:
             backend-go/ccx-linux-arm64
             backend-go/ccx-linux-amd64.sha256
             backend-go/ccx-linux-arm64.sha256
-            desktop/bin/CCX-Desktop-*-linux-amd64.AppImage
-            desktop/bin/CCX-Desktop-*-linux-amd64.AppImage.sha256
+            desktop/bin/Yunqi-Desktop-*-linux-amd64.AppImage
+            desktop/bin/Yunqi-Desktop-*-linux-amd64.AppImage.sha256
             checksums-linux.txt
             checksums-linux.txt.sigstore.json
           draft: true
@@ -905,27 +905,27 @@ jobs:
           GIT_COMMIT: ${{ github.sha }}
         run: |
           mkdir -p bin
-          cp ../backend-go/ccx-linux-arm64 bin/ccx-go
+          cp ../backend-go/ccx-linux-arm64 bin/yunqi
           BUILD_TIME=$(date -u '+%Y-%m-%d_%H:%M:%S')
           VERSION="${BUILD_VERSION#v}"
           wails3 task linux:create:appimage ARCH=arm64 BUILD_VERSION="${VERSION}" BUILD_TIME="${BUILD_TIME}" GIT_COMMIT="${GIT_COMMIT}"
           APPIMAGE=$(find bin -maxdepth 1 -iname '*.AppImage' | head -1)
-          mv "$APPIMAGE" "bin/CCX-Desktop-${VERSION}-linux-arm64.AppImage"
-          sha256sum "bin/CCX-Desktop-${VERSION}-linux-arm64.AppImage" | awk '{print $1}' > "bin/CCX-Desktop-${VERSION}-linux-arm64.AppImage.sha256"
+          mv "$APPIMAGE" "bin/Yunqi-Desktop-${VERSION}-linux-arm64.AppImage"
+          sha256sum "bin/Yunqi-Desktop-${VERSION}-linux-arm64.AppImage" | awk '{print $1}' > "bin/Yunqi-Desktop-${VERSION}-linux-arm64.AppImage.sha256"
         working-directory: ./desktop
 
       - name: Generate Linux arm64 checksums
         run: |
           cd desktop/bin
-          sha256sum CCX-Desktop-*-linux-arm64.AppImage > checksums-linux-arm64.txt
+          sha256sum Yunqi-Desktop-*-linux-arm64.AppImage > checksums-linux-arm64.txt
 
       - name: Upload Linux arm64 Assets
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: |
-            desktop/bin/CCX-Desktop-*-linux-arm64.AppImage
-            desktop/bin/CCX-Desktop-*-linux-arm64.AppImage.sha256
+            desktop/bin/Yunqi-Desktop-*-linux-arm64.AppImage
+            desktop/bin/Yunqi-Desktop-*-linux-arm64.AppImage.sha256
           draft: true
           generate_release_notes: true
           token: ${{ secrets.GITHUB_TOKEN }}

@@ -1,8 +1,8 @@
 package handlers
 
 import (
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/handlers/common"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/handlers/common"
 )
 
 // compatProbeTraitMap 把渠道诊断的推荐项名映射到可学习的 trait。

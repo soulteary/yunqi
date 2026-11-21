@@ -7,7 +7,7 @@
 3. 进入「API Keys」页面
 4. 点击「Create new secret key」，复制生成的密钥
 
-## 在 CCX 中添加渠道
+## 在 Yunqi 中添加渠道
 
 ### 基本配置
 
@@ -20,7 +20,7 @@
 
 ### 配置步骤
 
-1. 进入 CCX 管理界面，选择 **Chat** 入口
+1. 进入 Yunqi 管理界面，选择 **Chat** 入口
 2. 点击「添加渠道」
 3. 填写以下信息：
    - **名称**：`OpenAI`
@@ -83,4 +83,4 @@ o4-mini
 
 - OpenAI API Key 以 `sk-` 开头
 - 如果使用 Azure OpenAI，Base URL 和认证方式不同，请参考 Azure 文档
-- 推理模型（o1/o3 系列）不支持 system message，CCX 会自动处理兼容性
+- 推理模型（o1/o3 系列）不支持 system message，Yunqi 会自动处理兼容性

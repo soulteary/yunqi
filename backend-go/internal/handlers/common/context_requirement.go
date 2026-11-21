@@ -3,9 +3,9 @@ package common
 import (
 	"encoding/json"
 
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/scheduler"
-	"github.com/BenedictKing/ccx/internal/utils"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/scheduler"
+	"github.com/soulteary/yunqi/internal/utils"
 	"github.com/gin-gonic/gin"
 )
 

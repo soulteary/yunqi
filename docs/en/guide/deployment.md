@@ -4,8 +4,8 @@
 
 ```yaml
 services:
-  ccx:
-    image: crpi-i19l8zl0ugidq97v.cn-hangzhou.personal.cr.aliyuncs.com/bene/ccx:latest
+  yunqi:
+    image: ghcr.io/soulteary/yunqi:latest
     ports:
       - '3000:3000'
     volumes:
@@ -26,13 +26,13 @@ services:
 
 ```ini
 [Unit]
-Description=CCX AI API Gateway
+Description=Yunqi AI API Gateway
 After=network.target
 
 [Service]
 Type=simple
-ExecStart=/opt/ccx/ccx
-WorkingDirectory=/opt/ccx
+ExecStart=/opt/yunqi/yunqi
+WorkingDirectory=/opt/yunqi
 Environment=PROXY_ACCESS_KEY=your-proxy-key
 # Extra proxy access keys (optional, comma-separated; requires independent ADMIN_ACCESS_KEY)
 #Environment=EXTRA_PROXY_ACCESS_KEYS=extra-proxy-key-1,extra-proxy-key-2
@@ -47,7 +47,7 @@ WantedBy=multi-user.target
 
 ### macOS (launchd)
 
-See `docs/service/com.ccx.gateway.plist` for reference.
+See `docs/service/com.yunqi.gateway.plist` for reference.
 
 ## Environment Variables
 

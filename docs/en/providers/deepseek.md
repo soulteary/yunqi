@@ -9,15 +9,15 @@
 
 ## How It Works
 
-CCX supports multiple protocol endpoints for DeepSeek:
+Yunqi supports multiple protocol endpoints for DeepSeek:
 
 ```text
-Claude Code CLI       ──→  /v1/messages          ──→  CCX  ──→  DeepSeek Anthropic endpoint
-Codex CLI/App         ──→  /v1/responses         ──→  CCX  ──→  DeepSeek Chat endpoint
-OpenAI-compatible app ──→  /v1/chat/completions  ──→  CCX  ──→  DeepSeek Chat endpoint
+Claude Code CLI       ──→  /v1/messages          ──→  Yunqi  ──→  DeepSeek Anthropic endpoint
+Codex CLI/App         ──→  /v1/responses         ──→  Yunqi  ──→  DeepSeek Chat endpoint
+OpenAI-compatible app ──→  /v1/chat/completions  ──→  Yunqi  ──→  DeepSeek Chat endpoint
 ```
 
-A single CCX instance serves all paths simultaneously.
+A single Yunqi instance serves all paths simultaneously.
 
 ## Scenario 1: OpenAI Chat Protocol (General)
 
@@ -25,7 +25,7 @@ For any tool compatible with OpenAI Chat protocol.
 
 ### Configuration
 
-1. Go to CCX admin console, select **Chat** endpoint
+1. Go to Yunqi admin console, select **Chat** endpoint
 2. Click "Add Channel"
 3. Fill in:
 
@@ -40,7 +40,7 @@ For any tool compatible with OpenAI Chat protocol.
 ### Client Configuration
 
 ```bash
-export OPENAI_API_KEY="your-ccx-proxy-key"
+export OPENAI_API_KEY="your-yunqi-proxy-key"
 export OPENAI_BASE_URL="http://localhost:3000/v1"
 ```
 
@@ -52,7 +52,7 @@ Claude Code CLI uses the Messages API. Configure a Claude service type channel p
 
 ### Configuration
 
-1. Go to CCX admin console, select **Messages** endpoint
+1. Go to Yunqi admin console, select **Messages** endpoint
 2. Click "Add Channel"
 3. Fill in:
 
@@ -77,12 +77,12 @@ Claude Code CLI sends requests with Claude model names (e.g., `claude-opus-4-7`)
 ### Client Configuration
 
 ```bash
-export ANTHROPIC_API_KEY="your-ccx-proxy-key"
+export ANTHROPIC_API_KEY="your-yunqi-proxy-key"
 export ANTHROPIC_BASE_URL="http://localhost:3000"
 ```
 
 ::: warning
-`ANTHROPIC_BASE_URL` should point to the CCX gateway root — do not append `/v1` or `/v1/messages`.
+`ANTHROPIC_BASE_URL` should point to the Yunqi gateway root — do not append `/v1` or `/v1/messages`.
 :::
 
 ---
@@ -93,7 +93,7 @@ Codex CLI uses the OpenAI Responses API. Configure a Chat service type channel u
 
 ### Configuration
 
-1. Go to CCX admin console, select **Responses** endpoint
+1. Go to Yunqi admin console, select **Responses** endpoint
 2. Click "Add Channel"
 3. Fill in:
 
@@ -118,14 +118,14 @@ After Codex Responses requests are converted to Chat Completions, they may conta
 | `gpt` | `deepseek-v4-pro` |
 | `mini` | `deepseek-v4-flash` |
 
-CCX uses the longest matching key first. `gpt` matches `gpt-5`, while `mini` matches `gpt-5-mini`.
+Yunqi uses the longest matching key first. `gpt` matches `gpt-5`, while `mini` matches `gpt-5-mini`.
 
 ### Client Configuration
 
 **Codex CLI:**
 
 ```bash
-export OPENAI_API_KEY="your-ccx-proxy-key"
+export OPENAI_API_KEY="your-yunqi-proxy-key"
 export OPENAI_BASE_URL="http://localhost:3000/v1"
 codex "hello"
 ```
@@ -134,9 +134,9 @@ codex "hello"
 
 | Setting | Value |
 |---------|-------|
-| API Key | `your-ccx-proxy-key` |
+| API Key | `your-yunqi-proxy-key` |
 | Base URL | `http://localhost:3000/v1` |
-| Model | `gpt-5` (CCX redirects to `deepseek-v4-pro`) |
+| Model | `gpt-5` (Yunqi redirects to `deepseek-v4-pro`) |
 
 ---
 
@@ -153,15 +153,15 @@ codex "hello"
 
 ```bash
 curl http://localhost:3000/v1/models \
-  -H "Authorization: Bearer your-ccx-proxy-key"
+  -H "Authorization: Bearer your-yunqi-proxy-key"
 ```
 
 ## Troubleshooting
 
 | Issue | Solution |
 |-------|----------|
-| `401 Unauthorized` | Verify the key matches CCX's `PROXY_ACCESS_KEY` |
+| `401 Unauthorized` | Verify the key matches Yunqi's `PROXY_ACCESS_KEY` |
 | `Model not found` | Check model names in channel config |
-| `Connection refused` | Confirm CCX is running and Base URL is correct |
+| `Connection refused` | Confirm Yunqi is running and Base URL is correct |
 | Channel unhealthy | Check DeepSeek API Key and network access to `api.deepseek.com` |
 | Claude Code format error | Ensure `ANTHROPIC_BASE_URL` points to root, not `/v1` |

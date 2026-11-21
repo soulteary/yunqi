@@ -3,7 +3,7 @@ package common
 import (
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/autopilot"
+	"github.com/soulteary/yunqi/internal/autopilot"
 	"github.com/gin-gonic/gin"
 )
 

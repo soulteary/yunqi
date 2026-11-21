@@ -7,12 +7,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/quota"
-	"github.com/BenedictKing/ccx/internal/ratelimit"
-	"github.com/BenedictKing/ccx/internal/scheduler"
-	"github.com/BenedictKing/ccx/internal/types"
-	"github.com/BenedictKing/ccx/internal/warmup"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/quota"
+	"github.com/soulteary/yunqi/internal/ratelimit"
+	"github.com/soulteary/yunqi/internal/scheduler"
+	"github.com/soulteary/yunqi/internal/types"
+	"github.com/soulteary/yunqi/internal/warmup"
 	"github.com/gin-gonic/gin"
 )
 

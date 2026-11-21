@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/BenedictKing/ccx/internal/errutil"
+	"github.com/soulteary/yunqi/internal/errutil"
 	"github.com/klauspost/compress/zstd"
 )
 

@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/keypool"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/keypool"
 )
 
 func TestManagerCollectAllPreservesUpstreamServiceType(t *testing.T) {

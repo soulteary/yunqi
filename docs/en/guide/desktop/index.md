@@ -1,6 +1,6 @@
-# CCX Desktop
+# Yunqi Desktop
 
-CCX Desktop is a local management client for end users. You can complete installation, key setup, service management, channel setup, and client integration from the desktop app.
+Yunqi Desktop is a local management client for end users. You can complete installation, key setup, service management, channel setup, and client integration from the desktop app.
 
 Recommended user path:
 
@@ -10,7 +10,7 @@ Recommended user path:
 
 ### Download
 
-Windows users are recommended to search for **CCX Desktop** in the Microsoft Store to install. The Store handles signing and auto updates.
+Windows users are recommended to search for **Yunqi Desktop** in the Microsoft Store to install. The Store handles signing and auto updates.
 
 macOS users can also install via Homebrew:
 
@@ -19,22 +19,22 @@ brew tap BenedictKing/ccx
 brew install --cask ccx-desktop
 ```
 
-If you are a developer or cannot use the Store / Homebrew, download the platform package from [GitHub Releases](https://github.com/BenedictKing/ccx/releases):
+If you are a developer or cannot use the Store / Homebrew, download the platform package from [GitHub Releases](https://github.com/soulteary/yunqi/releases):
 
 | Platform | File name pattern |
 |----------|------------------|
-| macOS (Apple Silicon) | `CCX-Desktop-{version}-darwin-arm64.dmg` |
-| macOS (Intel) | `CCX-Desktop-{version}-darwin-amd64.dmg` |
-| Windows (GitHub) | `CCX-Desktop-{version}-windows-{arch}-setup.exe` |
-| Windows (Store/MSIX) | `CCX-Desktop-{version}-windows-{arch}-store.msix` |
-| Linux | `CCX-Desktop-{version}-linux-amd64.AppImage` |
+| macOS (Apple Silicon) | `Yunqi-Desktop-{version}-darwin-arm64.dmg` |
+| macOS (Intel) | `Yunqi-Desktop-{version}-darwin-amd64.dmg` |
+| Windows (GitHub) | `Yunqi-Desktop-{version}-windows-{arch}-setup.exe` |
+| Windows (Store/MSIX) | `Yunqi-Desktop-{version}-windows-{arch}-store.msix` |
+| Linux | `Yunqi-Desktop-{version}-linux-amd64.AppImage` |
 
 The `*-store.msix` package is mainly for Microsoft Store submission and verification. Public installs should prefer the Store. Direct sideloading of `.msix` may still require a trusted signing environment.
 
 You can verify the download with the `.sha256` file from the same release:
 
 ```bash
-shasum -a 256 -c CCX-Desktop-*.sha256
+shasum -a 256 -c Yunqi-Desktop-*.sha256
 ```
 
 ### Installation steps
@@ -42,43 +42,43 @@ shasum -a 256 -c CCX-Desktop-*.sha256
 #### macOS
 
 1. Open the `.dmg` file.
-2. Drag `CCX Desktop` into `Applications`.
-3. Open `CCX Desktop` from `Applications`. The macOS build is signed with Apple Developer ID and notarized, so it should launch directly under normal conditions.
+2. Drag `Yunqi Desktop` into `Applications`.
+3. Open `Yunqi Desktop` from `Applications`. The macOS build is signed with Apple Developer ID and notarized, so it should launch directly under normal conditions.
 
 #### Windows
 
-1. Search for **CCX Desktop** in the Microsoft Store to install. Signing and updates are handled by the Store.
+1. Search for **Yunqi Desktop** in the Microsoft Store to install. Signing and updates are handled by the Store.
 2. If you use the GitHub installer, run the `-setup.exe` file and follow the setup wizard.
 3. If SmartScreen appears, choose **More info → Run anyway**.
 
 #### Linux
 
 ```bash
-chmod +x CCX-Desktop-*.AppImage
-./CCX-Desktop-*.AppImage
+chmod +x Yunqi-Desktop-*.AppImage
+./Yunqi-Desktop-*.AppImage
 ```
 
 AppImage supports in-app auto updates. If you install through deb or rpm packages, use your system package manager instead.
 
 ## Configure key
 
-When you open CCX Desktop, the first-run wizard generates and writes `PROXY_ACCESS_KEY`.
+When you open Yunqi Desktop, the first-run wizard generates and writes `PROXY_ACCESS_KEY`.
 
-![CCX Desktop first-run wizard](/images/desktop/setup-wizard.png)
+![Yunqi Desktop first-run wizard](/images/desktop/setup-wizard.png)
 
 ### What `PROXY_ACCESS_KEY` is used for
 
-- It is the proxy key clients use to access CCX.
-- CCX Desktop writes it into client configuration when you apply agent settings.
+- It is the proxy key clients use to access Yunqi.
+- Yunqi Desktop writes it into client configuration when you apply agent settings.
 - If you configure a client manually, set the client API key to the same `PROXY_ACCESS_KEY`.
 
 ### Key types to understand
 
 | Key | Purpose |
 |-----|---------|
-| `PROXY_ACCESS_KEY` | Client proxy key for accessing CCX |
+| `PROXY_ACCESS_KEY` | Client proxy key for accessing Yunqi |
 | `ADMIN_ACCESS_KEY` | Admin key used by the web UI and admin endpoints |
-| Upstream API key | Provider key configured only inside CCX channels |
+| Upstream API key | Provider key configured only inside Yunqi channels |
 
 You can copy the current `PROXY_ACCESS_KEY` from the tray menu or **Gateway Monitor**, then paste it into the client configuration or shell environment.
 
@@ -88,7 +88,7 @@ Open **Gateway Monitor** and click **Start service**.
 
 ![Gateway Monitor](/images/desktop/gateway-monitor.png)
 
-If CCX Desktop reports that the binary is missing, build the backend first:
+If Yunqi Desktop reports that the binary is missing, build the backend first:
 
 ```bash
 cd backend-go && make build
@@ -108,7 +108,7 @@ Gateway Monitor also supports:
 
 ## Agent configuration
 
-Open **Agent Config** to apply local CCX configuration to supported agent tools:
+Open **Agent Config** to apply local Yunqi configuration to supported agent tools:
 
 ![Agent Config](/images/desktop/agent-config.png)
 
@@ -116,11 +116,11 @@ Open **Agent Config** to apply local CCX configuration to supported agent tools:
 - **Codex**
 - **OpenCode**
 
-Using CCX as the provider is recommended because requests go through the local gateway and can use channel scheduling and failover.
+Using Yunqi as the provider is recommended because requests go through the local gateway and can use channel scheduling and failover.
 
-CCX Desktop typically writes:
+Yunqi Desktop typically writes:
 
-- The CCX address the client should use.
+- The Yunqi address the client should use.
 - The proxy key (`PROXY_ACCESS_KEY`).
 - Related model or provider settings.
 
@@ -128,9 +128,9 @@ After applying configuration, restart the matching client so the new settings ta
 
 For protocol and Base URL details by client, see:
 
-- [Connect Claude Code to CCX](/en/guide/clients/claude-code)
-- [Connect Codex CLI / Codex App to CCX](/en/guide/clients/codex)
-- [Connect OpenCode to CCX](/en/guide/clients/opencode)
+- [Connect Claude Code to Yunqi](/en/guide/clients/claude-code)
+- [Connect Codex CLI / Codex App to Yunqi](/en/guide/clients/codex)
+- [Connect OpenCode to Yunqi](/en/guide/clients/opencode)
 
 ## Add channels
 
@@ -150,7 +150,7 @@ You can start from preset templates and then fill in:
 - Compatibility options
 
 ::: tip
-The upstream API key is configured only in the channel. The client API key should be set to CCX `PROXY_ACCESS_KEY`.
+The upstream API key is configured only in the channel. The client API key should be set to Yunqi `PROXY_ACCESS_KEY`.
 :::
 
 After adding a channel, confirm that it is healthy in the web UI or logs.
@@ -161,10 +161,10 @@ After completing installation, key setup, service startup, agent configuration, 
 
 ### Verify with a client
 
-1. Start CCX Desktop and confirm the service is running.
+1. Start Yunqi Desktop and confirm the service is running.
 2. Restart the client (Claude Code / Codex / OpenCode).
 3. Send a test prompt such as `hello`.
-4. Confirm the request appears in the CCX Desktop **Log Viewer** or web UI.
+4. Confirm the request appears in the Yunqi Desktop **Log Viewer** or web UI.
 
 ### Verify from the command line
 
@@ -187,13 +187,13 @@ Open **Environment Params** to edit the `.env` file. Common settings:
 
 ![Environment Params](/images/desktop/env-params.png)
 
-When installed as CCX Desktop, `.env` is stored in the CCX Desktop data directory, not in the source-tree `backend-go/.env`. You can find and open that directory from **Data dir** in **Gateway Monitor**. To enable local HTTPS for Claude Desktop, see [Environment - Local HTTPS](../environment#local-https) and use expanded absolute paths for `TLS_CERT_FILE` / `TLS_KEY_FILE`.
+When installed as Yunqi Desktop, `.env` is stored in the Yunqi Desktop data directory, not in the source-tree `backend-go/.env`. You can find and open that directory from **Data dir** in **Gateway Monitor**. To enable local HTTPS for Claude Desktop, see [Environment - Local HTTPS](../environment#local-https) and use expanded absolute paths for `TLS_CERT_FILE` / `TLS_KEY_FILE`.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | 3688 | Gateway port |
 | `BIND_HOST` | unset | Bind host; unset listens on all interfaces, `127.0.0.1` allows local-only access |
-| `PROXY_ACCESS_KEY` | - | Client proxy key for accessing CCX |
+| `PROXY_ACCESS_KEY` | - | Client proxy key for accessing Yunqi |
 | `ADMIN_ACCESS_KEY` | - | Admin key |
 | `LOG_LEVEL` | info | Log level |
 
@@ -207,9 +207,9 @@ You can open the embedded web UI from **Gateway Monitor** to manage channels, in
 
 ### System tray
 
-After the window is closed, CCX Desktop minimizes to the system tray.
+After the window is closed, Yunqi Desktop minimizes to the system tray.
 
-![CCX Desktop sidebar and daemon panel](/images/desktop/sidebar.png)
+![Yunqi Desktop sidebar and daemon panel](/images/desktop/sidebar.png)
 
 Common tray actions:
 
@@ -247,6 +247,6 @@ Your desktop setup is ready when all of these are true:
 - [ ] The gateway is running and the **Gateway Monitor** status looks healthy
 - [ ] At least one target channel has been added and enabled
 - [ ] Agent configuration has been applied and the client has been restarted
-- [ ] A client request appears in the CCX Desktop logs
+- [ ] A client request appears in the Yunqi Desktop logs
 
 For startup failures, update issues, or agent configuration problems, see [Troubleshooting](./troubleshooting).

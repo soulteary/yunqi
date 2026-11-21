@@ -4,8 +4,8 @@ import (
 	"log"
 	"sync"
 
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/ratelimit"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/ratelimit"
 )
 
 // RateLimitApplier 将 RateLimitDiscoverer 的高置信建议应用到运行态 limiter。

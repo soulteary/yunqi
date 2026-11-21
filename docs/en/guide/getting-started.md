@@ -1,6 +1,6 @@
 # Quick Start
 
-If you prefer the desktop app, start with the [CCX Desktop setup guide](/en/guide/desktop/) and follow **Install → Configure key → Start service → Agent configuration → Add channels → Verify requests**.
+If you prefer the desktop app, start with the [Yunqi Desktop setup guide](/en/guide/desktop/) and follow **Install → Configure key → Start service → Agent configuration → Add channels → Verify requests**.
 
 ## Installation
 
@@ -8,20 +8,20 @@ If you prefer the desktop app, start with the [CCX Desktop setup guide](/en/guid
 
 ```bash
 docker run -d \
-  --name ccx \
+  --name yunqi \
   -p 3000:3000 \
   -v ./.config:/app/.config \
   -e PROXY_ACCESS_KEY=your-proxy-key \
-  crpi-i19l8zl0ugidq97v.cn-hangzhou.personal.cr.aliyuncs.com/bene/ccx:latest
+  ghcr.io/soulteary/yunqi:latest
 ```
 
 ### Binary
 
-Download the binary for your platform from [GitHub Releases](https://github.com/BenedictKing/ccx/releases), then run:
+Download the binary for your platform from [GitHub Releases](https://github.com/soulteary/yunqi/releases), then run:
 
 ```bash
 export PROXY_ACCESS_KEY=your-proxy-key
-./ccx
+./yunqi
 ```
 
 The service listens on `http://localhost:3000` by default.

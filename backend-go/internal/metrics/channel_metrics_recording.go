@@ -3,8 +3,8 @@ package metrics
 import (
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/types"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/types"
 )
 
 // RecordSuccess 记录成功请求（使用 baseURL + apiKey）。model 为实际请求模型，

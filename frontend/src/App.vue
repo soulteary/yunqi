@@ -17,7 +17,7 @@
     <!-- 认证界面 -->
     <v-dialog v-model="showAuthDialog" persistent max-width="500">
       <v-card class="pa-4">
-        <v-card-title class="text-h5 text-center mb-4"> 🔐 API Proxy - CCX </v-card-title>
+        <v-card-title class="text-h5 text-center mb-4"> 🔐 云起 Yunqi — 连接客户端与模型。 </v-card-title>
 
         <v-card-text>
           <v-alert v-if="authStore.authError" type="error" variant="tonal" class="mb-4">
@@ -134,7 +134,7 @@
           <router-link to="/cost-report" class="api-type-text" :class="{ active: route.path === '/cost-report' }">
             {{ t('app.tabs.costReport') }}
           </router-link>
-          <span class="brand-text d-none d-md-inline">API Proxy - CCX</span>
+          <span class="brand-text d-none d-md-inline">云起 Yunqi — 连接客户端与模型。</span>
         </div>
       </div>
 

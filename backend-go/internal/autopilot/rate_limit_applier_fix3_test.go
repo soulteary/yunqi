@@ -3,8 +3,8 @@ package autopilot
 import (
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/ratelimit"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/ratelimit"
 )
 
 // activeRoutingCfg 返回 active 模式的路由配置，用于注入类用例。

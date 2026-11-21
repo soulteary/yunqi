@@ -3,7 +3,7 @@ package metrics
 import (
 	"strings"
 
-	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/soulteary/yunqi/internal/config"
 )
 
 const cnyToUSD = 1.0 / 6.8

@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/scheduler"
+	"github.com/soulteary/yunqi/internal/scheduler"
 )
 
 // ── NormalizeSelectionTrace 测试 ──

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"unicode"
 
-	"github.com/BenedictKing/ccx/internal/types"
+	"github.com/soulteary/yunqi/internal/types"
 )
 
 // EstimateTokens 估算文本的 token 数量

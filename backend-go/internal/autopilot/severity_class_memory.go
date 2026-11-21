@@ -5,7 +5,7 @@ import (
 
 	"github.com/tidwall/gjson"
 
-	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/soulteary/yunqi/internal/config"
 )
 
 // 格式约束型"安全分类"请求的识别与能力记忆（docs/specs/severity-class-capability.md）。

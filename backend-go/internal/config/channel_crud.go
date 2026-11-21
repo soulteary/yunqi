@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/utils"
+	"github.com/soulteary/yunqi/internal/utils"
 )
 
 // ChannelKind 是六类协议入口的标识，用于在通用 CRUD 方法中区分目标数组。

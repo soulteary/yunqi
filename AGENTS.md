@@ -7,7 +7,7 @@
 - 修改文档时，优先以以下文件为事实源：`VERSION`、`Makefile`、`backend-go/Makefile`、`frontend/package.json`、`backend-go/main.go`。
 
 ## 项目概览
-- CCX 是一个多上游 AI API 代理与协议转换网关，当前正式支持六类渠道：`messages`、`chat`、`responses`、`gemini`、`images`、`vectors`。
+- Yunqi 是一个多上游 AI API 代理与协议转换网关，当前正式支持六类渠道：`messages`、`chat`、`responses`、`gemini`、`images`、`vectors`。
 - 根目录 `VERSION` 是唯一发布版本源；后端构建时通过 `backend-go/Makefile` 的 `-ldflags` 注入运行时版本信息。
 
 ## 项目结构与模块

@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/presetstore"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/presetstore"
 )
 
 // ── 前沿选型集成用例的固定注册表 fixture ──

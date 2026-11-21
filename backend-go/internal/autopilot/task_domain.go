@@ -3,7 +3,7 @@ package autopilot
 import (
 	"strings"
 
-	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/soulteary/yunqi/internal/config"
 )
 
 // ── 种子矩阵（§5.7.3）──

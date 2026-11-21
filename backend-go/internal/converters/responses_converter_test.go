@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/session"
-	"github.com/BenedictKing/ccx/internal/types"
+	"github.com/soulteary/yunqi/internal/session"
+	"github.com/soulteary/yunqi/internal/types"
 )
 
 // TestClaudeResponseToResponses_ToolUse 测试 Claude 响应中的 tool_use 转换

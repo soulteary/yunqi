@@ -3,8 +3,8 @@ package autopilot
 import (
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/scheduler"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/scheduler"
 )
 
 // stubEffectiveContextWindow 用内存桩替换有效窗口查询，避免测试依赖落盘的共享兼容性记忆。

@@ -9,11 +9,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/eventbus"
-	"github.com/BenedictKing/ccx/internal/keypool"
-	"github.com/BenedictKing/ccx/internal/metrics"
-	"github.com/BenedictKing/ccx/internal/scheduler"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/eventbus"
+	"github.com/soulteary/yunqi/internal/keypool"
+	"github.com/soulteary/yunqi/internal/metrics"
+	"github.com/soulteary/yunqi/internal/scheduler"
 )
 
 // metricsManagerAdapter 包装 *metrics.MetricsManager，实现 MetricsProvider 接口。

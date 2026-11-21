@@ -1,6 +1,6 @@
 package autopilot
 
-import "github.com/BenedictKing/ccx/internal/config"
+import "github.com/soulteary/yunqi/internal/config"
 
 // 工具调用能力记忆在路由侧的读取。
 //

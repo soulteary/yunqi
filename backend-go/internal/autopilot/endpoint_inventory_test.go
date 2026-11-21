@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/soulteary/yunqi/internal/config"
 )
 
 func TestBuildEndpointInventoryRespectsBoundAndUnboundKeys(t *testing.T) {

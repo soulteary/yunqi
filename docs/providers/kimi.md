@@ -17,7 +17,7 @@ Kimi 同时兼容 OpenAI 和 Anthropic 两种协议。Kimi Code 的两个入口�
 | Anthropic（Kimi Code） | `https://api.kimi.com/coding/` | `https://api.kimi.com/coding/v1/messages` |
 | OpenAI（Kimi Code） | `https://api.kimi.com/coding/v1` | `https://api.kimi.com/coding/v1/chat/completions` |
 
-在 CCX 的自动添加页面选择 `Kimi`（别名 `Kimi Code`）并粘贴 Key，系统会按候选端点验证并为每个 Key 绑定可用入口；Kimi Code 使用 `GET /coding/v1/models` 发现该 Key 实际可用的模型。
+在 Yunqi 的自动添加页面选择 `Kimi`（别名 `Kimi Code`）并粘贴 Key，系统会按候选端点验证并为每个 Key 绑定可用入口；Kimi Code 使用 `GET /coding/v1/models` 发现该 Key 实际可用的模型。
 
 ## Kimi Code 模型权限
 
@@ -29,9 +29,9 @@ Kimi 同时兼容 OpenAI 和 Anthropic 两种协议。Kimi Code 的两个入口�
 
 `k3` 与 `kimi-for-coding` 均支持 `low`、`high`、`max` 三档思考强度（`k3` 默认 `high`，`kimi-for-coding` 默认 `max`）。关闭 thinking 时，K3 系列与 `kimi-for-coding` 的请求均由 K2.8 Preview（无思考版）处理；`kimi-for-coding-highspeed` 由服务端保持 Thinking。
 
-Claude Code 环境变量中的 `k3[1m]` 只是声明 1M 上下文的客户端写法；API 请求和 CCX 的模型字段仍使用 `k3`。
+Claude Code 环境变量中的 `k3[1m]` 只是声明 1M 上下文的客户端写法；API 请求和 Yunqi 的模型字段仍使用 `k3`。
 
-## 在 CCX 中添加渠道
+## 在 Yunqi 中添加渠道
 
 ### 方式一：自动添加 Kimi Code（推荐）
 
@@ -48,7 +48,7 @@ Claude Code 环境变量中的 `k3[1m]` 只是声明 1M 上下文的客户端写
 
 #### 配置步骤
 
-1. 进入 CCX 管理界面，选择 **Chat** 入口
+1. 进入 Yunqi 管理界面，选择 **Chat** 入口
 2. 点击「添加渠道」
 3. 填写以下信息：
    - **名称**：`Kimi`
@@ -68,7 +68,7 @@ Claude Code 环境变量中的 `k3[1m]` 只是声明 1M 上下文的客户端写
 | Base URL | `https://api.kimi.com/coding/` |
 | API Keys | 你的 Kimi Code API Key |
 
-Kimi Code 端点不需要手工把 `opus`、`sonnet` 或 `haiku` 映射为 Claude 模型名。建议使用 `/coding/v1/models` 返回的真实模型 ID；如客户端发送通用别名，请在 CCX 的模型映射中明确指定目标模型。
+Kimi Code 端点不需要手工把 `opus`、`sonnet` 或 `haiku` 映射为 Claude 模型名。建议使用 `/coding/v1/models` 返回的真实模型 ID；如客户端发送通用别名，请在 Yunqi 的模型映射中明确指定目标模型。
 
 ### 模型白名单（可选）
 
@@ -97,7 +97,7 @@ kimi-for-coding-highspeed
 
 ## 注意事项
 
-- 按量 OpenAI 兼容 API 的中国区 Base URL 为 `https://api.moonshot.cn/v1`；CCX 仍兼容 `https://api.moonshot.ai/v1` 全球入口
+- 按量 OpenAI 兼容 API 的中国区 Base URL 为 `https://api.moonshot.cn/v1`；Yunqi 仍兼容 `https://api.moonshot.ai/v1` 全球入口
 - Kimi Code 的 Anthropic Base URL 为 `https://api.kimi.com/coding/`，OpenAI Base URL 为 `https://api.kimi.com/coding/v1`
 - Kimi Code 的 `/coding/v1/models` 会按 Key 返回模型范围；该接口返回 401/403 时先检查 Key 是否有效，而调用未列出的模型或超出上下文权限时，上游也可能返回 401
 - `kimi-k2.7` 是当前最新按量计费模型，支持长上下文编码

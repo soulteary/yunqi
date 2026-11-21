@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/autopilot"
-	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/soulteary/yunqi/internal/autopilot"
+	"github.com/soulteary/yunqi/internal/config"
 )
 
 // 能力测试的工具调用探针项（docs/specs/tool-call-capability.md §4.2）。

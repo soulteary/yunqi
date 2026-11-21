@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	corecopilot "github.com/BenedictKing/ccx/internal/copilot"
+	corecopilot "github.com/soulteary/yunqi/internal/copilot"
 	"github.com/gin-gonic/gin"
 )
 

@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/session"
-	"github.com/BenedictKing/ccx/internal/types"
+	"github.com/soulteary/yunqi/internal/session"
+	"github.com/soulteary/yunqi/internal/types"
 )
 
 // TestOpenAIChatConverter_Issue39_ContentTypeText 测试 GitHub Issue #39

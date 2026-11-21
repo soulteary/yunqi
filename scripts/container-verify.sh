@@ -35,8 +35,8 @@ ensure_volume() {
 stage_command='sh /workspace/scripts/container-stage-source.sh /workspace /work'
 
 run_go() {
-  ensure_volume ccx-go-mod 4G
-  ensure_volume ccx-go-build 4G
+  ensure_volume yunqi-mod 4G
+  ensure_volume yunqi-build 4G
 
   echo "==> Verifying Go backend in Linux/arm64"
   container run --rm --progress plain \
@@ -44,10 +44,10 @@ run_go() {
     --memory "$MEMORY" \
     --env "GOPROXY=$GO_PROXY" \
     --mount "type=bind,source=$ROOT_DIR,target=/workspace,readonly" \
-    --mount type=volume,source=ccx-go-mod,target=/go/pkg/mod \
-    --mount type=volume,source=ccx-go-build,target=/root/.cache/go-build \
+    --mount type=volume,source=yunqi-mod,target=/go/pkg/mod \
+    --mount type=volume,source=yunqi-build,target=/root/.cache/go-build \
     --workdir / \
-    "$GO_IMAGE" sh -c "set -eu; $stage_command; cd /work/backend-go; export PATH=/usr/local/go/bin:\$PATH; go version; go test ./... -count=1; go vet ./...; CGO_ENABLED=0 go build -buildvcs=false -o /tmp/ccx-go ."
+    "$GO_IMAGE" sh -c "set -eu; $stage_command; cd /work/backend-go; export PATH=/usr/local/go/bin:\$PATH; go version; go test ./... -count=1; go vet ./...; CGO_ENABLED=0 go build -buildvcs=false -o /tmp/yunqi ."
 }
 
 run_frontend() {

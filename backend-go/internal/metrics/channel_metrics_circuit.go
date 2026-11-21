@@ -4,8 +4,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/eventbus"
-	"github.com/BenedictKing/ccx/internal/statelog"
+	"github.com/soulteary/yunqi/internal/eventbus"
+	"github.com/soulteary/yunqi/internal/statelog"
 )
 
 func (m *MetricsManager) refreshBreakerWindowsLocked(metrics *KeyMetrics, now time.Time) {

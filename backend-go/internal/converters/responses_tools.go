@@ -1,6 +1,6 @@
 package converters
 
-import "github.com/BenedictKing/ccx/internal/types"
+import "github.com/soulteary/yunqi/internal/types"
 
 func defaultResponsesToolParameters() map[string]interface{} {
 	return map[string]interface{}{

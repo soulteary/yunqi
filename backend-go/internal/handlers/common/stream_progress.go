@@ -3,7 +3,7 @@ package common
 import (
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/utils"
+	"github.com/soulteary/yunqi/internal/utils"
 )
 
 // StreamProgressLogger 记录流式响应的进度，便于定位首字后吞吐下降或断流。

@@ -4,8 +4,8 @@ import (
 	"log"
 	"math"
 
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/quota"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/quota"
 )
 
 // ── configured 级配额真相生产接线（quota-truth-scheduling.md §7.3）──

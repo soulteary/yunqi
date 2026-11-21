@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/routingref"
+	"github.com/soulteary/yunqi/internal/routingref"
 )
 
 func TestTraceAffinityRouteRoundTrip(t *testing.T) {

@@ -2,7 +2,7 @@
 
 ## 获取 GitHub OAuth Token
 
-1. 打开 CCX 管理界面，进入 **Responses** 入口
+1. 打开 Yunqi 管理界面，进入 **Responses** 入口
 2. 点击「添加渠道」
 3. 选择上游类型 `GitHub Copilot`
 4. 填写 `Base URL`（默认 `https://api.githubcopilot.com`，通常不需要修改）
@@ -10,7 +10,7 @@
 6. 记录页面显示的授权码，在打开的 GitHub 授权页确认授权
 7. 授权成功后，系统会自动把 GitHub OAuth token 写入渠道 `API Keys`
 
-## 在 CCX 中添加渠道
+## 在 Yunqi 中添加渠道
 
 ### Responses 入口（推荐）
 
@@ -36,16 +36,16 @@
 
 ## 跨协议转换
 
-GitHub Copilot 上游实际只暴露 Responses 协议（`/responses`）。CCX 会把其它入口的请求统一转换后再发给 Copilot，因此你可以在以下入口都使用 `serviceType: "copilot"` 的渠道：
+GitHub Copilot 上游实际只暴露 Responses 协议（`/responses`）。Yunqi 会把其它入口的请求统一转换后再发给 Copilot，因此你可以在以下入口都使用 `serviceType: "copilot"` 的渠道：
 
-| 客户端入口 | 客户端协议 | CCX 转换 | Copilot 上游 |
+| 客户端入口 | 客户端协议 | Yunqi 转换 | Copilot 上游 |
 |------------|------------|----------|--------------|
 | Responses | Responses | 透传 | `POST /responses` |
 | Chat | OpenAI Chat | Chat → Responses | `POST /responses` |
 | Messages | Anthropic Messages | Messages → Responses | `POST /responses` |
 | Gemini | Gemini generateContent | Gemini → Responses | `POST /responses` |
 
-无论从哪个入口进入，CCX 都会：
+无论从哪个入口进入，Yunqi 都会：
 
 1. 把客户端请求体转换成 Responses 格式
 2. 用渠道里保存的 GitHub OAuth token 换取短期 Copilot token
@@ -86,7 +86,7 @@ GitHub Copilot 的可用模型取决于你的订阅与组织策略，请以诊�
 ## 注意事项
 
 - 渠道中保存的 `API Key` 是 **GitHub OAuth token**，不是短期 Copilot API token
-- CCX 会在请求前自动把 GitHub OAuth token 换成短期 Copilot token，并注入 `Authorization: Bearer <copilot_token>`
+- Yunqi 会在请求前自动把 GitHub OAuth token 换成短期 Copilot token，并注入 `Authorization: Bearer <copilot_token>`
 - 不要手动把 GitHub OAuth token 当作 `Authorization: Bearer` 调用 `api.githubcopilot.com`
 - OAuth 相关接口默认要求管理员鉴权，避免对外暴露 GitHub 登录流程
 - 如需代理访问，请在渠道「代理地址」字段填写 HTTP/HTTPS/SOCKS5 代理 URL

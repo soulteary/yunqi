@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/handlers/common"
+	"github.com/soulteary/yunqi/internal/handlers/common"
 )
 
 func TestHasResponsesSemanticContent(t *testing.T) {

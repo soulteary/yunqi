@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/session"
-	"github.com/BenedictKing/ccx/internal/types"
+	"github.com/soulteary/yunqi/internal/session"
+	"github.com/soulteary/yunqi/internal/types"
 )
 
 // streamOutputCollector 从 Responses SSE 流中收集 output items 和 responseID，

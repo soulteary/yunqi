@@ -1,6 +1,6 @@
 # Verifying Release Artifacts
 
-CCX releases are signed using [Sigstore](https://www.sigstore.dev/) keyless signing on the checksums manifest. Verifying the signature proves that the release artifacts were built by the `BenedictKing/ccx` GitHub Actions workflow and have not been tampered with.
+Yunqi releases are signed using [Sigstore](https://www.sigstore.dev/) keyless signing on the checksums manifest. Verifying the signature proves that the release artifacts were built by the `BenedictKing/yunqi` GitHub Actions workflow and have not been tampered with.
 
 Windows GitHub installers are also Authenticode-signed through the SignPath Foundation. Sigstore verifies the Release manifest and CI origin; Authenticode lets Windows verify installer publisher and file integrity.
 
@@ -41,7 +41,7 @@ choco install cosign
 
 ### 1. Download checksums and signature files
 
-Download from [GitHub Releases](https://github.com/BenedictKing/ccx/releases):
+Download from [GitHub Releases](https://github.com/soulteary/yunqi/releases):
 
 - `checksums.txt` — cross-platform SHA256 manifest
 - `checksums.txt.sigstore.json` — the Sigstore signature bundle
@@ -61,7 +61,7 @@ VERSION=v2.7.12  # Replace with the target version
 
 cosign verify-blob \
   --bundle checksums.txt.sigstore.json \
-  --certificate-identity "https://github.com/BenedictKing/ccx/.github/workflows/release.yml@refs/tags/${VERSION}" \
+  --certificate-identity "https://github.com/soulteary/yunqi/.github/workflows/release.yml@refs/tags/${VERSION}" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
   checksums.txt
 ```
@@ -73,7 +73,7 @@ If you don't know the exact version, use a regex pattern:
 ```bash
 cosign verify-blob \
   --bundle checksums.txt.sigstore.json \
-  --certificate-identity-regexp "^https://github\.com/BenedictKing/ccx/\.github/workflows/release\.yml@refs/tags/v.*$" \
+  --certificate-identity-regexp "^https://github\.com/BenedictKing/yunqi/\.github/workflows/release\.yml@refs/tags/v.*$" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
   checksums.txt
 ```
@@ -91,7 +91,7 @@ sha256sum -c checksums.txt --ignore-missing
 macOS (some `shasum` versions don't support `--ignore-missing`, compare manually):
 
 ```bash
-shasum -a 256 ccx-darwin-arm64
+shasum -a 256 yunqi-darwin-arm64
 # Compare the output with the corresponding line in checksums.txt
 ```
 
@@ -101,7 +101,7 @@ You can verify SignPath code signing for Windows GitHub installers with PowerShe
 
 ```powershell
 $version = "2.7.12"  # Replace with the target version without v
-$signature = Get-AuthenticodeSignature ".\CCX-Desktop-$version-windows-amd64-setup.exe"
+$signature = Get-AuthenticodeSignature ".\Yunqi-Desktop-$version-windows-amd64-setup.exe"
 $signature.Status
 $signature.SignerCertificate.Subject
 ```
@@ -127,8 +127,8 @@ $signature.SignerCertificate.Subject
 | `checksums-{platform}.txt` | Single-platform SHA256 manifest |
 | `checksums-{platform}.txt.sigstore.json` | Single-platform Sigstore bundle |
 | `{artifact}.sha256` | Individual artifact SHA256 (hex hash only, used by updater for automated verification) |
-| `CCX-Desktop-*-windows-*-setup.exe` | SignPath Authenticode-signed Windows GitHub installer |
-| `CCX-Desktop-*-windows-*-store.msix` | Windows Store/MSIX submission and validation package; public installs should prefer Microsoft Store |
+| `Yunqi-Desktop-*-windows-*-setup.exe` | SignPath Authenticode-signed Windows GitHub installer |
+| `Yunqi-Desktop-*-windows-*-store.msix` | Windows Store/MSIX submission and validation package; public installs should prefer Microsoft Store |
 
 ## Learn More
 

@@ -1,10 +1,10 @@
-# CCX 架构说明
+# Yunqi 架构说明
 
-本文档描述 CCX 当前的系统边界、核心模块和主要请求流。
+本文档描述 Yunqi 当前的系统边界、核心模块和主要请求流。
 
 ## 系统概览
 
-CCX 是一个单端口部署的 AI API 代理与协议转换网关：
+Yunqi 是一个单端口部署的 AI API 代理与协议转换网关：
 
 - Go 后端负责路由、认证、调度、协议转换、日志与指标
 - Vue 3 + Vuetify 前端提供 Web 管理界面
@@ -14,7 +14,7 @@ CCX 是一个单端口部署的 AI API 代理与协议转换网关：
 ## 仓库结构
 
 ```text
-ccx/
+yunqi/
 ├── backend-go/                 # Go 后端
 │   ├── main.go                # 路由与服务启动
 │   └── internal/
@@ -32,7 +32,7 @@ ccx/
 
 ## 渠道类型与路由面
 
-CCX 当前内建六类渠道，每类渠道拥有独立的调度、指标和日志空间：
+Yunqi 当前内建六类渠道，每类渠道拥有独立的调度、指标和日志空间：
 
 | 渠道类型 | 代理入口 | 管理入口 | 说明 |
 | --- | --- | --- | --- |
@@ -132,17 +132,17 @@ Vectors 的 `/v1/embeddings` 在存在 `embeddingCapabilities` 元数据时会�
 
 ### 上下文路由
 
-上下文路由用于解决同一渠道组内不同实际模型上下文窗口不一致的问题。CCX 在调度前估算当前请求需要的上下文与输出预算，并结合下游 agent 请求模型的内置 profile 得到最小上下文窗口要求，再按渠道 `ModelMapping` 后的实际模型能力做资格过滤。该步骤只过滤不可用渠道，不改变用户在驾驶舱中设置的渠道顺序。
+上下文路由用于解决同一渠道组内不同实际模型上下文窗口不一致的问题。Yunqi 在调度前估算当前请求需要的上下文与输出预算，并结合下游 agent 请求模型的内置 profile 得到最小上下文窗口要求，再按渠道 `ModelMapping` 后的实际模型能力做资格过滤。该步骤只过滤不可用渠道，不改变用户在驾驶舱中设置的渠道顺序。
 
 能力来源优先级：
 
 ```text
 下游 agentModelProfiles
-> CCX 内置 agent 模型 profile
+> Yunqi 内置 agent 模型 profile
 
 渠道 modelCapabilities
 > 全局 upstreamModelCapabilities
-> CCX 内置模型能力库
+> Yunqi 内置模型能力库
 > 渠道 defaultCapability
 > unknown 策略
 ```
@@ -196,7 +196,7 @@ Vectors 的 `/v1/embeddings` 在存在 `embeddingCapabilities` 元数据时会�
 
 ## 可观测性
 
-CCX 提供三类核心可观测信息：
+Yunqi 提供三类核心可观测信息：
 
 1. **渠道指标**
    - 请求量、成功率、失败率、延迟
