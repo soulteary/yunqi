@@ -9,6 +9,7 @@ import (
 
 // ChannelLog 单次上游请求日志
 type ChannelLog struct {
+	OTLPTraceID             string                   `json:"otlpTraceId,omitempty"`
 	TimingSource            *telemetry.Timeline      `json:"-"`
 	PhaseTiming             *telemetry.PhaseSnapshot `json:"phaseTiming,omitempty"`
 	RequestID               string                   `json:"requestId"` // 请求唯一标识

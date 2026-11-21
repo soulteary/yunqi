@@ -12,6 +12,7 @@ import (
 	"github.com/soulteary/yunqi/internal/httpclient"
 	"github.com/soulteary/yunqi/internal/middleware"
 	"github.com/soulteary/yunqi/internal/scheduler"
+	"github.com/soulteary/yunqi/internal/telemetry"
 	"github.com/soulteary/yunqi/internal/types"
 )
 
@@ -156,6 +157,7 @@ func HandleMultiChannelFailoverWithSelectionFilter(
 	// 生成服务端逻辑请求关联 ID（贯穿所有渠道尝试和 trace）
 	correlationID := autopilot.GenerateRequestCorrelationID()
 	httpbridge.SetValue(c, "ccx.request_correlation_id", correlationID)
+	telemetry.LinkInternal(httpbridge.Request(c).Context(), correlationID, "")
 
 	// 该外壳是 route-aware 调用方：失败集合只按物理路由记录，避免不同 kind
 	// 的相同 index 相互污染。旧 SelectChannel/SelectionOptions 调用方仍可显式传 FailedChannels。

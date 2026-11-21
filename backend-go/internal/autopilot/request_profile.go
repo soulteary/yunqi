@@ -5,6 +5,7 @@ package autopilot
 // RequestProfile 是每次请求在进入调度器前生成的画像，不持久化。
 // 聚合了请求特征（ClassifierInput）和分类结果（TaskClass/TaskDomain）。
 type RequestProfile struct {
+	OTLPTraceID string `json:"-"`
 	// ── 来自请求（脱敏，对应 ClassifierInput）──
 	Model       string         // 请求的目标模型
 	ChannelKind string         // messages | chat | responses | gemini | images | vectors

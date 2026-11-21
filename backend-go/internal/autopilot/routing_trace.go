@@ -107,7 +107,8 @@ type RoutingCandidate struct {
 // 设计文档 P1.4：所有真实或 dry-run 路由都输出结构化 trace。
 // 只记录解释性字段，不记录明文 prompt、密钥、敏感 header 或 multipart。
 type RoutingDecisionTrace struct {
-	TraceUID string `json:"traceUid"`
+	OTLPTraceID string `json:"otlpTraceId,omitempty"`
+	TraceUID    string `json:"traceUid"`
 
 	// ── v2 身份与版本（§3.1）──
 	SchemaVersion        int    `json:"schemaVersion"`
@@ -429,7 +430,7 @@ func (s *TraceStore) loadRecent() error {
 		       prompt_hash, candidates_json,
 		       outcome_recorded, outcome, success, channel_fallback,
 		       status_code, request_duration_ms, first_byte_latency_ms, completed_at,
-		       created_at
+		       created_at, details_json
 		FROM autopilot_routing_traces
 		ORDER BY created_at DESC
 		LIMIT ?`, traceMaxRecords)
@@ -467,7 +468,7 @@ func scanTraceRow(rows *sql.Rows) (*RoutingDecisionTrace, error) {
 	var t RoutingDecisionTrace
 	var matchInt, fallbackInt, outcomeRecordedInt, successInt, channelFallbackInt int
 	var createdAt, completedAt string
-	var candidatesJSON string
+	var candidatesJSON, detailsJSON string
 
 	err := rows.Scan(
 		&t.TraceUID, &t.RequestKind, &t.TaskClass, &t.TaskDomain,
@@ -477,12 +478,19 @@ func scanTraceRow(rows *sql.Rows) (*RoutingDecisionTrace, error) {
 		&t.PromptHash, &candidatesJSON,
 		&outcomeRecordedInt, &t.Outcome, &successInt, &channelFallbackInt,
 		&t.StatusCode, &t.RequestDurationMs, &t.FirstByteLatencyMs, &completedAt,
-		&createdAt,
+		&createdAt, &detailsJSON,
 	)
 	if err != nil {
 		return nil, err
 	}
 
+	var metadata struct {
+		OTLPTraceID   string `json:"otlpTraceId"`
+		SchemaVersion int    `json:"schemaVersion"`
+	}
+	_ = json.Unmarshal([]byte(detailsJSON), &metadata)
+	t.OTLPTraceID = metadata.OTLPTraceID
+	t.SchemaVersion = metadata.SchemaVersion
 	t.Match = matchInt != 0
 	t.FallbackUsed = fallbackInt != 0
 	t.OutcomeRecorded = outcomeRecordedInt != 0
