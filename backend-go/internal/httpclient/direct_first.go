@@ -1,6 +1,7 @@
 package httpclient
 
 import (
+	"errors"
 	"log"
 	"net/http"
 
@@ -34,6 +35,9 @@ type directFirstRoundTripper struct {
 // RoundTrip 实现 http.RoundTripper。
 func (t *directFirstRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	resp, err := t.direct.RoundTrip(req)
+	if errors.Is(err, errMetadataDestination) {
+		return nil, err
+	}
 	if err == nil && !isProxyFallbackStatus(resp.StatusCode) {
 		return resp, nil
 	}

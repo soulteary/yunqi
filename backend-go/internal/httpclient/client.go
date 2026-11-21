@@ -81,7 +81,7 @@ func (cm *ClientManager) getStandardClient(timeout time.Duration, responseHeader
 	applyProxy(transport, proxyAddr)
 
 	client := &http.Client{
-		Transport: transport,
+		Transport: protectMetadataTransport(transport, proxyAddr != ""),
 		Timeout:   timeout,
 	}
 
@@ -94,6 +94,7 @@ func (cm *ClientManager) getStandardClient(timeout time.Duration, responseHeader
 // buildTransport 构造标准/流式 transport；proxyAddr 经 applyProxy 注入（空=直连）。
 func buildTransport(stream bool, responseHeaderTimeout time.Duration, insecure bool) *http.Transport {
 	transport := &http.Transport{
+		DialContext:           newMetadataSafeDialer().DialContext,
 		MaxIdleConns:          100,
 		MaxIdleConnsPerHost:   10,
 		IdleConnTimeout:       90 * time.Second,
@@ -159,7 +160,7 @@ func (cm *ClientManager) GetStreamClientWithResponseHeaderTimeout(responseHeader
 	applyProxy(transport, proxyAddr)
 
 	client := &http.Client{
-		Transport: transport,
+		Transport: protectMetadataTransport(transport, proxyAddr != ""),
 		Timeout:   0, // 流式请求无超时
 	}
 
@@ -268,7 +269,7 @@ func (cm *ClientManager) NewClient(opts ClientOptions) *http.Client {
 		timeout = 0 // 流式请求无整体超时
 	}
 	return &http.Client{
-		Transport: &directFirstRoundTripper{direct: direct, proxied: proxied, proxyURL: opts.ProxyURL},
+		Transport: &directFirstRoundTripper{direct: protectMetadataTransport(direct, false), proxied: protectMetadataTransport(proxied, true), proxyURL: opts.ProxyURL},
 		Timeout:   timeout,
 	}
 }
@@ -302,7 +303,7 @@ func (cm *ClientManager) getDirectFirstClient(opts ClientOptions) *http.Client {
 		timeout = 0 // 流式请求无整体超时
 	}
 	client := &http.Client{
-		Transport: &directFirstRoundTripper{direct: direct, proxied: proxied, proxyURL: opts.ProxyURL},
+		Transport: &directFirstRoundTripper{direct: protectMetadataTransport(direct, false), proxied: protectMetadataTransport(proxied, true), proxyURL: opts.ProxyURL},
 		Timeout:   timeout,
 	}
 	cm.clients[key] = client
