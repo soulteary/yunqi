@@ -17,6 +17,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/httpbridge"
+	"github.com/soulteary/yunqi/internal/httpclient"
 	"github.com/soulteary/yunqi/internal/providers"
 
 	"github.com/soulteary/yunqi/internal/errutil"
@@ -154,11 +155,11 @@ func NewABTestSampler(store *ABTestStore, configFn func() ABTestSamplerConfig) *
 		config: configFn,
 		client: &http.Client{
 			Timeout: 30 * time.Second,
-			Transport: &http.Transport{
+			Transport: httpclient.DefaultOutboundTransport(&http.Transport{
 				MaxIdleConns:        10,
 				MaxIdleConnsPerHost: 2,
 				IdleConnTimeout:     90 * time.Second,
-			},
+			}),
 		},
 		timeFn: time.Now,
 	}
