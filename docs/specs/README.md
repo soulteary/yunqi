@@ -88,7 +88,7 @@ Channels   (Claude/OpenAI/Gemini/...)
 | quota-truth-scheduling.md | ✅ 完成 | 2026-09-01 落地：配额包+SmartRouter评分+scheduler沉底+前端真相列，对应 omniroute §2 方向 A |
 | route-preview.md | ✅ 完成 | 2026-09-01 落地，v3.0.x：请求体直喂路由预演、两层对齐、前端 DiagnosePanel 升级 |
 
-> `phase3c-handoff.md` 为 2026-08-11 的历史交接快照（任务已全部完成），不作为现状参考。
+> 原设计、Phase 3c 交接快照和已完成任务已移出文档站，保存在[仓库历史归档](https://github.com/soulteary/yunqi/tree/main/archive)。未完成事项集中在[TODO](https://github.com/soulteary/yunqi/blob/main/TODO.md)和下方待补充章节；历史勾选状态不作为现状依据。
 
 ## 待补充
 

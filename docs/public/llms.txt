@@ -32,6 +32,8 @@ Yunqi provides unified proxy entry, built-in web admin, channel orchestration, f
 
 ## Advanced
 
+- [API and Authentication](https://soulteary.github.io/yunqi/en/guide/api): Proxy and admin credentials, protocol entry points, and JSON-body key mutations
+
 - [Architecture](https://soulteary.github.io/yunqi/en/guide/architecture): System architecture and design patterns
 - [Development](https://soulteary.github.io/yunqi/en/guide/development): Development setup and workflow
 - [Release](https://soulteary.github.io/yunqi/en/guide/release): Release process and versioning

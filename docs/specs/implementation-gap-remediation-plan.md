@@ -129,7 +129,7 @@ scheduler 渠道级过滤、keypool 候选过滤、持久限制和请求结果�
 - `ToolUseNeed`、`VisionNeed`、`DocumentNeed`、`SeverityClassNeed`；
 - `EstTokens`、`ContextNeed` 和 vectors 的 embedding dimension（如请求携带）。
 
-若部分真实画像函数因包依赖无法直接复用，应抽到不依赖 Gin/handlers 的叶子包或 autopilot
+若部分真实画像函数因包依赖无法直接复用，应抽到不依赖 HTTP 框架/handlers 的叶子包或 autopilot
 纯函数中，由真实入口和 preview 共用；禁止继续维护两份逐渐漂移的复制实现。
 
 ### C2. 提供无 trace 的计划计算入口（R2）

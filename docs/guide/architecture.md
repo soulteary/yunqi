@@ -135,6 +135,18 @@ shared/model-registry/ccx_model_registry.json
 
 Vectors 的 `/v1/embeddings` 在存在 `embeddingCapabilities` 元数据时会启用严格兼容过滤：候选渠道先按客户端原始 `model` 命中 `supportedModels`，再按各渠道 `modelMapping` 后的实际上游模型解析 Embedding 兼容元数据。fallback 只会在相同 `embeddingSpaceId`（未配置时使用实际模型名）、有效维度和归一化语义的候选之间发生；被过滤掉的候选不会发送上游请求，也不会计入失败或熔断指标。完全没有 Embedding 元数据的旧配置继续保持原有调度行为。
 
+### 调度优先级链路
+
+调度器在候选资格过滤后按以下优先级执行，命中后短路：
+
+1. 驾驶舱手动覆盖（Override）：按用户与协议、带 TTL 的渠道序列；全部不可用时清除并回退。
+2. 促销期（Promotion）：全局临时强制优先，首次选择可绕过健康检查尝试。
+3. Trace 亲和：按用户与协议保持粘性，但让位于更高优先级的健康渠道。
+4. 渠道 priority：按持久化优先级选择健康、active、未熔断的渠道。
+5. 降级兜底：健康候选都失败后，选择低失败率候选作最后尝试。
+
+普通置顶/reorder 持久改变 priority；Promotion 是临时全局偏好；Override 是有期限的用户级覆盖。实现以 `internal/scheduler/` 为准，Autopilot 的候选资格和 endpoint 选择见[当前规格](https://github.com/soulteary/yunqi/blob/main/docs/specs/autopilot.md)。
+
 ### 上下文路由
 
 上下文路由用于解决同一渠道组内不同实际模型上下文窗口不一致的问题。Yunqi 在调度前估算当前请求需要的上下文与输出预算，并结合下游 agent 请求模型的内置 profile 得到最小上下文窗口要求，再按渠道 `ModelMapping` 后的实际模型能力做资格过滤。该步骤只过滤不可用渠道，不改变用户在驾驶舱中设置的渠道顺序。

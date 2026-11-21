@@ -20,19 +20,9 @@ This project follows **Semantic Versioning 2.0.0**. The version format is `MAJOR
 - **MINOR**: Backwards-compatible new functionality.
 - **PATCH**: Backwards-compatible bug fixes.
 
-## Release Process
+## Release process
 
-This section is for project maintainers. Contributors typically do not need to follow these steps directly.
-
-1. **Prepare**:
-    * Ensure local `main` branch is up to date.
-    * Confirm all planned features and fixes have been merged.
-    * Run tests and build: `cd backend-go && make test && cd .. && make build`
-2. **Changelog**: Update `CHANGELOG.md` with a new version heading and categorized changes.
-3. **Version**: Update the root `VERSION` file.
-4. **Commit**: Commit `CHANGELOG.md` and `VERSION` changes with the message `chore(release): prepare for vX.Y.Z`.
-5. **Tag**: Create an annotated tag `git tag -a vX.Y.Z -m "Release vX.Y.Z"` and push to remote.
-6. **GitHub Release**: Create a Release on GitHub, copying the corresponding `CHANGELOG.md` section into the release notes.
+Maintain versions and release notes only in the root `VERSION` and `CHANGELOG.md`. Automated publishing is currently paused; the [release guide](release.md) owns restoration requirements and operator procedures. Follow the [development checks](development.md#common-verification-commands) before submitting changes.
 
 ## Coding Standards
 
@@ -68,7 +58,7 @@ The project strictly follows these software engineering principles:
 
 **Vue Frontend**:
 - **Files**: `kebab-case` (e.g., `api-service.ts`)
-- **Vue Components**: `PascalCase` (e.g., `ChannelCard.vue`)
+- **Vue Components**: `PascalCase` (e.g., `ChannelStatusBadge.vue`)
 - **Types/Interfaces**: `PascalCase`
 - **Functions**: `camelCase` (e.g., `getNextApiKey`)
 - **Constants**: `SCREAMING_SNAKE_CASE` (e.g., `DEFAULT_CONFIG`)

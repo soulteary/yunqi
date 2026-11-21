@@ -20,8 +20,7 @@ bun run preview   # 预览构建
 |------|------|
 | `App.vue` | 根组件，认证、布局、主题、能力测试入口 |
 | `ChannelOrchestration.vue` | 渠道编排主界面 |
-| `ChannelCard.vue` | 渠道卡片（状态、密钥、指标） |
-| `AddChannelModal.vue` | 添加/编辑渠道对话框（模型映射、高级选项、模型过滤等） |
+| `AddChannelModal.vue` / `EditChannelModal.vue` | 添加与编辑渠道对话框 |
 | `CapabilityTestDialog.vue` | 渠道能力测试结果对话框 |
 
 ## API 服务
@@ -125,7 +124,7 @@ const iconMap = {
 
 ## 依赖与安全检查
 
-前端以 Bun 为主包管理器，`bun.lock` 是依赖锁文件的权威来源。不要为了运行 `npm audit` 重新生成 `package-lock.json`，否则会引入重复锁文件并可能产生误报。
+前端只维护 Bun 依赖流程，`bun.lock` 是唯一前端锁文件。不要为了运行 `npm audit` 重新生成 `package-lock.json`，否则会引入重复锁文件并可能产生误报。
 
 ```bash
 bun install                                      # 安装依赖并触发 Socket 安全扫描器
@@ -134,7 +133,7 @@ bun audit --registry=https://registry.npmjs.org # 使用 npm 官方 registry 执
 
 说明：如果本地 registry 指向 `npmmirror`，直接运行 `bun audit` 可能因镜像源不支持 audit 接口而返回 404；审计时显式指定 npm 官方 registry。
 
-`pnpm install` 可作为兼容性验证，但新增或升级依赖优先使用 `bun add` / `bun update`。
+新增或升级依赖使用 `bun add` / `bun update`。文档站的 npm 锁文件属于独立依赖树，不与前端混用。
 
 ## 构建产物
 

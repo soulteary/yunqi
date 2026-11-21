@@ -106,7 +106,7 @@ bun run type-check
 bun run lint
 ```
 
-如果需要验证 pnpm 兼容性，可运行 `pnpm install`；日常开发、构建和依赖变更仍以 Bun 为准。
+前端安装和升级统一使用 Bun，提交 `frontend/bun.lock`；不再维护 pnpm 兼容锁。文档站是独立的 npm 项目，使用 `cd docs && npm ci` 安装并提交自己的 `package-lock.json`，不要在仓库根目录生成 npm 锁文件。
 
 ## Windows 环境建议
 
@@ -131,31 +131,39 @@ bun run dev
 
 ## 文件变更与重载规则
 
-### 自动热重载
+- `make dev` 使用后端 `.air.toml`：监听 Go、模板、HTML、YAML、TOML 和 `.env`；默认保存后延迟 1 秒重新编译，并可能重启开发进程。
+- `.air.toml` 的 `stop_on_error=true`，因此编译错误时不能保证旧进程继续运行。不要把热重载当作无中断部署。
+- Air 排除后端 `tmp/`、嵌入前端目录和构建产物；前端开发服务器自行处理 Vue/样式更新。
+- 渠道配置支持热重载；普通二进制运行时的环境变量变更需由部署工具安排重启，Air 模式下 `.env` 在监听范围内。
+- 自动化协作不得自行杀进程或重启服务。验证代码时优先使用独立工作副本，避免触发现有服务的 watcher。
 
-- Go 源码：`make dev` / `cd "backend-go" && make dev` 下自动重载
-- 配置文件：`backend-go/.config/config.json` 修改后自动生效
+热重载不触发时先检查 `air` 是否在 PATH、实际启动目录及 `.air.toml` 的监听/排除设置，再阅读构建错误日志。端口冲突先识别占用者，由维护者决定处理方式；不要通过强杀进程或递归修改仓库权限排障。
 
-### 需要重启
+## 代码检查与格式化
 
-- 环境变量文件：`backend-go/.env`
-- 依赖或构建配置变更
+前端配置入口是 `frontend/eslint.config.js`，使用 Flat Config、Vue 与 TypeScript 推荐规则；`eslint-config-prettier` 关闭格式冲突。ESLint 不替代 `vue-tsc` 类型检查。
+
+```bash
+(cd frontend && bun run lint)        # 代码检查
+(cd frontend && bun run lint:fix)    # 只在有意修改源码时自动修复
+(cd frontend && bun run format)      # 有意执行格式化
+(cd frontend && bun run type-check)  # 类型检查；生产构建也包含此步骤
+```
+
+特殊规则以配置文件为准。排障时避免对全仓库执行不必要的自动修复或格式化。
 
 ## 常用验证命令
 
-在提交改动前，至少执行以下检查：
+在仓库根目录执行，子目录命令使用子 shell，避免后续命令落在错误目录：
 
 ```bash
 make build
-cd "backend-go" && make test
-cd "frontend" && bun run build
+(cd backend-go && make test && go vet ./...)
+(cd frontend && bun run lint && bun run test)
+(cd docs && npm ci && npm run build)
 ```
 
-如果只改后端代码，建议额外执行：
-
-```bash
-cd "backend-go" && make lint
-```
+`make build` 已运行前端类型检查和生产构建，并将产物嵌入 Go 服务。仅改某个模块时按影响范围选择检查；没有新修改或失败时不必重复相同构建。CI 另会校验生成的渠道预置是否与源数据一致。
 
 ## 更新模型能力基准数据
 

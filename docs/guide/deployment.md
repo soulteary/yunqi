@@ -51,14 +51,4 @@ WantedBy=multi-user.target
 
 ## 环境变量
 
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `PORT` | 3000 | 服务端口 |
-| `ENV` | production | 运行环境 |
-| `PROXY_ACCESS_KEY` | - | 代理访问密钥（必填） |
-| `EXTRA_PROXY_ACCESS_KEYS` | - | 额外代理访问密钥（可选，逗号分隔；仅用于代理 API） |
-| `ADMIN_ACCESS_KEY` | - | 管理界面密钥（可选；配置额外代理密钥时必填且必须独立） |
-| `QUIET_POLLING_LOGS` | true | 静默轮询日志 |
-| `MAX_REQUEST_BODY_SIZE_MB` | 50 | 请求体大小限制 |
-
-完整环境变量列表请参考项目根目录的 `ENVIRONMENT.md`。
+配置统一见[环境变量指南](environment.md)，服务模板及 Linux、macOS、Windows 操作步骤见[服务部署指南](../service/README.md)。
