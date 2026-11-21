@@ -297,10 +297,17 @@ func TestRunRacingAttemptBothFailMergesShadowRoutes(t *testing.T) {
 	installRacingHub(t, racingCandidateList("ch_second"), racing.Behavior{MaxShadows: 1, StreamFloorMs: 30})
 
 	selection := racingPrimarySelection(t, env)
-	// 主 50ms 失败（晚于 30ms 阈值，保证影子已被派出），影子立即失败。
+	// 等待影子实际进入分支，避免机器负载较高时定时器晚于主分支完成。
+	shadowStarted := make(chan struct{})
 	branch := func(c *gin.Context, sel *scheduler.SelectionResult) common.MultiChannelAttemptResult {
 		if sel.Route.ChannelUID == "ch_first" {
-			time.Sleep(50 * time.Millisecond)
+			select {
+			case <-shadowStarted:
+			case <-time.After(5 * time.Second):
+				t.Error("等待影子分支启动超时")
+			}
+		} else {
+			defer close(shadowStarted)
 		}
 		if !common.RacingClaimClientCommit(c) {
 			return common.MultiChannelAttemptResult{Route: sel.Route, Attempted: true, LastError: common.ErrRacingSuperseded}
