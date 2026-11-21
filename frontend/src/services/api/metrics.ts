@@ -11,6 +11,10 @@ import type {
 } from '../types/metrics'
 import type { SchedulerDiagnoseRequest, SchedulerDiagnoseResponse } from '../types/routing'
 
+// A stalled poll must release the store's shared refresh promise so the next poll can recover.
+// Mutations, capability tests and other potentially long-running calls keep their existing policy.
+const DASHBOARD_TIMEOUT_MS = 30_000
+
 export function createMetricsApi(client: ApiClient) {
   return {
     // 获取渠道指标
@@ -32,12 +36,12 @@ export function createMetricsApi(client: ApiClient) {
       type: 'messages' | 'responses' | 'gemini' | 'chat' | 'images' | 'vectors' = 'messages'
     ): Promise<ChannelDashboardResponse> {
       const query = type !== 'messages' ? `?type=${type}` : ''
-      return client.request(`/messages/channels/dashboard${query}`)
+      return client.request(`/messages/channels/dashboard${query}`, {}, DASHBOARD_TIMEOUT_MS)
     },
 
     // 获取统一 LLM 渠道仪表盘，避免前端分别轮询四种协议。
     async getLlmChannelDashboard(): Promise<LlmChannelDashboardResponse> {
-      return client.request('/messages/channels/dashboard?type=llm')
+      return client.request('/messages/channels/dashboard?type=llm', {}, DASHBOARD_TIMEOUT_MS)
     },
 
     // 获取 Responses 渠道指标
