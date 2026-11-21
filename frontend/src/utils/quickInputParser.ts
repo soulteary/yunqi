@@ -173,10 +173,17 @@ export const isValidApiKey = (token: string): boolean => {
  * - 支持末尾 # 标记（用于跳过自动添加 /v1）
  */
 export const isValidUrl = (token: string): boolean => {
-  // 域名段不能以横线开头或结尾，支持末尾 # 或 / 或直接结束
-  return /^https?:\/\/[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*(:\d+)?(\/|#|$)/i.test(
-    token
-  )
+  if (!/^https?:\/\//i.test(token) || /\s/.test(token)) return false
+  try {
+    const url = new URL(token)
+    if (url.username || url.password) return false
+    // URL validates bracketed IPv6 literals and port ranges.
+    if (url.hostname.startsWith('[')) return true
+    // Preserve the existing DNS-label policy for non-IPv6 hosts.
+    return /^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*$/.test(url.hostname)
+  } catch {
+    return false
+  }
 }
 
 /**
