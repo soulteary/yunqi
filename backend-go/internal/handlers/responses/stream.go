@@ -474,7 +474,25 @@ func handleStreamSuccess(
 	reasoningCollector := thinkingcache.NewResponsesStreamCollector()
 
 	// processLine 处理单行数据（复用于缓冲行回放和后续读取），并返回转换后的 Responses 事件用于 watchdog 状态判断。
+	upstreamTerminal := false
+	nativeTerminal := ""
 	processLine := func(line string) []string {
+		upstreamTerminal = upstreamTerminal || hasUpstreamTerminalEvent(line, upstreamType)
+		if strings.TrimSpace(strings.TrimPrefix(line, "data:")) == "[DONE]" && !upstreamTerminal {
+			return nil
+		}
+		if !needConvert {
+			var event struct {
+				Type string `json:"type"`
+			}
+			raw := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+			if json.Unmarshal([]byte(raw), &event) == nil {
+				switch event.Type {
+				case "response.completed", "response.failed", "response.incomplete":
+					nativeTerminal = event.Type
+				}
+			}
+		}
 
 		if streamLoggingEnabled {
 			_, _ = logBuffer.WriteString(line + "\n")
@@ -789,6 +807,25 @@ func handleStreamSuccess(
 		}
 	}
 streamEnd:
+	if httpbridge.Request(c).Context().Err() != nil {
+		return nil, httpbridge.Request(c).Context().Err()
+	}
+	// Responses requires an explicit terminal event. EOF/[DONE] alone must not
+	// manufacture a successful response after partial, visible output.
+	if !upstreamTerminal || (scanner.Err() != nil && !completedEventSent) {
+		progress.Finish("incomplete")
+		if !clientGone {
+			event := converters.SynthesizeResponsesIncomplete(eventsSentCount+1, outputCollector.responseID, "upstream_eof")
+			if _, err := httpbridge.Writer(c).Write([]byte(event)); err == nil && flusher != nil {
+				flusher.Flush()
+			}
+		}
+		return nil, fmt.Errorf("%w: %v", common.ErrStreamUnexpectedEOF, scanner.Err())
+	}
+	if !needConvert && nativeTerminal != "response.completed" {
+		progress.Finish("incomplete")
+		return nil, fmt.Errorf("%w: %s", common.ErrStreamUnexpectedEOF, nativeTerminal)
+	}
 	progress.Finish("completed")
 
 	// 兜底：如果上游未发送终止符（如 MiniMax 不发 [DONE]），补发 response.completed
@@ -1090,4 +1127,41 @@ func writeResponsesContentText(buf *bytes.Buffer, content interface{}) {
 			writeResponsesContentText(buf, v["content"])
 		}
 	}
+}
+
+// hasUpstreamTerminalEvent recognizes protocol completion, not transport markers.
+func hasUpstreamTerminalEvent(line, protocol string) bool {
+	raw := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+	var event map[string]interface{}
+	if json.Unmarshal([]byte(raw), &event) != nil {
+		return false
+	}
+	switch protocol {
+	case "responses":
+		switch event["type"] {
+		case "response.completed", "response.failed", "response.incomplete":
+			return true
+		}
+	case "claude":
+		return event["type"] == "message_stop"
+	case "gemini":
+		candidates, _ := event["candidates"].([]interface{})
+		for _, candidate := range candidates {
+			if obj, ok := candidate.(map[string]interface{}); ok {
+				if reason, ok := obj["finishReason"].(string); ok && reason != "" {
+					return true
+				}
+			}
+		}
+	default:
+		choices, _ := event["choices"].([]interface{})
+		for _, choice := range choices {
+			if obj, ok := choice.(map[string]interface{}); ok {
+				if reason, ok := obj["finish_reason"].(string); ok && reason != "" {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
