@@ -181,7 +181,15 @@ Autopilot 是 Yunqi 的智能路由与渠道托管子系统，由 Manager + Smar
 | `handlers_newapi.go` | new-api 订阅 provision 接口 |
 | `handlers_subscription.go` | 订阅 CRUD 接口 |
 | `handlers_subscription_accounts.go` | new-api 账号管理接口 |
-| `handlers_auto_managed.go` | 通用自动托管渠道的账号/凭证/发现接口（最大文件，2994 行） |
+| `handlers_auto_managed.go` | 通用托管路由注册、依赖与请求/响应类型 |
+| `handlers_auto_managed_accounts.go` | 账号更新、重命名与删除 |
+| `handlers_auto_managed_inventory.go` | 账号清单与渠道/模型库存视图 |
+| `handlers_auto_managed_keys.go` | 新增 Key 校验与失败降级 |
+| `handlers_auto_managed_consoles.go` | DeepSeek 余额及 MiMo/Kimi/Compshare 控制台凭据 |
+| `handlers_auto_managed_volcengine.go` | 火山引擎 AK 绑定与用量刷新 |
+| `handlers_auto_managed_provider_add.go` | 提供商识别与托管账号添加 |
+| `handlers_auto_managed_custom_add.go` | 自定义托管账号添加与凭据追加 |
+| `handlers_auto_managed_discovery.go` | 渠道发现触发、状态与协议辅助逻辑 |
 | `handlers_billing_terms.go` | 订阅计费条款接口 |
 | `handlers_exchange_rates.go` | 多跳汇率接口 |
 | `handlers_key_multiplier.go` | Key 倍率管理接口 |
@@ -216,6 +224,9 @@ Autopilot 是 Yunqi 的智能路由与渠道托管子系统，由 Manager + Smar
 | 工具 | 用途 |
 |---|---|
 | `benchmark-report` | 独立的渠道无关 benchmark 场景选型报告 CLI，不依赖运行中的后端（详见 §5.7） |
+| `stream_verify` | Messages SSE 事件与 Token 诊断，可选对比上游；会真实调用，需显式指定模型 |
+
+从仓库根目录执行 `cd backend-go && go build -o stream_verify ./cmd/stream_verify`，再以 `PROXY_ACCESS_KEY` 环境变量提供密钥，运行 `./stream_verify -proxy http://localhost:3000 -model YOUR_MODEL`。`-upstream` 可配合 `UPSTREAM_API_KEY` 对比上游。工具仅验证 Messages 流式文本响应；诊断请求会消耗额度，默认不输出完整响应，`-v` 才显示详细内容。退出码 0 表示通过（双端比较要求内容和含缓存的 Token 统计一致），1 表示请求/流验证/比较失败，2 表示参数解析失败。流分块数量或延迟差异仅作诊断展示。
 
 ## 3. 核心结构体
 

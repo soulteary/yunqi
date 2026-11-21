@@ -16,7 +16,6 @@
 | AutopilotTraceDetailDialog | `frontend/src/components/AutopilotTraceDetailDialog.vue` | Dialog |
 | UpdateDialog | `frontend/src/components/UpdateDialog.vue` | Dialog |
 | UserGuideDialog | `frontend/src/components/UserGuideDialog.vue` | Dialog（多步引导） |
-| NewApiQuickAddDialog | `frontend/src/components/subscriptions/NewApiQuickAddDialog.vue` | Dialog（包裹表单） |
 | AutopilotModePanel | `frontend/src/components/AutopilotModePanel.vue` | Panel（内嵌卡片，非弹窗） |
 | AutopilotDiagnosePanel | `frontend/src/components/AutopilotDiagnosePanel.vue` | Panel（内嵌卡片，非弹窗） |
 | NewApiAccountPanel | `frontend/src/components/edit-channel/NewApiAccountPanel.vue` | Panel（EditChannelModal 内区块） |
@@ -138,7 +137,7 @@
 - 主要字段：provider `v-select`（保持后端模板顺序，末尾「new-api 通用接入」与「自定义」；**不按当前协议 tab 过滤**——任意 tab 下拉均显示全部 provider，fc7cc04f）、多 baseURL 输入（`recognizedBaseUrls` 识别提示）、多 apiKey 输入（显隐切换）、自定义模式**代理 URL 输入（可选，`mdi-vpn` 前置图标，随 `discoverFast`/`autoAddChannel` 透传，provider 模式不传）**、故障转移开关、自动生成渠道名预览、重复渠道 alert、提交错误 alert、创建中进度卡。
 - 校验/状态：`isQuickFormValid`（provider 模式仅需 key；自定义需 baseUrls+key）；`submitting`、`submitError`、`providerTemplatesLoading`。
 - 后端调用：`getProviderTemplates`、自定义模式 `discoverFast` → `autoAddChannel`；provider 模式直接 `autoAddChannel({providerId, apiKeys, kind: provider.channelKind})`（按 provider 自身声明的 channelKind 提交，自动创建该 provider 支持的全部渠道，避免 tab 与 provider 能力不匹配导致 400）。
-- 联动：选中 `__new_api__` → 打开 `NewApiQuickAddDialog`，其 `@created` → `emit('added', channelIndex)`。
+- 联动：选择 new-api 后在当前快速添加面板内嵌 `NewApiSubscriptionForm`（`auto-provision`），其 `@created` 经 `onNewApiCreated` → `emit('added', channelIndex)`；不另开对话框。
 
 布局示意图（内嵌表单，承载于 AddChannelModal 快速模式，自身非对话框）：
 
@@ -160,14 +159,14 @@
 └──────────────────────────────────────────────────────┘  无底部按钮，提交由父级「创建渠道」触发
 ```
 
-## 4. NewApiSubscriptionForm + NewApiQuickAddDialog（new-api 两步接入）
+## 4. NewApiSubscriptionForm（new-api 内联两步接入）
 
-- 路径：`frontend/src/components/NewApiSubscriptionForm.vue`、`frontend/src/components/subscriptions/NewApiQuickAddDialog.vue`
+- 路径：`frontend/src/components/NewApiSubscriptionForm.vue`，由 `QuickAddChannelForm` 或 `SubscriptionsView` 内嵌。
 - 用途：验证 new-api 实例 → 接入订阅并落地渠道。两步流程（step1 验证、step2 接入）。
 - 触发入口：
-  - Dialog 版：`QuickAddChannelForm` 选 new-api 时 `openDialog()`。
-  - 内联版：`SubscriptionsView.vue:25` provider 选择区直接内嵌 `NewApiSubscriptionForm`。
-- NewApiQuickAddDialog props/emits：emits `created(result)`、`error(message)`；内部 `dialogVisible`，`handleCreated` 关闭对话框并上抛。
+  - 快速添加：`QuickAddChannelForm` 选 new-api 时就地切换表单，传入 `auto-provision` 与默认渠道类型。
+  - 订阅中心：`SubscriptionsView` provider 选择区直接内嵌同一表单。
+- 表单 emits：`created(result)`、`error(message)`；事件交由宿主处理，不维护独立对话框显隐。
 - NewApiSubscriptionForm 字段：
   - step1 验证 `verifyForm`：baseUrl、accessToken(password)、userId、authTokenMode(bearer/raw)、displayName、`proxyUrl`（可选）+ `proxyPreferDirect` 开关（876eaf7e，verify/provision 均透传）；验证后展示账户预览（username/quota/usedQuota/可用模型数/分组倍率 chips）。
   - step2 接入 `provisionForm`：subscriptionUid、channelKind(messages/chat/…)、channelName、`maxGroupMultiplier`(number)、notes；分组资格 alert（blockedGroupCount / eligibleGroupItems / groupFetchError / noEligibleGroups）。
@@ -190,8 +189,7 @@
 │  Step2 接入: uid/kind/name/倍率…    │
 │   [资格 alert] [接入]               │
 ├───────────────────────────────────┤
-│                            [取消]   │
-└───────────────────────────────────┘  max-width 680, persistent
+└───────────────────────────────────┘  内嵌于宿主表单，无独立取消按钮/overlay
 ```
 
 ## 5. NewApiAccountPanel（EditChannelModal accounts 区）
@@ -560,7 +558,7 @@ linkDialog 绑定渠道（560）:            syncDialog 同步结果（760）:
 
 ```
 App.vue ─┬─ openAddChannelModal ─▶ AddChannelModal
-         │        └─(quick模式)─▶ QuickAddChannelForm ─(选new-api)─▶ NewApiQuickAddDialog ─▶ NewApiSubscriptionForm
+         │        └─(quick模式)─▶ QuickAddChannelForm ─(选new-api，内嵌)─▶ NewApiSubscriptionForm
          │                                                                      │ created
          │                                                                      ▼ 刷新渠道
          ├─ editChannel ─▶ EditChannelModal ─┬─ ApiKeyManagementSection ─▶ [分组模型排除/Key倍率 行内展开]
@@ -582,7 +580,7 @@ SubscriptionsView ─ 内嵌 NewApiSubscriptionForm；billingDialog / syncDialog
 
 - 状态管理：`dialogStore`（`stores/dialog.ts`）持有 `showAddChannelModal`/`showEditChannelModal`/`editingChannel`/`showAddKeyModal`/确认对话框状态 + `confirm()` Promise 化封装。
 - 快捷键：对话框普遍 Esc 关闭、⌘/Ctrl+Enter 提交。
-- 多级对话框：对话框之上再展开新对话框时（如 ChannelLogsDialog → AutopilotTraceDetailDialog），新对话框必须自带默认确认/取消快捷键（Esc 取消、⌘/Ctrl+Enter 确认），不得要求用户先关闭上层再操作底层；快捷键只作用于最上层对话框——全局 keydown 监听（`window`/`document`）须先确认自身处于栈顶（不存在更上层已打开的对话框）才响应，禁止一次按键同时关闭或提交多层对话框。实现：`frontend/src/composables/useDialogHotkeys.ts` 全局快捷键栈，各对话框经 `useDialogHotkeys(activeRef, { esc, confirm, plainEnter })` 注册（栈序=打开顺序，仅栈顶分发，`flush: 'sync'` 即开即用）；非 persistent 对话框的 Esc 关闭由 Vuetify overlay 栈原生处理（VOverlay `globalTop` 仅关最上层），persistent 或需自定义关闭语义的对话框才注册 `esc` 回调。已接线：AddChannelModal、EditChannelModal、熔断器/添加密钥/通用确认（useAppController）；分组模型排除/Key 倍率均已行内展开、不注册对话框快捷键（原分组模型弹窗的 ⌘Enter 提交随弹窗移除）、NewApiQuickAddDialog（persistent，Esc 取消 + ⌘Enter 触发表单当前步骤）、billingDialog/linkDialog（⌘Enter 保存/绑定）、UserGuideDialog（裸 Enter 前进）；ChannelLogsDialog/CapabilityTestDialog 的冗余自建 Esc 监听已删除，交回 Vuetify 原生。
+- 多级对话框：对话框之上再展开新对话框时（如 ChannelLogsDialog → AutopilotTraceDetailDialog），新对话框必须自带默认确认/取消快捷键（Esc 取消、⌘/Ctrl+Enter 确认），不得要求用户先关闭上层再操作底层；快捷键只作用于最上层对话框——全局 keydown 监听（`window`/`document`）须先确认自身处于栈顶（不存在更上层已打开的对话框）才响应，禁止一次按键同时关闭或提交多层对话框。实现：`frontend/src/composables/useDialogHotkeys.ts` 全局快捷键栈，各对话框经 `useDialogHotkeys(activeRef, { esc, confirm, plainEnter })` 注册（栈序=打开顺序，仅栈顶分发，`flush: 'sync'` 即开即用）；非 persistent 对话框的 Esc 关闭由 Vuetify overlay 栈原生处理（VOverlay `globalTop` 仅关最上层），persistent 或需自定义关闭语义的对话框才注册 `esc` 回调。已接线：AddChannelModal、EditChannelModal、熔断器/添加密钥/通用确认（useAppController）；分组模型排除/Key 倍率均已行内展开、不注册对话框快捷键（原分组模型弹窗的 ⌘Enter 提交随弹窗移除）、billingDialog/linkDialog（⌘Enter 保存/绑定）、UserGuideDialog（裸 Enter 前进）；ChannelLogsDialog/CapabilityTestDialog 的冗余自建 Esc 监听已删除，交回 Vuetify 原生。
 - 后端交互统一经 `services/api.ts` 与 `services/autopilot-api.ts`。
 - 校验模式：本地 computed 校验 + Vuetify `formRef.validate()` 规则 + 内联 error alert。
 

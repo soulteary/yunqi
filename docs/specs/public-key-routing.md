@@ -367,9 +367,8 @@ ccx_opportunistic_saved_cost_usd_total
 | SmartRouter 代表成本 | `backend-go/internal/autopilot/smart_router.go` | 按可用 Key 最小有效成本聚合，保留 `0` |
 | FastDecay 投影 | `backend-go/internal/autopilot/fast_decay.go` | `PoolTagTemp` 按 opportunistic 投影 |
 | Trace 字段 | `backend-go/internal/handlers/common/autopilot_outcome.go` | `consumptionPolicy`、`configuredCostMultiplier` 已补齐 |
-| Web UI | `frontend/src/components/edit-channel/ApiKeyManagementSection.vue`、`*_test.ts` | 消耗策略选择、快捷动作、chip 展示 |
-| Desktop UI | `desktop/frontend/src/components/console/channel-edit/AuthPanel.vue` | 消耗策略选择、标记为 opportunistic |
-| 公共类型 | `frontend/src/services/api-types.ts`、`desktop/frontend/src/services/admin-api.ts` | 类型已对齐 |
+| Web UI | `frontend/src/features/channels/api-keys/ApiKeyManagementSection.vue`、`frontend/src/components/edit-channel/ApiKeyManagementSection.test.ts` | 消耗策略选择、快捷动作、chip 展示 |
+| 公共类型 | `frontend/src/services/api-types.ts` | Web API 公共类型入口 |
 
 ### 9.2 仍需补充的运营能力
 

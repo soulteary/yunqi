@@ -1,9 +1,10 @@
 # 忽略编译产物
 dist/
 *.exe
-ccx
-ccx-*
-stream_verify
+/yunqi
+/ccx
+/ccx-*
+/stream_verify
 
 # 忽略前端资源（会在构建时复制）
 frontend/

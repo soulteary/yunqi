@@ -87,8 +87,8 @@ make deps
 
 Details:
 - `make dev`: Uses Air for hot-reload
-- `make run`: Copies frontend build artifacts then runs directly
-- `make build`: Builds production binary to `dist/`
+- `make run`: Validates/builds and embeds the frontend through the shared content cache, then runs the backend
+- `make build`: Validates/builds and embeds the frontend, then builds the production binary to the root `dist/` directory
 - `make test`: Runs all Go tests
 - `make test-cover`: Generates a coverage report
 
@@ -163,7 +163,7 @@ make build
 (cd docs && npm ci && npm run build)
 ```
 
-`make build` already checks frontend types, builds the production frontend and embeds it into the Go service. Select checks appropriate to the changed modules; do not repeat unchanged builds without a new failure or concern. CI also verifies generated channel presets against their sources.
+`make build` already checks frontend types, builds the production frontend and embeds it into the Go service. Select checks appropriate to the changed modules; do not repeat unchanged builds without a new failure or concern. CI runs the Node script regression tests and checks all shared generated consumers (frontend presets, backend embedded JSON, published shards, indexes and checksums). Regenerate with `node scripts/generate-preset-manifest.mjs`; use `--check` for read-only validation.
 
 ## Local Access Points
 
@@ -222,3 +222,7 @@ make dev
 ```bash
 make build
 ```
+
+### Keep compatibility learning isolated in tests
+
+Protocol handler tests use an in-memory shared compatibility cache. Persistence tests must explicitly use a path under `t.TempDir()`. Do not create or commit `.config/channel_compat.json` beneath source packages; it is runtime state, not a fixture.
