@@ -21,6 +21,7 @@ import (
 	"github.com/soulteary/yunqi/internal/middleware"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/session"
+	"github.com/soulteary/yunqi/internal/telemetry"
 	"github.com/soulteary/yunqi/internal/utils"
 )
 
@@ -45,6 +46,7 @@ func WebSocketHandler(
 ) fiber.Handler {
 	httpHandler := Handler(envCfg, cfgManager, sessionManager, channelScheduler)
 	bridgeRouter := httpbridge.NewApp()
+	bridgeRouter.Use(telemetry.BridgeMiddleware())
 	bridgeRouter.Use(middleware.ProxyAdmissionMiddleware(envCfg))
 	bridgeRouter.Post("/v1/responses", httpHandler)
 	bridgeRouter.Post("/:routePrefix/v1/responses", httpHandler)
@@ -125,6 +127,11 @@ func normalizeWebSocketResponseCreatePayload(payload []byte) ([]byte, bool, erro
 	if err != nil {
 		return nil, false, err
 	}
+	if model, present := req["model"]; present {
+		if _, ok := model.(string); !ok {
+			return nil, false, fmt.Errorf("model must be a string")
+		}
+	}
 	warmup := req["generate"] == false
 
 	delete(req, "type")
@@ -162,6 +169,8 @@ func serveResponsesWebSocketBridgeLoop(
 	// Read independently of HTTP/SSE processing so a disconnected client cancels
 	// even an upstream that has not sent headers or content yet.
 	ctx, cancel := context.WithCancel(httpbridge.Request(c).Context())
+	var active webSocketActiveTurn
+	active.reserve() // first response.create was accepted by the handshake reader
 	messages := make(chan webSocketClientMessage, 1)
 	readerDone := make(chan struct{})
 	go func() {
@@ -172,8 +181,29 @@ func serveResponsesWebSocketBridgeLoop(
 			if err != nil {
 				return
 			}
+			if kind == websocket.TextMessage {
+				var control struct {
+					Type       string `json:"type"`
+					ResponseID string `json:"response_id"`
+				}
+				if json.Unmarshal(body, &control) == nil && (control.Type == "response.cancel" || control.Type == "response.interrupt") {
+					if active.interrupt(control.ResponseID) {
+						continue
+					}
+				}
+			}
+			reserved := false
+			if kind == websocket.TextMessage {
+				var event struct {
+					Type string `json:"type"`
+				}
+				if json.Unmarshal(body, &event) == nil && event.Type == "response.create" {
+					active.reserve()
+					reserved = true
+				}
+			}
 			select {
-			case messages <- webSocketClientMessage{kind, body}:
+			case messages <- webSocketClientMessage{kind, body, reserved}:
 			case <-ctx.Done():
 				return
 			default:
@@ -186,6 +216,7 @@ func serveResponsesWebSocketBridgeLoop(
 	}()
 	defer func() { cancel(); _ = conn.Close(); <-readerDone }()
 	payload := firstPayload
+	payloadReserved := true
 	var continuation responsesWebSocketContinuation
 	for {
 		if payload == nil {
@@ -200,18 +231,33 @@ func serveResponsesWebSocketBridgeLoop(
 				return
 			}
 			payload = message.body
+			payloadReserved = message.reserved
 		}
 
 		if ctx.Err() != nil {
 			return
 		}
+		var control struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(payload, &control) == nil && (control.Type == "response.cancel" || control.Type == "response.interrupt") {
+			payload = nil
+			_ = writeWebSocketError(conn, http.StatusBadRequest, "response_not_active", "the requested response is not active")
+			continue
+		}
 		requestBody, warmup, err := normalizeWebSocketResponseCreatePayload(payload)
 		payload = nil
+		reserved := payloadReserved
+		payloadReserved = false
 		if err != nil {
+			if reserved {
+				active.discardReservation()
+			}
 			_ = writeWebSocketError(conn, http.StatusBadRequest, "invalid_request", err.Error())
 			continue
 		}
 		if warmup {
+			active.discardReservation()
 			if err := writeWebSocketWarmupResponse(conn); err != nil {
 				return
 			}
@@ -219,7 +265,17 @@ func serveResponsesWebSocketBridgeLoop(
 		}
 
 		requestBody, input, replayable := continuation.prepare(requestBody)
-		turn, err := serveResponseCreateOverWebSocket(ctx, c, conn, bridgeRouter, requestBody)
+		turn, err := serveResponseCreateOverWebSocketWithControl(ctx, c, conn, bridgeRouter, requestBody, &active)
+		if responseID, interrupted := active.result(); interrupted && ctx.Err() == nil {
+			// The HTTP bridge cannot undo tokens already generated. Cancel upstream,
+			// discard late frames, and acknowledge before accepting the next turn.
+			event, _ := json.Marshal(map[string]interface{}{"type": "response.cancelled", "response": map[string]interface{}{"id": responseID, "status": "cancelled"}})
+			_ = conn.SetWriteDeadline(time.Now().Add(responsesWebSocketWriteTimeout))
+			if conn.WriteMessage(websocket.TextMessage, event) != nil {
+				return
+			}
+			continue
+		}
 		if err != nil {
 			if ctx.Err() != nil || errors.Is(err, context.Canceled) || isWebSocketClosed(err) {
 				return
@@ -232,8 +288,9 @@ func serveResponsesWebSocketBridgeLoop(
 }
 
 type webSocketClientMessage struct {
-	kind int
-	body []byte
+	kind     int
+	body     []byte
+	reserved bool
 }
 
 func serveResponseCreateOverWebSocket(
@@ -243,12 +300,21 @@ func serveResponseCreateOverWebSocket(
 	httpHandler http.Handler,
 	requestBody []byte,
 ) (*responsesWebSocketTurn, error) {
+	return serveResponseCreateOverWebSocketWithControl(ctx, parent, conn, httpHandler, requestBody, nil)
+}
+
+func serveResponseCreateOverWebSocketWithControl(ctx context.Context, parent fiber.Ctx, conn *websocket.Conn, httpHandler http.Handler, requestBody []byte, active *webSocketActiveTurn) (*responsesWebSocketTurn, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	if active != nil {
+		active.start(cancel)
+		defer active.finish()
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, httpbridge.Request(parent).URL.RequestURI(), bytes.NewReader(requestBody))
 	if err != nil {
 		return nil, err
 	}
+	req.RemoteAddr = httpbridge.Request(parent).RemoteAddr
 	copyWebSocketRequestHeaders(httpbridge.Request(parent).Header, req.Header)
 	req.Header.Set("Content-Type", "application/json")
 	req.ContentLength = int64(len(requestBody))
@@ -256,8 +322,12 @@ func serveResponseCreateOverWebSocket(
 	writer := newResponsesWebSocketWriter(conn)
 	writer.context = ctx
 	writer.cancel = cancel
+	writer.active = active
 	httpHandler.ServeHTTP(writer, req)
 	err = writer.finish()
+	if ctx.Err() != nil {
+		err = ctx.Err()
+	}
 	return &writer.continuation, err
 }
 
@@ -274,6 +344,8 @@ func copyWebSocketRequestHeaders(src http.Header, dst http.Header) {
 }
 
 type responsesWebSocketWriter struct {
+	observeWrite func() func()
+	active       *webSocketActiveTurn
 	conn         *websocket.Conn
 	context      context.Context
 	cancel       context.CancelFunc
@@ -297,6 +369,7 @@ func newResponsesWebSocketWriter(conn *websocket.Conn) *responsesWebSocketWriter
 	}
 }
 
+func (w *responsesWebSocketWriter) ObserveWrites(observe func() func()) { w.observeWrite = observe }
 func (w *responsesWebSocketWriter) Header() http.Header {
 	return w.header
 }
@@ -435,8 +508,20 @@ func (w *responsesWebSocketWriter) sendCurrentData() {
 		return
 	}
 
+	if w.context != nil && w.context.Err() != nil {
+		w.writeErr = w.context.Err()
+		return
+	}
+	if w.active != nil {
+		w.active.observe(data)
+	}
 	_ = w.conn.SetWriteDeadline(time.Now().Add(responsesWebSocketWriteTimeout))
+	endWrite := func() {}
+	if w.observeWrite != nil {
+		endWrite = w.observeWrite()
+	}
 	w.setWriteError(w.conn.WriteMessage(websocket.TextMessage, []byte(data)))
+	endWrite()
 	if w.writeErr == nil {
 		w.continuation.observe(data)
 	}
@@ -525,4 +610,79 @@ func closeWithWebSocketError(conn *websocket.Conn, status int, code, message str
 func isWebSocketClosed(err error) bool {
 	return websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) ||
 		errors.Is(err, net.ErrClosed)
+}
+
+// webSocketActiveTurn has no connection writes: the reader may only cancel the
+// current worker. All data frames remain serialized through that worker.
+type webSocketActiveTurn struct {
+	mu                sync.Mutex
+	cancel            context.CancelFunc
+	responseID        string
+	interrupted       bool
+	queued            int
+	queuedInterrupted bool
+}
+
+func (a *webSocketActiveTurn) start(cancel context.CancelFunc) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.cancel = cancel
+	a.responseID = ""
+	a.interrupted = a.queued > 0 && a.queuedInterrupted
+	if a.queued > 0 {
+		a.queued--
+	}
+	a.queuedInterrupted = false
+	if a.interrupted {
+		cancel()
+	}
+}
+func (a *webSocketActiveTurn) finish() { a.mu.Lock(); defer a.mu.Unlock(); a.cancel = nil }
+func (a *webSocketActiveTurn) observe(data string) {
+	var event struct {
+		Type     string `json:"type"`
+		Response struct {
+			ID string `json:"id"`
+		} `json:"response"`
+	}
+	if json.Unmarshal([]byte(data), &event) != nil || event.Response.ID == "" {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.responseID = event.Response.ID
+	switch event.Type {
+	case "response.completed", "response.failed", "response.incomplete":
+		a.cancel = nil
+	}
+}
+func (a *webSocketActiveTurn) interrupt(id string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.cancel == nil && id == "" && a.queued > 0 {
+		a.queuedInterrupted = true
+		return true
+	}
+	if a.cancel == nil || (id != "" && id != a.responseID) {
+		return false
+	}
+	a.interrupted = true
+	a.cancel()
+	return true
+}
+func (a *webSocketActiveTurn) result() (string, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.responseID, a.interrupted
+}
+
+func (a *webSocketActiveTurn) reserve() { a.mu.Lock(); defer a.mu.Unlock(); a.queued++ }
+
+func (a *webSocketActiveTurn) discardReservation() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.queued > 0 {
+		a.queued--
+	}
+	a.queuedInterrupted = false
 }

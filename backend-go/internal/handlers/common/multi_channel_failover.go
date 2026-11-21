@@ -10,6 +10,7 @@ import (
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/httpclient"
+	"github.com/soulteary/yunqi/internal/middleware"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/types"
 )
@@ -125,6 +126,29 @@ func HandleMultiChannelFailoverWithSelectionFilter(
 	if handleAllFailed == nil {
 		handleAllFailed = func(c fiber.Ctx, failoverErr *FailoverError, lastError error) {
 			HandleAllChannelsFailed(c, failoverErr, lastError, apiType)
+		}
+	}
+	if !middleware.AuthorizeProxyModel(c, model) {
+		return
+	}
+	if policy := middleware.EntryPolicy(c); policy != nil && len(policy.ChannelUIDs) > 0 {
+		originalFilter := candidateFilter
+		candidateFilter = func(channels []scheduler.ChannelInfo, upstreamFor func(scheduler.ChannelInfo) *config.UpstreamConfig, available func(scheduler.ChannelInfo, *config.UpstreamConfig) bool) ([]scheduler.ChannelInfo, error) {
+			if originalFilter != nil {
+				var err error
+				channels, err = originalFilter(channels, upstreamFor, available)
+				if err != nil {
+					return nil, err
+				}
+			}
+			result := make([]scheduler.ChannelInfo, 0, len(channels))
+			for _, ch := range channels {
+				up := upstreamFor(ch)
+				if up != nil && policy.AllowsChannel(up.ChannelUID) {
+					result = append(result, ch)
+				}
+			}
+			return result, nil
 		}
 	}
 	requestStartedAt := time.Now()

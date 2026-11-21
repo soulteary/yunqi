@@ -183,6 +183,9 @@ func (fd *GeminiFunctionDeclaration) UnmarshalJSON(data []byte) error {
 // - exclusiveMinimum / exclusiveMaximum：Gemini 不支持（boolean 形式和 number 形式均移除）
 // - const：转换为 enum: [const]
 func SanitizeGeminiToolSchema(v interface{}) interface{} {
+	if GeminiSchemaRequiresJSONSchema(v) {
+		return normalizeGeminiJSONSchema(v, false)
+	}
 	return sanitizeGeminiSchemaNode(v, false)
 }
 
@@ -245,6 +248,7 @@ func sanitizeGeminiToolSchema(v interface{}) interface{} {
 
 // GeminiGenerationConfig 生成配置
 type GeminiGenerationConfig struct {
+	ResponseJSONSchema json.RawMessage       `json:"responseJsonSchema,omitempty"`
 	Temperature        *float64              `json:"temperature,omitempty"`
 	TopP               *float64              `json:"topP,omitempty"`
 	TopK               *int                  `json:"topK,omitempty"`
@@ -333,4 +337,77 @@ type GeminiErrorDetail struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
 	Status  string `json:"status"`
+}
+
+// GeminiSchemaRequiresJSONSchema detects JSON Schema constructs the legacy
+// OpenAPI parameters field cannot express without losing union/null semantics.
+func GeminiSchemaRequiresJSONSchema(v interface{}) bool {
+	switch node := v.(type) {
+	case map[string]interface{}:
+		for key, value := range node {
+			if key == "anyOf" || key == "oneOf" || key == "$ref" {
+				return true
+			}
+			if key == "type" {
+				if value == "null" {
+					return true
+				}
+				if _, ok := value.([]interface{}); ok {
+					return true
+				}
+				if _, ok := value.([]string); ok {
+					return true
+				}
+			}
+			if GeminiSchemaRequiresJSONSchema(value) {
+				return true
+			}
+		}
+	case []interface{}:
+		for _, value := range node {
+			if GeminiSchemaRequiresJSONSchema(value) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func normalizeGeminiJSONSchema(v interface{}, properties bool) interface{} {
+	switch node := v.(type) {
+	case map[string]interface{}:
+		out := make(map[string]interface{}, len(node))
+		for key, value := range node {
+			if !properties && key == "required" && value == nil {
+				continue
+			}
+			out[key] = normalizeGeminiJSONSchema(value, !properties && key == "properties")
+		}
+		return out
+	case []interface{}:
+		out := make([]interface{}, 0, len(node))
+		for _, value := range node {
+			out = append(out, normalizeGeminiJSONSchema(value, false))
+		}
+		return out
+	default:
+		return v
+	}
+}
+
+// MarshalJSON selects the native JSON Schema field for union/null schemas.
+// Simple schemas retain the existing parameters wire shape for compatibility.
+func (fd GeminiFunctionDeclaration) MarshalJSON() ([]byte, error) {
+	out := map[string]interface{}{"name": fd.Name}
+	if fd.Description != "" {
+		out["description"] = fd.Description
+	}
+	if fd.Parameters != nil {
+		key := "parameters"
+		if GeminiSchemaRequiresJSONSchema(fd.Parameters) {
+			key = "parametersJsonSchema"
+		}
+		out[key] = fd.Parameters
+	}
+	return json.Marshal(out)
 }

@@ -399,21 +399,25 @@ func (p *GeminiProvider) ConvertToClaudeResponse(providerResp *types.ProviderRes
 
 	candidates, ok := geminiResp["candidates"].([]interface{})
 	if !ok || len(candidates) == 0 {
+		types.CaptureUsageSource(claudeResp.Usage, "gemini", providerResp.Body)
 		return claudeResp, nil
 	}
 
 	candidate, ok := candidates[0].(map[string]interface{})
 	if !ok {
+		types.CaptureUsageSource(claudeResp.Usage, "gemini", providerResp.Body)
 		return claudeResp, nil
 	}
 
 	content, ok := candidate["content"].(map[string]interface{})
 	if !ok {
+		types.CaptureUsageSource(claudeResp.Usage, "gemini", providerResp.Body)
 		return claudeResp, nil
 	}
 
 	parts, ok := content["parts"].([]interface{})
 	if !ok {
+		types.CaptureUsageSource(claudeResp.Usage, "gemini", providerResp.Body)
 		return claudeResp, nil
 	}
 
@@ -479,6 +483,7 @@ func (p *GeminiProvider) ConvertToClaudeResponse(providerResp *types.ProviderRes
 		claudeResp.Usage = usage
 	}
 
+	types.CaptureUsageSource(claudeResp.Usage, "gemini", providerResp.Body)
 	return claudeResp, nil
 }
 

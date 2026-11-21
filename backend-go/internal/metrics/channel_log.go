@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"github.com/soulteary/yunqi/internal/telemetry"
 	"sort"
 	"sync"
 	"time"
@@ -8,32 +9,34 @@ import (
 
 // ChannelLog 单次上游请求日志
 type ChannelLog struct {
-	RequestID               string    `json:"requestId"` // 请求唯一标识
-	ChannelIndex            int       `json:"-"`         // 创建时的渠道索引（不序列化，仅用于内部排查）
-	ChannelName             string    `json:"-"`         // 创建时的渠道名称（不序列化，用于共享 metricsKey 日志归属）
-	MetricsKey              string    `json:"-"`         // 指标身份键（不序列化，仅用于日志分桶）
-	Timestamp               time.Time `json:"timestamp"`
-	Model                   string    `json:"model"`                             // 实际使用的模型（重定向后）
-	OriginalModel           string    `json:"originalModel,omitempty"`           // 原始请求模型（仅当重定向时有值）
-	Operation               string    `json:"operation,omitempty"`               // Images 端点（generations/edits/variations）
-	OriginalReasoningEffort string    `json:"originalReasoningEffort,omitempty"` // 原始请求的思考强度
-	ActualReasoningEffort   string    `json:"actualReasoningEffort,omitempty"`   // 实际发往上游的思考强度
-	EffortDecisionSource    string    `json:"effortDecisionSource,omitempty"`    // autopilot | client | passthrough
-	EffortClampedByClient   bool      `json:"effortClampedByClient,omitempty"`   // true if effort clamped by client upper bound
-	MappingFailReason       string    `json:"mappingFailReason,omitempty"`       // 自动映射未命中原因（fail-open 透传原始模型时非空）
-	StatusCode              int       `json:"statusCode"`
-	DurationMs              int64     `json:"durationMs"`
-	Success                 bool      `json:"success"`
-	KeyMask                 string    `json:"keyMask"`
-	BaseURL                 string    `json:"baseUrl"`
-	ErrorInfo               string    `json:"errorInfo"`
-	IsRetry                 bool      `json:"isRetry"`
-	InterfaceType           string    `json:"interfaceType"`           // 接口类型（Messages/Responses/Gemini）
-	RequestSource           string    `json:"requestSource,omitempty"` // 请求来源（proxy/capability_test）
-	SelectionReason         string    `json:"selectionReason,omitempty"`
-	SelectionTraceSummary   string    `json:"selectionTraceSummary,omitempty"`
-	RacingRole              string    `json:"racingRole,omitempty"`   // 竞速角色（primary/shadow，空=未参与竞速）
-	RacingStatus            string    `json:"racingStatus,omitempty"` // 竞速结果（won/lost）
+	TimingSource            *telemetry.Timeline      `json:"-"`
+	PhaseTiming             *telemetry.PhaseSnapshot `json:"phaseTiming,omitempty"`
+	RequestID               string                   `json:"requestId"` // 请求唯一标识
+	ChannelIndex            int                      `json:"-"`         // 创建时的渠道索引（不序列化，仅用于内部排查）
+	ChannelName             string                   `json:"-"`         // 创建时的渠道名称（不序列化，用于共享 metricsKey 日志归属）
+	MetricsKey              string                   `json:"-"`         // 指标身份键（不序列化，仅用于日志分桶）
+	Timestamp               time.Time                `json:"timestamp"`
+	Model                   string                   `json:"model"`                             // 实际使用的模型（重定向后）
+	OriginalModel           string                   `json:"originalModel,omitempty"`           // 原始请求模型（仅当重定向时有值）
+	Operation               string                   `json:"operation,omitempty"`               // Images 端点（generations/edits/variations）
+	OriginalReasoningEffort string                   `json:"originalReasoningEffort,omitempty"` // 原始请求的思考强度
+	ActualReasoningEffort   string                   `json:"actualReasoningEffort,omitempty"`   // 实际发往上游的思考强度
+	EffortDecisionSource    string                   `json:"effortDecisionSource,omitempty"`    // autopilot | client | passthrough
+	EffortClampedByClient   bool                     `json:"effortClampedByClient,omitempty"`   // true if effort clamped by client upper bound
+	MappingFailReason       string                   `json:"mappingFailReason,omitempty"`       // 自动映射未命中原因（fail-open 透传原始模型时非空）
+	StatusCode              int                      `json:"statusCode"`
+	DurationMs              int64                    `json:"durationMs"`
+	Success                 bool                     `json:"success"`
+	KeyMask                 string                   `json:"keyMask"`
+	BaseURL                 string                   `json:"baseUrl"`
+	ErrorInfo               string                   `json:"errorInfo"`
+	IsRetry                 bool                     `json:"isRetry"`
+	InterfaceType           string                   `json:"interfaceType"`           // 接口类型（Messages/Responses/Gemini）
+	RequestSource           string                   `json:"requestSource,omitempty"` // 请求来源（proxy/capability_test）
+	SelectionReason         string                   `json:"selectionReason,omitempty"`
+	SelectionTraceSummary   string                   `json:"selectionTraceSummary,omitempty"`
+	RacingRole              string                   `json:"racingRole,omitempty"`   // 竞速角色（primary/shadow，空=未参与竞速）
+	RacingStatus            string                   `json:"racingStatus,omitempty"` // 竞速结果（won/lost）
 
 	// 请求生命周期状态
 	Status      string     `json:"status"`                // pending/connecting/first_byte/streaming/completed/failed/cancelled
@@ -218,6 +221,7 @@ func (s *ChannelLogStore) GetMergedFiltered(metricsKeys []string, includeLog fun
 				continue
 			}
 			logCopy := *logEntry
+			logCopy.PhaseTiming = logCopy.TimingSource.Snapshot()
 			merged = append(merged, &logCopy)
 		}
 	}
@@ -248,6 +252,7 @@ func copyLogsNewestFirst(src []*ChannelLog, limit int) []*ChannelLog {
 			continue
 		}
 		logCopy := *src[i]
+		logCopy.PhaseTiming = logCopy.TimingSource.Snapshot()
 		result = append(result, &logCopy)
 	}
 	if len(result) == 0 {

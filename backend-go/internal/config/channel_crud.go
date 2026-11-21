@@ -209,13 +209,20 @@ func (cm *ConfigManager) addUpstreamCommon(k ChannelKindConfig, upstream Upstrea
 
 // updateUpstreamCommonLocked 是六类 Update*Upstream 方法的通用实现。
 // 返回值 shouldResetMetrics 与旧方法语义一致。
-func (cm *ConfigManager) updateUpstreamCommonLocked(k ChannelKindConfig, index int, updates UpstreamUpdate) (bool, error) {
+func (cm *ConfigManager) updateUpstreamCommonLocked(k ChannelKindConfig, index int, updates UpstreamUpdate) (reset bool, updateErr error) {
 	slice := k.SliceRef(&cm.config)
 	if index < 0 || index >= len(*slice) {
 		return false, fmt.Errorf("无效的 %s 上游索引: %d", k.Kind.Label(), index)
 	}
 
 	originalConfig := cm.config.deepCopy()
+	// Validation and persistence failures must not publish a partially applied
+	// runtime configuration. This includes mutations to sibling routes.
+	defer func() {
+		if updateErr != nil {
+			cm.config = originalConfig
+		}
+	}()
 	upstream := &(*slice)[index]
 
 	upstream.ServiceType = normalizeUpstreamServiceType(upstream.ServiceType, k.DefaultServiceType)
@@ -346,6 +353,7 @@ func (cm *ConfigManager) updateUpstreamCommon(k ChannelKindConfig, index int, up
 // 本函数不处理 baseURL/serviceType 相关逻辑，由调用方提前处理。
 func applyUpstreamUpdateFields(upstream *UpstreamConfig, updates UpstreamUpdate) (bool, error) {
 	var shouldResetMetrics bool
+	applyChannelNullFields(upstream, updates.NullFields)
 	network := upstream.OutboundNetwork
 	proxyURL := upstream.ProxyURL
 	if updates.OutboundNetwork.Set {

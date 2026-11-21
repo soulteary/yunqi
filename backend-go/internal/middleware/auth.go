@@ -74,6 +74,11 @@ func WebAuthMiddleware(envCfg *config.EnvConfig, cfgManager *config.ConfigManage
 				return nil
 			}
 
+			authenticateAdminPrincipal(c, envCfg, providedKey)
+			if !authorizeManagementRoute(c) {
+				return nil
+			}
+
 			// 认证成功 - 记录日志(可选，根据日志级别)
 			// 如果启用了 QuietPollingLogs，则静默轮询端点日志
 			if envCfg.ShouldLog("info") && (!envCfg.QuietPollingLogs || !isPollingEndpoint(path)) {
@@ -113,7 +118,7 @@ func isDataPlaneEndpoint(method, path string) bool {
 		}
 	case http.MethodPost:
 		switch path {
-		case "/v1/messages", "/v1/messages/count_tokens", "/v1/responses", "/v1/responses/compact",
+		case "/v1/quote", "/v1/messages", "/v1/messages/count_tokens", "/v1/responses", "/v1/responses/compact",
 			"/v1/chat/completions", "/v1/images/generations", "/v1/images/edits",
 			"/v1/images/variations", "/v1/embeddings":
 			return true
@@ -228,8 +233,15 @@ func AuthenticateProxy(c fiber.Ctx, envCfg *config.EnvConfig) error {
 	if id := envCfg.ProxyPrincipalIDs[providedKey]; id != "" {
 		principalID = "principal:" + id
 	}
+	managedID, allowed := setEntryPolicy(c, envCfg, providedKey)
+	if !allowed {
+		return nil
+	}
+	if managedID != "" {
+		principalID = managedID
+	}
 	httpbridge.SetValue(c, ContextKeyPrincipalID, principalID)
-	if mask := envCfg.ProxyKeyMaskForRequest(providedKey); mask != "" {
+	if mask := envCfg.ProxyKeyMaskForRequest(providedKey); mask != "" && managedID == "" {
 		httpbridge.SetValue(c, ContextKeyProxyKeyMask, mask)
 	}
 	return nil

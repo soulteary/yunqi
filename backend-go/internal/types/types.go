@@ -34,6 +34,7 @@ type ClaudeMessage struct {
 // CacheControl Anthropic 缓存控制
 // 用于 Claude API 请求，会序列化到 JSON（仅在发送给 Anthropic 时有效）
 type CacheControl struct {
+	TTL  string `json:"ttl,omitempty"`
 	Type string `json:"type,omitempty"` // "ephemeral"
 }
 
@@ -206,10 +207,11 @@ type OpenAIChoice struct {
 // Usage 使用情况统计
 // 完整支持 Claude API 的详细 usage 字段，包括缓存 TTL 细分
 type Usage struct {
-	InputTokens              int `json:"input_tokens,omitempty"`
-	OutputTokens             int `json:"output_tokens,omitempty"`
-	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
-	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
+	Provenance               *UsageProvenance `json:"-"`
+	InputTokens              int              `json:"input_tokens,omitempty"`
+	OutputTokens             int              `json:"output_tokens,omitempty"`
+	CacheCreationInputTokens int              `json:"cache_creation_input_tokens,omitempty"`
+	CacheReadInputTokens     int              `json:"cache_read_input_tokens,omitempty"`
 	// PromptTokensTotal 仅供内部统计使用，用于保留上游返回的总 prompt tokens 口径。
 	// 例如 Responses/OpenAI 风格的 input_tokens 可能已包含 cached tokens，metrics 层会据此归一化未命中输入。
 	PromptTokensTotal int `json:"-"`

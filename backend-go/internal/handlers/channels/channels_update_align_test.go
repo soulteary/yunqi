@@ -189,3 +189,50 @@ func TestUpdatePersistsResponsesReasoningFold(t *testing.T) {
 func RegisterRoutesForTest(r *fiber.App, h *Handler) {
 	r.Put("/channels/:uid", h.Update)
 }
+
+func TestUpdateReturnsSaveReceiptAndRejectsStaleRevision(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(file, []byte(`{"chatUpstream":[{"channelUid":"receipt-test","baseUrl":"https://example.com","apiKeys":["sk-local-test"],"serviceType":"openai"}]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cm, err := config.NewConfigManager(file, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cm.Close()
+	initial := config.ChannelRevision(cm.GetConfig().ChatUpstream[0])
+	app := httpbridge.NewApp()
+	RegisterRoutesForTest(app, &Handler{cm: cm})
+	handler := httpbridge.Handler(app)
+	save := func(revision, description string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPut, "/channels/receipt-test", strings.NewReader(`{"description":"`+description+`"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("If-Match", revision)
+		res := httptest.NewRecorder()
+		handler.ServeHTTP(res, req)
+		return res
+	}
+	res := save(initial, "saved")
+	if res.Code != 200 {
+		t.Fatalf("save status=%d body=%s", res.Code, res.Body.String())
+	}
+	var receipt struct {
+		Revision  string `json:"revision"`
+		Persisted bool   `json:"persisted"`
+		Changed   bool   `json:"changed"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &receipt); err != nil {
+		t.Fatal(err)
+	}
+	if !receipt.Persisted || !receipt.Changed || receipt.Revision == initial {
+		t.Fatalf("invalid receipt %+v", receipt)
+	}
+	if strings.Contains(res.Body.String(), "sk-local-test") {
+		t.Fatal("receipt exposed credentials")
+	}
+	res = save(initial, "stale")
+	if res.Code != http.StatusConflict || cm.GetConfig().ChatUpstream[0].Description != "saved" {
+		t.Fatalf("stale save status=%d body=%s", res.Code, res.Body.String())
+	}
+}

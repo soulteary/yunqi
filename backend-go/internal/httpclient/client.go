@@ -203,7 +203,7 @@ func applyProxy(transport *http.Transport, proxyAddr string) {
 				Password: password,
 			}
 		}
-		dialer, dialErr := proxy.SOCKS5("tcp", u.Host, auth, proxy.Direct)
+		dialer, dialErr := proxy.SOCKS5("tcp", u.Host, auth, newMetadataSafeDialer())
 		if dialErr != nil {
 			redactedProxyURL := utils.RedactURLCredentials(proxyAddr)
 			log.Printf("[HttpClient-Proxy] 警告: SOCKS5 代理创建失败: %s, 错误: %v", redactedProxyURL, dialErr)

@@ -6,6 +6,8 @@
 package channels
 
 import (
+	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"strings"
@@ -55,13 +57,14 @@ func (h *Handler) List(c fiber.Ctx) error {
 // GetResponse 单渠道响应，仅附带该渠道 key 引用到的能力子集。
 type GetResponse struct {
 	Channel      config.ChannelView          `json:"channel"`
+	Revision     string                      `json:"revision,omitempty"`
 	Capabilities []config.EndpointCapability `json:"capabilities"`
 }
 
 // Get 按聚合 ChannelUID 返回单个渠道视图及其引用的能力子集。
 func (h *Handler) Get(c fiber.Ctx) error {
 	uid := httpbridge.Param(c, "uid")
-	views, caps := h.cm.GetChannelViews()
+	views, caps, revisions := h.cm.ChannelSaveViews()
 	capByUID := make(map[string]config.EndpointCapability, len(caps))
 	for _, cap := range caps {
 		capByUID[cap.CapabilityUID] = cap
@@ -70,7 +73,7 @@ func (h *Handler) Get(c fiber.Ctx) error {
 		if v.ChannelUID != uid {
 			continue
 		}
-		httpbridge.JSON(c, http.StatusOK, GetResponse{Channel: v, Capabilities: referencedCapabilities(v, capByUID)})
+		httpbridge.JSON(c, http.StatusOK, GetResponse{Channel: v, Revision: revisions[uid], Capabilities: referencedCapabilities(v, capByUID)})
 		return nil
 	}
 	httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "channel not found", "uid": uid})
@@ -171,72 +174,73 @@ func (h *Handler) Create(c fiber.Ctx) error {
 
 // UpdateRequest 统一渠道更新请求体。
 type UpdateRequest struct {
-	Kind                          *string                                   `json:"kind"`
-	Name                          *string                                   `json:"name"`
-	CopilotProtocol               *string                                   `json:"copilotProtocol"`
-	ServiceType                   *string                                   `json:"serviceType"`
-	BaseURL                       *string                                   `json:"baseUrl"`
-	BaseURLs                      []string                                  `json:"baseUrls"`
-	APIKeys                       []string                                  `json:"apiKeys"`
-	APIKeyConfigs                 []config.APIKeyConfig                     `json:"apiKeyConfigs"`
-	ModelCapabilities             map[string]config.UpstreamModelCapability `json:"modelCapabilities"`
-	SupportedModels               []string                                  `json:"supportedModels"`
-	CustomHeaders                 map[string]string                         `json:"customHeaders"`
-	ProxyURL                      *string                                   `json:"proxyUrl"`
-	ProxyPreferDirect             *bool                                     `json:"proxyPreferDirect"`
-	OutboundNetwork               config.OutboundNetworkPatch               `json:"outboundNetwork,omitempty"`
-	RoutePrefix                   *string                                   `json:"routePrefix"`
-	Status                        *string                                   `json:"status"`
-	Priority                      *int                                      `json:"priority"`
-	AuthHeader                    *string                                   `json:"authHeader"`
-	InsecureSkipVerify            *bool                                     `json:"insecureSkipVerify"`
-	RequestTimeoutMs              *int                                      `json:"requestTimeoutMs"`
-	ResponseHeaderTimeoutMs       *int                                      `json:"responseHeaderTimeoutMs"`
-	NoVision                      *bool                                     `json:"noVision"`
-	FastMode                      *bool                                     `json:"fastMode"`
-	Remark                        *string                                   `json:"remark"`
-	Description                   *string                                   `json:"description"`
-	Website                       *string                                   `json:"website"`
-	Tags                          []string                                  `json:"tags"`
-	RateLimitRPM                  *int                                      `json:"rateLimitRpm"`
-	RateLimitBurst                *int                                      `json:"rateLimitBurst"`
-	RateLimitMaxConcurrent        *int                                      `json:"rateLimitMaxConcurrent"`
-	ConvertImageURLToB64JSON      *bool                                     `json:"convertImageUrlToB64Json"`
-	StripCodexClientTools         *bool                                     `json:"stripCodexClientTools"`
-	CodexToolCompat               *bool                                     `json:"codexToolCompat"`
-	ResponsesReasoningFold        *bool                                     `json:"responsesReasoningFold"`
-	EmbeddingCapabilities         map[string]config.EmbeddingCapability     `json:"embeddingCapabilities"`
-	DefaultCapability             *config.UpstreamModelCapability           `json:"defaultCapability"`
-	AllowUnknownContext           *bool                                     `json:"allowUnknownContext"`
-	ReasoningParamStyle           *string                                   `json:"reasoningParamStyle"`
-	TextVerbosity                 *string                                   `json:"textVerbosity"`
-	Racing                        *config.ChannelRacingConfig               `json:"racing"`
-	LowQuality                    *bool                                     `json:"lowQuality"`
-	AutoBlacklistBalance          *bool                                     `json:"autoBlacklistBalance"`
-	NormalizeMetadataUserID       *bool                                     `json:"normalizeMetadataUserId"`
-	StripBillingHeader            *bool                                     `json:"stripBillingHeader"`
-	NormalizeSystemRoleToTopLevel *bool                                     `json:"normalizeSystemRoleToTopLevel"`
-	InjectDummyThoughtSignature   *bool                                     `json:"injectDummyThoughtSignature"`
-	StripThoughtSignature         *bool                                     `json:"stripThoughtSignature"`
-	StreamFirstContentTimeoutMs   *int                                      `json:"streamFirstContentTimeoutMs"`
-	StreamInactivityTimeoutMs     *int                                      `json:"streamInactivityTimeoutMs"`
-	StreamToolCallIdleTimeoutMs   *int                                      `json:"streamToolCallIdleTimeoutMs"`
-	RateLimitWindowMinutes        *int                                      `json:"rateLimitWindowMinutes"`
-	RateLimitAutoFromHeaders      *bool                                     `json:"rateLimitAutoFromHeaders"`
-	CostMultiplier                *float64                                  `json:"costMultiplier"`
-	ChannelPaymentCurrency        *string                                   `json:"channelPaymentCurrency"`
-	ChannelPaymentAmount          *float64                                  `json:"channelPaymentAmount"`
-	ChannelCreditCurrency         *string                                   `json:"channelCreditCurrency"`
-	ChannelCreditAmount           *float64                                  `json:"channelCreditAmount"`
-	MaxGroupMultiplier            *float64                                  `json:"maxGroupMultiplier"`
-	HistoricalImageTurnLimit      *int                                      `json:"historicalImageTurnLimit"`
-	BalanceCheck                  *config.ChannelBalanceCheckConfig         `json:"balanceCheck"`
+	NullFields                    []string                                  `json:"-"`
+	Kind                          *string                                   `json:"kind,omitzero"`
+	Name                          *string                                   `json:"name,omitzero"`
+	CopilotProtocol               *string                                   `json:"copilotProtocol,omitzero"`
+	ServiceType                   *string                                   `json:"serviceType,omitzero"`
+	BaseURL                       *string                                   `json:"baseUrl,omitzero"`
+	BaseURLs                      []string                                  `json:"baseUrls,omitzero"`
+	APIKeys                       []string                                  `json:"apiKeys,omitzero"`
+	APIKeyConfigs                 []config.APIKeyConfig                     `json:"apiKeyConfigs,omitzero"`
+	ModelCapabilities             map[string]config.UpstreamModelCapability `json:"modelCapabilities,omitzero"`
+	SupportedModels               []string                                  `json:"supportedModels,omitzero"`
+	CustomHeaders                 map[string]string                         `json:"customHeaders,omitzero"`
+	ProxyURL                      *string                                   `json:"proxyUrl,omitzero"`
+	ProxyPreferDirect             *bool                                     `json:"proxyPreferDirect,omitzero"`
+	OutboundNetwork               config.OutboundNetworkPatch               `json:"outboundNetwork,omitzero"`
+	RoutePrefix                   *string                                   `json:"routePrefix,omitzero"`
+	Status                        *string                                   `json:"status,omitzero"`
+	Priority                      *int                                      `json:"priority,omitzero"`
+	AuthHeader                    *string                                   `json:"authHeader,omitzero"`
+	InsecureSkipVerify            *bool                                     `json:"insecureSkipVerify,omitzero"`
+	RequestTimeoutMs              *int                                      `json:"requestTimeoutMs,omitzero"`
+	ResponseHeaderTimeoutMs       *int                                      `json:"responseHeaderTimeoutMs,omitzero"`
+	NoVision                      *bool                                     `json:"noVision,omitzero"`
+	FastMode                      *bool                                     `json:"fastMode,omitzero"`
+	Remark                        *string                                   `json:"remark,omitzero"`
+	Description                   *string                                   `json:"description,omitzero"`
+	Website                       *string                                   `json:"website,omitzero"`
+	Tags                          []string                                  `json:"tags,omitzero"`
+	RateLimitRPM                  *int                                      `json:"rateLimitRpm,omitzero"`
+	RateLimitBurst                *int                                      `json:"rateLimitBurst,omitzero"`
+	RateLimitMaxConcurrent        *int                                      `json:"rateLimitMaxConcurrent,omitzero"`
+	ConvertImageURLToB64JSON      *bool                                     `json:"convertImageUrlToB64Json,omitzero"`
+	StripCodexClientTools         *bool                                     `json:"stripCodexClientTools,omitzero"`
+	CodexToolCompat               *bool                                     `json:"codexToolCompat,omitzero"`
+	ResponsesReasoningFold        *bool                                     `json:"responsesReasoningFold,omitzero"`
+	EmbeddingCapabilities         map[string]config.EmbeddingCapability     `json:"embeddingCapabilities,omitzero"`
+	DefaultCapability             *config.UpstreamModelCapability           `json:"defaultCapability,omitzero"`
+	AllowUnknownContext           *bool                                     `json:"allowUnknownContext,omitzero"`
+	ReasoningParamStyle           *string                                   `json:"reasoningParamStyle,omitzero"`
+	TextVerbosity                 *string                                   `json:"textVerbosity,omitzero"`
+	Racing                        *config.ChannelRacingConfig               `json:"racing,omitzero"`
+	LowQuality                    *bool                                     `json:"lowQuality,omitzero"`
+	AutoBlacklistBalance          *bool                                     `json:"autoBlacklistBalance,omitzero"`
+	NormalizeMetadataUserID       *bool                                     `json:"normalizeMetadataUserId,omitzero"`
+	StripBillingHeader            *bool                                     `json:"stripBillingHeader,omitzero"`
+	NormalizeSystemRoleToTopLevel *bool                                     `json:"normalizeSystemRoleToTopLevel,omitzero"`
+	InjectDummyThoughtSignature   *bool                                     `json:"injectDummyThoughtSignature,omitzero"`
+	StripThoughtSignature         *bool                                     `json:"stripThoughtSignature,omitzero"`
+	StreamFirstContentTimeoutMs   *int                                      `json:"streamFirstContentTimeoutMs,omitzero"`
+	StreamInactivityTimeoutMs     *int                                      `json:"streamInactivityTimeoutMs,omitzero"`
+	StreamToolCallIdleTimeoutMs   *int                                      `json:"streamToolCallIdleTimeoutMs,omitzero"`
+	RateLimitWindowMinutes        *int                                      `json:"rateLimitWindowMinutes,omitzero"`
+	RateLimitAutoFromHeaders      *bool                                     `json:"rateLimitAutoFromHeaders,omitzero"`
+	CostMultiplier                *float64                                  `json:"costMultiplier,omitzero"`
+	ChannelPaymentCurrency        *string                                   `json:"channelPaymentCurrency,omitzero"`
+	ChannelPaymentAmount          *float64                                  `json:"channelPaymentAmount,omitzero"`
+	ChannelCreditCurrency         *string                                   `json:"channelCreditCurrency,omitzero"`
+	ChannelCreditAmount           *float64                                  `json:"channelCreditAmount,omitzero"`
+	MaxGroupMultiplier            *float64                                  `json:"maxGroupMultiplier,omitzero"`
+	HistoricalImageTurnLimit      *int                                      `json:"historicalImageTurnLimit,omitzero"`
+	BalanceCheck                  *config.ChannelBalanceCheckConfig         `json:"balanceCheck,omitzero"`
 }
 
 // Update 更新渠道（按 ChannelUID 寻址，内部按 kind 路由）。
 func (h *Handler) Update(c fiber.Ctx) error {
 	uid := httpbridge.Param(c, "uid")
-	loc, _, found := h.cm.FindUpstreamByUID(uid)
+	_, _, found := h.cm.FindUpstreamByUID(uid)
 	if !found {
 		httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "channel not found", "uid": uid})
 		return nil
@@ -249,6 +253,7 @@ func (h *Handler) Update(c fiber.Ctx) error {
 	}
 
 	updates := config.UpstreamUpdate{
+		NullFields:                    req.NullFields,
 		Name:                          req.Name,
 		ServiceType:                   req.ServiceType,
 		CopilotProtocol:               req.CopilotProtocol,
@@ -310,8 +315,12 @@ func (h *Handler) Update(c fiber.Ctx) error {
 		BalanceCheck:                  req.BalanceCheck,
 	}
 
-	shouldResetMetrics, err := config.UpdateUpstreamByKind(h.cm, loc, updates)
+	receipt, loc, shouldResetMetrics, err := h.cm.UpdateChannelWithReceipt(uid, httpbridge.Request(c).Header.Get("If-Match"), updates)
 	if err != nil {
+		if errors.Is(err, config.ErrChannelRevisionConflict) {
+			httpbridge.JSON(c, http.StatusConflict, fiber.Map{"error": err.Error(), "persisted": false})
+			return nil
+		}
 		log.Printf("[Channels-Update] 更新渠道失败: %v", err)
 		httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": "Failed to update channel: " + err.Error()})
 		return nil
@@ -321,7 +330,7 @@ func (h *Handler) Update(c fiber.Ctx) error {
 		kind := schedulerChannelKind(loc.Kind)
 		h.scheduler.ResetChannelMetrics(loc.Index, kind)
 	}
-	httpbridge.JSON(c, http.StatusOK, fiber.Map{"message": "渠道已更新"})
+	httpbridge.JSON(c, http.StatusOK, fiber.Map{"message": "渠道已更新", "revision": receipt.Revision, "persisted": receipt.Persisted, "changed": receipt.Changed, "changedFields": receipt.ChangedFields})
 	return nil
 }
 
@@ -450,4 +459,19 @@ func schedulerChannelKind(k config.ChannelKind) scheduler.ChannelKind {
 	default:
 		return scheduler.ChannelKindMessages
 	}
+}
+
+func (r *UpdateRequest) UnmarshalJSON(data []byte) error {
+	type wire UpdateRequest
+	var decoded wire
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	fields, err := config.ParseChannelNullFields(data)
+	if err != nil {
+		return err
+	}
+	*r = UpdateRequest(decoded)
+	r.NullFields = fields
+	return nil
 }
