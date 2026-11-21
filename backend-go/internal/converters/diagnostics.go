@@ -25,7 +25,9 @@ type ConversionDiagnostic struct {
 type ConversionLossError struct{ Report ConversionReport }
 
 func (e *ConversionLossError) Error() string {
- if len(e.Report.Diagnostics)==0{return "protocol conversion rejected: unrepresentable field"}
+	if len(e.Report.Diagnostics) == 0 {
+		return "protocol conversion rejected: unrepresentable field"
+	}
 	return fmt.Sprintf("protocol conversion rejected: %s cannot be represented without loss", e.Report.Diagnostics[len(e.Report.Diagnostics)-1].Field)
 }
 
