@@ -1,8 +1,11 @@
 package common
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -347,6 +350,8 @@ type racingRuns struct {
 	// true 时影子候选受工具调用白名单渠道间排他约束。
 	needsToolWhitelist bool
 	// clientWriter 真实客户端 writer（主分支包装前的原值），影子分支 writer 的桥接目标。
+	shadowRequest   *http.Request
+	shadowBody      []byte
 	clientWriter    httpbridge.ResponseWriter
 	runs            []*racingShadowRun
 	results         map[int]MultiChannelAttemptResult
@@ -440,6 +445,8 @@ func RunRacingAttempt(
 		thresholdMs:        thresholdMs,
 		needsToolWhitelist: BodyHasTools(GetEffectiveRequestBody(c, nil)),
 		clientWriter:       origWriter,
+		shadowRequest:      httpbridge.Request(c).Clone(httpbridge.Request(c).Context()),
+		shadowBody:         append([]byte(nil), GetEffectiveRequestBody(c, nil)...),
 		results:            make(map[int]MultiChannelAttemptResult),
 		nextBranchID:       1,
 		usedIdentities: map[string]bool{
@@ -590,7 +597,10 @@ func (r *racingRuns) startShadow(c fiber.Ctx, sel *scheduler.SelectionResult) {
 	r.gate.RegisterCancel(branchID, cancel)
 
 	shadowC := httpbridge.Copy(c)
-	httpbridge.SetRequest(shadowC, httpbridge.Request(c).WithContext(shadowCtx))
+	// Never shallow-copy the mutable primary request while its provider resets Body.
+	shadowRequest := r.shadowRequest.Clone(shadowCtx)
+	shadowRequest.Body = io.NopCloser(bytes.NewReader(r.shadowBody))
+	httpbridge.SetRequest(shadowC, shadowRequest)
 	httpbridge.
 		// gin 的 Copy() 不复制 Writer（副本 Writer 为 nil）。影子挂独立分支 writer：
 		// pre-commit 写私有缓冲，claim 赢家 Commit 时桥接到真实客户端 writer，
