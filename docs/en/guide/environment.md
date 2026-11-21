@@ -863,3 +863,11 @@ echo $ENV  # 必须是 development
 - **项目架构**: 参见 [架构说明](./architecture.md)
 - **快速开始**: 参见 [快速开始](./getting-started.md)
 - **贡献指南**: 参见 [贡献指南](./contributing.md)
+
+## Circuit thresholds do not disable protection
+
+`METRICS_FAILURE_THRESHOLD=1` means a 100% failure-rate threshold. It does not disable the separate consecutive-failure trigger (default: 5). The tuning console can adjust `windowSize` (3–100), `failureThreshold` (0.01–1), and `consecutiveFailuresThreshold` (1–100). Saved `config.json` values take precedence over the environment fallbacks and apply immediately.
+
+`CIRCUIT_BREAKER_COOLDOWN` is not a supported environment variable. Key-level runtime circuit backoff starts at 30 seconds and increases after failed probes, up to 10 minutes. Overload handling, model-level circuits, 429 cooldowns, and authentication/balance-related Key disabling have independent rules. Raising the failure-rate threshold does not turn off these protections.
+
+For temporary capacity failures on a single channel, inspect the failure class, model and next retry time in the channel logs, then choose the gentle tuning preset or adjust the consecutive-failure threshold as appropriate. There is no global switch that permanently disables every circuit and Key-disabling rule. `REQUEST_TIMEOUT` controls non-streaming upstream request duration; it is not a circuit switch.
