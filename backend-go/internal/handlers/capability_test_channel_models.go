@@ -43,6 +43,9 @@ func resolveChannelProbeModels(ctx context.Context, channel *config.UpstreamConf
 
 	// 1. 实时拉取渠道认可清单
 	fetched, fetchErr := fetchChannelRecognizedModels(ctx, channel, channelKind, cfgManager, baseURL, apiKey)
+	if httpclient.IsEgressError(fetchErr) {
+		return nil, fetchErr
+	}
 	if fetchErr != nil {
 		log.Printf("[CapabilityTest-ChannelModels] 渠道 %s 拉取模型清单失败: %v", channel.Name, fetchErr)
 	}
@@ -70,7 +73,7 @@ func resolveChannelProbeModels(ctx context.Context, channel *config.UpstreamConf
 	}
 	if len(resolved) == 0 {
 		if fetchErr != nil {
-			return nil, fmt.Errorf("拉取渠道模型列表失败: %v", fetchErr)
+			return nil, fmt.Errorf("拉取渠道模型列表失败: %w", fetchErr)
 		}
 		return nil, fmt.Errorf("渠道模型列表为空")
 	}
@@ -92,7 +95,7 @@ func fetchChannelRecognizedModels(ctx context.Context, channel *config.UpstreamC
 	}
 
 	if strings.EqualFold(strings.TrimSpace(channel.ServiceType), "copilot") {
-		_, _, details, err := capabilityCopilotResolver.Models(ctx, apiKey, channel.ProxyURL)
+		_, _, details, err := capabilityCopilotResolver.Models(httpclient.WithOutboundContext(ctx, channel), apiKey, channel.ProxyURL)
 		if err != nil {
 			return nil, err
 		}
@@ -113,6 +116,7 @@ func fetchChannelRecognizedModels(ctx context.Context, channel *config.UpstreamC
 		Insecure:          channel.InsecureSkipVerify,
 		ProxyURL:          channel.ProxyURL,
 		ProxyPreferDirect: channel.ProxyPreferDirect,
+		OutboundNetwork:   channel.OutboundNetwork,
 	})
 
 	applyAuth := func(h http.Header) {

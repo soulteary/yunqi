@@ -22,6 +22,7 @@ import (
 	"github.com/soulteary/yunqi/internal/errutil"
 	"github.com/soulteary/yunqi/internal/handlers/common"
 	"github.com/soulteary/yunqi/internal/httpbridge"
+	"github.com/soulteary/yunqi/internal/httpclient"
 	"github.com/soulteary/yunqi/internal/utils"
 )
 
@@ -139,7 +140,7 @@ func runCompatDiagnoseWithProbeModel(channel *config.UpstreamConfig, channelKind
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if probeModel == "" {
-			_, _, models, err := capabilityCopilotResolver.Models(ctx, apiKey, channel.ProxyURL)
+			_, _, models, err := capabilityCopilotResolver.Models(httpclient.WithOutboundContext(ctx, channel), apiKey, channel.ProxyURL)
 			if err != nil {
 				return CompatDiagnoseResult{Evidence: map[string]string{"copilotEndpoints": err.Error()}}
 			}
@@ -153,7 +154,7 @@ func runCompatDiagnoseWithProbeModel(channel *config.UpstreamConfig, channelKind
 				return CompatDiagnoseResult{Evidence: map[string]string{"copilotEndpoints": "no supported HTTP model endpoint"}}
 			}
 		}
-		_, _, protocol, _, err := capabilityCopilotResolver.Resolve(ctx, apiKey, channel.ProxyURL, probeModel, channel.CopilotProtocol)
+		_, _, protocol, _, err := capabilityCopilotResolver.Resolve(httpclient.WithOutboundContext(ctx, channel), apiKey, channel.ProxyURL, probeModel, channel.CopilotProtocol)
 		if err != nil {
 			return CompatDiagnoseResult{Evidence: map[string]string{"copilotEndpoints": err.Error()}}
 		}
@@ -1106,7 +1107,7 @@ func finishCopilotCompatRequest(req *http.Request, body []byte, channel *config.
 	}
 	ctx, cancel := context.WithTimeout(req.Context(), 10*time.Second)
 	defer cancel()
-	token, baseURL, _, endpoint, err := capabilityCopilotResolver.Resolve(ctx, apiKey, channel.ProxyURL, payload.Model, protocol)
+	token, baseURL, _, endpoint, err := capabilityCopilotResolver.Resolve(httpclient.WithOutboundContext(ctx, channel), apiKey, channel.ProxyURL, payload.Model, protocol)
 	if err != nil {
 		return nil, err
 	}

@@ -27,6 +27,14 @@ describe('出口设置', () => {
     iface.vm.$emit('update:modelValue', 'en1')
     expect(wrapper.emitted('update:modelValue')?.[0]).toEqual([{ interfaceName: 'en1', dns: { mode: 'bound', servers: ['127.0.0.1:53'] } }])
   })
+  it('多 DNS 地址按真实换行回显，并按空白分隔保存 IPv4 和 IPv6 地址', () => {
+    const servers = ['192.0.2.53:53', '[2001:db8::53]:53']
+    const wrapper = mountSettings({ modelValue: { proxyMode: 'direct', dns: { mode: 'bound', servers } } })
+    const dns = wrapper.findAllComponents(select).find(input => input.props('label') === 'network.dnsServers')!
+    expect(dns.props('modelValue')).toBe(servers.join('\n'))
+    dns.vm.$emit('update:modelValue', ' \t192.0.2.53:53\r\n\n[2001:db8::53]:53 \t')
+    expect(wrapper.emitted('update:modelValue')?.[0]).toEqual([{ proxyMode: 'direct', dns: { mode: 'bound', servers } }])
+  })
   it('只在显式点击后诊断，发送出口设置但不发送 Key', async () => {
     mocks.diagnoseNetwork.mockResolvedValue({ results: [{ branch: 'direct', stage: 'complete', success: true, bindingApplied: false }] })
     const wrapper = mountSettings({ baseUrl: 'https://example.com', proxyUrl: 'http://localhost:7890', modelValue: { proxyMode: 'direct' } })

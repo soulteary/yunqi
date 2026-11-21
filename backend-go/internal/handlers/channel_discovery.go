@@ -1334,7 +1334,7 @@ func selectDiscoveryModelsFetcher(channelKind, serviceType string, fetchers Chan
 
 func discoverTransientModels(ctx context.Context, channel *config.UpstreamConfig, channelKind string, apiKey string) DiscoveryModelsResult {
 	if channel.ServiceType == "copilot" {
-		_, baseURL, details, err := capabilityCopilotResolver.Models(ctx, apiKey, channel.ProxyURL)
+		_, baseURL, details, err := capabilityCopilotResolver.Models(httpclient.WithOutboundContext(ctx, channel), apiKey, channel.ProxyURL)
 		result := DiscoveryModelsResult{Source: "copilot_models", URL: baseURL + "/models", ModelDetails: details}
 		if err != nil {
 			result.Warnings = []string{err.Error()}
