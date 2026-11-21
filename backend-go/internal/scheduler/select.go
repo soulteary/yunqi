@@ -500,12 +500,18 @@ func (s *ChannelScheduler) SelectChannelWithOptions(ctx context.Context, opts Se
 	promotedChannel := s.findPromotedChannel(activeChannels, kind)
 	if promotedChannel != nil && !channelInfoFailed(*promotedChannel, failedChannels, failedRoutes) {
 		// 促销渠道存在且未失败，直接使用（不检查健康状态，让用户设置的促销渠道有机会尝试）
-		upstream := s.getUpstreamByIndex(promotedChannel.Index, kind)
-		if channelHasSelectableKey(upstream) && !s.channelInRuntimeCooldown(kind, promotedChannel.Index) {
-			failureRate := s.channelFailureRate(upstream, kind, model)
+		route := normalizedChannelRoute(*promotedChannel, kind)
+		executionKind := ChannelKind(route.Kind)
+		upstream := s.getUpstreamByRoute(route)
+		if channelHasSelectableKey(upstream) && !s.channelInRuntimeCooldownByRoute(route) {
+			attemptModel := model
+			if promotedChannel.ActualModel != "" {
+				attemptModel = promotedChannel.ActualModel
+			}
+			failureRate := s.channelFailureRate(upstream, executionKind, attemptModel)
 			prefix := kindSchedulerLogPrefix(kind)
 			log.Printf("[%s-Promotion] 促销期优先选择渠道: [%d] %s (失败率: %.1f%%, 绕过健康检查)", prefix, promotedChannel.Index, upstream.Name, failureRate*100)
-			return finish(upstream, promotedChannel.Index, "promotion_priority"), nil
+			return finish(upstream, route.Index, "promotion_priority"), nil
 		} else if upstream != nil {
 			prefix := kindSchedulerLogPrefix(kind)
 			log.Printf("[%s-Promotion] 警告: 促销渠道 [%d] %s 无可用密钥，跳过", prefix, promotedChannel.Index, upstream.Name)
