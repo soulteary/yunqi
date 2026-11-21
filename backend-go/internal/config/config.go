@@ -15,7 +15,8 @@ import (
 	"github.com/soulteary/yunqi/internal/utils"
 )
 
-// ============== 核心类型定义 =======
+// ============== 核心类型定义 ==============
+
 // UpstreamConfig 上游配置
 type UpstreamConfig struct {
 	// ResponsesClaudePrefixCache opts into one automatic multi-turn prefix breakpoint.
@@ -1531,7 +1532,8 @@ func failedKeyCacheKey(apiType, apiKey string) string {
 	return apiType + ":" + apiKey
 }
 
-// ============== 核心共享方法 =======
+// ============== 核心共享方法 ==============
+
 // GetConfig 获取配置（返回深拷贝，确保并发安全）
 func (cm *ConfigManager) GetConfig() Config {
 	cm.mu.RLock()
@@ -1976,7 +1978,8 @@ func (cm *ConfigManager) cleanupExpiredFailures() {
 	}
 }
 
-// ============== HistoricalImageTurnLimit 相关方法 =======
+// ============== HistoricalImageTurnLimit 相关方法 ==============
+
 // 历史图片轮次限制约束：
 //   - 0 表示不限制
 //   - 大于 0 时有效值范围为 2-10
@@ -2039,7 +2042,8 @@ func (cm *ConfigManager) SetOverrideTTLMinutes(minutes int) error {
 	return nil
 }
 
-// ============== API Key 拉黑相关方法 =======
+// ============== API Key 拉黑相关方法 ==============
+
 // applyKeyBlacklistLocked 在单个 upstream 上执行拉黑变更（不落盘、不发事件）。
 // 返回是否实际发生变更（target 无此 key 且未被禁用时返回 false，保持原早退语义）。
 // apiType 仅用于日志标签。
@@ -2225,7 +2229,8 @@ func (cm *ConfigManager) BlacklistKeyWithRecoverAt(apiType string, channelIndex 
 	return nil
 }
 
-// ============== 熔断器运行时配置 =======
+// ============== 熔断器运行时配置 ==============
+
 // GetCircuitBreakerConfig 获取熔断器运行时配置
 func (cm *ConfigManager) GetCircuitBreakerConfig() CircuitBreakerConfig {
 	cm.mu.RLock()
