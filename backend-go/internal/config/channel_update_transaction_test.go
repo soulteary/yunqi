@@ -86,3 +86,46 @@ func TestAtomicConfigWritePreservesOldFileOnRenameFailure(t *testing.T) {
 		t.Fatalf("temporary files leaked: %v %v", files, err)
 	}
 }
+
+func TestChannelSaveViewRevisionUsesSameSnapshot(t *testing.T) {
+	cm := &ConfigManager{config: Config{ChatUpstream: []UpstreamConfig{{ChannelUID: "route", BaseURL: "https://example.com", ServiceType: "openai", Name: "before"}}}}
+	before := ChannelRevision(cm.config.ChatUpstream[0])
+	cm.config.ChatUpstream[0].Name = "after"
+	after := ChannelRevision(cm.config.ChatUpstream[0])
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 200; i++ {
+			cm.mu.Lock()
+			cm.config.ChatUpstream[0].Name = "before"
+			cm.mu.Unlock()
+			cm.mu.Lock()
+			cm.config.ChatUpstream[0].Name = "after"
+			cm.mu.Unlock()
+		}
+	}()
+	for i := 0; i < 200; i++ {
+		views, _, versions := cm.ChannelSaveViews()
+		expected := before
+		if views[0].Name == "after" {
+			expected = after
+		}
+		if versions["route"] != expected {
+			t.Fatalf("view %q paired with different revision", views[0].Name)
+		}
+	}
+	<-done
+}
+
+func TestChannelSaveRevisionDetectsSiblingChange(t *testing.T) {
+	cm := &ConfigManager{config: Config{ChatUpstream: []UpstreamConfig{
+		{ChannelUID: "first", LogicalChannelUID: "logical", BaseURL: "https://example.com", ServiceType: "openai"},
+		{ChannelUID: "second", LogicalChannelUID: "logical", BaseURL: "https://example.com", ServiceType: "openai"},
+	}}}
+	_, _, versions := cm.ChannelSaveViews()
+	cm.config.ChatUpstream[1].Description = "changed by another administrator"
+	desc := "stale"
+	if _, _, _, err := cm.UpdateChannelWithReceipt("first", versions["first"], UpstreamUpdate{Description: &desc}); err != ErrChannelRevisionConflict {
+		t.Fatalf("sibling change accepted stale version: %v", err)
+	}
+}

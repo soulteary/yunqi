@@ -63,7 +63,7 @@ type GetResponse struct {
 // Get 按聚合 ChannelUID 返回单个渠道视图及其引用的能力子集。
 func (h *Handler) Get(c fiber.Ctx) error {
 	uid := httpbridge.Param(c, "uid")
-	views, caps := h.cm.GetChannelViews()
+	views, caps, revisions := h.cm.ChannelSaveViews()
 	capByUID := make(map[string]config.EndpointCapability, len(caps))
 	for _, cap := range caps {
 		capByUID[cap.CapabilityUID] = cap
@@ -72,7 +72,7 @@ func (h *Handler) Get(c fiber.Ctx) error {
 		if v.ChannelUID != uid {
 			continue
 		}
-		httpbridge.JSON(c, http.StatusOK, GetResponse{Channel: v, Revision: h.channelRevision(uid), Capabilities: referencedCapabilities(v, capByUID)})
+		httpbridge.JSON(c, http.StatusOK, GetResponse{Channel: v, Revision: revisions[uid], Capabilities: referencedCapabilities(v, capByUID)})
 		return nil
 	}
 	httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "channel not found", "uid": uid})
@@ -456,12 +456,4 @@ func schedulerChannelKind(k config.ChannelKind) scheduler.ChannelKind {
 	default:
 		return scheduler.ChannelKindMessages
 	}
-}
-
-func (h *Handler) channelRevision(uid string) string {
-	_, channel, found := h.cm.FindUpstreamByUID(uid)
-	if !found {
-		return ""
-	}
-	return config.ChannelRevision(*channel)
 }
