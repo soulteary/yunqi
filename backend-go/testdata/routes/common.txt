@@ -418,3 +418,11 @@ PUT /api/smart-routing/config
 PUT /api/subscriptions/:uid
 PUT /api/task-templates/:id
 PUT /api/vectors/channels/:id
+GET /api/access/me
+GET /api/access/channels
+PUT /api/access/channels/:uid/state
+GET /api/admin-credentials
+POST /api/admin-credentials
+PUT /api/admin-credentials/:id
+POST /api/admin-credentials/:id/rotate
+GET /access

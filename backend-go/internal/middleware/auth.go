@@ -74,6 +74,11 @@ func WebAuthMiddleware(envCfg *config.EnvConfig, cfgManager *config.ConfigManage
 				return nil
 			}
 
+			authenticateAdminPrincipal(c, envCfg, providedKey)
+			if !authorizeManagementRoute(c) {
+				return nil
+			}
+
 			// 认证成功 - 记录日志(可选，根据日志级别)
 			// 如果启用了 QuietPollingLogs，则静默轮询端点日志
 			if envCfg.ShouldLog("info") && (!envCfg.QuietPollingLogs || !isPollingEndpoint(path)) {
