@@ -87,3 +87,27 @@ func TestExecutorRejectsLossyFinalWireBeforeSending(t *testing.T) {
 		t.Fatalf("report missing: %v", w.Header())
 	}
 }
+
+func TestFinalWireProtocolUsesEndpointSuffixNotBaseURLPrefix(t *testing.T) {
+	for _, tc := range []struct{ path, from, target string }{
+		{"/responses-proxy/v1/messages", "responses", "messages"},
+		{"/chat/completions-proxy/v1/responses", "chat", "responses"},
+		{"/messages-proxy/v1/chat/completions", "messages", "chat"},
+		{"/responses-proxy/v1beta/models/m:streamGenerateContent", "responses", "gemini"},
+	} {
+		w := httptest.NewRecorder()
+		c, _ := httpbridge.TestContext(w)
+		httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/test", nil))
+		req, _ := http.NewRequest(http.MethodPost, "https://example.invalid"+tc.path, strings.NewReader(`{}`))
+		if err := recordFinalConversion(c, []byte(`{}`), req, tc.from, "responses"); err != nil {
+			t.Fatal(err)
+		}
+		var report converters.ConversionReport
+		if err := json.Unmarshal([]byte(w.Header().Get("X-Yunqi-Conversion")), &report); err != nil {
+			t.Fatalf("missing report for %s: %v", tc.path, err)
+		}
+		if report.Steps[0].To != tc.target {
+			t.Fatalf("path %s target=%s want=%s", tc.path, report.Steps[0].To, tc.target)
+		}
+	}
+}

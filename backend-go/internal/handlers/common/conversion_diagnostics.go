@@ -15,20 +15,37 @@ const conversionReportKey = "protocolConversionReport"
 func recordFinalConversion(c fiber.Ctx, source []byte, request *http.Request, from, target string) error {
 	from = conversionProtocol(from)
 	target = conversionProtocol(target)
-	body := []byte(`{}`)
 	if request != nil {
-		path := strings.ToLower(request.URL.Path)
+		path := strings.TrimRight(strings.ToLower(request.URL.Path), "/")
 		switch {
-		case strings.Contains(path, "chat/completions"):
+		case strings.HasSuffix(path, "/chat/completions"):
 			target = "chat"
-		case strings.Contains(path, "/responses"):
+		case strings.HasSuffix(path, "/responses"):
 			target = "responses"
-		case strings.Contains(path, "/messages"):
+		case strings.HasSuffix(path, "/messages"):
 			target = "messages"
-		case strings.Contains(path, "generatecontent"):
+		case strings.HasSuffix(path, ":generatecontent") || strings.HasSuffix(path, ":streamgeneratecontent"):
 			target = "gemini"
 		}
+	}
+	if from == target {
+		return nil
+	}
+	if from != "responses" && from != "messages" && from != "chat" && from != "gemini" {
+		return nil
+	}
+	publish := func(report converters.ConversionReport) {
+		httpbridge.SetValue(c, conversionReportKey, report)
+		if raw, err := json.Marshal(report); err == nil {
+			httpbridge.Header(c, "X-Yunqi-Conversion", string(raw))
+		}
+	}
+	body := []byte(`{}`)
+	if request != nil {
 		if request.GetBody == nil {
+			report, _ := converters.AnalyzeConversion(source, nil, from, target)
+			report.Diagnostics = []converters.ConversionDiagnostic{{Field: "request", Action: "unverified", Code: "wire_body_not_replayable"}}
+			publish(report)
 			return nil
 		}
 		reader, err := request.GetBody()
@@ -41,22 +58,14 @@ func recordFinalConversion(c fiber.Ctx, source []byte, request *http.Request, fr
 			return err
 		}
 	}
-	if from == target {
-		return nil
-	}
-	if from != "responses" && from != "messages" && from != "chat" && from != "gemini" {
-		return nil
-	}
 	report, err := converters.AnalyzeConversion(source, body, from, target)
 	if request == nil && err == nil {
-		report.Quality = "lossy"
+		if report.Quality != "unknown" {
+			report.Quality = "lossy"
+		}
 		report.Diagnostics = append(report.Diagnostics, converters.ConversionDiagnostic{Field: "request", Action: "rejected", Code: "conversion_failed"})
 	}
-	httpbridge.SetValue(c, conversionReportKey, report)
-	raw, marshalErr := json.Marshal(report)
-	if marshalErr == nil {
-		httpbridge.Header(c, "X-Yunqi-Conversion", string(raw))
-	}
+	publish(report)
 	return err
 }
 
