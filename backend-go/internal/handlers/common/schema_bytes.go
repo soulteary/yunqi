@@ -10,6 +10,9 @@ import (
 // order is part of structured output behavior and must remain provider supplied.
 func preserveOutboundSchemaBytes(source, rewritten []byte) []byte {
 	paths := []string{"response_format.json_schema.schema", "text.format.schema", "output_config.format.schema", "generationConfig.responseJsonSchema", "generationConfig.responseSchema"}
+	for i := range gjson.GetBytes(source, "functions").Array() {
+		paths = append(paths, fmt.Sprintf("functions.%d.parameters", i))
+	}
 	for i, tool := range gjson.GetBytes(source, "tools").Array() {
 		prefix := fmt.Sprintf("tools.%d.", i)
 		for _, field := range []string{"parameters", "input_schema", "function.parameters"} {

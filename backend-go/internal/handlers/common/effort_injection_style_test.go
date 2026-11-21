@@ -192,6 +192,7 @@ func TestFinalProviderEffortPreservesSchemaBytes(t *testing.T) {
 		{`{"input":[],"text":{"format":{"type":"json_schema","schema":` + schema + `}}}`, "text.format.schema", "responses", scheduler.ChannelKindResponses},
 		{`{"contents":[],"generationConfig":{"responseJsonSchema":` + schema + `}}`, "generationConfig.responseJsonSchema", "gemini", scheduler.ChannelKindGemini},
 		{`{"messages":[],"tools":[{"type":"function","function":{"name":"t","parameters":` + schema + `}}]}`, "tools.0.function.parameters", "openai", scheduler.ChannelKindChat},
+		{`{"messages":[],"functions":[{"name":"t","parameters":` + schema + `}]}`, "functions.0.parameters", "openai", scheduler.ChannelKindChat},
 	} {
 		req, err := http.NewRequest(http.MethodPost, "https://example.invalid", bytes.NewBufferString(tc.body))
 		if err != nil {
