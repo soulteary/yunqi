@@ -16,6 +16,7 @@ import (
 	"github.com/soulteary/yunqi/internal/errutil"
 	"github.com/soulteary/yunqi/internal/handlers/common"
 	"github.com/soulteary/yunqi/internal/httpbridge"
+	"github.com/soulteary/yunqi/internal/middleware"
 	"github.com/soulteary/yunqi/internal/providers"
 	"github.com/soulteary/yunqi/internal/session"
 	"github.com/soulteary/yunqi/internal/types"
@@ -371,6 +372,10 @@ func tryLocalCompactWithKey(
 	cfgManager *config.ConfigManager,
 	sessionManager *session.SessionManager,
 ) (bool, *compactError) {
+	if !middleware.AuthorizeProxyRoute(c, envCfg, extractCompactRequestModel(bodyBytes), upstream.ChannelUID) {
+		return true, nil
+	}
+
 	// 解析原始请求判断 stream
 	var originalReq types.ResponsesRequest
 	if err := json.Unmarshal(bodyBytes, &originalReq); err != nil {
@@ -389,6 +394,9 @@ func tryLocalCompactWithKey(
 
 	// 通过 provider 转换并构建上游请求
 	// （CompactModel 走同一请求模型，渠道级 ModelMapping 已退役，无需临时副本防二次映射）
+	if !middleware.AuthorizeProxyRoute(c, envCfg, extractCompactRequestModel(localBody), upstream.ChannelUID) {
+		return true, nil
+	}
 	provider := &providers.ResponsesProvider{SessionManager: sessionManager}
 	req, _, err := provider.ConvertBodyToProviderRequest(c, upstream, apiKey, localBody, "/v1/responses")
 	if err != nil {

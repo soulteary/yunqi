@@ -316,6 +316,10 @@ func tryCompactWithKey(
 	cfgManager *config.ConfigManager,
 	sessionManager *session.SessionManager,
 ) (bool, *compactError) {
+	if !middleware.AuthorizeProxyRoute(c, envCfg, extractCompactRequestModel(bodyBytes), upstream.ChannelUID) {
+		return true, nil
+	}
+
 	// 非 responses 类型上游走本地 compact
 	if needsLocalCompact(upstream) {
 		return tryLocalCompactWithKey(c, upstream, apiKey, bodyBytes, envCfg, cfgManager, sessionManager)

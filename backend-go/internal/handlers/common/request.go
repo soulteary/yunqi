@@ -19,6 +19,7 @@ import (
 	"github.com/soulteary/yunqi/internal/httpclient"
 	"github.com/soulteary/yunqi/internal/logger"
 	"github.com/soulteary/yunqi/internal/metrics"
+	"github.com/soulteary/yunqi/internal/middleware"
 	"github.com/soulteary/yunqi/internal/redaction"
 	"github.com/soulteary/yunqi/internal/utils"
 )
@@ -134,6 +135,12 @@ func ReadRequestBody(c fiber.Ctx, maxBodySize int64) ([]byte, error) {
 			httpbridge.JSON(c, 413, fiber.Map{"error": fmt.Sprintf("Request body too large after decompression, maximum size is %d MB", maxBodySize/1024/1024)})
 			return nil, fmt.Errorf("request body too large after decompression")
 		}
+	}
+	var requestModel struct {
+		Model string `json:"model"`
+	}
+	if json.Unmarshal(bodyBytes, &requestModel) == nil && requestModel.Model != "" && !middleware.AuthorizeProxyModel(c, requestModel.Model) {
+		return nil, fmt.Errorf("entry key model denied")
 	}
 	httpbridge.
 
@@ -252,6 +259,7 @@ func SendRequest(req *http.Request, upstream *config.UpstreamConfig, envCfg *con
 
 // SendRequestWithLifecycleTrace 发送 HTTP 请求到上游，并可记录连接取得与首个响应字节时间。
 func SendRequestWithLifecycleTrace(req *http.Request, upstream *config.UpstreamConfig, envCfg *config.EnvConfig, isStream bool, apiType string, lifecycleTrace *RequestLifecycleTrace) (*http.Response, error) {
+	redaction.ObserveRequest(req)
 	clientManager := httpclient.GetManager()
 
 	var client *http.Client

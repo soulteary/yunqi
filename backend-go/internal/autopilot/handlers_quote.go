@@ -11,6 +11,7 @@ import (
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/metrics"
+	"github.com/soulteary/yunqi/internal/middleware"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/tidwall/gjson"
 )
@@ -44,6 +45,9 @@ func CallerQuoteHandler(cm *config.ConfigManager, sch *scheduler.ChannelSchedule
 		}
 		if model == "" {
 			httpbridge.JSON(c, 400, fiber.Map{"error": "model_required"})
+			return nil
+		}
+		if !middleware.AuthorizeProxyModel(c, model) {
 			return nil
 		}
 		cfg := cm.GetConfig()
@@ -83,7 +87,20 @@ func CallerQuoteHandler(cm *config.ConfigManager, sch *scheduler.ChannelSchedule
 			return nil
 		}
 		profile.ContextNeed = int(input)
-		result, err := sch.SelectChannelWithOptions(ContextWithRequestProfile(httpbridge.Request(c).Context(), profile), scheduler.SelectionOptions{Kind: kind, Model: model, RoutePrefix: httpbridge.Param(c, "routePrefix"), ChannelName: httpbridge.GetHeader(c, "X-Channel"), HasImageContent: profile.VisionNeed, AgentRole: profile.AgentRole, ContextRequirement: &scheduler.ContextRequirement{InputTokens: int(input), OutputTokens: int(output), ExplicitOutputMax: outputKnown}, DryRun: true})
+		var aclFilter scheduler.CandidateFilterFunc
+		if policy := middleware.EntryPolicy(c); policy != nil && len(policy.ChannelUIDs) > 0 {
+			aclFilter = func(channels []scheduler.ChannelInfo, upstreamFor func(scheduler.ChannelInfo) *config.UpstreamConfig, _ func(scheduler.ChannelInfo, *config.UpstreamConfig) bool) ([]scheduler.ChannelInfo, error) {
+				filtered := make([]scheduler.ChannelInfo, 0, len(channels))
+				for _, ch := range channels {
+					up := upstreamFor(ch)
+					if up != nil && policy.AllowsChannel(up.ChannelUID) {
+						filtered = append(filtered, ch)
+					}
+				}
+				return filtered, nil
+			}
+		}
+		result, err := sch.SelectChannelWithOptions(ContextWithRequestProfile(httpbridge.Request(c).Context(), profile), scheduler.SelectionOptions{CandidateFilter: aclFilter, Kind: kind, Model: model, RoutePrefix: httpbridge.Param(c, "routePrefix"), ChannelName: httpbridge.GetHeader(c, "X-Channel"), HasImageContent: profile.VisionNeed, AgentRole: profile.AgentRole, ContextRequirement: &scheduler.ContextRequirement{InputTokens: int(input), OutputTokens: int(output), ExplicitOutputMax: outputKnown}, DryRun: true})
 		if err != nil || result.Upstream == nil {
 			httpbridge.JSON(c, 503, fiber.Map{"error": "no_eligible_route"})
 			return nil
@@ -91,6 +108,9 @@ func CallerQuoteHandler(cm *config.ConfigManager, sch *scheduler.ChannelSchedule
 		actualModel := model
 		if result.ExecutionModel != "" {
 			actualModel = result.ExecutionModel
+		}
+		if !middleware.AuthorizeProxyRoute(c, nil, actualModel, result.Upstream.ChannelUID) {
+			return nil
 		}
 		resolved := config.ResolveUpstreamCapability(actualModel, result.Upstream, cm.UpstreamModelCapabilitiesSnapshot())
 		cost, complete := metrics.CalculateTokenCostUSDWithPricingAndStatus(resolved.Capability.Pricing, input, output, 0, 0)

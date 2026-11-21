@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"strings"
 	"syscall"
 	"time"
 
@@ -28,8 +29,15 @@ func newMetadataSafeDialer() *net.Dialer {
 			if err != nil {
 				return err
 			}
+			policy, err := loadOutboundPolicy()
+			if err != nil {
+				return outboundPolicyError(err)
+			}
 			if utils.IsMetadataHost(host) {
 				return errMetadataDestination
+			}
+			if err := policy.validateIP(net.ParseIP(strings.Split(host, "%")[0])); err != nil {
+				return outboundPolicyError(err)
 			}
 			return nil
 		},
@@ -37,8 +45,9 @@ func newMetadataSafeDialer() *net.Dialer {
 }
 
 type metadataGuardTransport struct {
-	base   http.RoundTripper
-	lookup metadataLookup
+	base          http.RoundTripper
+	lookup        metadataLookup
+	privateLookup metadataLookup
 }
 
 func protectMetadataTransport(base http.RoundTripper, proxied bool) http.RoundTripper {
@@ -56,24 +65,38 @@ func protectMetadataTransport(base http.RoundTripper, proxied bool) http.RoundTr
 func (t *metadataGuardTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	redaction.ObserveRequest(req)
 	if req == nil || req.URL == nil {
-		return nil, errors.New("missing request URL")
+		return blockedOutboundRequest(req, errors.New("missing request URL"))
+	}
+	policy, err := loadOutboundPolicy()
+	if err != nil {
+		return blockedOutboundRequest(req, outboundPolicyError(err))
+	}
+	if err := policy.validateURL(req.URL); err != nil {
+		return blockedOutboundRequest(req, outboundPolicyError(err))
 	}
 	host := req.URL.Hostname()
-	if utils.IsMetadataHost(host) {
-		return nil, errMetadataDestination
+	lookup := t.lookup
+	if lookup == nil && policy.blockPrivate {
+		lookup = t.privateLookup
+		if lookup == nil {
+			lookup = net.DefaultResolver.LookupIPAddr
+		}
 	}
-	if t.lookup != nil {
-		ips, err := t.lookup(req.Context(), host)
+	if lookup != nil {
+		ips, err := lookup(req.Context(), host)
 		if req.Context().Err() != nil {
-			return nil, req.Context().Err()
+			return blockedOutboundRequest(req, req.Context().Err())
 		}
 		if IsEgressError(err) {
-			return nil, err
+			return blockedOutboundRequest(req, err)
+		}
+		if err != nil && policy.blockPrivate {
+			return blockedOutboundRequest(req, outboundPolicyError(errors.New("cannot resolve restricted outbound destination")))
 		}
 		if err == nil {
 			for _, ip := range ips {
-				if utils.IsMetadataIP(ip.IP) {
-					return nil, errMetadataDestination
+				if err := policy.validateIP(ip.IP); err != nil {
+					return blockedOutboundRequest(req, outboundPolicyError(err))
 				}
 			}
 		}
@@ -85,4 +108,11 @@ func (t *metadataGuardTransport) CloseIdleConnections() {
 	if closer, ok := t.base.(interface{ CloseIdleConnections() }); ok {
 		closer.CloseIdleConnections()
 	}
+}
+
+func blockedOutboundRequest(req *http.Request, err error) (*http.Response, error) {
+	if req != nil && req.Body != nil {
+		_ = req.Body.Close()
+	}
+	return nil, err
 }

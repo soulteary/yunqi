@@ -29,6 +29,7 @@ func (a *application) registerSystemRoutes(r *fiber.App) {
 }
 
 func (a *application) registerManagementRoutes(apiGroup fiber.Router) {
+	handlers.RegisterEntryKeyRoutes(apiGroup, a.cfgManager)
 	apiGroup.Get("/network/interfaces", handlers.NetworkInterfaces())
 	apiGroup.Post("/network/diagnose", handlers.DiagnoseNetwork(a.cfgManager))
 	discoveryModelFetchers := buildChannelDiscoveryModelFetchers(a.cfgManager)
