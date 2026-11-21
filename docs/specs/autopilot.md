@@ -116,7 +116,7 @@ Autopilot 是 Yunqi 的智能路由与渠道托管子系统，由 Manager + Smar
 
 | 文件 | 职责 |
 |---|---|
-| `model_resolver.go` | `ModelResolver`：手动映射 → 能力下界过滤 → 模型×effort 排序（8 档规范轴） |
+| `model_resolver.go` | `ModelResolver`：画像候选 → 能力下界过滤 → 精确/等价命中或模型×effort 排序（8 档规范轴） |
 | `model_profile.go` | `ModelProfile`、质量档（benchmark 优先 + 动态边界，见 §5.6）、能力字段、`EffortLevel` 8 档规范枚举 |
 | `model_profile_store.go` | `(channel, kind, metricsKey, model)` 维度的模型画像存储 |
 | `capability_floor.go` | `CapabilityFloor` 与 `MinQualityTierReasons` |
@@ -465,9 +465,9 @@ ContextFilter → CandidateFilter(SmartRouter) → X-Channel/ManualOverride/Prom
 
 ### 4.5 模型解析与 effort 决策
 
-`ModelResolver.ResolveModel`（`model_resolver.go:125`）：
+`ModelResolver.ResolveModel`（`model_resolver.go`）：
 
-1. **显式 modelMapping** 优先（非自动托管渠道）
+1. 统一客户端与意图的 effort 优先级；渠道级显式 `modelMapping` 已退役，不再存在手工映射短路
 2. 无 `ModelProfileStore` → fail-open
 3. 查询 `ModelProfileStore.GetModelProfiles(channelUID, kind, metricsKey)`
 4. 能力过滤：
@@ -476,6 +476,8 @@ ContextFilter → CandidateFilter(SmartRouter) → X-Channel/ManualOverride/Prom
 5. 精确/等价模型命中 → 直接返回，并应用 effort 决策
 6. 不可替换意图 → 返回原模型
 7. 否则 `rankEligibleModels`
+
+自建模型使用其真实模型 ID：已有画像且满足能力下界时可精确命中；画像为空时解析器 fail-open 返回原请求模型，不会凭空生成“别名 → 私有模型”的配置。messages/responses 入口允许按画像跨模型选优，chat/gemini/images/vectors 保持精确模型语义。`codex-auto-review` 的快捷映射是请求入口的专用配置，不是通用渠道 `modelMapping` 的恢复；映射后仍走正常调度与能力检查。
 
 `rankEligibleModels`：
 
@@ -683,8 +685,8 @@ health(40) > fastDecay(25) > successRate(20) > latency(10) > cost(5)
 - 候选粒度从渠道级变为 (渠道, 模型) 级：`RoutingCandidate`/`RoutingPlanCandidate`/`channelScoreEntry` 新增 `CandidateKey = channelUID + "|" + normalizeRoutingModelID(model)`（`smart_router.go:1318`）；单渠道候选行上限 `routingCandidateFanoutLimit = 8`。
 - AutoManaged 渠道走 `ResolveModelsAnyEndpointWithFloor`（能力过滤 + `betterRankedModel` 排序 + 截断 top8）；精确/等价命中只产该行；无精确命中且意图不允许替代（`AllowsSubstitution()` 为 false）→ 渠道不产候选行（保持 exact_model_required 不变量）。
 - 路由意图按协议划分，不再按模型名白名单放行（`model_routing_policy.go`）：messages/responses 逻辑入口对任意请求模型都是自适应（gpt-6-astra、第三方模型名与 claude/gpt-5.x 同权，精确命中仍优先短路）；chat/gemini/images/vectors 执行侧协议保持 exact_only。协议联邦同为常开行为：`ProtocolFederationConfig` 配置开关已删除，默认 Autopilot 路径无条件拉入同账号 AutoManaged 的 chat/responses sibling（执行边界 `protocolFederationExecutionKinds`，转换惩罚固定 0.35）。
-- **精确命中短路例外（运行期否决）**：精确模型在画像中命中、但被运行期负信号否决（Key 全禁用/持久限制/模型熔断/endpoint binding 判死，`exactModelRuntimeViable`）时，自适应意图渠道不短路，改产替代模型行（被否决的精确模型不再产行，`MappingReason` 带 `exact_vetoed:` 前缀）；单数版 `resolveChannelModel` 的 AutoManaged 同名承接路径同样改取最佳非精确候选。非自适应意图与手动显式映射渠道不受影响。
-- 显式/白名单渠道从 `ModelMapping` 值 + redirect 目标枚举，逐个过 `ExplainModelSupport`；枚举为空但单数版认为 supported 时回退单模型行（fail-open）。
+- **精确命中短路例外（运行期否决）**：精确模型在画像中命中、但被运行期负信号否决（Key 全禁用/持久限制/模型熔断/endpoint binding 判死，`exactModelRuntimeViable`）时，自适应意图渠道不短路，改产替代模型行（被否决的精确模型不再产行，`MappingReason` 带 `exact_vetoed:` 前缀）；单数版 `resolveChannelModel` 的 AutoManaged 同名承接路径同样改取最佳非精确候选。非自适应意图不允许因此跨模型替代。
+- 非 AutoManaged 渠道只枚举原请求模型，经 `ExplainModelSupport` 应用白名单；若枚举为空但单数版 `resolveChannelModel` 判定 supported，回退到该单模型行。不会枚举已退役的 `ModelMapping` 字典或 redirect 目标。
 - 同名承接（映射后模型名 == 请求模型名）的行 `MappedModel` 保持空——`applyModelQualityTier` 依赖 MappedModel 判空做映射质量档折算；模型名展示由前端经 CandidateKey 回退解析（`AutopilotTraceDetailDialog.vue` 加 Model 列）。
 - 返回 scheduler 的结果仍按路由键渠道级去重：同渠道一个模型行通过即保留该渠道（取最高分行），不重复占用 failover 槽位。`RoutingPlan`/`BuildPlan`（dry-run 诊断面板）同样消费 CandidateKey。
 
@@ -736,7 +738,7 @@ health(40) > fastDecay(25) > successRate(20) > latency(10) > cost(5)
 
 - 原缺陷：`DisableKeyModel` 以 autopilot 映射后的实际模型名写入黑名单，而 keypool 选 Key 阶段（`CandidatesForModelFiltered`）用映射前的请求模型名查询，自动映射渠道上持久化黑名单永不命中。
 - 修复：发送前（实际发往上游的模型确定后）复查 `IsKeyModelDisabledNow(apiKey, actualAttemptModel, now)`（`handlers/common/upstream_failover.go:750` 附近），命中则跳过本 Key 走正常 failover；不重复计熔断、不写新黑名单。
-- 两层关系：选 Key 阶段覆盖手动 RedirectModel 场景，autopilot 映射目标由发送前复查兜底。
+- 两层关系：选 Key 阶段检查当前请求模型，autopilot 选出的实际模型由发送前复查兜底；不依赖已退役的手动 RedirectModel。
 
 ### 5.13 key 验证兼容 new-api 占位模型 503
 
@@ -980,7 +982,7 @@ health(40) > fastDecay(25) > successRate(20) > latency(10) > cost(5)
 ```text
 [ModelResolver.ResolveModel]
       │
-      ├─ 显式 modelMapping? ──→ 直接返回
+      ├─ 统一客户端 / 意图 effort 优先级
       │
       ├─ 无 ModelProfileStore? ──→ fail-open
       │
