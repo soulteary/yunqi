@@ -30,10 +30,10 @@ jobs:
           go test ./...
           go vet ./...
           go build ./...
-      - name: Verify generated presets
+      - name: Verify shared artifact generators
         run: |
-          node scripts/generate-channel-presets.mjs
-          git diff --exit-code -- frontend/src/generated
+          find scripts -name '*.test.mjs' -print0 | xargs -0 node --test
+          node scripts/generate-preset-manifest.mjs --check
       - name: Verify documentation
         working-directory: docs
         run: |

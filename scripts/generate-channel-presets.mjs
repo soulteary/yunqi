@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -69,8 +69,8 @@ const generatedSources = [
   },
 ]
 
-function readPresetSource(sourceFile) {
-  const sourcePath = join(root, 'shared/channel-presets', sourceFile)
+function readPresetSource(sourceFile, rootDir) {
+  const sourcePath = join(rootDir, 'shared/channel-presets', sourceFile)
   return JSON.parse(readFileSync(sourcePath, 'utf8'))
 }
 
@@ -156,8 +156,16 @@ export const ${config.exportName}: Record<string, ${config.interfaceName}> = ${j
 `
 }
 
-for (const config of generatedSources) {
-  const source = readPresetSource(config.sourceFile)
-  const ts = formatTs(config, source)
-  writeFileSync(join(root, config.webTsPath), ts)
+// Rendering is side-effect free so CI can verify generated files without rewriting them.
+export function renderChannelPresets(rootDir = root) {
+  return generatedSources.map(config => ({
+    path: join(rootDir, config.webTsPath),
+    content: formatTs(config, readPresetSource(config.sourceFile, rootDir)),
+  }))
+}
+
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  for (const artifact of renderChannelPresets()) {
+    writeFileSync(artifact.path, artifact.content)
+  }
 }

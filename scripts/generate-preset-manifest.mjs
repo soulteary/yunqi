@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { renderChannelPresets } from './generate-channel-presets.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const docsOutputDir = join(root, 'docs/public/presets')
@@ -11,51 +12,94 @@ const SHARDS = [
   {
     fileName: 'subscription-preset.json',
     kind: 'subscriptionPreset',
-    sourcePath: join(root, 'shared/subscription-preset/subscription-preset.json'),
+    sourcePath: 'shared/subscription-preset/subscription-preset.json',
     transform: value => validateSchemaVersion(value, 'shared/subscription-preset/subscription-preset.json'),
   },
   {
     fileName: 'model-registry.json',
     kind: 'modelRegistry',
-    sourcePath: join(root, 'shared/model-registry/ccx_model_registry.json'),
+    sourcePath: 'shared/model-registry/ccx_model_registry.json',
     transform: value => validateSchemaVersion(value, 'shared/model-registry/ccx_model_registry.json'),
   },
   {
     fileName: 'channel-presets.json',
     kind: 'channelPresets',
-    transform: () => buildChannelPresetsShard(),
+    transform: (_, rootDir) => buildChannelPresetsShard(rootDir),
   },
   {
     fileName: 'builtin-manifest.json',
     kind: 'builtinManifest',
-    sourcePath: join(root, 'shared/builtin-models-manifest/builtin-models-manifest.json'),
+    sourcePath: 'shared/builtin-models-manifest/builtin-models-manifest.json',
     transform: value => validateBuiltinManifest(value, 'shared/builtin-models-manifest/builtin-models-manifest.json'),
   },
 ]
 
 const CHANNEL_PRESET_SOURCES = {
-  claudeMessages: join(root, 'shared/channel-presets/claude-messages.json'),
-  openAIChat: join(root, 'shared/channel-presets/openai-chat.json'),
-  codexResponses: join(root, 'shared/channel-presets/codex-responses.json'),
-  openAIMessages: join(root, 'shared/channel-presets/openai-messages.json'),
+  claudeMessages: 'shared/channel-presets/claude-messages.json',
+  openAIChat: 'shared/channel-presets/openai-chat.json',
+  codexResponses: 'shared/channel-presets/codex-responses.json',
+  openAIMessages: 'shared/channel-presets/openai-messages.json',
 }
 
 export const presetArtifactPaths = buildPresetArtifactPaths()
 
+export function renderPresetManifest({ rootDir = root, metadata } = {}) {
+  const renderedShards = SHARDS.map(shard => renderShard(shard, rootDir))
+  const indexContent = formatJson(buildIndex(renderedShards, rootDir, metadata))
+  const artifacts = []
+  for (const output of ['docs/public/presets', 'backend-go/internal/presetstore/embedded']) {
+    for (const [fileName, content] of [
+      ['index.json', indexContent],
+      ...renderedShards.map(shard => [shard.fileName, shard.content]),
+    ]) {
+      artifacts.push({ path: join(rootDir, output, fileName), content })
+      artifacts.push({ path: join(rootDir, output, `${fileName}.sha256`), content: `${sha256Hex(content)}  ${fileName}\n` })
+    }
+  }
+  return artifacts
+}
+
+// Keep this legacy entry point and its publication-date semantics for the benchmark updater.
 export function generatePresetManifest() {
-  mkdirSync(docsOutputDir, { recursive: true })
-  mkdirSync(embeddedOutputDir, { recursive: true })
+  writeArtifacts(renderPresetManifest())
+}
 
-  const renderedShards = SHARDS.map(renderShard)
-  const index = buildIndex(renderedShards)
-  const indexContent = formatJson(index)
+// Publication metadata belongs to a release, not the wall clock of each CI run.
+// Reuse it for reproducible regeneration; explicit release environment variables override it.
+function publicationMetadata(rootDir) {
+  const indexPath = join(rootDir, 'docs/public/presets/index.json')
+  if (process.env.PRESET_DATA_VERSION || process.env.SOURCE_DATE_EPOCH || !existsSync(indexPath)) return undefined
+  const index = readJsonFile(indexPath)
+  if (typeof index.dataVersion !== 'string' || !index.dataVersion.trim()) {
+    throw new Error('Published preset index dataVersion must be a non-empty string')
+  }
+  return { dataVersion: index.dataVersion, publishedAt: index.publishedAt }
+}
 
-  writeArtifact(docsOutputDir, 'index.json', indexContent)
-  writeArtifact(embeddedOutputDir, 'index.json', indexContent)
+export function renderSharedArtifacts(rootDir = root) {
+  const schemaPath = join(rootDir, 'shared/capability-probe-schema.json')
+  validateSchemaVersion(readJsonFile(schemaPath), 'shared/capability-probe-schema.json')
+  return [
+    ...renderPresetManifest({ rootDir, metadata: publicationMetadata(rootDir) }),
+    ...renderChannelPresets(rootDir),
+    { path: join(rootDir, 'backend-go/internal/handlers/embedded/capability-probe-schema.json'), content: ensureTrailingNewline(readFileSync(schemaPath, 'utf8')) },
+  ]
+}
 
-  for (const shard of renderedShards) {
-    writeArtifact(docsOutputDir, shard.fileName, shard.content)
-    writeArtifact(embeddedOutputDir, shard.fileName, shard.content)
+export function synchronizeSharedArtifacts({ rootDir = root, check = false } = {}) {
+  const artifacts = renderSharedArtifacts(rootDir)
+  if (!check) {
+    writeArtifacts(artifacts)
+    return []
+  }
+  return artifacts.filter(artifact => !existsSync(artifact.path) || readFileSync(artifact.path, 'utf8') !== artifact.content)
+    .map(artifact => artifact.path.slice(rootDir.length + 1))
+}
+
+function writeArtifacts(artifacts) {
+  for (const { path, content } of artifacts) {
+    mkdirSync(dirname(path), { recursive: true })
+    writeFileSync(path, content)
   }
 }
 
@@ -70,11 +114,12 @@ function buildPresetArtifactPaths() {
   return paths
 }
 
-function renderShard(shard) {
+function renderShard(shard, rootDir) {
+  const sourcePath = shard.sourcePath && join(rootDir, shard.sourcePath)
   const value = shard.sourcePath
-    ? shard.transform(readJsonFile(shard.sourcePath))
-    : shard.transform()
-  const content = shard.sourcePath ? formatLikeSource(shard.sourcePath, value) : formatJson(value)
+    ? shard.transform(readJsonFile(sourcePath), rootDir)
+    : shard.transform(undefined, rootDir)
+  const content = shard.sourcePath ? formatLikeSource(sourcePath, value) : formatJson(value)
   const sha256 = sha256Hex(content)
   return {
     kind: shard.kind,
@@ -85,18 +130,18 @@ function renderShard(shard) {
   }
 }
 
-function buildChannelPresetsShard() {
+function buildChannelPresetsShard(rootDir) {
   const result = { schemaVersion: 1 }
   for (const [key, sourcePath] of Object.entries(CHANNEL_PRESET_SOURCES)) {
-    const value = validateSchemaVersion(readJsonFile(sourcePath), relativeToRoot(sourcePath))
+    const value = validateSchemaVersion(readJsonFile(join(rootDir, sourcePath)), sourcePath)
     result[key] = value
   }
   return result
 }
 
-function buildIndex(shards) {
-  const dataVersion = resolveDataVersion()
-  const publishedAt = resolvePublishedAt()
+function buildIndex(shards, rootDir, metadata) {
+  const dataVersion = metadata?.dataVersion ?? resolveDataVersion(rootDir)
+  const publishedAt = metadata ? metadata.publishedAt : resolvePublishedAt()
   const index = {
     schemaVersion: 1,
     dataVersion,
@@ -113,12 +158,12 @@ function buildIndex(shards) {
   return index
 }
 
-function resolveDataVersion() {
+function resolveDataVersion(rootDir) {
   const explicit = process.env.PRESET_DATA_VERSION?.trim()
   if (explicit) {
     return explicit
   }
-  const version = readFileSync(join(root, 'VERSION'), 'utf8').trim()
+  const version = readFileSync(join(rootDir, 'VERSION'), 'utf8').trim()
   if (!version) {
     throw new Error('VERSION must not be empty')
   }
@@ -241,17 +286,21 @@ function sha256Hex(content) {
   return createHash('sha256').update(content).digest('hex')
 }
 
-function writeArtifact(dir, fileName, content) {
-  writeFileSync(join(dir, fileName), content)
-  const checksum = `${sha256Hex(content)}  ${fileName}\n`
-  writeFileSync(join(dir, `${fileName}.sha256`), checksum)
-}
-
 function relativeToRoot(path) {
   return path.startsWith(root) ? path.slice(root.length + 1) : path
 }
 
-const invokedPath = process.argv[1] ? resolve(process.argv[1]) : ''
+const invokedPath = process.argv[1] ? realpathSync(process.argv[1]) : ''
 if (invokedPath === fileURLToPath(import.meta.url)) {
-  generatePresetManifest()
+  const args = process.argv.slice(2)
+  if (args.some(arg => arg !== '--check') || args.length > 1) {
+    console.error('Usage: node scripts/generate-preset-manifest.mjs [--check]')
+    process.exitCode = 1
+  } else {
+    const differences = synchronizeSharedArtifacts({ check: args.includes('--check') })
+    if (differences.length) {
+      console.error(`Generated shared artifacts are stale or missing:\n${differences.map(path => `  ${path}`).join('\n')}\nRun node scripts/generate-preset-manifest.mjs to regenerate.`)
+      process.exitCode = 1
+    }
+  }
 }

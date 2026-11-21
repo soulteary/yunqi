@@ -10,7 +10,7 @@ import (
 // capabilityProbeSchema 是从 shared/capability-probe-schema.json 编译期嵌入的单一真相源。
 // 该文件在后端和前端之间共享，避免探测模型列表与基础协议的双副本硬编码。
 // 修改模型列表或基础协议时请编辑仓库根目录的 shared/capability-probe-schema.json，
-// 并同步 backend-go/internal/handlers/embedded/capability-probe-schema.json（可直接复制）。
+// 然后运行 node scripts/generate-preset-manifest.mjs，同步所有共享生成产物。
 //
 //go:embed embedded/capability-probe-schema.json
 var capabilityProbeSchemaBytes []byte
