@@ -102,6 +102,7 @@ func TestGeminiToClaudeRequest_FunctionResponse(t *testing.T) {
 				Parts: []types.GeminiPart{
 					{
 						FunctionResponse: &types.GeminiFunctionResponse{
+							ID:   "get_weather",
 							Name: "get_weather",
 							Response: map[string]interface{}{
 								"temperature": 22,
@@ -229,6 +230,7 @@ func TestGeminiToOpenAIRequest_FunctionResponse(t *testing.T) {
 				Parts: []types.GeminiPart{
 					{
 						FunctionResponse: &types.GeminiFunctionResponse{
+							ID:   "web_search",
 							Name: "web_search",
 							Response: map[string]interface{}{
 								"results": []string{"Tutorial 1", "Tutorial 2"},

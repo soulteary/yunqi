@@ -14,6 +14,11 @@ import (
 
 // GeminiToResponsesRequest 将 Gemini 请求转换为 Responses 格式
 func GeminiToResponsesRequest(geminiReq *types.GeminiRequest, modelName string) (map[string]interface{}, error) {
+	normalized, normalizeErr := normalizeGeminiToolIDs(geminiReq)
+	if normalizeErr != nil {
+		return nil, normalizeErr
+	}
+	geminiReq = normalized
 	responsesReq := map[string]interface{}{
 		"model": modelName,
 	}
@@ -130,7 +135,7 @@ func geminiContentToResponsesItems(content *types.GeminiContent) []types.Respons
 			items = append(items, types.ResponsesItem{
 				Type:      "function_call",
 				Role:      role,
-				CallID:    part.FunctionCall.Name,
+				CallID:    geminiToolCorrelationID(part.FunctionCall.ID, part.FunctionCall.Name),
 				Name:      part.FunctionCall.Name,
 				Arguments: string(argsJSON),
 			})
@@ -143,8 +148,8 @@ func geminiContentToResponsesItems(content *types.GeminiContent) []types.Respons
 			items = append(items, types.ResponsesItem{
 				Type:   "function_call_output",
 				Role:   role,
-				CallID: part.FunctionResponse.Name,
-				Output: part.FunctionResponse.Response,
+				CallID: geminiToolCorrelationID(part.FunctionResponse.ID, part.FunctionResponse.Name),
+				Output: geminiFunctionResponseOutput(part.FunctionResponse),
 			})
 		}
 	}

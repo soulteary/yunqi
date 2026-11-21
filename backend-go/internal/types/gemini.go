@@ -3,6 +3,7 @@ package types
 import "encoding/json"
 
 // ============================================================================
+
 // Gemini API 常量
 // ============================================================================
 
@@ -15,6 +16,7 @@ const DummyThoughtSignature = "skip_thought_signature_validator"
 const StripThoughtSignatureMarker = "__STRIP_THOUGHT_SIGNATURE__"
 
 // ============================================================================
+
 // Gemini API 请求结构
 // ============================================================================
 
@@ -98,14 +100,16 @@ func (p GeminiPart) MarshalJSON() ([]byte, error) {
 
 // GeminiInlineData 内联数据（图片、音频等）
 type GeminiInlineData struct {
-	MimeType string `json:"mimeType"`
-	Data     string `json:"data"` // base64 编码
+	DisplayName string `json:"displayName,omitempty"`
+	MimeType    string `json:"mimeType"`
+	Data        string `json:"data"` // base64 编码
 }
 
 // GeminiFileData 文件引用（File API）
 type GeminiFileData struct {
-	MimeType string `json:"mimeType,omitempty"`
-	FileURI  string `json:"fileUri"`
+	DisplayName string `json:"displayName,omitempty"`
+	MimeType    string `json:"mimeType,omitempty"`
+	FileURI     string `json:"fileUri"`
 }
 
 // GeminiFunctionCall 函数调用
@@ -114,6 +118,7 @@ type GeminiFileData struct {
 // - 驼峰格式（thoughtSignature）：Gemini CLI 等第三方客户端
 // 为了保持透传，我们记录原始格式并在输出时使用相同格式
 type GeminiFunctionCall struct {
+	ID               string                 `json:"id,omitempty"`
 	Name             string                 `json:"name"`
 	Args             map[string]interface{} `json:"args"`
 	ThoughtSignature string                 `json:"-"` // thoughtSignature 位于 part 层级，仅内部使用
@@ -121,8 +126,10 @@ type GeminiFunctionCall struct {
 
 // GeminiFunctionResponse 函数响应
 type GeminiFunctionResponse struct {
-	Name     string      `json:"name"`
-	Response interface{} `json:"response"`
+	ID       string                       `json:"id,omitempty"`
+	Parts    []GeminiFunctionResponsePart `json:"parts,omitempty"`
+	Name     string                       `json:"name"`
+	Response interface{}                  `json:"response"`
 }
 
 // GeminiTool 工具定义
@@ -273,6 +280,7 @@ type GeminiSafetySetting struct {
 }
 
 // ============================================================================
+
 // Gemini API 响应结构
 // ============================================================================
 
@@ -314,6 +322,7 @@ type GeminiUsageMetadata struct {
 }
 
 // ============================================================================
+
 // Gemini 流式响应结构
 // ============================================================================
 
@@ -324,6 +333,7 @@ type GeminiStreamChunk struct {
 }
 
 // ============================================================================
+
 // Gemini 错误响应结构
 // ============================================================================
 
@@ -337,6 +347,13 @@ type GeminiErrorDetail struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
 	Status  string `json:"status"`
+}
+
+// GeminiFunctionResponsePart carries native multimodal tool output, separate
+// from the JSON response object so Base64 is never rendered as ordinary text.
+type GeminiFunctionResponsePart struct {
+	InlineData *GeminiInlineData `json:"inlineData,omitempty"`
+	FileData   *GeminiFileData   `json:"fileData,omitempty"`
 }
 
 // GeminiSchemaRequiresJSONSchema detects JSON Schema constructs the legacy

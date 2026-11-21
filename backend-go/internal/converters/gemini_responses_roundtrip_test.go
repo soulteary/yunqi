@@ -53,7 +53,7 @@ func TestResponsesToGeminiRequest_PreservesFunctionItems(t *testing.T) {
 	if respPart == nil {
 		t.Fatal("expected second content to be function response")
 	}
-	if respPart.Name != "weather_call" {
+	if respPart.Name != "get_weather" || respPart.ID != "weather_call" {
 		t.Fatalf("expected function response name weather_call, got %q", respPart.Name)
 	}
 	responseMap, ok := respPart.Response.(map[string]interface{})
@@ -671,6 +671,7 @@ func TestGeminiResponsesRoundtrip_FunctionResponseObjectShape(t *testing.T) {
 				Parts: []types.GeminiPart{
 					{
 						FunctionResponse: &types.GeminiFunctionResponse{
+							ID:   "weather_call",
 							Name: "weather_call",
 							Response: map[string]interface{}{
 								"temperature": 72,
@@ -887,7 +888,7 @@ func TestResponsesToGeminiRequest_PreservesCustomToolCallHistory(t *testing.T) {
 	if respPart == nil {
 		t.Fatal("expected custom_tool_call_output to be converted to FunctionResponse")
 	}
-	if respPart.Name != "toolu_serena_1" {
+	if respPart.Name != "mcp__serena__find_symbol" || respPart.ID != "toolu_serena_1" {
 		t.Fatalf("expected function response name toolu_serena_1, got %q", respPart.Name)
 	}
 	responseMap, ok := respPart.Response.(map[string]interface{})

@@ -12,6 +12,11 @@ import (
 
 // GeminiToClaudeRequest 将 Gemini 请求转换为 Claude Messages API 格式
 func GeminiToClaudeRequest(geminiReq *types.GeminiRequest, model string) (map[string]interface{}, error) {
+	normalized, normalizeErr := normalizeGeminiToolIDs(geminiReq)
+	if normalizeErr != nil {
+		return nil, normalizeErr
+	}
+	geminiReq = normalized
 	claudeReq := map[string]interface{}{
 		"model": model,
 	}
@@ -90,6 +95,11 @@ func GeminiToClaudeRequest(geminiReq *types.GeminiRequest, model string) (map[st
 
 // GeminiToOpenAIRequest 将 Gemini 请求转换为 OpenAI Chat Completions 格式
 func GeminiToOpenAIRequest(geminiReq *types.GeminiRequest, model string) (map[string]interface{}, error) {
+	normalized, normalizeErr := normalizeGeminiToolIDs(geminiReq)
+	if normalizeErr != nil {
+		return nil, normalizeErr
+	}
+	geminiReq = normalized
 	openaiReq := map[string]interface{}{
 		"model": model,
 	}
@@ -109,6 +119,38 @@ func GeminiToOpenAIRequest(geminiReq *types.GeminiRequest, model string) (map[st
 
 	// 2. 转换 contents -> messages
 	for _, content := range geminiReq.Contents {
+		var replies []types.GeminiPart
+		var other []types.GeminiPart
+		for _, part := range content.Parts {
+			if part.FunctionResponse != nil {
+				replies = append(replies, part)
+			} else {
+				other = append(other, part)
+			}
+		}
+		if len(replies) > 0 {
+			for _, part := range replies {
+				single := types.GeminiContent{Role: content.Role, Parts: []types.GeminiPart{part}}
+				msg, err := geminiContentToOpenAIMessage(&single)
+				if err != nil {
+					return nil, err
+				}
+				if msg != nil {
+					messages = append(messages, msg)
+				}
+			}
+			if len(other) > 0 {
+				single := types.GeminiContent{Role: content.Role, Parts: other}
+				msg, err := geminiContentToOpenAIMessage(&single)
+				if err != nil {
+					return nil, err
+				}
+				if msg != nil {
+					messages = append(messages, msg)
+				}
+			}
+			continue
+		}
 		msg, err := geminiContentToOpenAIMessage(&content)
 		if err != nil {
 			return nil, err
@@ -117,7 +159,7 @@ func GeminiToOpenAIRequest(geminiReq *types.GeminiRequest, model string) (map[st
 			messages = append(messages, msg)
 		}
 	}
-	openaiReq["messages"] = messages
+	openaiReq["messages"] = expandChatToolOutputMedia(messages)
 
 	// 3. 转换 generationConfig
 	if geminiReq.GenerationConfig != nil {
@@ -400,7 +442,7 @@ func geminiContentToClaudeMessage(content *types.GeminiContent) (map[string]inte
 
 		if part.FunctionCall != nil {
 			// 工具调用
-			toolUseID := part.FunctionCall.Name
+			toolUseID := geminiToolCorrelationID(part.FunctionCall.ID, part.FunctionCall.Name)
 			if toolUseID == "" {
 				continue
 			}
@@ -415,10 +457,14 @@ func geminiContentToClaudeMessage(content *types.GeminiContent) (map[string]inte
 		if part.FunctionResponse != nil {
 			// 工具结果 - Claude 需要单独的 tool_result 消息
 			// 这里简化处理，将其作为 tool_result 内容块
+			output, err := ConvertToolOutputToClaude(geminiFunctionResponseOutput(part.FunctionResponse))
+			if err != nil {
+				return nil, err
+			}
 			claudeContent = append(claudeContent, map[string]interface{}{
 				"type":        "tool_result",
-				"tool_use_id": part.FunctionResponse.Name,
-				"content":     part.FunctionResponse.Response,
+				"tool_use_id": geminiToolCorrelationID(part.FunctionResponse.ID, part.FunctionResponse.Name),
+				"content":     output,
 			})
 		}
 	}
@@ -470,7 +516,10 @@ func geminiContentToOpenAIMessage(content *types.GeminiContent) (map[string]inte
 			if functionName == "" {
 				continue
 			}
-			toolCallID := fmt.Sprintf("%s_%d", functionName, idx)
+			toolCallID := part.FunctionCall.ID
+			if toolCallID == "" {
+				toolCallID = fmt.Sprintf("%s_%d", functionName, idx)
+			}
 			argsJSON, _ := JSONMarshal(part.FunctionCall.Args)
 			toolCalls = append(toolCalls, map[string]interface{}{
 				"id":   toolCallID,
@@ -484,13 +533,16 @@ func geminiContentToOpenAIMessage(content *types.GeminiContent) (map[string]inte
 
 		if part.FunctionResponse != nil {
 			hasToolResponse = true
-			toolResponseName = part.FunctionResponse.Name
-			toolResponseContent = part.FunctionResponse.Response
+			toolResponseName = geminiToolCorrelationID(part.FunctionResponse.ID, part.FunctionResponse.Name)
+			toolResponseContent = geminiFunctionResponseOutput(part.FunctionResponse)
 		}
 	}
 
 	// 如果是工具响应，返回 tool role 的消息
 	if hasToolResponse {
+		if parts, ok := toolResponseContent.([]interface{}); ok {
+			return map[string]interface{}{"role": "tool", "tool_call_id": toolResponseName, "content": parts}, nil
+		}
 		contentStr := ""
 		if str, ok := toolResponseContent.(string); ok {
 			contentStr = str
