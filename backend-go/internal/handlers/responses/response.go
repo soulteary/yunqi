@@ -139,7 +139,7 @@ func handleSuccess(
 	// Token 补全逻辑
 	originalUsage := responsesResp.Usage
 
-	patchResponsesUsageWithContext(c, responsesResp, originalRequestJSON, envCfg)
+	patchResponsesUsageWithContext(c, responsesResp, originalRequestJSON, envCfg, upstreamType != "responses")
 
 	// 更新会话
 	if originalReq.Store == nil || *originalReq.Store {
@@ -228,10 +228,10 @@ func metricsUsageFromResponsesUsage(usage types.ResponsesUsage, promptTokensTota
 
 // patchResponsesUsage 补全 Responses 响应的 Token 统计
 func patchResponsesUsage(resp *types.ResponsesResponse, requestBody []byte, envCfg *config.EnvConfig) {
-	patchResponsesUsageWithContext(nil, resp, requestBody, envCfg)
+	patchResponsesUsageWithContext(nil, resp, requestBody, envCfg, false)
 }
 
-func patchResponsesUsageWithContext(c fiber.Ctx, resp *types.ResponsesResponse, requestBody []byte, envCfg *config.EnvConfig) {
+func patchResponsesUsageWithContext(c fiber.Ctx, resp *types.ResponsesResponse, requestBody []byte, envCfg *config.EnvConfig, converted bool) {
 	// 检查是否有 Claude 原生缓存 token（有时才跳过 input_tokens 修补）
 	// 仅检测 Claude 原生字段：cache_creation_input_tokens, cache_read_input_tokens,
 	// cache_creation_5m_input_tokens, cache_creation_1h_input_tokens
@@ -242,7 +242,12 @@ func patchResponsesUsageWithContext(c fiber.Ctx, resp *types.ResponsesResponse, 
 		resp.Usage.CacheCreation1hInputTokens > 0
 
 	// 检查是否需要补全
-	needInputPatch := resp.Usage.InputTokens <= 1 && !hasClaudeCache
+	cacheRead := resp.Usage.CacheReadInputTokens
+	if cacheRead == 0 && resp.Usage.InputTokensDetails != nil {
+		cacheRead = resp.Usage.InputTokensDetails.CachedTokens
+	}
+	knownCachedInput := converted && coherentCachedInputUsage(resp.Usage.InputTokens, resp.Usage.OutputTokens, resp.Usage.TotalTokens, cacheRead, resp.Usage.CacheCreationInputTokens, resp.Usage.CacheCreation5mInputTokens, resp.Usage.CacheCreation1hInputTokens)
+	needInputPatch := resp.Usage.InputTokens <= 1 && !hasClaudeCache && !knownCachedInput
 	needOutputPatch := resp.Usage.OutputTokens <= 1
 
 	// 如果 usage 完全为空，进行完整估算
