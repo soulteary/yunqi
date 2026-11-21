@@ -23,11 +23,13 @@ import (
 	"github.com/soulteary/yunqi/internal/ratelimit"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/session"
+	"github.com/soulteary/yunqi/internal/telemetry"
 	"github.com/soulteary/yunqi/internal/thinkingcache"
 	"github.com/soulteary/yunqi/internal/warmup"
 )
 
 type application struct {
+	monitoring    *telemetry.Registry
 	envCfg        *config.EnvConfig
 	paths         runtimePaths
 	cfgManager    *config.ConfigManager
