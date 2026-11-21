@@ -30,7 +30,9 @@ func FilteredLogger(envCfg *config.EnvConfig, skipPrefixes ...string) fiber.Hand
 		skipPrefixes = defaultSkipPrefixes
 	}
 	return func(c fiber.Ctx) error {
-		path := httpbridge.Request(c).URL.Path
+		// Match the same normalized path used by routing and authentication. Raw
+		// dot segments can disguise a key route and must never reach the log.
+		path := strings.Clone(c.Path())
 		method := httpbridge.Request(c).Method
 		skip := false
 		if envCfg.QuietPollingLogs {
@@ -49,7 +51,7 @@ func FilteredLogger(envCfg *config.EnvConfig, skipPrefixes ...string) fiber.Hand
 		start := time.Now()
 		err := c.Next()
 		if !skip {
-			log.Printf("[HTTP] %s %s | %d | %s | %s", method, path, httpbridge.Writer(c).Status(), time.Since(start), httpbridge.ClientIP(c))
+			log.Printf("[HTTP] %s %s | %d | %s | %s", method, sanitizeLogPath(path, method), httpbridge.Writer(c).Status(), time.Since(start), httpbridge.ClientIP(c))
 		}
 		return err
 	}
@@ -57,4 +59,34 @@ func FilteredLogger(envCfg *config.EnvConfig, skipPrefixes ...string) fiber.Hand
 
 func isResponsesChannelLogsPath(path string) bool {
 	return strings.HasPrefix(path, "/api/responses/channels/") && strings.HasSuffix(path, "/logs")
+}
+
+// sanitizeLogPath hides legacy API-key path parameters before any request or
+// authentication logging. Redact the whole remainder because decoded keys may
+// themselves contain slashes. New key mutation endpoints carry keys in JSON.
+func sanitizeLogPath(path, method string) string {
+	parts := strings.SplitN(path, "/", 7)
+	if len(parts) < 7 || parts[1] != "api" || parts[3] != "channels" || parts[5] != "keys" {
+		return path
+	}
+	switch parts[2] {
+	case "messages", "chat", "responses", "gemini", "images", "vectors":
+	default:
+		return path
+	}
+	// These exact POST routes identify JSON-body operations, not path keys.
+	if method == http.MethodPost {
+		switch parts[6] {
+		case "remove", "move-to-top", "move-to-bottom":
+			return path
+		}
+	}
+	suffix := ""
+	for _, action := range []string{"/top", "/bottom"} {
+		if strings.HasSuffix(parts[6], action) {
+			suffix = action
+			break
+		}
+	}
+	return strings.Join(parts[:6], "/") + "/[REDACTED]" + suffix
 }

@@ -48,8 +48,9 @@ export function createChannelsResponsesApi(client: ApiClient) {
     },
 
     async removeResponsesApiKey(channelId: number, apiKey: string): Promise<void> {
-      await client.request(`/responses/channels/${channelId}/keys/${encodeURIComponent(apiKey)}`, {
-        method: 'DELETE'
+      await client.request(`/responses/channels/${channelId}/keys/remove`, {
+        method: 'POST',
+        body: JSON.stringify({ apiKey })
       })
     },
 
@@ -89,14 +90,16 @@ export function createChannelsResponsesApi(client: ApiClient) {
     },
 
     async moveResponsesApiKeyToTop(channelId: number, apiKey: string): Promise<void> {
-      await client.request(`/responses/channels/${channelId}/keys/${encodeURIComponent(apiKey)}/top`, {
-        method: 'POST'
+      await client.request(`/responses/channels/${channelId}/keys/move-to-top`, {
+        method: 'POST',
+        body: JSON.stringify({ apiKey })
       })
     },
 
     async moveResponsesApiKeyToBottom(channelId: number, apiKey: string): Promise<void> {
-      await client.request(`/responses/channels/${channelId}/keys/${encodeURIComponent(apiKey)}/bottom`, {
-        method: 'POST'
+      await client.request(`/responses/channels/${channelId}/keys/move-to-bottom`, {
+        method: 'POST',
+        body: JSON.stringify({ apiKey })
       })
     },
 

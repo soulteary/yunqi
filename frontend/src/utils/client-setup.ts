@@ -12,7 +12,11 @@ export function clientConfig(kind: ClientKind, address: string, model: string): 
   const root = gatewayRoot(address)
   const key = 'YOUR_CCX_PROXY_KEY'
   model = model.trim()
-  if (!model || /[\u0000-\u001f\u007f]/.test(model))
+  const hasControlCharacter = Array.from(model).some(character => {
+    const code = character.charCodeAt(0)
+    return code < 32 || code === 127
+  })
+  if (!model || hasControlCharacter)
     throw new Error('Model is required and must not contain control characters')
   if (kind === 'claude')
     return {

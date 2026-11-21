@@ -40,8 +40,9 @@ export function createChannelsVectorsApi(client: ApiClient) {
     },
 
     async removeVectorsApiKey(channelId: number, apiKey: string): Promise<void> {
-      await client.request(`/vectors/channels/${channelId}/keys/${encodeURIComponent(apiKey)}`, {
-        method: 'DELETE'
+      await client.request(`/vectors/channels/${channelId}/keys/remove`, {
+        method: 'POST',
+        body: JSON.stringify({ apiKey })
       })
     },
 
@@ -74,14 +75,16 @@ export function createChannelsVectorsApi(client: ApiClient) {
     },
 
     async moveVectorsApiKeyToTop(channelId: number, apiKey: string): Promise<void> {
-      await client.request(`/vectors/channels/${channelId}/keys/${encodeURIComponent(apiKey)}/top`, {
-        method: 'POST'
+      await client.request(`/vectors/channels/${channelId}/keys/move-to-top`, {
+        method: 'POST',
+        body: JSON.stringify({ apiKey })
       })
     },
 
     async moveVectorsApiKeyToBottom(channelId: number, apiKey: string): Promise<void> {
-      await client.request(`/vectors/channels/${channelId}/keys/${encodeURIComponent(apiKey)}/bottom`, {
-        method: 'POST'
+      await client.request(`/vectors/channels/${channelId}/keys/move-to-bottom`, {
+        method: 'POST',
+        body: JSON.stringify({ apiKey })
       })
     },
 

@@ -335,7 +335,9 @@ func Param(c fiber.Ctx, name string) string {
 	case "rest", "modelAction", "filepath":
 		return "/" + c.Params("*")
 	}
-	return c.Params(name)
+	// Fiber parameters alias pooled request buffers. Callers may retain IDs or
+	// keys in configuration after this request returns.
+	return strings.Clone(c.Params(name))
 }
 func ClientIP(c fiber.Ctx) string {
 	// Preserve the existing reverse-proxy interpretation; do not newly trust a

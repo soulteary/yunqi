@@ -40,8 +40,9 @@ export function createChannelsGeminiApi(client: ApiClient) {
     },
 
     async removeGeminiApiKey(channelId: number, apiKey: string): Promise<void> {
-      await client.request(`/gemini/channels/${channelId}/keys/${encodeURIComponent(apiKey)}`, {
-        method: 'DELETE'
+      await client.request(`/gemini/channels/${channelId}/keys/remove`, {
+        method: 'POST',
+        body: JSON.stringify({ apiKey })
       })
     },
 
@@ -74,14 +75,16 @@ export function createChannelsGeminiApi(client: ApiClient) {
     },
 
     async moveGeminiApiKeyToTop(channelId: number, apiKey: string): Promise<void> {
-      await client.request(`/gemini/channels/${channelId}/keys/${encodeURIComponent(apiKey)}/top`, {
-        method: 'POST'
+      await client.request(`/gemini/channels/${channelId}/keys/move-to-top`, {
+        method: 'POST',
+        body: JSON.stringify({ apiKey })
       })
     },
 
     async moveGeminiApiKeyToBottom(channelId: number, apiKey: string): Promise<void> {
-      await client.request(`/gemini/channels/${channelId}/keys/${encodeURIComponent(apiKey)}/bottom`, {
-        method: 'POST'
+      await client.request(`/gemini/channels/${channelId}/keys/move-to-bottom`, {
+        method: 'POST',
+        body: JSON.stringify({ apiKey })
       })
     },
 

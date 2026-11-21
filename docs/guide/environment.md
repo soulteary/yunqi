@@ -73,8 +73,9 @@ METRICS_RETENTION_DAYS=366             # 数据保留天数（3-366，默认 366
                                        # 支持查询最长 1 年的历史数据
 
 # CORS 配置
-ENABLE_CORS=false                      # 是否启用 CORS
-CORS_ORIGIN=*                          # CORS 允许的源
+ENABLE_CORS=false                      # false 不发送允许跨域的响应头；同源访问不受影响
+CORS_ORIGIN=*                          # 开启后允许的单一 Origin（如 https://console.example）或 *
+                                       # development 环境额外允许 http(s)://localhost[:port]；* 不允许凭据
 
 # 调校台启动兜底（旧部署兼容）：运行时请优先使用 Web/桌面调校台
 # REQUEST_TIMEOUT=300000               # 非流式上游请求总超时（毫秒，1000-300000，默认 300000）

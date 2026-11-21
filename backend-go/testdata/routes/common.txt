@@ -221,6 +221,9 @@ POST /api/chat/channels/:id/keys/:apiKey/bottom
 POST /api/chat/channels/:id/keys/:apiKey/top
 POST /api/chat/channels/:id/keys/group-model/disable
 POST /api/chat/channels/:id/keys/group-model/restore
+POST /api/chat/channels/:id/keys/move-to-bottom
+POST /api/chat/channels/:id/keys/move-to-top
+POST /api/chat/channels/:id/keys/remove
 POST /api/chat/channels/:id/keys/restore
 POST /api/chat/channels/:id/keys/restore-model
 POST /api/chat/channels/:id/keys/resume
@@ -247,6 +250,9 @@ POST /api/gemini/channels/:id/keys/:apiKey/bottom
 POST /api/gemini/channels/:id/keys/:apiKey/top
 POST /api/gemini/channels/:id/keys/group-model/disable
 POST /api/gemini/channels/:id/keys/group-model/restore
+POST /api/gemini/channels/:id/keys/move-to-bottom
+POST /api/gemini/channels/:id/keys/move-to-top
+POST /api/gemini/channels/:id/keys/remove
 POST /api/gemini/channels/:id/keys/restore
 POST /api/gemini/channels/:id/keys/restore-model
 POST /api/gemini/channels/:id/keys/resume
@@ -268,6 +274,9 @@ POST /api/images/channels/:id/keys/:apiKey/bottom
 POST /api/images/channels/:id/keys/:apiKey/top
 POST /api/images/channels/:id/keys/group-model/disable
 POST /api/images/channels/:id/keys/group-model/restore
+POST /api/images/channels/:id/keys/move-to-bottom
+POST /api/images/channels/:id/keys/move-to-top
+POST /api/images/channels/:id/keys/remove
 POST /api/images/channels/:id/keys/restore
 POST /api/images/channels/:id/keys/restore-model
 POST /api/images/channels/:id/keys/resume
@@ -294,6 +303,9 @@ POST /api/messages/channels/:id/keys/:apiKey/bottom
 POST /api/messages/channels/:id/keys/:apiKey/top
 POST /api/messages/channels/:id/keys/group-model/disable
 POST /api/messages/channels/:id/keys/group-model/restore
+POST /api/messages/channels/:id/keys/move-to-bottom
+POST /api/messages/channels/:id/keys/move-to-top
+POST /api/messages/channels/:id/keys/remove
 POST /api/messages/channels/:id/keys/restore
 POST /api/messages/channels/:id/keys/restore-model
 POST /api/messages/channels/:id/keys/resume
@@ -317,6 +329,9 @@ POST /api/responses/channels/:id/keys/:apiKey/bottom
 POST /api/responses/channels/:id/keys/:apiKey/top
 POST /api/responses/channels/:id/keys/group-model/disable
 POST /api/responses/channels/:id/keys/group-model/restore
+POST /api/responses/channels/:id/keys/move-to-bottom
+POST /api/responses/channels/:id/keys/move-to-top
+POST /api/responses/channels/:id/keys/remove
 POST /api/responses/channels/:id/keys/restore
 POST /api/responses/channels/:id/keys/restore-model
 POST /api/responses/channels/:id/keys/resume
@@ -347,6 +362,9 @@ POST /api/vectors/channels/:id/keys/:apiKey/bottom
 POST /api/vectors/channels/:id/keys/:apiKey/top
 POST /api/vectors/channels/:id/keys/group-model/disable
 POST /api/vectors/channels/:id/keys/group-model/restore
+POST /api/vectors/channels/:id/keys/move-to-bottom
+POST /api/vectors/channels/:id/keys/move-to-top
+POST /api/vectors/channels/:id/keys/remove
 POST /api/vectors/channels/:id/keys/restore
 POST /api/vectors/channels/:id/keys/restore-model
 POST /api/vectors/channels/:id/keys/resume

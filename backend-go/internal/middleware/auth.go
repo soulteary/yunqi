@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"log"
+	"net/http"
 	"strings"
 	"time"
 
@@ -14,24 +15,21 @@ import (
 func WebAuthMiddleware(envCfg *config.EnvConfig, cfgManager *config.ConfigManager) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		path := c.Path()
+		isManagementPath := strings.HasPrefix(path, "/api") || strings.HasPrefix(path, "/admin")
 
 		// OPTIONS 预检请求直接放行（浏览器 CORS 预检不携带自定义 header，不应要求认证）
 		if httpbridge.Request(c).Method == "OPTIONS" {
 			return c.Next()
 		}
 
-		// 公开端点直接放行（健康检查固定为 /health）
-		if path == "/health" {
+		// 数据面与健康检查允许一个渠道前缀；代理处理器仍负责验证代理密钥。
+		// 必须先精确识别端点，避免 /api 或 /admin 前缀被误当成管理请求。
+		if isDataPlaneRequest(httpbridge.Request(c).Method, path) {
 			return c.Next()
 		}
 
-		// 静态资源文件直接放行
-		if isStaticResource(path) {
-			return c.Next()
-		}
-
-		// API 代理端点后续处理
-		if strings.HasPrefix(path, "/v1/") || strings.HasPrefix(path, "/v1beta/") {
+		// 管理路由中的动态参数可能带有静态文件后缀，不能因此跳过鉴权。
+		if !isManagementPath && isStaticResource(path) {
 			return c.Next()
 		}
 
@@ -46,12 +44,12 @@ func WebAuthMiddleware(envCfg *config.EnvConfig, cfgManager *config.ConfigManage
 		}
 
 		// SPA 页面路由直接交给前端处理，但需要排除 /api* 路径
-		if path == "/" || path == "/index.html" || (!strings.Contains(path, ".") && !strings.HasPrefix(path, "/api") && !strings.HasPrefix(path, "/admin")) {
+		if path == "/" || path == "/index.html" || (!strings.Contains(path, ".") && !isManagementPath) {
 			return c.Next()
 		}
 
 		// 检查访问密钥（管理 API + 管理端点）
-		if strings.HasPrefix(path, "/api") || strings.HasPrefix(path, "/admin") {
+		if isManagementPath {
 			providedKey := getAPIKey(c)
 
 			// 记录认证尝试
@@ -65,7 +63,7 @@ func WebAuthMiddleware(envCfg *config.EnvConfig, cfgManager *config.ConfigManage
 					reason = "密钥缺失"
 				}
 				log.Printf("[Auth-Failed] IP: %s | Path: %s | Time: %s | Reason: %s",
-					clientIP, path, timestamp, reason)
+					clientIP, sanitizeLogPath(path, httpbridge.Request(c).Method), timestamp, reason)
 				httpbridge.JSON(c, 401, fiber.Map{
 					"error":   "Unauthorized",
 					"message": "Invalid or missing access key",
@@ -77,12 +75,50 @@ func WebAuthMiddleware(envCfg *config.EnvConfig, cfgManager *config.ConfigManage
 			// 认证成功 - 记录日志(可选，根据日志级别)
 			// 如果启用了 QuietPollingLogs，则静默轮询端点日志
 			if envCfg.ShouldLog("info") && (!envCfg.QuietPollingLogs || !isPollingEndpoint(path)) {
-				log.Printf("[Auth-Success] IP: %s | Path: %s | Time: %s", clientIP, path, timestamp)
+				log.Printf("[Auth-Success] IP: %s | Path: %s | Time: %s", clientIP, sanitizeLogPath(path, httpbridge.Request(c).Method), timestamp)
 			}
 		}
 
 		return c.Next()
 	}
+}
+
+// isDataPlaneRequest mirrors the public route shapes in routes_proxy.go and
+// registerSystemRoutes. Only one optional routePrefix segment is accepted; an
+// arbitrary /v1/ substring must never exempt a management path from admin auth.
+func isDataPlaneRequest(method, path string) bool {
+	if isDataPlaneEndpoint(method, path) {
+		return true
+	}
+	if !strings.HasPrefix(path, "/") {
+		return false
+	}
+	prefix, suffix, ok := strings.Cut(path[1:], "/")
+	if !ok || prefix == "" || prefix == "." || prefix == ".." {
+		return false
+	}
+	return isDataPlaneEndpoint(method, "/"+suffix)
+}
+
+func isDataPlaneEndpoint(method, path string) bool {
+	switch method {
+	case http.MethodGet:
+		if path == "/health" || path == "/v1/models" || path == "/v1/responses" {
+			return true
+		}
+		if model, ok := strings.CutPrefix(path, "/v1/models/"); ok {
+			return model != "" && !strings.Contains(model, "/")
+		}
+	case http.MethodPost:
+		switch path {
+		case "/v1/messages", "/v1/messages/count_tokens", "/v1/responses", "/v1/responses/compact",
+			"/v1/chat/completions", "/v1/images/generations", "/v1/images/edits",
+			"/v1/images/variations", "/v1/embeddings":
+			return true
+		}
+		return strings.HasPrefix(path, "/v1/alpha/") || strings.HasPrefix(path, "/v1beta/models/")
+	}
+	return false
 }
 
 // isPollingEndpoint 判断是否为轮询端点（前缀匹配，兼容 query string 和尾部斜杠）
