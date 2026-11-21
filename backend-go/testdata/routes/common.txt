@@ -69,6 +69,7 @@ GET /api/console/codex-auto-review
 GET /api/console/status
 GET /api/conversations
 GET /api/conversations/settings
+GET /api/entry-keys
 GET /api/gemini/channels
 GET /api/gemini/channels/:id/auto-status
 GET /api/gemini/channels/:id/balance
@@ -127,6 +128,7 @@ GET /api/messages/global/stats/history
 GET /api/messages/models/stats/history
 GET /api/messages/ping
 GET /api/messages/ping/:id
+GET /api/metrics/prometheus
 GET /api/network/interfaces
 GET /api/presets
 GET /api/presets/status
@@ -194,6 +196,7 @@ POST /:routePrefix/v1/images/generations
 POST /:routePrefix/v1/images/variations
 POST /:routePrefix/v1/messages
 POST /:routePrefix/v1/messages/count_tokens
+POST /:routePrefix/v1/quote
 POST /:routePrefix/v1/responses
 POST /:routePrefix/v1/responses/compact
 POST /:routePrefix/v1beta/models/*modelAction
@@ -241,6 +244,8 @@ POST /api/conversations/:id/override
 POST /api/copilot/oauth/device/code
 POST /api/copilot/oauth/token
 POST /api/copilot/oauth/verify
+POST /api/entry-keys
+POST /api/entry-keys/:id/rotate
 POST /api/gemini/channels
 POST /api/gemini/channels/:id/auto-discover
 POST /api/gemini/channels/:id/balance/check
@@ -387,6 +392,7 @@ POST /v1/images/generations
 POST /v1/images/variations
 POST /v1/messages
 POST /v1/messages/count_tokens
+POST /v1/quote
 POST /v1/responses
 POST /v1/responses/compact
 POST /v1beta/models/*modelAction
@@ -400,6 +406,7 @@ PUT /api/channels/:uid
 PUT /api/chat/channels/:id
 PUT /api/console/codex-auto-review
 PUT /api/conversations/settings
+PUT /api/entry-keys/:id
 PUT /api/gemini/channels/:id
 PUT /api/images/channels/:id
 PUT /api/logical-channels/:uid
@@ -411,9 +418,16 @@ PUT /api/smart-routing/config
 PUT /api/subscriptions/:uid
 PUT /api/task-templates/:id
 PUT /api/vectors/channels/:id
-GET /api/entry-keys
-POST /api/entry-keys
-PUT /api/entry-keys/:id
-POST /api/entry-keys/:id/rotate
-POST /v1/quote
-POST /:routePrefix/v1/quote
+GET /api/access/me
+GET /api/access/channels
+PUT /api/access/channels/:uid/state
+GET /api/admin-credentials
+POST /api/admin-credentials
+PUT /api/admin-credentials/:id
+POST /api/admin-credentials/:id/rotate
+GET /access
+GET /api/reports/request-timeline/:id
+GET /api/identity-proxy
+PUT /api/identity-proxy
+POST /api/identity-proxy/sessions/revoke
+POST /api/access/session/revoke

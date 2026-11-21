@@ -1,10 +1,12 @@
 package logger
 
 import (
+	"github.com/soulteary/yunqi/internal/redaction"
 	"io"
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -20,41 +22,31 @@ func resetLoggersForTest() {
 }
 
 func TestSetupLogDirNoneConsoleTrue(t *testing.T) {
-	cfg := &Config{
-		LogDir:  "none",
-		Console: true,
-	}
-
-	err := Setup(cfg)
+	const secret = "opaque!console-credential=secret"
+	redaction.Configure([]string{secret})
+	defer redaction.Configure(nil)
+	original := os.Stdout
+	reader, writer, err := os.Pipe()
 	if err != nil {
-		t.Fatalf("Setup() error = %v", err)
+		t.Fatal(err)
 	}
-	t.Cleanup(resetLoggersForTest)
-
-	// 不应创建目录
-	if _, err := os.Stat("none"); !os.IsNotExist(err) {
-		t.Fatal("Setup() created directory 'none', should not")
+	os.Stdout = writer
+	defer func() { os.Stdout = original; _ = reader.Close(); _ = writer.Close(); resetLoggersForTest() }()
+	if err := Setup(&Config{LogDir: "none", Console: true}); err != nil {
+		t.Fatal(err)
 	}
-
-	// rawFileLog 应写入 io.Discard
-	if rawFileLog == nil {
-		t.Fatal("rawFileLog is nil")
+	if rawFileLog == nil || rawFileLog.Writer() != io.Discard {
+		t.Fatal("disabled file channel must discard")
 	}
-	if rawFileLog.Writer() != io.Discard {
-		t.Fatalf("rawFileLog writer = %v, want io.Discard", rawFileLog.Writer())
+	ConsoleLog().Println(secret)
+	log.Println(secret)
+	_ = writer.Close()
+	output, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	// consoleLog 应写入 os.Stdout
-	if consoleLog == nil {
-		t.Fatal("consoleLog is nil")
-	}
-	if consoleLog.Writer() != os.Stdout {
-		t.Fatalf("consoleLog writer = %v, want os.Stdout", consoleLog.Writer())
-	}
-
-	// 全局 log 应写入 os.Stdout
-	if log.Default().Writer() != os.Stdout {
-		t.Fatalf("global log writer = %v, want os.Stdout", log.Default().Writer())
+	if strings.Contains(string(output), secret) || strings.Count(string(output), redaction.Mask) != 2 {
+		t.Fatalf("unsafe console output: %s", output)
 	}
 }
 
@@ -175,5 +167,26 @@ func TestIsLogDisabled(t *testing.T) {
 				t.Fatalf("IsLogDisabled(%q) = %v, want %v", tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestEveryFileLogChannelRedactsCredentials(t *testing.T) {
+	const secret = "opaque!file-credential=secret"
+	redaction.Configure([]string{secret})
+	defer redaction.Configure(nil)
+	dir := t.TempDir()
+	if err := Setup(&Config{LogDir: dir, LogFile: "redacted.log", Console: false}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(resetLoggersForTest)
+	log.Println(secret)
+	RawFileLog().Println(secret)
+	ConsoleLog().Println(secret)
+	data, err := os.ReadFile(filepath.Join(dir, "redacted.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), secret) || strings.Count(string(data), redaction.Mask) != 3 {
+		t.Fatalf("unsafe log file: %s", data)
 	}
 }

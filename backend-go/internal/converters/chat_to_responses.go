@@ -974,7 +974,7 @@ func SynthesizeResponsesIncomplete(sequenceNumber int, responseID, reason string
 	if responseID == "" {
 		responseID = fmt.Sprintf("resp_%d", time.Now().UnixNano())
 	}
-	payload := fmt.Sprintf(`{"type":"response.incomplete","sequence_number":%d,"response":{"id":%q,"object":"response","created_at":0,"status":"incomplete","background":false,"error":null,"incomplete_details":{"reason":%q},"output":[],"usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0}}}`,
+	payload := fmt.Sprintf(`{"type":"response.incomplete","sequence_number":%d,"response":{"id":%q,"object":"response","created_at":0,"status":"incomplete","background":false,"error":null,"incomplete_details":{"reason":%q,"source":"gateway"},"output":[],"usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0}}}`,
 		sequenceNumber, responseID, reason)
 	return emitResponsesEvent("response.incomplete", payload)
 }

@@ -23,11 +23,13 @@ import (
 	"github.com/soulteary/yunqi/internal/ratelimit"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/session"
+	"github.com/soulteary/yunqi/internal/telemetry"
 	"github.com/soulteary/yunqi/internal/thinkingcache"
 	"github.com/soulteary/yunqi/internal/warmup"
 )
 
 type application struct {
+	monitoring    *telemetry.Registry
 	envCfg        *config.EnvConfig
 	paths         runtimePaths
 	cfgManager    *config.ConfigManager
@@ -100,6 +102,8 @@ func runService(cliOpts cliOptions) {
 		log.Fatalf("初始化日志系统失败: %v", err)
 	}
 
+	// Candidate keys must be observed before initial parsing/validation can log.
+	initializeCredentialRedaction(envCfg)
 	cfgManager, err := config.NewConfigManager(paths.ConfigPath, paths.BackupDir)
 	if err != nil {
 		log.Fatalf("初始化配置管理器失败: %v", err)
@@ -107,6 +111,7 @@ func runService(cliOpts cliOptions) {
 	defer errutil.IgnoreDeferred(cfgManager.Close)
 
 	a := &application{envCfg: envCfg, paths: paths, cfgManager: cfgManager}
+	a.initTelemetry()
 	a.configureGuardrails()
 	a.startPresetUpdater()
 	a.configureThinkingCache()

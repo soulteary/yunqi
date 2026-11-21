@@ -1,13 +1,16 @@
 package main
 
 import (
+	"encoding/json"
 	"log"
+	"os"
 	"time"
 
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/conversation"
 	"github.com/soulteary/yunqi/internal/guardrails"
 	"github.com/soulteary/yunqi/internal/ratelimit"
+	"github.com/soulteary/yunqi/internal/redaction"
 	"github.com/soulteary/yunqi/internal/session"
 	"github.com/soulteary/yunqi/internal/thinkingcache"
 	"github.com/soulteary/yunqi/internal/utils"
@@ -20,39 +23,33 @@ func (a *application) configureGuardrails() {
 	credentialMasker := guardrails.NewCredentialMasker()
 	// 注入网关自身密钥
 	gatewayKeys := []string{a.envCfg.ProxyAccessKey, a.envCfg.GetAdminAccessKey()}
+	if a.envCfg.IdentityProxySecret != "" {
+		gatewayKeys = append(gatewayKeys, a.envCfg.IdentityProxySecret)
+	}
 	gatewayKeys = append(gatewayKeys, a.envCfg.ExtraProxyAccessKeys...)
 	credentialMasker.SetStaticKeys(gatewayKeys)
-	// 注入渠道 key 前缀指纹
-	initCfg := a.cfgManager.GetConfig()
-	var channelKeyPrefixes []string
-	for _, upstream := range initCfg.Upstream {
-		for _, key := range upstream.APIKeys {
-			if len(key) >= 8 {
-				channelKeyPrefixes = append(channelKeyPrefixes, key[:8])
-			}
+	initializeCredentialRedaction(a.envCfg)
+	redaction.Add(gatewayKeys)
+	updateCredentials := func(cfg config.Config) {
+		if data, err := json.Marshal(cfg); err == nil {
+			redaction.ObserveJSON(data)
 		}
-	}
-	credentialMasker.SetChannelKeyPrefixes(channelKeyPrefixes)
-	guardrails.DefaultRegistry().Register(credentialMasker)
-	log.Printf("[Guardrails-Init] 已注册 credential-masker，渠道 key 前缀 %d 个", len(channelKeyPrefixes))
-
-	// 配置热重载时同步更新 credential-masker 的渠道 key 前缀
-	a.cfgManager.RegisterOnConfigChange(func(cfg config.Config) {
 		var prefixes []string
-		seen := make(map[string]struct{})
-		for _, upstream := range cfg.Upstream {
-			for _, key := range upstream.APIKeys {
-				if len(key) >= 8 {
-					p := key[:8]
-					if _, ok := seen[p]; !ok {
-						seen[p] = struct{}{}
-						prefixes = append(prefixes, p)
+		for _, kind := range config.ChannelKindRegistry {
+			for _, upstream := range kind.Slice(cfg) {
+				for _, key := range upstream.APIKeys {
+					if len(key) >= 8 {
+						prefixes = append(prefixes, key[:8])
 					}
 				}
 			}
 		}
 		credentialMasker.SetChannelKeyPrefixes(prefixes)
-	})
+	}
+	updateCredentials(a.cfgManager.GetConfig())
+	guardrails.DefaultRegistry().Register(credentialMasker)
+	log.Printf("[Guardrails-Init] 已注册 credential-masker，错误与日志出口完整凭证脱敏已启用")
+	a.cfgManager.RegisterOnConfigChange(updateCredentials)
 }
 
 func (a *application) configureThinkingCache() {
@@ -159,4 +156,13 @@ func (a *application) initConversations() {
 
 	a.overrideManager = conversation.NewOverrideManager(overrideTTL)
 	a.channelScheduler.SetConversationComponents(a.conversationTracker, a.overrideManager)
+}
+
+func initializeCredentialRedaction(env *config.EnvConfig) func() {
+	keys := []string{env.ProxyAccessKey, env.GetAdminAccessKey(), env.IdentityProxySecret}
+	keys = append(keys, env.ExtraProxyAccessKeys...)
+	if secret := os.Getenv("IDENTITY_PROXY_SECRET"); secret != "" {
+		keys = append(keys, secret)
+	}
+	return redaction.Enable(keys)
 }

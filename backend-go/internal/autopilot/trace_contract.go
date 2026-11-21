@@ -55,6 +55,7 @@ const (
 // TraceDetailV2 是 v2 trace 的安全详情 DTO，只包含可解释决策的字段。
 // 禁止包含 API Key、Authorization、prompt 全文、响应正文、multipart 和原始 BaseURL。
 type TraceDetailV2 struct {
+	OTLPTraceID          string                    `json:"otlpTraceId,omitempty"`
 	TraceUID             string                    `json:"traceUid"`
 	SchemaVersion        int                       `json:"schemaVersion"`
 	TraceRevision        int64                     `json:"traceRevision"`
@@ -449,6 +450,7 @@ func AdaptV1ToTraceDetailV2(trace *RoutingDecisionTrace) *TraceDetailV2 {
 	}
 	return &TraceDetailV2{
 		TraceUID:            trace.TraceUID,
+		OTLPTraceID:         trace.OTLPTraceID,
 		SchemaVersion:       1,
 		CreatedAt:           trace.CreatedAt,
 		ReleaseID:           "legacy",
@@ -546,6 +548,7 @@ func (t *RoutingDecisionTrace) ToTraceDetailV2(snapshot *RoutingReleaseSnapshot,
 	comparison := ComputeComparisonStatus(t.ShadowChannelUID, t.ActualChannelUID, t.Match)
 
 	detail := &TraceDetailV2{
+		OTLPTraceID:          t.OTLPTraceID,
 		TraceUID:             t.TraceUID,
 		SchemaVersion:        2,
 		TraceRevision:        revision,

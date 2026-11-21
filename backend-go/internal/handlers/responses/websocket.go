@@ -7,11 +7,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/soulteary/yunqi/internal/redaction"
 	"net"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/gorilla/websocket"
@@ -21,6 +23,7 @@ import (
 	"github.com/soulteary/yunqi/internal/middleware"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/session"
+	"github.com/soulteary/yunqi/internal/telemetry"
 	"github.com/soulteary/yunqi/internal/utils"
 )
 
@@ -45,6 +48,7 @@ func WebSocketHandler(
 ) fiber.Handler {
 	httpHandler := Handler(envCfg, cfgManager, sessionManager, channelScheduler)
 	bridgeRouter := httpbridge.NewApp()
+	bridgeRouter.Use(telemetry.BridgeMiddleware())
 	bridgeRouter.Use(middleware.ProxyAdmissionMiddleware(envCfg))
 	bridgeRouter.Post("/v1/responses", httpHandler)
 	bridgeRouter.Post("/:routePrefix/v1/responses", httpHandler)
@@ -342,6 +346,7 @@ func copyWebSocketRequestHeaders(src http.Header, dst http.Header) {
 }
 
 type responsesWebSocketWriter struct {
+	observeWrite func() func()
 	active       *webSocketActiveTurn
 	conn         *websocket.Conn
 	context      context.Context
@@ -366,6 +371,7 @@ func newResponsesWebSocketWriter(conn *websocket.Conn) *responsesWebSocketWriter
 	}
 }
 
+func (w *responsesWebSocketWriter) ObserveWrites(observe func() func()) { w.observeWrite = observe }
 func (w *responsesWebSocketWriter) Header() http.Header {
 	return w.header
 }
@@ -512,7 +518,13 @@ func (w *responsesWebSocketWriter) sendCurrentData() {
 		w.active.observe(data)
 	}
 	_ = w.conn.SetWriteDeadline(time.Now().Add(responsesWebSocketWriteTimeout))
-	w.setWriteError(w.conn.WriteMessage(websocket.TextMessage, []byte(data)))
+	payload := redaction.ErrorJSON([]byte(data))
+	endWrite := func() {}
+	if w.observeWrite != nil {
+		endWrite = w.observeWrite()
+	}
+	w.setWriteError(w.conn.WriteMessage(websocket.TextMessage, payload))
+	endWrite()
 	if w.writeErr == nil {
 		w.continuation.observe(data)
 	}
@@ -546,7 +558,7 @@ func writeWebSocketError(conn *websocket.Conn, status int, code, message string)
 		"status_code": status,
 		"error": fiber.Map{
 			"code":    code,
-			"message": message,
+			"message": redaction.String(message),
 		},
 	})
 	if err != nil {
@@ -594,7 +606,7 @@ func writeWebSocketWarmupResponse(conn *websocket.Conn) error {
 
 func closeWithWebSocketError(conn *websocket.Conn, status int, code, message string) {
 	_ = writeWebSocketError(conn, status, code, message)
-	closePayload := websocket.FormatCloseMessage(websocket.CloseUnsupportedData, message)
+	closePayload := websocket.FormatCloseMessage(websocket.CloseUnsupportedData, safeWebSocketCloseReason(message))
 	_ = conn.WriteControl(websocket.CloseMessage, closePayload, time.Now().Add(responsesWebSocketWriteTimeout))
 }
 
@@ -676,4 +688,15 @@ func (a *webSocketActiveTurn) discardReservation() {
 		a.queued--
 	}
 	a.queuedInterrupted = false
+}
+
+func safeWebSocketCloseReason(message string) string {
+	message = redaction.String(message)
+	if len(message) > 123 {
+		message = message[:123]
+		for !utf8.ValidString(message) {
+			message = message[:len(message)-1]
+		}
+	}
+	return message
 }

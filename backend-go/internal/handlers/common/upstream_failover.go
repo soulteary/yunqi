@@ -28,6 +28,7 @@ import (
 	"github.com/soulteary/yunqi/internal/racing"
 	"github.com/soulteary/yunqi/internal/ratelimit"
 	"github.com/soulteary/yunqi/internal/scheduler"
+	"github.com/soulteary/yunqi/internal/telemetry"
 	"github.com/soulteary/yunqi/internal/types"
 	"github.com/soulteary/yunqi/internal/utils"
 	"github.com/soulteary/yunqi/internal/warmup"
@@ -1092,8 +1093,12 @@ func TryUpstreamWithAllKeys(
 				const maxRateLimitWait = 10 * time.Second
 				releases := make([]func(), 0, 2)
 				if limiter := rateLimitMgr.Get(executionAPIType, executionIndex); limiter != nil {
+					endQueue := telemetry.Phase(httpbridge.Request(c).Context(), "queue")
 					release, rlErr := limiter.Acquire(httpbridge.Request(c).Context(), maxRateLimitWait, time.Now())
+					endQueue()
 					if rlErr != nil {
+						telemetry.Event(httpbridge.Request(c).Context(), "limiter", "scope")
+						recordLocalDiagnostic(c, upstream.ChannelUID, selection.KeyUID, apiKey, executionAPIType, "limiter", "gateway")
 						lastError = rlErr
 						RequestLogf(c, "[%s-RateLimit] 渠道限速器拦截: %v，尝试下一个 Key/渠道", apiType, rlErr)
 						failedKeys[apiKey] = true
@@ -1103,8 +1108,12 @@ func TryUpstreamWithAllKeys(
 				}
 				if selection.LimiterScope != "" {
 					keyLimiter := rateLimitMgr.GetOrCreateScoped(executionAPIType, executionIndex, selection.LimiterScope, keypool.ConfigForCandidate(*upstream, selection.Config))
+					endQueue := telemetry.Phase(httpbridge.Request(c).Context(), "queue")
 					release, rlErr := keyLimiter.Acquire(httpbridge.Request(c).Context(), maxRateLimitWait, time.Now())
+					endQueue()
 					if rlErr != nil {
+						telemetry.Event(httpbridge.Request(c).Context(), "limiter", "scope")
+						recordLocalDiagnostic(c, upstream.ChannelUID, selection.KeyUID, apiKey, executionAPIType, "limiter", "gateway")
 						lastError = rlErr
 						RequestLogf(c, "[%s-RateLimit] Key/Quota 限速器拦截: scope=%s, err=%v，尝试下一个 Key/渠道", apiType, selection.LimiterScope, rlErr)
 						failedKeys[apiKey] = true
@@ -1128,6 +1137,7 @@ func TryUpstreamWithAllKeys(
 			req, err := buildRequest(c, upstreamCopy, apiKey)
 			if err != nil {
 				_ = recordFinalConversion(c, requestBody, nil, apiType, upstreamCopy.ServiceType)
+				recordLocalDiagnostic(c, upstream.ChannelUID, selection.KeyUID, apiKey, executionAPIType, "build", "gateway")
 				// buildRequest 失败通常是客户端参数问题或本地构建错误
 				// 不应污染熔断统计，直接返回错误
 				RequestLogf(c, "[%s-BuildRequest] 请求构建失败: %v", apiType, err)
@@ -1233,6 +1243,16 @@ func TryUpstreamWithAllKeys(
 			// 创建 pending 状态日志（附带代理上下文与会话标识，用于 subagent 观测）
 			// interfaceType 记录实际执行协议：联邦 sibling 必须归属到 chat/responses，
 			// 否则日志会把 chat 上的尝试错误地展示成 messages 渠道的尝试。
+			logOpts = append(logOpts, func(log *metrics.ChannelLog) {
+				log.Diagnostics = telemetry.DiagnosticsFromContext(httpbridge.Request(c).Context())
+				log.ChannelUID = upstream.ChannelUID
+				log.KeyUID = selection.KeyUID
+				if log.KeyUID == "" {
+					log.KeyUID = diagnosticKeyUID(apiKey)
+				}
+				log.TimingSource = telemetry.Timing(httpbridge.Request(c).Context())
+				log.OTLPTraceID = telemetry.TraceID(httpbridge.Request(c).Context())
+			})
 			logRequestID := CreatePendingLog(channelLogStore, metricsKey, executionIndex, upstream.Name, actualAttemptModel, actualOriginalModel, originalReasoningEffort, actualReasoningEffort, apiKey, currentBaseURL, executionAPIType, operation, metrics.RequestSourceProxy, AgentContextFromFiber(c), SessionIDFromFiber(c), logOpts...)
 
 			// 计算当前 Key 的 ConsumptionPolicy，供 metrics 与 trace 共同使用。
@@ -1247,6 +1267,7 @@ func TryUpstreamWithAllKeys(
 			// 向 Autopilot trace 追加一条 "started" endpoint 尝试摘要（fail-open）
 			attemptTraceUID, _ := httpbridge.Value(c, "ccx.autopilot_trace_uid")
 			if uid, ok := attemptTraceUID.(string); ok && uid != "" {
+				telemetry.LinkInternal(httpbridge.Request(c).Context(), requestCorrelationID, uid)
 				configuredCostMultiplier := -1.0
 				if endpointPolicy != nil {
 					if _, cands := callPolicySortKeyBindings(endpointPolicy, upstream.ChannelUID, currentBaseURL, []string{apiKey}, apiType, c); len(cands) > 0 {
@@ -1326,11 +1347,16 @@ func TryUpstreamWithAllKeys(
 					model, actualAttemptModel, mappingNote, utils.MaskAPIKey(apiKey))
 			}
 			resp, err := SendRequestWithLifecycleTrace(req, requestUpstream, envCfg, isStream, apiType, lifecycleTrace)
+			if resp != nil {
+				channelLogStore.Update(metricsKey, logRequestID, func(log *metrics.ChannelLog) { log.UpstreamRequestID = diagnosticUpstreamRequestID(resp.Header) })
+			}
 			if err != nil {
 				lastError = err
 				// 竞速败出：被赢家取消（SendRequest 阶段），不计失败不 failover。
 				if isRacingSuperseded(c, err) {
-					metricsManager.RecordRequestFinalizeIgnored(currentBaseURL, apiKey, metricsServiceType, requestID)
+					measureRequestFinalize(c, func() {
+						metricsManager.RecordRequestFinalizeIgnored(currentBaseURL, apiKey, metricsServiceType, requestID)
+					})
 					channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, metricsServiceType, executionKind)
 					MarkChannelLogRacingLost(channelLogStore, metricsKey, logRequestID)
 					CompleteLog(channelLogStore, metricsKey, logRequestID, 0, false, racing.ErrRacingSuperseded.Error(), isRetryAttempt)
@@ -1340,7 +1366,9 @@ func TryUpstreamWithAllKeys(
 				// 区分客户端取消和真实渠道故障（统一口径）
 				if isClientSideError(err) || httpbridge.Request(c).Context().Err() != nil {
 					// 客户端取消：不计入失败，不触发 failover
-					metricsManager.RecordRequestFinalizeClientCancel(currentBaseURL, apiKey, metricsServiceType, requestID)
+					measureRequestFinalize(c, func() {
+						metricsManager.RecordRequestFinalizeClientCancel(currentBaseURL, apiKey, metricsServiceType, requestID)
+					})
 					channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, metricsServiceType, executionKind)
 					// 完成日志记录（客户端取消）
 					CompleteLog(channelLogStore, metricsKey, logRequestID, 0, false, "client canceled", isRetryAttempt)
@@ -1348,15 +1376,20 @@ func TryUpstreamWithAllKeys(
 					return true, "", 0, nil, nil, err
 				}
 				if httpclient.IsEgressError(err) {
-					metricsManager.RecordRequestFinalizeIgnored(currentBaseURL, apiKey, metricsServiceType, requestID)
+					measureRequestFinalize(c, func() {
+						metricsManager.RecordRequestFinalizeIgnored(currentBaseURL, apiKey, metricsServiceType, requestID)
+					})
 					channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, metricsServiceType, executionKind)
 					CompleteLog(channelLogStore, metricsKey, logRequestID, 0, false, err.Error(), isRetryAttempt)
 					return false, "", 0, nil, nil, err
 				}
+				telemetry.Event(httpbridge.Request(c).Context(), "failover", "transport_error")
 				// 真实渠道故障：计入失败，继续 failover
 				failedKeys[apiKey] = true
 				cfgManager.MarkKeyAsFailed(apiKey, executionAPIType)
-				metricsManager.RecordRequestFinalizeFailureWithClass(currentBaseURL, apiKey, metricsServiceType, requestID, metrics.FailureClassRetryable)
+				measureRequestFinalize(c, func() {
+					metricsManager.RecordRequestFinalizeFailureWithClass(currentBaseURL, apiKey, metricsServiceType, requestID, metrics.FailureClassRetryable)
+				})
 				channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, metricsServiceType, executionKind)
 				recordModelCircuitFailure(c, metricsManager, upstream, apiKey, model, err.Error(), apiType)
 				if markURLFailure != nil {
@@ -1419,7 +1452,9 @@ func TryUpstreamWithAllKeys(
 				errorBodyTimeout := time.Duration(requestUpstream.GetEffectiveRequestTimeoutMs(config.GetRuntimeRequestTimeoutMs(envCfg.RequestTimeout))) * time.Millisecond
 				respBodyBytes, readErr := readUpstreamErrorBody(httpbridge.Request(c).Context(), resp, errorBodyTimeout)
 				if cancelErr := httpbridge.Request(c).Context().Err(); cancelErr != nil {
-					metricsManager.RecordRequestFinalizeClientCancel(currentBaseURL, apiKey, metricsServiceType, requestID)
+					measureRequestFinalize(c, func() {
+						metricsManager.RecordRequestFinalizeClientCancel(currentBaseURL, apiKey, metricsServiceType, requestID)
+					})
 					channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, metricsServiceType, executionKind)
 					CompleteLog(channelLogStore, metricsKey, logRequestID, 0, false, "client canceled", isRetryAttempt)
 					return true, "", 0, nil, nil, cancelErr
@@ -1552,7 +1587,9 @@ func TryUpstreamWithAllKeys(
 								if _, changed := clampMaxTokensInBody(attemptBody, kind, signal.MaxOutputTokens); changed {
 									retrySelection = selection
 									retryAPIKey = apiKey
-									metricsManager.RecordRequestFinalizeIgnored(currentBaseURL, apiKey, metricsServiceType, requestID)
+									measureRequestFinalize(c, func() {
+										metricsManager.RecordRequestFinalizeIgnored(currentBaseURL, apiKey, metricsServiceType, requestID)
+									})
 									channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, metricsServiceType, executionKind)
 									if probeKey := currentBaseURL + "|" + apiKey; probeAcquired[probeKey] {
 										metricsManager.ReleaseProbe(currentBaseURL, apiKey, metricsServiceType)
@@ -1578,7 +1615,9 @@ func TryUpstreamWithAllKeys(
 							deprecatedParamCache.Record(upstream.ChannelUID, keyHash, attemptModel, param) {
 							retrySelection = selection
 							retryAPIKey = apiKey
-							metricsManager.RecordRequestFinalizeIgnored(currentBaseURL, apiKey, metricsServiceType, requestID)
+							measureRequestFinalize(c, func() {
+								metricsManager.RecordRequestFinalizeIgnored(currentBaseURL, apiKey, metricsServiceType, requestID)
+							})
 							channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, metricsServiceType, executionKind)
 							if probeKey := currentBaseURL + "|" + apiKey; probeAcquired[probeKey] {
 								metricsManager.ReleaseProbe(currentBaseURL, apiKey, metricsServiceType)
@@ -1614,7 +1653,9 @@ func TryUpstreamWithAllKeys(
 							signal.Trait, signal.Enabled, config.CompatSourceErrorSignal, signal.Evidence) {
 							retrySelection = selection
 							retryAPIKey = apiKey
-							metricsManager.RecordRequestFinalizeIgnored(currentBaseURL, apiKey, metricsServiceType, requestID)
+							measureRequestFinalize(c, func() {
+								metricsManager.RecordRequestFinalizeIgnored(currentBaseURL, apiKey, metricsServiceType, requestID)
+							})
 							channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, metricsServiceType, executionKind)
 							if probeKey := currentBaseURL + "|" + apiKey; probeAcquired[probeKey] {
 								metricsManager.ReleaseProbe(currentBaseURL, apiKey, metricsServiceType)
@@ -1703,6 +1744,7 @@ func TryUpstreamWithAllKeys(
 				}
 
 				if shouldFailover {
+					telemetry.Event(httpbridge.Request(c).Context(), "failover", "http_error")
 					lastError = fmt.Errorf("上游错误: %d", resp.StatusCode)
 					failedKeys[apiKey] = true
 					cfgManager.MarkKeyAsFailed(apiKey, executionAPIType)
@@ -1719,7 +1761,9 @@ func TryUpstreamWithAllKeys(
 						// （与下方非 failover 分支对内容审核的处理约定一致）。
 						failureClass = metrics.FailureClassNonRetryable
 					}
-					metricsManager.RecordRequestFinalizeFailureWithClass(currentBaseURL, apiKey, metricsServiceType, requestID, failureClass)
+					measureRequestFinalize(c, func() {
+						metricsManager.RecordRequestFinalizeFailureWithClass(currentBaseURL, apiKey, metricsServiceType, requestID, failureClass)
+					})
 					channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, metricsServiceType, executionKind)
 					// 仅 Retryable 计入模型级熔断：Quota 与 Overloaded（含账号级限流）
 					// 反映的是额度或瞬时负载，已由 cooldown / scope 冷却处理，
@@ -1819,7 +1863,9 @@ func TryUpstreamWithAllKeys(
 							executionIndex, upstream.Name, resp.StatusCode, model, actualAttemptModel, errorSummary)
 					}
 				}
-				metricsManager.RecordRequestFinalizeFailureWithClass(currentBaseURL, apiKey, metricsServiceType, requestID, metrics.FailureClassNonRetryable)
+				measureRequestFinalize(c, func() {
+					metricsManager.RecordRequestFinalizeFailureWithClass(currentBaseURL, apiKey, metricsServiceType, requestID, metrics.FailureClassNonRetryable)
+				})
 				channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, metricsServiceType, executionKind)
 				// 不计入模型级熔断：本分支是 shouldFailover=false 的场景
 				// （invalid_request / bad_request / 上游内容审核），问题出在请求本身而非
@@ -1860,6 +1906,12 @@ func TryUpstreamWithAllKeys(
 			capture := &usageCapture{ReadCloser: resp.Body, stream: strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream")}
 			resp.Body = capture
 			usage, err = handleSuccess(c, resp, upstreamCopy, apiKey, attemptBody)
+			if err != nil {
+				channelLogStore.Update(metricsKey, logRequestID, func(log *metrics.ChannelLog) { log.ErrorSource = diagnosticStreamErrorSource(err) })
+			}
+			if lifecycleTrace.finishFirstContentWait != nil {
+				lifecycleTrace.finishFirstContentWait()
+			}
 			capture.annotate(usage, providers.ActualServiceType(c, upstreamCopy.ServiceType))
 			// 上下文窗口自学习（放宽侧）：2xx 完成即实证该渠道×协议×模型可承载本次输入，
 			// 棘轮只升不降。失败/取消/空响应不学习（err 非 nil 时内部直接返回）。
@@ -1906,7 +1958,9 @@ func TryUpstreamWithAllKeys(
 				// 竞速败出最先裁决：另一分支更快交付，本分支的失败不是渠道故障。
 				// 不计失败指标、不熔断、不拉黑、不标记 URL 失败，仅完成日志终态。
 				if racingSupersededOrCanceledEmptyStream(c, err) {
-					metricsManager.RecordRequestFinalizeIgnored(currentBaseURL, apiKey, metricsServiceType, requestID)
+					measureRequestFinalize(c, func() {
+						metricsManager.RecordRequestFinalizeIgnored(currentBaseURL, apiKey, metricsServiceType, requestID)
+					})
 					channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, metricsServiceType, executionKind)
 					MarkChannelLogRacingLost(channelLogStore, metricsKey, logRequestID)
 					CompleteLog(channelLogStore, metricsKey, logRequestID, http.StatusOK, false, racing.ErrRacingSuperseded.Error(), isRetryAttempt)
@@ -1927,7 +1981,9 @@ func TryUpstreamWithAllKeys(
 				var rejected *UpstreamRequestRejectedError
 				if isClientSideError(err) || httpbridge.Request(c).Context().Err() != nil || isClientWriteDisconnect(err) {
 					// 客户端取消/断开：计入总请求数但不计入失败
-					metricsManager.RecordRequestFinalizeClientCancel(currentBaseURL, apiKey, metricsServiceType, requestID)
+					measureRequestFinalize(c, func() {
+						metricsManager.RecordRequestFinalizeClientCancel(currentBaseURL, apiKey, metricsServiceType, requestID)
+					})
 					channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, metricsServiceType, executionKind)
 					RequestLogf(c, "[%s-Cancel] 请求已取消，停止渠道 failover", apiType)
 					// 完成日志记录（客户端取消）
@@ -1937,7 +1993,9 @@ func TryUpstreamWithAllKeys(
 					// 请求侧确定性错误）：与 HTTP 4xx 的「非 failover 错误」分支同一语义，
 					// 问题出在请求本身而非渠道-模型健康度。不逐 Key/渠道重放，也不做渠道级
 					// 惩罚（不标记 Key/URL 失败、不计模型级熔断），直接返回真实错误。
-					metricsManager.RecordRequestFinalizeFailureWithClass(currentBaseURL, apiKey, metricsServiceType, requestID, metrics.FailureClassNonRetryable)
+					measureRequestFinalize(c, func() {
+						metricsManager.RecordRequestFinalizeFailureWithClass(currentBaseURL, apiKey, metricsServiceType, requestID, metrics.FailureClassNonRetryable)
+					})
 					channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, metricsServiceType, executionKind)
 					CompleteLog(channelLogStore, metricsKey, logRequestID, http.StatusBadRequest, false, rejected.Error(), isRetryAttempt)
 					RequestLogf(c, "[%s-RequestRejected] 上游以流内错误拒绝请求 (Key: %s): %s", apiType, utils.MaskAPIKey(apiKey), rejected.Error())
@@ -1953,7 +2011,9 @@ func TryUpstreamWithAllKeys(
 						shortEmptyRetried[retryKey] = true
 						retrySelection = selection
 						retryAPIKey = apiKey
-						metricsManager.RecordRequestFinalizeIgnored(currentBaseURL, apiKey, metricsServiceType, requestID)
+						measureRequestFinalize(c, func() {
+							metricsManager.RecordRequestFinalizeIgnored(currentBaseURL, apiKey, metricsServiceType, requestID)
+						})
 						channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, metricsServiceType, executionKind)
 						if probeAcquired[retryKey] {
 							metricsManager.ReleaseProbe(currentBaseURL, apiKey, metricsServiceType)
@@ -1966,7 +2026,9 @@ func TryUpstreamWithAllKeys(
 					}
 					failedKeys[apiKey] = true
 					cfgManager.MarkKeyAsFailed(apiKey, executionAPIType)
-					metricsManager.RecordRequestFinalizeFailureWithClass(currentBaseURL, apiKey, metricsServiceType, requestID, metrics.FailureClassRetryable)
+					measureRequestFinalize(c, func() {
+						metricsManager.RecordRequestFinalizeFailureWithClass(currentBaseURL, apiKey, metricsServiceType, requestID, metrics.FailureClassRetryable)
+					})
 					channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, metricsServiceType, executionKind)
 					// 空响应 / 无效响应体 / 首字超时 / 断流都是该渠道-模型确实不可用的表现。
 					recordModelCircuitFailure(c, metricsManager, upstream, apiKey, model, err.Error(), apiType)
@@ -1975,6 +2037,7 @@ func TryUpstreamWithAllKeys(
 					}
 					// 记录渠道日志
 					CompleteLog(channelLogStore, metricsKey, logRequestID, http.StatusOK, false, err.Error(), isRetryAttempt)
+					telemetry.Event(httpbridge.Request(c).Context(), "failover", "invalid_response")
 					RequestLogf(c, "[%s-InvalidResponse] 上游返回无效响应 (Key: %s): %v，尝试下一个密钥", apiType, utils.MaskAPIKey(apiKey), err)
 					continue
 				} else if blErr, ok := err.(*ErrBlacklistKey); ok {
@@ -2000,7 +2063,9 @@ func TryUpstreamWithAllKeys(
 						}
 					}
 					cfgManager.MarkKeyAsFailed(apiKey, executionAPIType)
-					metricsManager.RecordRequestFinalizeFailureWithClass(currentBaseURL, apiKey, metricsServiceType, requestID, metrics.FailureClassRetryable)
+					measureRequestFinalize(c, func() {
+						metricsManager.RecordRequestFinalizeFailureWithClass(currentBaseURL, apiKey, metricsServiceType, requestID, metrics.FailureClassRetryable)
+					})
 					channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, metricsServiceType, executionKind)
 					if markURLFailure != nil {
 						markURLFailure(currentBaseURL)
@@ -2017,7 +2082,9 @@ func TryUpstreamWithAllKeys(
 					// 渠道故障一致（Header 已发送，不换渠道），但熔断走「一次确证即隔离」
 					// ——字节级重复证据无歧义，不等双阈值累积。
 					cfgManager.MarkKeyAsFailed(apiKey, executionAPIType)
-					metricsManager.RecordRequestFinalizeFailureWithClass(currentBaseURL, apiKey, metricsServiceType, requestID, metrics.FailureClassRetryable)
+					measureRequestFinalize(c, func() {
+						metricsManager.RecordRequestFinalizeFailureWithClass(currentBaseURL, apiKey, metricsServiceType, requestID, metrics.FailureClassRetryable)
+					})
 					channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, metricsServiceType, executionKind)
 					recordModelCircuitForcedFailure(c, metricsManager, upstream, apiKey, model, err.Error(), apiType)
 					CompleteLog(channelLogStore, metricsKey, logRequestID, http.StatusOK, false, err.Error(), isRetryAttempt)
@@ -2025,7 +2092,9 @@ func TryUpstreamWithAllKeys(
 				} else {
 					// 真实渠道故障：计入失败指标
 					cfgManager.MarkKeyAsFailed(apiKey, executionAPIType)
-					metricsManager.RecordRequestFinalizeFailureWithClass(currentBaseURL, apiKey, metricsServiceType, requestID, metrics.FailureClassRetryable)
+					measureRequestFinalize(c, func() {
+						metricsManager.RecordRequestFinalizeFailureWithClass(currentBaseURL, apiKey, metricsServiceType, requestID, metrics.FailureClassRetryable)
+					})
 					channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, metricsServiceType, executionKind)
 					recordModelCircuitFailure(c, metricsManager, upstream, apiKey, model, err.Error(), apiType)
 					// 记录渠道日志
@@ -2044,7 +2113,9 @@ func TryUpstreamWithAllKeys(
 				endpointUID := autopilot.GenerateEndpointUID(upstream.ChannelUID, currentBaseURL, keyHash)
 				notifyEndpointResultHook(endpointUID, true)
 			}
-			metricsManager.RecordRequestFinalizeSuccess(currentBaseURL, apiKey, metricsServiceType, requestID, usage)
+			measureRequestFinalize(c, func() {
+				metricsManager.RecordRequestFinalizeSuccess(currentBaseURL, apiKey, metricsServiceType, requestID, usage)
+			})
 			channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, metricsServiceType, executionKind)
 			// 成功即解除该渠道-模型的失败累积；若这是熔断到期后放行的探针，
 			// 同时重置退避级别并回收状态条目。
@@ -2962,4 +3033,10 @@ func effortInjectionStyle(kind scheduler.ChannelKind, upstream *config.UpstreamC
 	default:
 		return "reasoning"
 	}
+}
+
+func measureRequestFinalize(c fiber.Ctx, fn func()) {
+	end := telemetry.Phase(httpbridge.Request(c).Context(), "finalize")
+	defer end()
+	fn()
 }

@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"github.com/soulteary/yunqi/internal/telemetry"
 	"sort"
 	"sync"
 	"time"
@@ -8,32 +9,40 @@ import (
 
 // ChannelLog 单次上游请求日志
 type ChannelLog struct {
-	RequestID               string    `json:"requestId"` // 请求唯一标识
-	ChannelIndex            int       `json:"-"`         // 创建时的渠道索引（不序列化，仅用于内部排查）
-	ChannelName             string    `json:"-"`         // 创建时的渠道名称（不序列化，用于共享 metricsKey 日志归属）
-	MetricsKey              string    `json:"-"`         // 指标身份键（不序列化，仅用于日志分桶）
-	Timestamp               time.Time `json:"timestamp"`
-	Model                   string    `json:"model"`                             // 实际使用的模型（重定向后）
-	OriginalModel           string    `json:"originalModel,omitempty"`           // 原始请求模型（仅当重定向时有值）
-	Operation               string    `json:"operation,omitempty"`               // Images 端点（generations/edits/variations）
-	OriginalReasoningEffort string    `json:"originalReasoningEffort,omitempty"` // 原始请求的思考强度
-	ActualReasoningEffort   string    `json:"actualReasoningEffort,omitempty"`   // 实际发往上游的思考强度
-	EffortDecisionSource    string    `json:"effortDecisionSource,omitempty"`    // autopilot | client | passthrough
-	EffortClampedByClient   bool      `json:"effortClampedByClient,omitempty"`   // true if effort clamped by client upper bound
-	MappingFailReason       string    `json:"mappingFailReason,omitempty"`       // 自动映射未命中原因（fail-open 透传原始模型时非空）
-	StatusCode              int       `json:"statusCode"`
-	DurationMs              int64     `json:"durationMs"`
-	Success                 bool      `json:"success"`
-	KeyMask                 string    `json:"keyMask"`
-	BaseURL                 string    `json:"baseUrl"`
-	ErrorInfo               string    `json:"errorInfo"`
-	IsRetry                 bool      `json:"isRetry"`
-	InterfaceType           string    `json:"interfaceType"`           // 接口类型（Messages/Responses/Gemini）
-	RequestSource           string    `json:"requestSource,omitempty"` // 请求来源（proxy/capability_test）
-	SelectionReason         string    `json:"selectionReason,omitempty"`
-	SelectionTraceSummary   string    `json:"selectionTraceSummary,omitempty"`
-	RacingRole              string    `json:"racingRole,omitempty"`   // 竞速角色（primary/shadow，空=未参与竞速）
-	RacingStatus            string    `json:"racingStatus,omitempty"` // 竞速结果（won/lost）
+	Diagnostics             *telemetry.Diagnostics   `json:"-"`
+	ChannelUID              string                   `json:"-"`
+	KeyUID                  string                   `json:"-"`
+	UpstreamRequestID       string                   `json:"-"`
+	ErrorSource             string                   `json:"-"`
+	OTLPTraceID             string                   `json:"otlpTraceId,omitempty"`
+	TimingSource            *telemetry.Timeline      `json:"-"`
+	PhaseTiming             *telemetry.PhaseSnapshot `json:"phaseTiming,omitempty"`
+	RequestID               string                   `json:"requestId"` // 请求唯一标识
+	ChannelIndex            int                      `json:"-"`         // 创建时的渠道索引（不序列化，仅用于内部排查）
+	ChannelName             string                   `json:"-"`         // 创建时的渠道名称（不序列化，用于共享 metricsKey 日志归属）
+	MetricsKey              string                   `json:"-"`         // 指标身份键（不序列化，仅用于日志分桶）
+	Timestamp               time.Time                `json:"timestamp"`
+	Model                   string                   `json:"model"`                             // 实际使用的模型（重定向后）
+	OriginalModel           string                   `json:"originalModel,omitempty"`           // 原始请求模型（仅当重定向时有值）
+	Operation               string                   `json:"operation,omitempty"`               // Images 端点（generations/edits/variations）
+	OriginalReasoningEffort string                   `json:"originalReasoningEffort,omitempty"` // 原始请求的思考强度
+	ActualReasoningEffort   string                   `json:"actualReasoningEffort,omitempty"`   // 实际发往上游的思考强度
+	EffortDecisionSource    string                   `json:"effortDecisionSource,omitempty"`    // autopilot | client | passthrough
+	EffortClampedByClient   bool                     `json:"effortClampedByClient,omitempty"`   // true if effort clamped by client upper bound
+	MappingFailReason       string                   `json:"mappingFailReason,omitempty"`       // 自动映射未命中原因（fail-open 透传原始模型时非空）
+	StatusCode              int                      `json:"statusCode"`
+	DurationMs              int64                    `json:"durationMs"`
+	Success                 bool                     `json:"success"`
+	KeyMask                 string                   `json:"keyMask"`
+	BaseURL                 string                   `json:"baseUrl"`
+	ErrorInfo               string                   `json:"errorInfo"`
+	IsRetry                 bool                     `json:"isRetry"`
+	InterfaceType           string                   `json:"interfaceType"`           // 接口类型（Messages/Responses/Gemini）
+	RequestSource           string                   `json:"requestSource,omitempty"` // 请求来源（proxy/capability_test）
+	SelectionReason         string                   `json:"selectionReason,omitempty"`
+	SelectionTraceSummary   string                   `json:"selectionTraceSummary,omitempty"`
+	RacingRole              string                   `json:"racingRole,omitempty"`   // 竞速角色（primary/shadow，空=未参与竞速）
+	RacingStatus            string                   `json:"racingStatus,omitempty"` // 竞速结果（won/lost）
 
 	// 请求生命周期状态
 	Status      string     `json:"status"`                // pending/connecting/first_byte/streaming/completed/failed/cancelled
@@ -96,15 +105,17 @@ func isTerminalStatus(status string) bool {
 // ChannelLogStore 渠道日志存储（内存环形缓冲区）。
 // 分桶键与指标统计保持一致：metricsKey = identity(baseURL, apiKey, serviceType)。
 type ChannelLogStore struct {
-	mu               sync.RWMutex
-	logs             map[string][]*ChannelLog // key: metricsKey
-	requestLocations map[string]string        // requestID -> current metricsKey；仅跟踪在途请求
+	mu                 sync.RWMutex
+	logs               map[string][]*ChannelLog // key: metricsKey
+	diagnosticInflight map[string]*ChannelLog
+	requestLocations   map[string]string // requestID -> current metricsKey；仅跟踪在途请求
 }
 
 func NewChannelLogStore() *ChannelLogStore {
 	return &ChannelLogStore{
-		logs:             make(map[string][]*ChannelLog),
-		requestLocations: make(map[string]string),
+		logs:               make(map[string][]*ChannelLog),
+		diagnosticInflight: make(map[string]*ChannelLog),
+		requestLocations:   make(map[string]string),
 	}
 }
 
@@ -117,11 +128,20 @@ func (s *ChannelLogStore) Record(metricsKey string, log *ChannelLog) {
 	defer s.mu.Unlock()
 	if log != nil {
 		log.MetricsKey = metricsKey
+		log.observeDiagnostic()
+		if log.Diagnostics != nil && log.RequestID != "" && !isTerminalStatus(log.Status) {
+			if len(s.diagnosticInflight) < telemetry.MaxDiagnosticRequests*telemetry.MaxDiagnosticAttempts {
+				s.diagnosticInflight[log.RequestID] = log
+			} else {
+				log.Diagnostics.DropUpdate()
+			}
+		}
 		if log.RequestID != "" {
 			if !isTerminalStatus(log.Status) {
 				s.requestLocations[log.RequestID] = metricsKey
 			} else {
 				delete(s.requestLocations, log.RequestID)
+				delete(s.diagnosticInflight, log.RequestID)
 			}
 		}
 	}
@@ -154,6 +174,7 @@ func (s *ChannelLogStore) Remove(metricsKeys []string) {
 	for requestID, metricsKey := range s.requestLocations {
 		if _, shouldRemove := removeSet[metricsKey]; shouldRemove {
 			delete(s.requestLocations, requestID)
+			delete(s.diagnosticInflight, requestID)
 		}
 	}
 }
@@ -180,6 +201,7 @@ func (s *ChannelLogStore) ClearAll() {
 	defer s.mu.Unlock()
 	s.logs = make(map[string][]*ChannelLog)
 	s.requestLocations = make(map[string]string)
+	s.diagnosticInflight = make(map[string]*ChannelLog)
 }
 
 func (s *ChannelLogStore) Get(metricsKey string) []*ChannelLog {
@@ -218,6 +240,7 @@ func (s *ChannelLogStore) GetMergedFiltered(metricsKeys []string, includeLog fun
 				continue
 			}
 			logCopy := *logEntry
+			logCopy.PhaseTiming = logCopy.TimingSource.Snapshot()
 			merged = append(merged, &logCopy)
 		}
 	}
@@ -248,6 +271,7 @@ func copyLogsNewestFirst(src []*ChannelLog, limit int) []*ChannelLog {
 			continue
 		}
 		logCopy := *src[i]
+		logCopy.PhaseTiming = logCopy.TimingSource.Snapshot()
 		result = append(result, &logCopy)
 	}
 	if len(result) == 0 {
@@ -286,6 +310,7 @@ func (s *ChannelLogStore) Update(metricsKey string, requestID string, updateFn f
 
 	logs, ok := s.logs[actualMetricsKey]
 	if !ok {
+		delete(s.diagnosticInflight, requestID)
 		delete(s.requestLocations, requestID)
 		return UpdateMissingDeleted, ""
 	}
@@ -293,13 +318,42 @@ func (s *ChannelLogStore) Update(metricsKey string, requestID string, updateFn f
 	for i := range logs {
 		if logs[i] != nil && logs[i].RequestID == requestID {
 			updateFn(logs[i])
+			logs[i].observeDiagnostic()
 			if isTerminalStatus(logs[i].Status) {
 				delete(s.requestLocations, requestID)
+				delete(s.diagnosticInflight, requestID)
 			}
 			return UpdateFound, actualMetricsKey
 		}
 	}
 
+	// A short per-key UI ring must not erase the logical timeline's final state.
+	if retained := s.diagnosticInflight[requestID]; retained != nil {
+		updateFn(retained)
+		retained.observeDiagnostic()
+		if isTerminalStatus(retained.Status) {
+			delete(s.diagnosticInflight, requestID)
+		}
+	}
 	// 仍被标记为在途，但已不在缓冲区中，说明是环形缓冲淘汰。
 	return UpdateMissingEvicted, actualMetricsKey
+}
+
+func (l *ChannelLog) observeDiagnostic() {
+	if l == nil || l.Diagnostics == nil {
+		return
+	}
+	source := l.ErrorSource
+	if l.Status == StatusCancelled {
+		source = "client"
+	} else if l.Status == StatusRacingLost {
+		source = "racing"
+	} else if l.Status == StatusFailed && source == "" {
+		if l.StatusCode >= 400 {
+			source = "upstream"
+		} else if l.StatusCode == 0 {
+			source = "transport"
+		}
+	}
+	l.Diagnostics.Attempt(telemetry.DiagnosticAttempt{AttemptID: l.RequestID, ChannelUID: l.ChannelUID, KeyUID: l.KeyUID, Protocol: l.InterfaceType, Source: l.RequestSource, Status: l.Status, StatusCode: l.StatusCode, ErrorSource: source, UpstreamRequestID: l.UpstreamRequestID, RacingRole: l.RacingRole, RacingStatus: l.RacingStatus, DurationMs: l.DurationMs, StartMs: l.Diagnostics.Elapsed(l.StartTime)})
 }

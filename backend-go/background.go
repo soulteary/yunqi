@@ -285,4 +285,11 @@ func (a *application) stopBackgroundTasks() {
 	a.rateLimitManager.Stop()
 
 	close(a.scheduledRecoveryStop)
+	if a.monitoring != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := a.monitoring.ShutdownTracing(ctx); err != nil {
+			log.Print("[Telemetry-Shutdown] OTLP flush未完成")
+		}
+	}
 }
