@@ -1,6 +1,7 @@
 package converters
 
 import (
+	"encoding/json"
 	"github.com/soulteary/yunqi/internal/session"
 	"github.com/soulteary/yunqi/internal/types"
 )
@@ -25,6 +26,11 @@ func (c *OpenAIChatConverter) ToProviderRequest(sess *session.Session, req *type
 		"stream":   req.Stream,
 	}
 
+	for key, value := range map[string]json.RawMessage{"prompt_cache_key": req.PromptCacheKey, "prompt_cache_options": req.PromptCacheOptions, "prompt_cache_retention": req.PromptCacheRetention} {
+		if len(value) > 0 {
+			openaiReq[key] = value
+		}
+	}
 	// 复制其他参数
 	if req.MaxTokens > 0 {
 		openaiReq["max_tokens"] = req.MaxTokens
