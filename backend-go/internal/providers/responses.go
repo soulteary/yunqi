@@ -1508,17 +1508,13 @@ func convertCodexToolsForPassthrough(reqMap map[string]interface{}) {
 // custom_tool_call(_output) 与带 namespace 的 function_call 归一为上游可识别的
 // function_call(_output) 形态。第三方 Responses 上游只认顶层 tools，对
 // additional_tools 条目静默忽略，导致 codex 工具调用完全失效（ark 实测）。
-// 仅在顶层 tools 为空时触发（codex 0.153+ 的标配形状），与既有
-// codexNativeToolPassthrough/codexToolCompat 顶层转换互不叠加。
+// 与顶层 tools 合并；重复 namespace 按子工具合并，已有定义优先。
 // 必须先于 normalizeResponsesInputForPassthrough 执行：其无状态配对检查会丢弃
 // 未配对的 function_call_output，custom_tool_call 历史须先完成归一。
 // 返回提升前的原始工具数组（namespace/custom 形态）与是否提升；原始工具供
 // 协议转换路径（responses→chat 等）经 codex_merged_raw_tools 通道重建响应侧
 // remap 上下文——提升后的扁平形态丢了 custom 代理语义，无法还原 custom_tool_call。
 func hoistCodexAdditionalTools(c fiber.Ctx, reqMap map[string]interface{}) ([]interface{}, bool) {
-	if rawTools, ok := reqMap["tools"].([]interface{}); ok && len(rawTools) > 0 {
-		return nil, false
-	}
 	input, ok := reqMap["input"].([]interface{})
 	if !ok {
 		return nil, false
@@ -1540,6 +1536,8 @@ func hoistCodexAdditionalTools(c fiber.Ctx, reqMap map[string]interface{}) ([]in
 		return nil, false
 	}
 
+	existing, _ := reqMap["tools"].([]interface{})
+	harvested = mergeAdditionalToolDefinitions(append(append([]interface{}{}, existing...), harvested...))
 	ctx := converters.BuildCodexToolContextFromRaw(harvested)
 	hoisted := make([]interface{}, 0, len(harvested))
 	for _, rawTool := range harvested {
@@ -1560,6 +1558,9 @@ func hoistCodexAdditionalTools(c fiber.Ctx, reqMap map[string]interface{}) ([]in
 				continue
 			}
 			hoisted = append(hoisted, converters.CustomProxyToolResponsesFlat(name, toString(tool["description"])))
+		default:
+			// Preserve native tools already declared at the top level.
+			hoisted = append(hoisted, tool)
 		}
 	}
 	if len(hoisted) == 0 {
@@ -1601,6 +1602,51 @@ func hoistCodexAdditionalTools(c fiber.Ctx, reqMap map[string]interface{}) ([]in
 	httpbridge.SetValue(c, "codex_tool_context", ctx)
 	httpbridge.SetValue(c, "codex_additional_tools_hoisted", true)
 	return harvested, true
+}
+
+// mergeAdditionalToolDefinitions preserves the first named definition, while
+// allowing later additional_tools batches to extend an existing namespace.
+// Clone namespace maps so merging does not mutate the original input history.
+func mergeAdditionalToolDefinitions(tools []interface{}) []interface{} {
+	merged := make([]interface{}, 0, len(tools))
+	positions := make(map[string]int)
+	for _, raw := range tools {
+		tool, ok := raw.(map[string]interface{})
+		if !ok {
+			merged = append(merged, raw)
+			continue
+		}
+		kind, name := toString(tool["type"]), toString(tool["name"])
+		if name == "" {
+			merged = append(merged, raw)
+			continue
+		}
+		key := "callable:" + name
+		if kind != "function" && kind != "custom" {
+			key = kind + ":" + name
+		}
+		if index, exists := positions[key]; exists {
+			if kind == "namespace" {
+				previous := merged[index].(map[string]interface{})
+				children, _ := previous["tools"].([]interface{})
+				additional, _ := tool["tools"].([]interface{})
+				previous["tools"] = mergeAdditionalToolDefinitions(append(append([]interface{}{}, children...), additional...))
+			}
+			continue
+		}
+		positions[key] = len(merged)
+		if kind == "namespace" {
+			copy := make(map[string]interface{}, len(tool))
+			for key, value := range tool {
+				copy[key] = value
+			}
+			children, _ := tool["tools"].([]interface{})
+			copy["tools"] = mergeAdditionalToolDefinitions(children)
+			raw = copy
+		}
+		merged = append(merged, raw)
+	}
+	return merged
 }
 
 func normalizeToolChoiceAfterToolStrip(reqMap map[string]interface{}, keptTools []interface{}) {

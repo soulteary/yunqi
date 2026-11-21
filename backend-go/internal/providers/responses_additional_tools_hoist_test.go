@@ -170,18 +170,18 @@ func TestHoistCodexAdditionalTools(t *testing.T) {
 		}
 	})
 
-	t.Run("顶层 tools 非空时不触发", func(t *testing.T) {
+	t.Run("顶层 tools 与追加工具合并", func(t *testing.T) {
 		req := additionalToolsHoistFixture()
 		req["tools"] = []interface{}{map[string]interface{}{"type": "function", "name": "existing"}}
 		c := hoistTestFiberContext()
 		hoistCodexAdditionalTools(c, req)
 
 		tools := req["tools"].([]interface{})
-		if len(tools) != 1 || toString(tools[0].(map[string]interface{})["name"]) != "existing" {
-			t.Fatalf("顶层 tools 不应被改动: %v", tools)
+		if len(tools) != 3 || toString(tools[0].(map[string]interface{})["name"]) != "existing" {
+			t.Fatalf("顶层工具应保留并补齐追加工具: %v", tools)
 		}
-		if _, ok := httpbridge.Value(c, "codex_additional_tools_hoisted"); ok {
-			t.Fatalf("未收割时不应置位 hoisted")
+		if _, ok := httpbridge.Value(c, "codex_additional_tools_hoisted"); !ok {
+			t.Fatalf("合并时应置位 hoisted")
 		}
 	})
 
@@ -353,5 +353,106 @@ func TestBuildProviderRequestBody_ChatHoistsAdditionalTools(t *testing.T) {
 	}
 	if hoisted, _ := httpbridge.Value(c, "codex_additional_tools_hoisted"); hoisted != true {
 		t.Fatalf("codex_additional_tools_hoisted 未置位")
+	}
+}
+
+func TestBuildProviderRequestBody_ChatMergesAdditionalToolsBatches(t *testing.T) {
+	body := []byte(`{"model":"test-model","tools":[{"type":"function","name":"existing","description":"original","parameters":{"type":"object"}},{"type":"namespace","name":"shell","tools":[{"type":"custom","name":"exec"}]}],"tool_choice":{"type":"function","namespace":"shell","name":"wait"},"input":[{"type":"additional_tools","tools":[{"type":"function","name":"existing","description":"duplicate"},{"type":"namespace","name":"shell","tools":[{"type":"custom","name":"exec"},{"type":"function","name":"wait","parameters":{"type":"object"}}]}]},{"type":"additional_tools","tools":[{"type":"namespace","name":"shell","tools":[{"type":"function","name":"wait","description":"duplicate"},{"type":"function","name":"status","parameters":{"type":"object"}}]}]},{"type":"custom_tool_call","name":"exec","call_id":"call_1","input":"ls"},{"type":"custom_tool_call_output","call_id":"call_1","output":"ok"},{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}]}`)
+	c := hoistTestFiberContext()
+	request, _, err := (&ResponsesProvider{}).buildProviderRequestBody(c, "/v1/responses", body, &config.UpstreamConfig{ServiceType: "openai"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result map[string]interface{}
+	if err := json.Unmarshal(encoded, &result); err != nil {
+		t.Fatal(err)
+	}
+	tools := result["tools"].([]interface{})
+	if len(tools) != 4 {
+		t.Fatalf("expected four unique tools, got %s", encoded)
+	}
+	names := map[string]bool{}
+	for _, raw := range tools {
+		fn := raw.(map[string]interface{})["function"].(map[string]interface{})
+		name := toString(fn["name"])
+		if names[name] {
+			t.Fatalf("duplicate tool %s: %s", name, encoded)
+		}
+		names[name] = true
+		if name == "existing" && fn["description"] != "original" {
+			t.Fatalf("existing definition overwritten: %s", encoded)
+		}
+	}
+	for _, name := range []string{"existing", "shell__exec", "shell__wait", "shell__status"} {
+		if !names[name] {
+			t.Fatalf("missing tool %s: %s", name, encoded)
+		}
+	}
+	choice := result["tool_choice"].(map[string]interface{})["function"].(map[string]interface{})
+	if choice["name"] != "shell__wait" {
+		t.Fatalf("choice was not mapped: %s", encoded)
+	}
+	var call, output bool
+	for _, raw := range result["messages"].([]interface{}) {
+		message := raw.(map[string]interface{})
+		if message["role"] == "tool" && message["tool_call_id"] == "call_1" {
+			output = true
+		}
+		if calls, ok := message["tool_calls"].([]interface{}); ok {
+			for _, rawCall := range calls {
+				item := rawCall.(map[string]interface{})
+				fn := item["function"].(map[string]interface{})
+				if item["id"] == "call_1" && fn["name"] == "shell__exec" {
+					call = true
+				}
+			}
+		}
+	}
+	if !call || !output {
+		t.Fatalf("custom call/output pairing lost: %s", encoded)
+	}
+	value, _ := httpbridge.Value(c, "codex_tool_context")
+	ctx := value.(converters.CodexToolContext)
+	if _, ok := ctx.CustomTools["shell__exec"]; !ok {
+		t.Fatalf("custom response mapping lost: %#v", ctx)
+	}
+}
+
+func TestHoistCodexAdditionalTools_PreservesNativeToolsAndInputDefinitions(t *testing.T) {
+	req := additionalToolsHoistFixture()
+	req["tools"] = []interface{}{map[string]interface{}{"type": "web_search"}}
+	input := req["input"].([]interface{})
+	original := input[0].(map[string]interface{})["tools"].([]interface{})[0].(map[string]interface{})
+	input = append(input, map[string]interface{}{
+		"type": "additional_tools",
+		"tools": []interface{}{map[string]interface{}{
+			"type": "namespace", "name": "functions", "tools": []interface{}{
+				map[string]interface{}{"type": "function", "name": "status"},
+			},
+		}},
+	})
+	req["input"] = input
+	c := hoistTestFiberContext()
+	if _, ok := hoistCodexAdditionalTools(c, req); !ok {
+		t.Fatal("mixed tools were not hoisted")
+	}
+	tools := req["tools"].([]interface{})
+	if len(tools) != 4 || tools[0].(map[string]interface{})["type"] != "web_search" {
+		t.Fatalf("native top-level tool was lost: %#v", tools)
+	}
+	if len(original["tools"].([]interface{})) != 2 {
+		t.Fatal("merging mutated the original additional_tools definition")
+	}
+	before, _ := json.Marshal(req)
+	if _, ok := hoistCodexAdditionalTools(c, req); ok {
+		t.Fatal("repeated normalization should not re-hoist tools")
+	}
+	after, _ := json.Marshal(req)
+	if string(before) != string(after) {
+		t.Fatalf("repeated normalization changed request: %s", after)
 	}
 }
