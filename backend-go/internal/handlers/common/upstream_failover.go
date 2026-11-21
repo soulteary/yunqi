@@ -687,6 +687,11 @@ func TryUpstreamWithAllKeys(
 
 		for keyAttempts, attemptOrdinal := 0, 0; keyAttempts < maxRetries || retryAPIKey != ""; attemptOrdinal++ {
 			if requestErr := httpbridge.Request(c).Context().Err(); requestErr != nil {
+				// A racing winner also cancels this branch. Let the orchestrator
+				// settle the shadow instead of claiming the losing branch handled it.
+				if isRacingSuperseded(c, requestErr) {
+					return false, "", 0, nil, nil, requestErr
+				}
 				return true, "", 0, nil, nil, requestErr
 			}
 			isRetryAttempt := attemptOrdinal > 0 || urlIdx > 0
