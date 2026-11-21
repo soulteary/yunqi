@@ -481,7 +481,7 @@
                 <v-icon size="small">mdi-history</v-icon>
               </v-btn>
 
-              <v-menu
+              <ChannelActionMenu
                 :model-value="isChannelMenuOpen('active', element)"
                 location="bottom end"
                 origin="top end"
@@ -579,7 +579,7 @@
                     </v-list-item-title>
                   </v-list-item>
                 </v-list>
-              </v-menu>
+              </ChannelActionMenu>
             </div>
               </div><!-- .channel-row-content -->
           </div><!-- .channel-row -->
@@ -709,7 +709,7 @@
               {{ t('orchestration.enable') }}
             </v-btn>
 
-            <v-menu
+            <ChannelActionMenu
               :model-value="isChannelMenuOpen('inactive', channel)"
               location="bottom end"
               origin="top end"
@@ -758,7 +758,7 @@
                   <v-list-item-title>{{ t('orchestration.delete') }}</v-list-item-title>
                 </v-list-item>
               </v-list>
-            </v-menu>
+            </ChannelActionMenu>
           </div>
         </div>
       </div>
@@ -782,7 +782,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, shallowRef, computed, watch, onMounted, onUnmounted, defineAsyncComponent, nextTick, type ObjectDirective } from 'vue'
+import ChannelActionMenu from './ChannelActionMenu.vue'
+import { ref, shallowRef, computed, watch, onMounted, onUnmounted, defineAsyncComponent, type ObjectDirective } from 'vue'
 import draggable from 'vuedraggable'
 import { api, type Channel, type ChannelKind, type ChannelMetrics, type ChannelProtocolRoute, type ChannelStatus, type TimeWindowStats, type ChannelRecentActivity, type SchedulerStatsResponse } from '../services/api'
 import { getChannelTypeApi } from '../utils/channelTypeApi'
@@ -961,7 +962,6 @@ let copyTimeoutId: ReturnType<typeof setTimeout> | null = null
 type ChannelMenuScope = 'active' | 'inactive'
 type ChannelMenuKey = `${ChannelMenuScope}:${string}`
 const openChannelMenuKey = ref<ChannelMenuKey | null>(null)
-let channelMenuRepositionTimer: ReturnType<typeof setTimeout> | null = null
 
 const getChannelMenuKey = (scope: ChannelMenuScope, channel: Channel): ChannelMenuKey =>
   `${scope}:${getChannelUiKey(channel)}`
@@ -988,25 +988,6 @@ const shouldRenderViewportChannel = (
   )
 }
 
-const dispatchOverlayResize = () => {
-  window.dispatchEvent(new Event('resize'))
-}
-
-const scheduleChannelMenuReposition = () => {
-  nextTick(() => {
-    window.requestAnimationFrame(dispatchOverlayResize)
-
-    if (channelMenuRepositionTimer) {
-      clearTimeout(channelMenuRepositionTimer)
-    }
-
-    channelMenuRepositionTimer = setTimeout(() => {
-      dispatchOverlayResize()
-      channelMenuRepositionTimer = null
-    }, 50)
-  })
-}
-
 const handleChannelMenuUpdate = (
   scope: ChannelMenuScope,
   channel: Channel,
@@ -1016,7 +997,6 @@ const handleChannelMenuUpdate = (
 
   if (open) {
     openChannelMenuKey.value = key
-    scheduleChannelMenuReposition()
     return
   }
 
@@ -1741,10 +1721,6 @@ onUnmounted(() => {
   if (copyTimeoutId) {
     clearTimeout(copyTimeoutId)
     copyTimeoutId = null
-  }
-  if (channelMenuRepositionTimer) {
-    clearTimeout(channelMenuRepositionTimer)
-    channelMenuRepositionTimer = null
   }
 })
 
