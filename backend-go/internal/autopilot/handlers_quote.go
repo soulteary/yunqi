@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gofiber/fiber/v3"
@@ -48,8 +49,15 @@ func CallerQuoteHandler(cm *config.ConfigManager, sch *scheduler.ChannelSchedule
 		cfg := cm.GetConfig()
 		profile := buildRoutePreviewProfile(c, kind, model, normalizeRoutePreviewOperation(kind, strings.TrimSpace(req.Operation), c), body, cfg.AutopilotRouting.Scenario)
 		input := int64(profile.ContextNeed)
+		inputKnown := quoteHasInput(body)
+		inputSource := "unknown"
+		if inputKnown {
+			inputSource = "body_estimate"
+		}
 		if req.InputTokens != nil {
 			input = *req.InputTokens
+			inputKnown = true
+			inputSource = "explicit"
 		}
 		output := int64(0)
 		outputKnown := false
@@ -59,7 +67,12 @@ func CallerQuoteHandler(cm *config.ConfigManager, sch *scheduler.ChannelSchedule
 		} else {
 			for _, key := range []string{"max_output_tokens", "max_completion_tokens", "max_tokens", "generationConfig.maxOutputTokens"} {
 				if value := gjson.GetBytes(body, key); value.Exists() {
-					output = value.Int()
+					parsed, parseErr := strconv.ParseInt(value.Raw, 10, 64)
+					if value.Type != gjson.Number || parseErr != nil || parsed < 0 || parsed > 1_000_000_000 {
+						httpbridge.JSON(c, 400, fiber.Map{"error": "invalid_token_count"})
+						return nil
+					}
+					output = parsed
 					outputKnown = true
 					break
 				}
@@ -82,10 +95,60 @@ func CallerQuoteHandler(cm *config.ConfigManager, sch *scheduler.ChannelSchedule
 		resolved := config.ResolveUpstreamCapability(actualModel, result.Upstream, cm.UpstreamModelCapabilitiesSnapshot())
 		cost, complete := metrics.CalculateTokenCostUSDWithPricingAndStatus(resolved.Capability.Pricing, input, output, 0, 0)
 		// Token-only quotes cannot promise full media/request charges.
-		if !outputKnown || kind == scheduler.ChannelKindImages {
+		if !inputKnown || !outputKnown || kind == scheduler.ChannelKindImages || quoteHasMedia(body) {
 			complete = false
 		}
-		httpbridge.JSON(c, http.StatusOK, fiber.Map{"model": model, "resolvedModel": actualModel, "currency": "USD", "estimatedCost": cost, "pricingComplete": complete, "inputTokens": input, "outputTokens": output, "outputBudgetKnown": outputKnown, "quoteOnly": true})
+		httpbridge.JSON(c, http.StatusOK, fiber.Map{"model": model, "resolvedModel": actualModel, "currency": "USD", "estimatedCost": cost, "pricingComplete": complete, "inputTokens": input, "outputTokens": output, "outputBudgetKnown": outputKnown, "inputBudgetKnown": inputKnown, "inputBudgetSource": inputSource, "quoteOnly": true})
 		return nil
 	}
+}
+
+func quoteHasInput(body []byte) bool {
+	for _, key := range []string{"messages", "input", "contents", "prompt", "system", "instructions"} {
+		v := gjson.GetBytes(body, key)
+		if v.IsArray() && len(v.Array()) > 0 || v.Type == gjson.String && v.String() != "" || v.IsObject() && len(v.Map()) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func quoteHasMedia(body []byte) bool {
+	var value interface{}
+	if json.Unmarshal(body, &value) != nil {
+		return false
+	}
+	var walk func(interface{}) bool
+	walk = func(v interface{}) bool {
+		switch x := v.(type) {
+		case []interface{}:
+			for _, item := range x {
+				if walk(item) {
+					return true
+				}
+			}
+		case map[string]interface{}:
+			for key, item := range x {
+				switch strings.ToLower(key) {
+				case "audio", "video", "image", "image_url", "input_audio", "output_audio", "inlinedata", "filedata", "modalities", "responsemodalities":
+					return true
+				}
+				if key == "type" || strings.EqualFold(key, "mimeType") || key == "mime_type" {
+					if text, ok := item.(string); ok {
+						lower := strings.ToLower(text)
+						for _, media := range []string{"image", "audio", "video", "document", "input_file", "application/pdf"} {
+							if strings.Contains(lower, media) {
+								return true
+							}
+						}
+					}
+				}
+				if walk(item) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	return walk(value)
 }

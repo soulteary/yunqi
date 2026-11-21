@@ -59,3 +59,37 @@ func TestCallerQuoteUsesChannelPriceWithoutDisclosingInfrastructure(t *testing.T
 		}
 	}
 }
+
+func TestCallerQuoteRejectsMalformedBodyBudgetsAndFlagsUnknownInputMedia(t *testing.T) {
+	cfg := baseTestConfig()
+	sch, cm, cleanup := createTestScheduler(t, cfg)
+	defer cleanup()
+	app := httpbridge.NewApp()
+	app.Post("/v1/quote", CallerQuoteHandler(cm, sch))
+	for _, raw := range []string{`"foo"`, `1.5`, `1e99`, `9223372036854775808`, `-1`, `true`, `{}`, `[]`} {
+		body := `{"channelKind":"messages","model":"claude-sonnet-4","body":{"max_tokens":` + raw + `}}`
+		req := httptest.NewRequest("POST", "/v1/quote", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		httpbridge.Handler(app).ServeHTTP(w, req)
+		if w.Code != 400 {
+			t.Fatalf("budget %s status=%d body=%s", raw, w.Code, w.Body.String())
+		}
+	}
+	for _, body := range []string{
+		`{"channelKind":"messages","model":"claude-sonnet-4","outputTokens":10}`,
+		`{"channelKind":"messages","model":"claude-sonnet-4","inputTokens":10,"outputTokens":10,"body":{"messages":[{"role":"user","content":[{"type":"input_audio","input_audio":{"data":"AA","format":"wav"}}]}]}}`,
+		`{"channelKind":"messages","model":"claude-sonnet-4","inputTokens":10,"outputTokens":10,"body":{"modalities":["audio"]}}`,
+	} {
+		req := httptest.NewRequest("POST", "/v1/quote", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		httpbridge.Handler(app).ServeHTTP(w, req)
+		if w.Code != 200 {
+			t.Fatalf("%d: %s", w.Code, w.Body.String())
+		}
+		if strings.Contains(w.Body.String(), `"pricingComplete":true`) {
+			t.Fatalf("false complete quote: %s", w.Body.String())
+		}
+	}
+}
