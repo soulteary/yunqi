@@ -35,7 +35,7 @@ var responsesWebSocketUpgrader = websocket.Upgrader{
 }
 
 // WebSocketHandler 支持 Codex 原生 Responses WebSocket 协议。
-// 对原生 Responses 上游使用 WebSocket v2 透传；其他上游保留 HTTP/SSE bridge。
+// 上游使用 HTTP/SSE bridge，并在同一连接中完整重放已知的续接历史。
 func WebSocketHandler(
 	envCfg *config.EnvConfig,
 	cfgManager *config.ConfigManager,
@@ -158,6 +158,7 @@ func serveResponsesWebSocketBridgeLoop(
 	firstPayload []byte,
 ) {
 	payload := firstPayload
+	var continuation responsesWebSocketContinuation
 	for {
 		if payload == nil {
 			messageType, nextPayload, err := conn.ReadMessage()
@@ -187,12 +188,16 @@ func serveResponsesWebSocketBridgeLoop(
 			continue
 		}
 
-		if err := serveResponseCreateOverWebSocket(c, conn, bridgeRouter, requestBody); err != nil {
+		requestBody, input, replayable := continuation.prepare(requestBody)
+		turn, err := serveResponseCreateOverWebSocket(c, conn, bridgeRouter, requestBody)
+		if err != nil {
 			if isWebSocketClosed(err) {
 				return
 			}
 			_ = writeWebSocketError(conn, http.StatusInternalServerError, "stream_error", err.Error())
+			continue
 		}
+		continuation.record(input, replayable, turn)
 	}
 }
 
@@ -201,10 +206,10 @@ func serveResponseCreateOverWebSocket(
 	conn *websocket.Conn,
 	httpHandler http.Handler,
 	requestBody []byte,
-) error {
+) (*responsesWebSocketTurn, error) {
 	req, err := http.NewRequestWithContext(httpbridge.Request(parent).Context(), http.MethodPost, httpbridge.Request(parent).URL.RequestURI(), bytes.NewReader(requestBody))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	copyWebSocketRequestHeaders(httpbridge.Request(parent).Header, req.Header)
 	req.Header.Set("Content-Type", "application/json")
@@ -212,7 +217,8 @@ func serveResponseCreateOverWebSocket(
 
 	writer := newResponsesWebSocketWriter(conn)
 	httpHandler.ServeHTTP(writer, req)
-	return writer.finish()
+	err = writer.finish()
+	return &writer.continuation, err
 }
 
 func copyWebSocketRequestHeaders(src http.Header, dst http.Header) {
@@ -228,15 +234,16 @@ func copyWebSocketRequestHeaders(src http.Header, dst http.Header) {
 }
 
 type responsesWebSocketWriter struct {
-	conn        *websocket.Conn
-	header      http.Header
-	status      int
-	size        int
-	written     bool
-	writeErr    error
-	mu          sync.Mutex
-	sseBuffer   bytes.Buffer
-	currentData strings.Builder
+	conn         *websocket.Conn
+	header       http.Header
+	status       int
+	size         int
+	written      bool
+	writeErr     error
+	mu           sync.Mutex
+	sseBuffer    bytes.Buffer
+	currentData  strings.Builder
+	continuation responsesWebSocketTurn
 }
 
 func newResponsesWebSocketWriter(conn *websocket.Conn) *responsesWebSocketWriter {
@@ -388,6 +395,9 @@ func (w *responsesWebSocketWriter) sendCurrentData() {
 
 	_ = w.conn.SetWriteDeadline(time.Now().Add(responsesWebSocketWriteTimeout))
 	w.writeErr = w.conn.WriteMessage(websocket.TextMessage, []byte(data))
+	if w.writeErr == nil {
+		w.continuation.observe(data)
+	}
 }
 
 func takeSSELine(buf *bytes.Buffer) (string, bool) {
