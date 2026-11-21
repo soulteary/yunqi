@@ -228,8 +228,15 @@ func AuthenticateProxy(c fiber.Ctx, envCfg *config.EnvConfig) error {
 	if id := envCfg.ProxyPrincipalIDs[providedKey]; id != "" {
 		principalID = "principal:" + id
 	}
+	managedID, allowed := setEntryPolicy(c, envCfg, providedKey)
+	if !allowed {
+		return nil
+	}
+	if managedID != "" {
+		principalID = managedID
+	}
 	httpbridge.SetValue(c, ContextKeyPrincipalID, principalID)
-	if mask := envCfg.ProxyKeyMaskForRequest(providedKey); mask != "" {
+	if mask := envCfg.ProxyKeyMaskForRequest(providedKey); mask != "" && managedID == "" {
 		httpbridge.SetValue(c, ContextKeyProxyKeyMask, mask)
 	}
 	return nil

@@ -69,6 +69,7 @@ GET /api/console/codex-auto-review
 GET /api/console/status
 GET /api/conversations
 GET /api/conversations/settings
+GET /api/entry-keys
 GET /api/gemini/channels
 GET /api/gemini/channels/:id/auto-status
 GET /api/gemini/channels/:id/balance
@@ -243,6 +244,8 @@ POST /api/conversations/:id/override
 POST /api/copilot/oauth/device/code
 POST /api/copilot/oauth/token
 POST /api/copilot/oauth/verify
+POST /api/entry-keys
+POST /api/entry-keys/:id/rotate
 POST /api/gemini/channels
 POST /api/gemini/channels/:id/auto-discover
 POST /api/gemini/channels/:id/balance/check
@@ -403,6 +406,7 @@ PUT /api/channels/:uid
 PUT /api/chat/channels/:id
 PUT /api/console/codex-auto-review
 PUT /api/conversations/settings
+PUT /api/entry-keys/:id
 PUT /api/gemini/channels/:id
 PUT /api/images/channels/:id
 PUT /api/logical-channels/:uid
