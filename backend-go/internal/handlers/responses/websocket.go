@@ -7,11 +7,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/soulteary/yunqi/internal/redaction"
 	"net"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/gorilla/websocket"
@@ -512,7 +514,7 @@ func (w *responsesWebSocketWriter) sendCurrentData() {
 		w.active.observe(data)
 	}
 	_ = w.conn.SetWriteDeadline(time.Now().Add(responsesWebSocketWriteTimeout))
-	w.setWriteError(w.conn.WriteMessage(websocket.TextMessage, []byte(data)))
+	w.setWriteError(w.conn.WriteMessage(websocket.TextMessage, redaction.ErrorJSON([]byte(data))))
 	if w.writeErr == nil {
 		w.continuation.observe(data)
 	}
@@ -546,7 +548,7 @@ func writeWebSocketError(conn *websocket.Conn, status int, code, message string)
 		"status_code": status,
 		"error": fiber.Map{
 			"code":    code,
-			"message": message,
+			"message": redaction.String(message),
 		},
 	})
 	if err != nil {
@@ -594,7 +596,7 @@ func writeWebSocketWarmupResponse(conn *websocket.Conn) error {
 
 func closeWithWebSocketError(conn *websocket.Conn, status int, code, message string) {
 	_ = writeWebSocketError(conn, status, code, message)
-	closePayload := websocket.FormatCloseMessage(websocket.CloseUnsupportedData, message)
+	closePayload := websocket.FormatCloseMessage(websocket.CloseUnsupportedData, safeWebSocketCloseReason(message))
 	_ = conn.WriteControl(websocket.CloseMessage, closePayload, time.Now().Add(responsesWebSocketWriteTimeout))
 }
 
@@ -676,4 +678,15 @@ func (a *webSocketActiveTurn) discardReservation() {
 		a.queued--
 	}
 	a.queuedInterrupted = false
+}
+
+func safeWebSocketCloseReason(message string) string {
+	message = redaction.String(message)
+	if len(message) > 123 {
+		message = message[:123]
+		for !utf8.ValidString(message) {
+			message = message[:len(message)-1]
+		}
+	}
+	return message
 }
