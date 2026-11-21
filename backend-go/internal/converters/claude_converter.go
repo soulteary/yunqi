@@ -1,6 +1,7 @@
 package converters
 
 import (
+	"encoding/json"
 	"github.com/soulteary/yunqi/internal/session"
 	"github.com/soulteary/yunqi/internal/types"
 )
@@ -12,6 +13,14 @@ type ClaudeConverter struct{}
 
 // ToProviderRequest 将 Responses 请求转换为 Claude Messages 格式
 func (c *ClaudeConverter) ToProviderRequest(sess *session.Session, req *types.ResponsesRequest) (interface{}, error) {
+	raw, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+	format, err := ClaudeStructuredOutput(raw)
+	if err != nil {
+		return nil, err
+	}
 	var codexTools []map[string]interface{}
 	var codexCtx CodexToolContext
 	codexEnabled, _ := req.TransformerMetadata["codex_tool_compat_enabled"].(bool)
@@ -36,6 +45,10 @@ func (c *ClaudeConverter) ToProviderRequest(sess *session.Session, req *types.Re
 		"model":    req.Model,
 		"messages": messages,
 		"stream":   req.Stream,
+	}
+
+	if len(format) > 0 {
+		claudeReq["output_config"] = map[string]interface{}{"format": format}
 	}
 
 	// Claude 使用独立的 system 参数（不在 messages 中）

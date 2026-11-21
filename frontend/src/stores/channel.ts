@@ -393,12 +393,18 @@ export const useChannelStore = defineStore('channel', () => {
     const isVectors = targetTab === 'vectors'
 
     if (editingChannelIndex !== null) {
+      let saveRequestCount = 0
+      const persistChannel = (...args: Parameters<typeof updateChannelByType>) => {
+        saveRequestCount++
+        return updateChannelByType(...args)
+      }
       // 更新现有渠道
       const primaryPatch = { ...channel }
       if (targetTab !== 'responses' || channel.serviceType !== 'responses') {
         delete primaryPatch.responsesReasoningFold
       }
       let accountWarnings: string[] | undefined
+      let unsavedFields: string[] = []
       if (options?.autoManaged && options.accountUid) {
         const original = options.originalChannel
         if (original && !original.providerId) {
@@ -407,6 +413,7 @@ export const useChannelStore = defineStore('channel', () => {
           const baseUrls = channel.baseUrls?.length
             ? [...channel.baseUrls]
             : (channel.baseUrl ? [channel.baseUrl] : [])
+          saveRequestCount++
           const accountResp = await api.updateManagedAccount(options.accountUid, {
             name: channel.name,
             apiKeys: channel.apiKeys,
@@ -423,9 +430,11 @@ export const useChannelStore = defineStore('channel', () => {
             .map(keyConfig => keyConfig.credentialUid)
             .filter((uid): uid is string => !!uid)
           if (addApiKeys.length > 0 || removeCredentialUids.length > 0) {
+            saveRequestCount++
             await api.patchManagedAccountCredentials(options.accountUid, { addApiKeys, removeCredentialUids })
           }
         } else {
+          saveRequestCount++
           await api.updateManagedAccount(options.accountUid, { name: channel.name, apiKeys: channel.apiKeys })
         }
 
@@ -433,14 +442,14 @@ export const useChannelStore = defineStore('channel', () => {
         // 以下单卡更新一律用编辑会话快照的 channelUid 寻址，避免保存期间列表重排串渠道。
         const snapshotChannelUid = original?.channelUid
         if (original && (channel.website ?? '').trim() !== (original.website ?? '').trim()) {
-          await updateChannelByType(targetTab, editingChannelIndex, {
+          await persistChannel(targetTab, editingChannelIndex, {
             website: (channel.website ?? '').trim(),
           }, snapshotChannelUid)
         }
         // 备注同样是跨协议共享字段，账号接口（PUT /accounts）不承载 remark；
         // 变化时经单卡更新下发，由后端整组同步到逻辑渠道与兄弟卡。
         if (original && (channel.remark ?? '').trim() !== (original.remark ?? '').trim()) {
-          await updateChannelByType(targetTab, editingChannelIndex, {
+          await persistChannel(targetTab, editingChannelIndex, {
             remark: (channel.remark ?? '').trim(),
           }, snapshotChannelUid)
         }
@@ -456,28 +465,29 @@ export const useChannelStore = defineStore('channel', () => {
           channelPatch.apiKeyConfigs = stagedKeyMultiplierConfigs
         }
         if (Object.keys(channelPatch).length > 0) {
-          await updateChannelByType(targetTab, editingChannelIndex, channelPatch, snapshotChannelUid)
+          await persistChannel(targetTab, editingChannelIndex, channelPatch, snapshotChannelUid)
         }
         // 静默丢弃兜底：编辑前后变化但未被任何保存链路承载的字段输出 debug 日志，
         // 防止再次出现「保存后丢」无感知（新增可编辑字段时据此补 channelPatch 白名单）。
         const droppedFields = listDroppedManagedChannelFields(original, channel)
         if (droppedFields.length > 0) {
+          unsavedFields = droppedFields
           console.debug(
             `[ManagedChannelSave] 以下字段编辑后发生变化，但托管账号保存链路未持久化（如需支持请在 buildManagedChannelPatch 白名单补充）: ${droppedFields.join(', ')}（渠道: ${channel.name}）`,
           )
         }
       } else if (isChat) {
-        await updateChannelByType('chat', editingChannelIndex, primaryPatch, options?.originalChannel?.channelUid)
+        await persistChannel('chat', editingChannelIndex, primaryPatch, options?.originalChannel?.channelUid)
       } else if (isVectors) {
-        await updateChannelByType('vectors', editingChannelIndex, primaryPatch, options?.originalChannel?.channelUid)
+        await persistChannel('vectors', editingChannelIndex, primaryPatch, options?.originalChannel?.channelUid)
       } else if (isImages) {
-        await updateChannelByType('images', editingChannelIndex, primaryPatch, options?.originalChannel?.channelUid)
+        await persistChannel('images', editingChannelIndex, primaryPatch, options?.originalChannel?.channelUid)
       } else if (isGemini) {
-        await updateChannelByType('gemini', editingChannelIndex, primaryPatch, options?.originalChannel?.channelUid)
+        await persistChannel('gemini', editingChannelIndex, primaryPatch, options?.originalChannel?.channelUid)
       } else if (isResponses) {
-        await updateChannelByType('responses', editingChannelIndex, primaryPatch, options?.originalChannel?.channelUid)
+        await persistChannel('responses', editingChannelIndex, primaryPatch, options?.originalChannel?.channelUid)
       } else {
-        await updateChannelByType('messages', editingChannelIndex, primaryPatch, options?.originalChannel?.channelUid)
+        await persistChannel('messages', editingChannelIndex, primaryPatch, options?.originalChannel?.channelUid)
       }
       const original = options?.originalChannel
       const originalRoutes = original?.protocolRoutes?.length ? original.protocolRoutes : original ? [{
@@ -485,6 +495,7 @@ export const useChannelStore = defineStore('channel', () => {
         name: original.name, serviceType: original.serviceType, supportedModels: original.supportedModels,
       }] : []
       for (const update of buildProtocolModelLimitUpdates(originalRoutes, channel.protocolRoutes ?? [])) {
+        saveRequestCount++
         await api.updateChannelV2(update.channelUid, { kind: update.kind, supportedModels: update.supportedModels })
       }
       const foldingRoutes = original?.protocolRoutes?.length ? original.protocolRoutes : original ? [{
@@ -497,10 +508,17 @@ export const useChannelStore = defineStore('channel', () => {
         // 普通原生渠道的主保存已携带该字段；托管和混合协议渠道需逐路由补发。
         if (!options?.autoManaged && targetTab === 'responses' && channel.serviceType === 'responses'
             && route.channelUid === original?.channelUid) continue
+        saveRequestCount++
         await api.updateChannelV2(route.channelUid, {
           kind: route.upstreamKind ?? route.kind,
           responsesReasoningFold: !!channel.responsesReasoningFold,
         })
+      }
+      if (saveRequestCount === 0) {
+        return { success: false, message: '没有发送保存请求，配置未发生可保存的变化' }
+      }
+      if (unsavedFields.length > 0) {
+        return { success: false, message: `部分配置未保存：${unsavedFields.join(', ')}；请重新载入核对已应用内容`, warnings: accountWarnings }
       }
       return { success: true, message: t('store.channel.updated'), channelId: editingChannelIndex, ...(accountWarnings?.length ? { warnings: accountWarnings } : {}) }
     } else {

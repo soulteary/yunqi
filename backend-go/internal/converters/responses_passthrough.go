@@ -1,6 +1,7 @@
 package converters
 
 import (
+	"encoding/json"
 	"github.com/soulteary/yunqi/internal/session"
 	"github.com/soulteary/yunqi/internal/types"
 )
@@ -28,6 +29,14 @@ func (c *ResponsesPassthroughConverter) ToProviderRequest(sess *session.Session,
 		"stop":                 req.Stop,
 		"user":                 req.User,
 		"stream_options":       req.StreamOptions,
+	}
+	if len(req.Text) > 0 {
+		reqMap["text"] = req.Text
+	}
+	for key, value := range map[string]json.RawMessage{"prompt_cache_key": req.PromptCacheKey, "prompt_cache_options": req.PromptCacheOptions, "prompt_cache_retention": req.PromptCacheRetention} {
+		if len(value) > 0 {
+			reqMap[key] = value
+		}
 	}
 	if req.MaxTokens > 0 {
 		reqMap["max_tokens"] = req.MaxTokens

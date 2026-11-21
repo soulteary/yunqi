@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/types"
 	"github.com/soulteary/yunqi/internal/utils"
 
 	"github.com/soulteary/yunqi/internal/errutil"
@@ -354,6 +356,17 @@ func initSchema(db *sql.DB) error {
 		log.Printf("[SQLite-Migration] schema 升级: v8 -> v9 (添加 correlation_id 列)")
 	}
 
+	var provenanceVersion int
+	if err := db.QueryRow("PRAGMA user_version").Scan(&provenanceVersion); err != nil {
+		return err
+	}
+	if provenanceVersion < 10 {
+		for _, q := range []string{"ALTER TABLE request_records ADD COLUMN usage_provenance TEXT NOT NULL DEFAULT '{}'", "PRAGMA user_version = 10"} {
+			if _, err := db.Exec(q); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+				return fmt.Errorf("migration v9->v10 failed: %w", err)
+			}
+		}
+	}
 	return nil
 }
 
@@ -784,8 +797,8 @@ func (s *SQLiteStore) batchInsertRecords(records []PersistentRecord) error {
 		 channel_uid, route_model, key_uid, subscription_uid, exchange_snapshot_version,
 		 list_cost_usd, effective_cost_usd, effective_cost_available, effective_cost_reason, consumption_policy,
 			 compressed, original_tokens, compressed_tokens, compression_savings_percent, compression_technique, compression_fallback_reason,
-			 correlation_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 correlation_id, usage_provenance)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return err
@@ -805,7 +818,7 @@ func (s *SQLiteStore) batchInsertRecords(records []PersistentRecord) error {
 			r.ChannelUID, r.RouteModel, r.KeyUID, r.SubscriptionUID, r.ExchangeSnapshotVersion,
 			r.ListCostUSD, r.EffectiveCostUSD, effectiveAvailable, r.EffectiveCostReason, r.ConsumptionPolicy,
 			r.Compressed, r.OriginalTokens, r.CompressedTokens, r.CompressionSavingsPct, r.CompressionTechnique, r.CompressionFallbackReason,
-			r.CorrelationID,
+			r.CorrelationID, marshalUsageProvenance(r.UsageProvenance),
 		)
 		if err != nil {
 			return err
@@ -822,7 +835,7 @@ func (s *SQLiteStore) LoadRecords(since time.Time, apiType string) ([]Persistent
 		       key_uid, subscription_uid, exchange_snapshot_version, list_cost_usd, effective_cost_usd,
 		       effective_cost_available, effective_cost_reason, consumption_policy,
 		       compressed, original_tokens, compressed_tokens, compression_savings_percent, compression_technique, compression_fallback_reason,
-		       correlation_id
+		       correlation_id, usage_provenance
 		FROM request_records
 		WHERE timestamp >= ? AND api_type = ?
 		ORDER BY timestamp ASC
@@ -834,6 +847,7 @@ func (s *SQLiteStore) LoadRecords(since time.Time, apiType string) ([]Persistent
 	var records []PersistentRecord
 	for rows.Next() {
 		var r PersistentRecord
+		var provenance string
 		var ts int64
 		var success int
 		var failureClass string
@@ -847,11 +861,12 @@ func (s *SQLiteStore) LoadRecords(since time.Time, apiType string) ([]Persistent
 			&r.ChannelUID, &r.RouteModel, &keyUID, &subscriptionUID, &version, &listCost, &effectiveCost,
 			&effectiveAvailable, &effectiveReason, &consumptionPolicy,
 			&r.Compressed, &r.OriginalTokens, &r.CompressedTokens, &r.CompressionSavingsPct, &r.CompressionTechnique, &r.CompressionFallbackReason,
-			&r.CorrelationID,
+			&r.CorrelationID, &provenance,
 		)
 		if err != nil {
 			return nil, err
 		}
+		r.UsageProvenance = unmarshalUsageProvenance(provenance)
 		r.Timestamp = time.Unix(ts, 0)
 		r.Success = success == 1
 		r.FailureClass = FailureClass(failureClass)
@@ -1543,4 +1558,22 @@ func (s *SQLiteStore) QueryModelCostBreakdown(apiType string, since time.Time, g
 		results = append(results, row)
 	}
 	return results, rows.Err()
+}
+
+func marshalUsageProvenance(p *types.UsageProvenance) string {
+	if p == nil {
+		return "{}"
+	}
+	b, err := json.Marshal((&types.Usage{Provenance: p}).AccountingProvenance())
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
+}
+func unmarshalUsageProvenance(raw string) *types.UsageProvenance {
+	var p types.UsageProvenance
+	if json.Unmarshal([]byte(raw), &p) != nil || p.UsageSource == "" {
+		return &types.UsageProvenance{UsageSource: "unknown", Reason: "source_not_captured"}
+	}
+	return &p
 }

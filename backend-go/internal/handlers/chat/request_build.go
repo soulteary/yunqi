@@ -326,6 +326,10 @@ func buildProviderRequest(
 
 // convertChatToClaudeRequest 将 OpenAI Chat 请求转换为 Claude Messages 格式
 func convertChatToClaudeRequest(bodyBytes []byte, model string, isStream bool) (map[string]interface{}, error) {
+	format, err := converters.ClaudeStructuredOutput(bodyBytes)
+	if err != nil {
+		return nil, err
+	}
 	var reqMap map[string]interface{}
 	if err := json.Unmarshal(bodyBytes, &reqMap); err != nil {
 		return nil, err
@@ -334,6 +338,10 @@ func convertChatToClaudeRequest(bodyBytes []byte, model string, isStream bool) (
 	claudeReq := map[string]interface{}{
 		"model":  model,
 		"stream": isStream,
+	}
+
+	if len(format) > 0 {
+		claudeReq["output_config"] = map[string]interface{}{"format": format}
 	}
 
 	// 转换 max_tokens

@@ -624,17 +624,26 @@ func resumeAutoNoKeysChannel(upstream *UpstreamConfig) bool {
 	return true
 }
 
-func applySingleKeyReplacementTransition(upstream *UpstreamConfig, newKeys []string) (shouldResetMetrics bool) {
+func applyKeyReplacementTransition(upstream *UpstreamConfig, newKeys []string) (shouldResetMetrics bool) {
 	if upstream == nil {
 		return false
 	}
 	newKeys = deduplicateStrings(newKeys)
-	singleKeyReplaced := len(upstream.APIKeys) == 1 && len(newKeys) == 1 && upstream.APIKeys[0] != newKeys[0]
+	// Partial edits and reordering retain health evidence for keys still in use.
+	oldKeys := deduplicateStrings(upstream.APIKeys)
+	fullyReplaced := len(oldKeys) > 0 && len(newKeys) > 0
+	for _, oldKey := range oldKeys {
+		for _, newKey := range newKeys {
+			if oldKey == newKey {
+				fullyReplaced = false
+			}
+		}
+	}
 	autoRecovered := upstream.Status == "suspended" && upstream.SuspensionSource == SuspensionSourceAutoNoKeys && len(newKeys) > 0
 	if autoRecovered {
 		applyChannelStatusTransition(upstream, "active", "")
 	}
-	return singleKeyReplaced || autoRecovered
+	return fullyReplaced || autoRecovered
 }
 
 // GetChannelPriority 获取渠道优先级（带默认值处理）
