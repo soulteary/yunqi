@@ -780,6 +780,7 @@ func (p *ResponsesProvider) ConvertToClaudeResponse(providerResp *types.Provider
 		claudeResp.StopReason = "end_turn"
 	}
 
+	types.CaptureUsageSource(claudeResp.Usage, "responses", providerResp.Body)
 	return claudeResp, nil
 }
 

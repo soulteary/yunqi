@@ -414,3 +414,5 @@ GET /api/entry-keys
 POST /api/entry-keys
 PUT /api/entry-keys/:id
 POST /api/entry-keys/:id/rotate
+POST /v1/quote
+POST /:routePrefix/v1/quote

@@ -13,7 +13,7 @@ func TestAPIModePrefixedProxyRoutesKeepProxyAuthentication(t *testing.T) {
 	a := newRouteTestApplication(t, false, "production")
 	handler := httpbridge.Handler(a.newRouter())
 	endpoints := []struct{ method, path string }{
-		{"POST", "/v1/messages"}, {"POST", "/v1/messages/count_tokens"},
+		{"POST", "/v1/quote"}, {"POST", "/v1/messages"}, {"POST", "/v1/messages/count_tokens"},
 		{"GET", "/v1/models"}, {"GET", "/v1/models/test"},
 		{"POST", "/v1/responses"}, {"GET", "/v1/responses"},
 		{"POST", "/v1/responses/compact"}, {"POST", "/v1/alpha/history/v2/items"},

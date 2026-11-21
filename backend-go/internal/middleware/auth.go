@@ -113,7 +113,7 @@ func isDataPlaneEndpoint(method, path string) bool {
 		}
 	case http.MethodPost:
 		switch path {
-		case "/v1/messages", "/v1/messages/count_tokens", "/v1/responses", "/v1/responses/compact",
+		case "/v1/quote", "/v1/messages", "/v1/messages/count_tokens", "/v1/responses", "/v1/responses/compact",
 			"/v1/chat/completions", "/v1/images/generations", "/v1/images/edits",
 			"/v1/images/variations", "/v1/embeddings":
 			return true
