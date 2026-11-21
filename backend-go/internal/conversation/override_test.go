@@ -2,6 +2,7 @@ package conversation
 
 import (
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -207,27 +208,29 @@ func TestOverrideManager_RefreshTTL_PerpetualNoOp(t *testing.T) {
 }
 
 func TestOverrideManager_RefreshOverrideForUser(t *testing.T) {
-	om := NewOverrideManager(100 * time.Millisecond)
-	defer om.Stop()
+	synctest.Test(t, func(t *testing.T) {
+		om := NewOverrideManager(100 * time.Millisecond)
+		defer om.Stop()
 
-	seq := []ChannelEntry{{ChannelIndex: 0, ChannelName: "primary"}}
-	_ = om.SetOverride("conv_abc", "chat", "user1", seq, 0)
+		seq := []ChannelEntry{{ChannelIndex: 0, ChannelName: "primary"}}
+		_ = om.SetOverride("conv_abc", "chat", "user1", seq, 0)
 
-	time.Sleep(50 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
 
-	// 续期
-	ok := om.RefreshOverrideForUser("chat", "user1")
-	if !ok {
-		t.Fatal("expected RefreshOverrideForUser to return true")
-	}
+		// 续期
+		ok := om.RefreshOverrideForUser("chat", "user1")
+		if !ok {
+			t.Fatal("expected RefreshOverrideForUser to return true")
+		}
 
-	// 再等 70ms（从设置算起已过 120ms，但续期后应仍在有效期内）
-	time.Sleep(70 * time.Millisecond)
+		// 再等 70ms（从设置算起已过 120ms，但续期后应仍在有效期内）
+		time.Sleep(70 * time.Millisecond)
 
-	_, ok = om.GetOverrideForUser("chat", "user1")
-	if !ok {
-		t.Error("expected override to still be valid after RefreshOverrideForUser")
-	}
+		_, ok = om.GetOverrideForUser("chat", "user1")
+		if !ok {
+			t.Error("expected override to still be valid after RefreshOverrideForUser")
+		}
+	})
 }
 
 func TestOverrideManager_RefreshOverrideForUser_PerpetualNoOp(t *testing.T) {
