@@ -159,7 +159,7 @@ func (a *application) initConversations() {
 }
 
 func initializeCredentialRedaction(env *config.EnvConfig) func() {
-	keys := []string{env.ProxyAccessKey, env.GetAdminAccessKey()}
+	keys := []string{env.ProxyAccessKey, env.GetAdminAccessKey(), env.IdentityProxySecret}
 	keys = append(keys, env.ExtraProxyAccessKeys...)
 	if secret := os.Getenv("IDENTITY_PROXY_SECRET"); secret != "" {
 		keys = append(keys, secret)

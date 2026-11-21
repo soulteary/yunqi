@@ -75,3 +75,13 @@ func TestGuardrailSetupDoesNotClearStartupCapacityFailClosedState(t *testing.T) 
 		t.Fatalf("later startup leaked diagnostic: %q", safe)
 	}
 }
+
+func TestStartupObservesProgrammaticIdentityProxySecret(t *testing.T) {
+	t.Setenv("IDENTITY_PROXY_SECRET", "")
+	secret := "programmatic-only!identity=private-unique"
+	restore := initializeCredentialRedaction(&config.EnvConfig{IdentityProxySecret: secret})
+	defer restore()
+	if redaction.String(secret) != redaction.Mask {
+		t.Fatal("programmatic identity secret was not registered before config loading")
+	}
+}
