@@ -18,6 +18,7 @@ import (
 	"github.com/soulteary/yunqi/internal/session"
 	"github.com/soulteary/yunqi/internal/types"
 	"github.com/soulteary/yunqi/internal/utils"
+	"github.com/tidwall/sjson"
 )
 
 // Handler Responses API 代理处理器
@@ -69,6 +70,22 @@ func Handler(
 
 		// 记录原始请求信息（仅在入口处记录一次）
 		common.LogOriginalRequest(c, bodyBytes, envCfg, "Responses")
+
+		// The optional reserved alias uses the target's existing routing. Keep the
+		// original request log, instructions and approval policy intact.
+		mapping := cfgManager.GetCodexAutoReviewMapping()
+		if responsesReq.Model == config.CodexAutoReviewModel && mapping.Enabled && mapping.TargetModel != "" && mapping.Validate() == nil {
+			mappedBody, rewriteErr := sjson.SetBytes(bodyBytes, "model", mapping.TargetModel)
+			if rewriteErr != nil {
+				httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "无法改写自动审批模型"})
+				return nil
+			}
+			bodyBytes = mappedBody
+			responsesReq.Model = mapping.TargetModel
+			common.RestoreRequestBody(c, bodyBytes)
+			httpbridge.SetValue(c, "requestBodyBytes", bodyBytes)
+			common.RequestLogf(c, "[Codex-AutoReview] %s -> %s", config.CodexAutoReviewModel, mapping.TargetModel)
+		}
 
 		isCompactionV2 := hasCompactionTrigger(responsesReq.Input)
 		operation := "completion"

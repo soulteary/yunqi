@@ -2,6 +2,7 @@ import type { ApiClient } from './client'
 import type { PresetBundle, ProviderTemplatesResponse } from '../types/presets'
 import type {
   ConsoleStatus,
+  CodexAutoReviewMapping,
   CopilotDeviceCodeResponse,
   CopilotTokenResponse,
   CopilotUserResponse
@@ -11,6 +12,14 @@ export function createSystemApi(client: ApiClient) {
   return {
     async getConsoleStatus(): Promise<ConsoleStatus> {
       return client.request('/console/status')
+    },
+
+    async getCodexAutoReviewMapping(): Promise<CodexAutoReviewMapping> {
+      return client.request('/console/codex-auto-review')
+    },
+
+    async setCodexAutoReviewMapping(mapping: CodexAutoReviewMapping): Promise<CodexAutoReviewMapping> {
+      return client.request('/console/codex-auto-review', { method: 'PUT', body: JSON.stringify(mapping) })
     },
 
     async requestCopilotDeviceCode(proxyUrl?: string): Promise<CopilotDeviceCodeResponse> {

@@ -1404,6 +1404,7 @@ type CircuitBreakerConfig struct {
 }
 
 type Config struct {
+	CodexAutoReview CodexAutoReviewMapping `json:"codexAutoReview,omitempty"`
 	ManagedAccounts []ManagedAccountConfig `json:"managedAccounts,omitempty"`
 	Upstream        []UpstreamConfig       `json:"upstream,omitempty"`
 	CurrentUpstream int                    `json:"currentUpstream,omitempty"` // 已废弃：旧格式兼容用

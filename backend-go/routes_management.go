@@ -31,6 +31,8 @@ func (a *application) registerSystemRoutes(r *fiber.App) {
 func (a *application) registerManagementRoutes(apiGroup fiber.Router) {
 	discoveryModelFetchers := buildChannelDiscoveryModelFetchers(a.cfgManager)
 	apiGroup.Get("/console/status", handlers.ConsoleStatus(a.envCfg, a.cfgManager))
+	apiGroup.Get("/console/codex-auto-review", handlers.GetCodexAutoReviewMapping(a.cfgManager))
+	apiGroup.Put("/console/codex-auto-review", handlers.PutCodexAutoReviewMapping(a.cfgManager))
 	apiGroup.Post("/copilot/oauth/device/code", copilot.RequestDeviceCode())
 	apiGroup.Post("/copilot/oauth/token", copilot.PollAccessToken())
 	apiGroup.Post("/copilot/oauth/verify", copilot.VerifyToken())
