@@ -9,28 +9,26 @@ import (
 	"testing"
 
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/types"
-	"github.com/gin-gonic/gin"
 )
 
 func TestHandler_RequiresProxyAccessKeyEvenWhenGeminiKeyProvided(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	envCfg := &config.EnvConfig{
 		ProxyAccessKey:     "secret-key",
 		MaxRequestBodySize: 1024 * 1024,
 	}
 
-	r := gin.New()
-	r.POST("/v1beta/models/*modelAction", Handler(envCfg, nil, nil))
+	r := httpbridge.NewApp()
+	r.Post("/v1beta/models/*", Handler(envCfg, nil, nil))
 
 	t.Run("x-goog-api-key does not bypass proxy auth", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-2.0-flash:generateContent", bytes.NewReader([]byte(`{}`)))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("x-goog-api-key", "any-gemini-key")
 		w := httptest.NewRecorder()
-
-		r.ServeHTTP(w, req)
+		httpbridge.Handler(r).ServeHTTP(w, req)
 
 		if w.Code != http.StatusUnauthorized {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusUnauthorized)
@@ -41,8 +39,7 @@ func TestHandler_RequiresProxyAccessKeyEvenWhenGeminiKeyProvided(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-2.0-flash:generateContent?key=any-gemini-key", bytes.NewReader([]byte(`{}`)))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
-
-		r.ServeHTTP(w, req)
+		httpbridge.Handler(r).ServeHTTP(w, req)
 
 		if w.Code != http.StatusUnauthorized {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusUnauthorized)
@@ -247,7 +244,6 @@ func TestStripThoughtSignature(t *testing.T) {
 
 // TestBuildProviderRequest_StripThoughtSignature 测试 buildProviderRequest 中的 StripThoughtSignature 配置
 func TestBuildProviderRequest_StripThoughtSignature(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	tests := []struct {
 		name                     string
@@ -318,8 +314,8 @@ func TestBuildProviderRequest_StripThoughtSignature(t *testing.T) {
 				},
 			}
 
-			c, _ := gin.CreateTestContext(httptest.NewRecorder())
-			c.Request = httptest.NewRequest(http.MethodPost, "/test", nil)
+			c, _ := httpbridge.TestContext(httptest.NewRecorder())
+			httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/test", nil))
 
 			bodyBytes, err := json.Marshal(geminiReq)
 			if err != nil {
@@ -361,7 +357,6 @@ func TestBuildProviderRequest_StripThoughtSignature(t *testing.T) {
 }
 
 func TestBuildProviderRequest_GeminiPassthroughPreservesEmptyTextPart(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	body := []byte(`{"contents":[{"role":"user","parts":[{"text":""},{"text":"hello"}]}]}`)
 	var geminiReq types.GeminiRequest
@@ -374,8 +369,8 @@ func TestBuildProviderRequest_GeminiPassthroughPreservesEmptyTextPart(t *testing
 		ServiceType: "gemini",
 	}
 
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
-	c.Request = httptest.NewRequest(http.MethodPost, "/test", nil)
+	c, _ := httpbridge.TestContext(httptest.NewRecorder())
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/test", nil))
 
 	req, err := buildProviderRequest(c, upstream, upstream.BaseURL, "test-key", body, &geminiReq, "gemini-2.0-flash", false)
 	if err != nil {
@@ -395,7 +390,6 @@ func TestBuildProviderRequest_GeminiPassthroughPreservesEmptyTextPart(t *testing
 }
 
 func TestBuildProviderRequest_GeminiPassthroughThoughtSignaturePatchPreservesRawFields(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	body := []byte(`{
 		"contents": [{
@@ -420,8 +414,8 @@ func TestBuildProviderRequest_GeminiPassthroughThoughtSignaturePatchPreservesRaw
 		StripThoughtSignature: true,
 	}
 
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
-	c.Request = httptest.NewRequest(http.MethodPost, "/test", nil)
+	c, _ := httpbridge.TestContext(httptest.NewRecorder())
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/test", nil))
 
 	req, err := buildProviderRequest(c, upstream, upstream.BaseURL, "test-key", body, &geminiReq, "gemini-2.0-flash", false)
 	if err != nil {
@@ -455,7 +449,6 @@ func TestBuildProviderRequest_GeminiPassthroughThoughtSignaturePatchPreservesRaw
 }
 
 func TestBuildProviderRequest_InjectDummyThoughtSignature_IgnoresNullFunctionCall(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	body := []byte(`{"contents":[{"role":"model","parts":[{"functionCall":null,"text":"kept"}]}]}`)
 	var geminiReq types.GeminiRequest
@@ -469,8 +462,8 @@ func TestBuildProviderRequest_InjectDummyThoughtSignature_IgnoresNullFunctionCal
 		InjectDummyThoughtSignature: true,
 	}
 
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
-	c.Request = httptest.NewRequest(http.MethodPost, "/test", nil)
+	c, _ := httpbridge.TestContext(httptest.NewRecorder())
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/test", nil))
 
 	req, err := buildProviderRequest(c, upstream, upstream.BaseURL, "test-key", body, &geminiReq, "gemini-2.0-flash", false)
 	if err != nil {
@@ -491,7 +484,6 @@ func TestBuildProviderRequest_InjectDummyThoughtSignature_IgnoresNullFunctionCal
 }
 
 func TestBuildProviderRequest_InjectDummyThoughtSignature_PreservesThoughtSignatureAtPartLevel(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	upstream := &config.UpstreamConfig{
 		BaseURL:                     "https://test.example.com",
@@ -521,8 +513,8 @@ func TestBuildProviderRequest_InjectDummyThoughtSignature_PreservesThoughtSignat
 		t.Fatalf("Unmarshal 请求失败: %v", err)
 	}
 
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
-	c.Request = httptest.NewRequest(http.MethodPost, "/test", nil)
+	c, _ := httpbridge.TestContext(httptest.NewRecorder())
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/test", nil))
 
 	req, err := buildProviderRequest(c, upstream, upstream.BaseURL, "test-key", body, &geminiReq, "gemini-2.0-flash", false)
 	if err != nil {

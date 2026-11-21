@@ -5,11 +5,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 func TestPrepareUpstreamHeaders(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	tests := []struct {
 		name        string
@@ -62,10 +61,10 @@ func TestPrepareUpstreamHeaders(t *testing.T) {
 				req.Header.Set(k, v)
 			}
 
-			// 创建Gin上下文
+			// 创建Fiber上下文
 			w := httptest.NewRecorder()
-			c, _ := gin.CreateTestContext(w)
-			c.Request = req
+			c, _ := httpbridge.TestContext(w)
+			httpbridge.SetRequest(c, req)
 
 			// 调用函数
 			result := PrepareUpstreamHeaders(c, tt.targetHost)
@@ -254,7 +253,6 @@ func TestExtractAgentContextClaudeCodeSubagentFromRawMetadata(t *testing.T) {
 }
 
 func TestExtractAgentContextClaudeCodeSubagentFromAgentHeader(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	body := []byte(`{
 		"model": "claude-fable-5",
@@ -273,8 +271,8 @@ func TestExtractAgentContextClaudeCodeSubagentFromAgentHeader(t *testing.T) {
 	req := httptest.NewRequest("POST", "/v1/messages", nil)
 	req.Header.Set("X-Claude-Code-Agent-Id", "agent-abc")
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = req
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, req)
 
 	ctx := ExtractAgentContext(c, body)
 	if ctx == nil {
@@ -445,14 +443,13 @@ func TestExtractUnifiedSessionID_UsesTopLevelUserID(t *testing.T) {
 }
 
 func TestExtractUnifiedSessionID_ClientRequestIDIsFallback(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 	req.Header.Set("X-Client-Request-Id", "req_per_request")
 
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = req
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, req)
 
 	body := []byte(`{"model":"gpt-5.5","prompt_cache_key":"stable_cache_key","metadata":{"user_id":"meta_user"}}`)
 	if got := ExtractUnifiedSessionID(c, body); got != "stable_cache_key" {

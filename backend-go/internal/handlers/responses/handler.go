@@ -8,15 +8,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/handlers/common"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/middleware"
 	"github.com/soulteary/yunqi/internal/providers"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/session"
 	"github.com/soulteary/yunqi/internal/types"
 	"github.com/soulteary/yunqi/internal/utils"
-	"github.com/gin-gonic/gin"
 )
 
 // Handler Responses API 代理处理器
@@ -26,12 +27,12 @@ func Handler(
 	cfgManager *config.ConfigManager,
 	sessionManager *session.SessionManager,
 	channelScheduler *scheduler.ChannelScheduler,
-) gin.HandlerFunc {
-	return gin.HandlerFunc(func(c *gin.Context) {
+) fiber.Handler {
+	return fiber.Handler(func(c fiber.Ctx) error {
 		// 先进行认证
-		middleware.ProxyAuthMiddleware(envCfg)(c)
-		if c.IsAborted() {
-			return
+		middleware.AuthenticateProxy(c, envCfg)
+		if httpbridge.IsAborted(c) {
+			return nil
 		}
 
 		startTime := time.Now()
@@ -40,11 +41,11 @@ func Handler(
 		maxBodySize := envCfg.MaxRequestBodySize
 		bodyBytes, err := common.ReadRequestBody(c, maxBodySize)
 		if err != nil {
-			return
+			return nil
 		}
 
 		// 入口保留原始请求体；按渠道在发往上游前决定是否规范化 metadata.user_id
-		c.Set("requestBodyBytes", bodyBytes)
+		httpbridge.SetValue(c, "requestBodyBytes", bodyBytes)
 
 		// 解析 Responses 请求
 		var responsesReq types.ResponsesRequest
@@ -57,13 +58,13 @@ func Handler(
 		affinityBody := common.NormalizeMetadataUserID(bodyBytes)
 		userID := utils.ExtractUnifiedSessionID(c, affinityBody)
 		agentCtx := utils.ExtractAgentContext(c, bodyBytes)
-		c.Set("agentContext", agentCtx)
+		httpbridge.SetValue(c, "agentContext", agentCtx)
 
 		// 统计 user 输入用于驾驶舱标题与轮数
 		lastUserMessages := extractRecentResponsesUserInputs(responsesReq.Input)
-		c.Set("lastUserMessages", lastUserMessages)
-		c.Set("lastUserMessage", strings.Join(lastUserMessages, " / "))
-		c.Set("userMessageCount", countResponsesUserMessages(responsesReq.Input))
+		httpbridge.SetValue(c, "lastUserMessages", lastUserMessages)
+		httpbridge.SetValue(c, "lastUserMessage", strings.Join(lastUserMessages, " / "))
+		httpbridge.SetValue(c, "userMessageCount", countResponsesUserMessages(responsesReq.Input))
 		common.SetRequestLogContextWithAgent(c, userID, countResponsesUserMessages(responsesReq.Input), agentCtx)
 
 		// 记录原始请求信息（仅在入口处记录一次）
@@ -84,6 +85,7 @@ func Handler(
 		} else {
 			handleSingleChannel(c, envCfg, cfgManager, channelScheduler, sessionManager, bodyBytes, userID, responsesReq, startTime, isCompactionV2)
 		}
+		return nil
 	})
 }
 
@@ -98,7 +100,7 @@ func extractRawToolsFromRequestBody(bodyBytes []byte) []interface{} {
 }
 
 func handleMultiChannel(
-	c *gin.Context,
+	c fiber.Ctx,
 	envCfg *config.EnvConfig,
 	cfgManager *config.ConfigManager,
 	channelScheduler *scheduler.ChannelScheduler,
@@ -119,7 +121,7 @@ func handleMultiChannel(
 	}
 	common.LogContextEstimate(c, "Responses", contextRequirement)
 	agentRole := ""
-	if ac := common.AgentContextFromGin(c); ac != nil {
+	if ac := common.AgentContextFromFiber(c); ac != nil {
 		agentRole = ac.AgentRole
 	}
 	common.HandleMultiChannelFailoverWithContextRequirement(
@@ -133,7 +135,7 @@ func handleMultiChannel(
 		contextRequirement,
 		responsesReq.Stream,
 		agentRole,
-		func(c *gin.Context, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
+		func(c fiber.Ctx, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
 			upstream := selection.Upstream
 			executionRoute := selection.Route
 
@@ -156,7 +158,7 @@ func handleMultiChannel(
 						result.LastError = compactErr.err
 						return result
 					}
-					c.Data(compactErr.status, "application/json", compactErr.body)
+					httpbridge.Data(c, compactErr.status, "application/json", compactErr.body)
 					result.Handled = true
 					result.LastError = compactErr.err
 					return result
@@ -183,7 +185,7 @@ func handleMultiChannel(
 				func(upstream *config.UpstreamConfig, failedKeys map[string]bool) (string, error) {
 					return cfgManager.GetNextAPIKey(upstream, failedKeys, common.ChannelAPIType(scheduler.ChannelKind(executionRoute.Kind)))
 				},
-				func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
+				func(c fiber.Ctx, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
 					req, _, err := provider.ConvertToProviderRequest(c, upstreamCopy, apiKey)
 					return req, err
 				},
@@ -198,13 +200,13 @@ func handleMultiChannel(
 				func(url string) {
 					channelScheduler.MarkURLSuccessForRoute(executionRoute, url)
 				},
-				func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
+				func(c fiber.Ctx, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 					// Inject codex_tool_compat_enabled for response remapping
 					if responsesReq.TransformerMetadata == nil {
 						responsesReq.TransformerMetadata = make(map[string]interface{})
 					}
 					// additional_tools 提升（默认开启，不经渠道开关）同样激活响应侧 remap
-					hoisted, _ := c.Get("codex_additional_tools_hoisted")
+					hoisted, _ := httpbridge.Value(c, "codex_additional_tools_hoisted")
 					hoistedBool, _ := hoisted.(bool)
 					responsesReq.TransformerMetadata["codex_tool_compat_enabled"] = upstreamCopy.IsCodexToolCompatEnabled() || upstreamCopy.IsCodexNativeToolPassthroughEnabled() || hoistedBool
 					timeouts := common.ResolveStreamPreflightTimeouts(upstreamCopy, metricsManager.GetCircuitBreakerConfig())
@@ -231,7 +233,7 @@ func handleMultiChannel(
 			}
 		},
 		nil,
-		func(ctx *gin.Context, failoverErr *common.FailoverError, lastError error) {
+		func(ctx fiber.Ctx, failoverErr *common.FailoverError, lastError error) {
 			common.HandleAllChannelsFailed(ctx, failoverErr, lastError, "Responses")
 		},
 	)
@@ -239,7 +241,7 @@ func handleMultiChannel(
 
 // handleSingleChannel 处理单渠道 Responses 请求
 func handleSingleChannel(
-	c *gin.Context,
+	c fiber.Ctx,
 	envCfg *config.EnvConfig,
 	cfgManager *config.ConfigManager,
 	channelScheduler *scheduler.ChannelScheduler,
@@ -252,7 +254,7 @@ func handleSingleChannel(
 ) {
 	upstream, channelIndex, err := cfgManager.GetCurrentResponsesUpstreamWithIndex()
 	if err != nil {
-		c.JSON(503, gin.H{
+		httpbridge.JSON(c, 503, fiber.Map{
 			"error": "未配置任何 Responses 渠道，请先在管理界面添加渠道",
 			"code":  "NO_RESPONSES_UPSTREAM",
 		})
@@ -260,7 +262,7 @@ func handleSingleChannel(
 	}
 
 	if len(upstream.APIKeys) == 0 {
-		c.JSON(503, gin.H{
+		httpbridge.JSON(c, 503, fiber.Map{
 			"error": fmt.Sprintf("当前 Responses 渠道 \"%s\" 未配置API密钥", upstream.Name),
 			"code":  "NO_API_KEYS",
 		})
@@ -275,7 +277,7 @@ func handleSingleChannel(
 	}
 	common.LogContextEstimate(c, "Responses", contextRequirement)
 	if err := channelScheduler.ValidateUpstreamContext(scheduler.ChannelKindResponses, responsesReq.Model, upstream, contextRequirement); err != nil {
-		c.JSON(400, gin.H{
+		httpbridge.JSON(c, 400, fiber.Map{
 			"error": err.Error(),
 			"code":  "CONTEXT_WINDOW_EXCEEDED",
 		})
@@ -295,9 +297,9 @@ func handleSingleChannel(
 			return
 		}
 		if compactErr != nil {
-			c.JSON(503, gin.H{
+			httpbridge.JSON(c, 503, fiber.Map{
 				"type": "error",
-				"error": gin.H{
+				"error": fiber.Map{
 					"type":    "service_unavailable",
 					"message": "All upstream channels are currently unavailable",
 				},
@@ -322,7 +324,7 @@ func handleSingleChannel(
 		func(upstream *config.UpstreamConfig, failedKeys map[string]bool) (string, error) {
 			return cfgManager.GetNextResponsesAPIKey(upstream, failedKeys)
 		},
-		func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
+		func(c fiber.Ctx, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
 			req, _, err := provider.ConvertToProviderRequest(c, upstreamCopy, apiKey)
 			return req, err
 		},
@@ -333,13 +335,13 @@ func handleSingleChannel(
 		},
 		nil,
 		nil,
-		func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
+		func(c fiber.Ctx, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 			// Inject codex_tool_compat_enabled for response remapping
 			if responsesReq.TransformerMetadata == nil {
 				responsesReq.TransformerMetadata = make(map[string]interface{})
 			}
 			// additional_tools 提升（默认开启，不经渠道开关）同样激活响应侧 remap
-			hoisted, _ := c.Get("codex_additional_tools_hoisted")
+			hoisted, _ := httpbridge.Value(c, "codex_additional_tools_hoisted")
 			hoistedBool, _ := hoisted.(bool)
 			responsesReq.TransformerMetadata["codex_tool_compat_enabled"] = upstreamCopy.IsCodexToolCompatEnabled() || upstreamCopy.IsCodexNativeToolPassthroughEnabled() || hoistedBool
 			timeouts := common.ResolveStreamPreflightTimeouts(upstreamCopy, metricsManager.GetCircuitBreakerConfig())
@@ -353,11 +355,11 @@ func handleSingleChannel(
 
 	// 追踪对话（驾驶舱显示）
 	if handled && successKey != "" {
-		lastUserMsg, _ := c.Get("lastUserMessage")
+		lastUserMsg, _ := httpbridge.Value(c, "lastUserMessage")
 		lastUserMsgStr, _ := lastUserMsg.(string)
-		lastUserMsgs, _ := c.Get("lastUserMessages")
+		lastUserMsgs, _ := httpbridge.Value(c, "lastUserMessages")
 		lastUserMessages, _ := lastUserMsgs.([]string)
-		userMsgCount, _ := c.Get("userMessageCount")
+		userMsgCount, _ := httpbridge.Value(c, "userMessageCount")
 		userMsgCountInt, _ := userMsgCount.(int)
 
 		if lastUserMsgStr != "" || userMsgCountInt > 0 {
@@ -366,7 +368,7 @@ func handleSingleChannel(
 				channelName = upstream.Name
 			}
 			agentRole := ""
-			agentCtx := common.AgentContextFromGin(c)
+			agentCtx := common.AgentContextFromFiber(c)
 			if agentCtx != nil {
 				agentRole = agentCtx.AgentRole
 			}

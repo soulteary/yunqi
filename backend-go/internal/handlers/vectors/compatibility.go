@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/handlers/common"
 	"github.com/soulteary/yunqi/internal/scheduler"
-	"github.com/gin-gonic/gin"
 )
 
 type embeddingCompatibilityKey struct {
@@ -27,7 +27,7 @@ type embeddingCompatibilityCandidate struct {
 	reason      string
 }
 
-func newEmbeddingCompatibilityFilter(c *gin.Context, requestModel string, requestDimensions int) scheduler.CandidateFilterFunc {
+func newEmbeddingCompatibilityFilter(c fiber.Ctx, requestModel string, requestDimensions int) scheduler.CandidateFilterFunc {
 	return func(
 		channels []scheduler.ChannelInfo,
 		upstreamFor func(scheduler.ChannelInfo) *config.UpstreamConfig,

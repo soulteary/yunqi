@@ -6,19 +6,20 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v3"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 // ── 路由注册 ──
 
 // RegisterTraceRoutes 注册路由追踪只读 API 到给定路由组。
 // 路由前缀由调用方控制（例如 router.Group("/traces")）。
-func RegisterTraceRoutes(router gin.IRouter, store *TraceStore) {
+func RegisterTraceRoutes(router fiber.Router, store *TraceStore) {
 	group := router.Group("/traces")
 	{
-		group.GET("", handleListTraces(store))
-		group.GET("/stats", handleTraceStats(store))
-		group.GET("/:traceUid", handleGetTraceDetail(store))
+		group.Get("", handleListTraces(store))
+		group.Get("/stats", handleTraceStats(store))
+		group.Get("/:traceUid", handleGetTraceDetail(store))
 	}
 }
 
@@ -66,10 +67,10 @@ const traceQueryDeadline = 2 * time.Second
 //   - mode=shadow/assist/auto/active 过滤模式
 //
 // 脱敏输出：不含 promptHash、key 已掩码、不含消息正文。
-func handleListTraces(store *TraceStore) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handleListTraces(store *TraceStore) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		limit := 50
-		if limitStr := c.Query("limit"); limitStr != "" {
+		if limitStr := httpbridge.Query(c, "limit"); limitStr != "" {
 			if parsed, err := strconv.Atoi(limitStr); err == nil && parsed > 0 {
 				limit = parsed
 			}
@@ -78,56 +79,57 @@ func handleListTraces(store *TraceStore) gin.HandlerFunc {
 			limit = 200
 		}
 
-		mismatchOnly := c.Query("mismatch") == "true"
-		releaseFilter := c.Query("release")
-		cohortFilter := c.Query("cohort")
-		modeFilter := c.Query("mode")
+		mismatchOnly := httpbridge.Query(c, "mismatch") == "true"
+		releaseFilter := httpbridge.Query(c, "release")
+		cohortFilter := httpbridge.Query(c, "cohort")
+		modeFilter := httpbridge.Query(c, "mode")
 
 		traces, partial, hasMore, err := store.ListTraceSummary(limit, mismatchOnly, releaseFilter, cohortFilter, modeFilter)
 		if err != nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "存储暂不可用", "retryable": true})
-			return
+			httpbridge.JSON(c, http.StatusServiceUnavailable, fiber.Map{"error": "存储暂不可用", "retryable": true})
+			return nil
 		}
-
-		c.JSON(http.StatusOK, TraceListResponse{
+		httpbridge.JSON(c, http.StatusOK, TraceListResponse{
 			Traces:  traces,
 			Total:   len(traces),
 			Partial: partial,
 			HasMore: hasMore,
 		})
+		return nil
 	}
 }
 
 // handleGetTraceDetail GET /api/autopilot/traces/:traceUid
 // 按 UID 查询单条 trace 的安全详情。
 // 记录不存在、已过期或未被持久化时返回 404。
-func handleGetTraceDetail(store *TraceStore) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		traceUID := c.Param("traceUid")
+func handleGetTraceDetail(store *TraceStore) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		traceUID := httpbridge.Param(c, "traceUid")
 		if traceUID == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "缺少 traceUid 参数"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "缺少 traceUid 参数"})
+			return nil
 		}
 
 		detail, err := store.GetTraceDetail(traceUID)
 		if err != nil {
 			if err == sql.ErrNoRows {
-				c.JSON(http.StatusNotFound, gin.H{"error": "记录不存在、已过期或未被采样", "traceUid": traceUID})
-				return
+				httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "记录不存在、已过期或未被采样", "traceUid": traceUID})
+				return nil
 			}
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "存储暂不可用", "retryable": true})
-			return
+			httpbridge.JSON(c, http.StatusServiceUnavailable, fiber.Map{"error": "存储暂不可用", "retryable": true})
+			return nil
 		}
-
-		c.JSON(http.StatusOK, TraceDetailResponse{Trace: detail})
+		httpbridge.JSON(c, http.StatusOK, TraceDetailResponse{Trace: detail})
+		return nil
 	}
 }
 
 // handleTraceStats GET /api/autopilot/traces/stats
 // 返回追踪统计：总数、三态比较率、各 TaskClass/Mode 分布。
-func handleTraceStats(store *TraceStore) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handleTraceStats(store *TraceStore) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		stats := store.GetV2Stats()
-		c.JSON(http.StatusOK, stats)
+		httpbridge.JSON(c, http.StatusOK, stats)
+		return nil
 	}
 }

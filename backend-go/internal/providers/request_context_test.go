@@ -9,27 +9,27 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/thinkingcache"
-	"github.com/gin-gonic/gin"
 )
 
 type testContextKey string
 
-func newGinContext(method, url string, body []byte, ctx context.Context) *gin.Context {
+func newFiberContext(method, url string, body []byte, ctx context.Context) fiber.Ctx {
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
+	c, _ := httpbridge.TestContext(w)
 
 	req := httptest.NewRequest(method, url, bytes.NewReader(body))
 	if ctx != nil {
 		req = req.WithContext(ctx)
 	}
-	c.Request = req
+	httpbridge.SetRequest(c, req)
 	return c
 }
 
 func TestClaudeProvider_ConvertToProviderRequest_PassbackConvertsRealThinking(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	body := []byte(`{
 		"model": "mimo-v2.5-pro",
@@ -40,7 +40,7 @@ func TestClaudeProvider_ConvertToProviderRequest_PassbackConvertsRealThinking(t 
 			]}
 		]
 	}`)
-	c := newGinContext(http.MethodPost, "/v1/messages", body, context.Background())
+	c := newFiberContext(http.MethodPost, "/v1/messages", body, context.Background())
 	upstream := &config.UpstreamConfig{
 		BaseURL:     "https://api.example.com",
 		ServiceType: "claude",
@@ -61,7 +61,7 @@ func TestClaudeProvider_ConvertToProviderRequest_PassbackConvertsRealThinking(t 
 }
 
 func TestClaudeProvider_ConvertToProviderRequest_InjectsCachedThinkingForDeepSeek(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	thinkingcache.ResetForTest()
 
 	content := []interface{}{map[string]interface{}{
@@ -83,8 +83,8 @@ func TestClaudeProvider_ConvertToProviderRequest_InjectsCachedThinkingForDeepSee
 			]}
 		]
 	}`)
-	c := newGinContext(http.MethodPost, "/v1/messages", body, context.Background())
-	c.Request.Header.Set("X-Claude-Code-Session-Id", "session-1")
+	c := newFiberContext(http.MethodPost, "/v1/messages", body, context.Background())
+	httpbridge.Request(c).Header.Set("X-Claude-Code-Session-Id", "session-1")
 	upstream := &config.UpstreamConfig{
 		BaseURL:     "https://api.deepseek.com",
 		ServiceType: "claude",
@@ -101,7 +101,6 @@ func TestClaudeProvider_ConvertToProviderRequest_InjectsCachedThinkingForDeepSee
 }
 
 func TestClaudeProvider_ConvertToProviderRequest_StripsDeepSeekClearThinkingContextManagement(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	body := []byte(`{
 		"model": "deepseek-v4-pro",
@@ -109,8 +108,8 @@ func TestClaudeProvider_ConvertToProviderRequest_StripsDeepSeekClearThinkingCont
 		"context_management": {"edits": [{"keep": "all", "type": "clear_thinking_20251015"}]},
 		"messages": [{"role": "user", "content": [{"type": "text", "text": "hello"}]}]
 	}`)
-	c := newGinContext(http.MethodPost, "/v1/messages", body, context.Background())
-	c.Request.Header.Set("Anthropic-Beta", "claude-code-20250219,context-management-2025-06-27,effort-2025-11-24")
+	c := newFiberContext(http.MethodPost, "/v1/messages", body, context.Background())
+	httpbridge.Request(c).Header.Set("Anthropic-Beta", "claude-code-20250219,context-management-2025-06-27,effort-2025-11-24")
 	upstream := &config.UpstreamConfig{
 		BaseURL:     "https://api.deepseek.com/anthropic",
 		ServiceType: "claude",
@@ -139,13 +138,12 @@ func TestClaudeProvider_ConvertToProviderRequest_StripsDeepSeekClearThinkingCont
 }
 
 func TestConvertToProviderRequest_PropagatesContext(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	key := testContextKey("test-key")
 	ctx := context.WithValue(context.Background(), key, "ok")
 
 	t.Run("claude", func(t *testing.T) {
-		c := newGinContext(http.MethodPost, "/v1/messages", []byte(`{"model":"claude-3","messages":[]}`), ctx)
+		c := newFiberContext(http.MethodPost, "/v1/messages", []byte(`{"model":"claude-3","messages":[]}`), ctx)
 		upstream := &config.UpstreamConfig{BaseURL: "https://api.example.com", ServiceType: "claude"}
 
 		p := &ClaudeProvider{}
@@ -159,7 +157,7 @@ func TestConvertToProviderRequest_PropagatesContext(t *testing.T) {
 	})
 
 	t.Run("openai", func(t *testing.T) {
-		c := newGinContext(http.MethodPost, "/v1/messages", []byte(`{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}`), ctx)
+		c := newFiberContext(http.MethodPost, "/v1/messages", []byte(`{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}`), ctx)
 		upstream := &config.UpstreamConfig{BaseURL: "https://api.example.com", ServiceType: "openai"}
 
 		p := &OpenAIProvider{}
@@ -173,7 +171,7 @@ func TestConvertToProviderRequest_PropagatesContext(t *testing.T) {
 	})
 
 	t.Run("gemini", func(t *testing.T) {
-		c := newGinContext(http.MethodPost, "/v1/messages", []byte(`{"model":"gemini-2.0-flash","messages":[{"role":"user","content":"hi"}]}`), ctx)
+		c := newFiberContext(http.MethodPost, "/v1/messages", []byte(`{"model":"gemini-2.0-flash","messages":[{"role":"user","content":"hi"}]}`), ctx)
 		upstream := &config.UpstreamConfig{BaseURL: "https://api.example.com", ServiceType: "gemini"}
 
 		p := &GeminiProvider{}
@@ -187,7 +185,7 @@ func TestConvertToProviderRequest_PropagatesContext(t *testing.T) {
 	})
 
 	t.Run("responses", func(t *testing.T) {
-		c := newGinContext(http.MethodPost, "/v1/responses", []byte(`{"model":"gpt-4o","input":"hi"}`), ctx)
+		c := newFiberContext(http.MethodPost, "/v1/responses", []byte(`{"model":"gpt-4o","input":"hi"}`), ctx)
 		upstream := &config.UpstreamConfig{BaseURL: "https://api.example.com", ServiceType: "responses"}
 
 		p := &ResponsesProvider{}
@@ -202,11 +200,11 @@ func TestConvertToProviderRequest_PropagatesContext(t *testing.T) {
 }
 
 func TestConvertToProviderRequest_UsesUpdatedRequestBodyBytesContext(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	body := []byte(`{"model":"claude-3","messages":[],"metadata":{"user_id":"{\"device_id\":\"abc\"}"}}`)
 	normalized := []byte(`{"model":"claude-3","messages":[],"metadata":{"user_id":"user_abc"}}`)
-	c := newGinContext(http.MethodPost, "/v1/messages", body, context.Background())
-	c.Set("requestBodyBytes", normalized)
+	c := newFiberContext(http.MethodPost, "/v1/messages", body, context.Background())
+	httpbridge.SetValue(c, "requestBodyBytes", normalized)
 	upstream := &config.UpstreamConfig{BaseURL: "https://api.example.com", ServiceType: "claude"}
 
 	p := &ClaudeProvider{}
@@ -220,9 +218,9 @@ func TestConvertToProviderRequest_UsesUpdatedRequestBodyBytesContext(t *testing.
 }
 
 func TestOpenAIProvider_ConvertToProviderRequest_MapsMetadataUserID(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	body := []byte(`{"model":"gpt-4o","metadata":{"user_id":"deepseek_user_123"},"messages":[{"role":"user","content":"hi"}]}`)
-	c := newGinContext(http.MethodPost, "/v1/messages", body, context.Background())
+	c := newFiberContext(http.MethodPost, "/v1/messages", body, context.Background())
 	upstream := &config.UpstreamConfig{BaseURL: "https://api.example.com", ServiceType: "openai"}
 
 	p := &OpenAIProvider{}

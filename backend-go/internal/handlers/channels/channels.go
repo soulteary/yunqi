@@ -10,9 +10,10 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/scheduler"
-	"github.com/gin-gonic/gin"
 )
 
 // Handler 渠道 v2 处理器。
@@ -22,15 +23,15 @@ type Handler struct {
 }
 
 // RegisterRoutes 注册渠道 v2 路由（读 + 写）。
-func RegisterRoutes(apiGroup *gin.RouterGroup, cfgManager *config.ConfigManager, channelScheduler *scheduler.ChannelScheduler) {
+func RegisterRoutes(apiGroup fiber.Router, cfgManager *config.ConfigManager, channelScheduler *scheduler.ChannelScheduler) {
 	h := &Handler{cm: cfgManager, scheduler: channelScheduler}
-	apiGroup.GET("/channels", h.List)
-	apiGroup.GET("/channels/:uid", h.Get)
-	apiGroup.POST("/channels", h.Create)
-	apiGroup.PUT("/channels/:uid", h.Update)
-	apiGroup.DELETE("/channels/:uid", h.Delete)
-	apiGroup.POST("/channels/:uid/keys", h.AddKey)
-	apiGroup.DELETE("/channels/:uid/keys/:keyHash", h.RemoveKey)
+	apiGroup.Get("/channels", h.List)
+	apiGroup.Get("/channels/:uid", h.Get)
+	apiGroup.Post("/channels", h.Create)
+	apiGroup.Put("/channels/:uid", h.Update)
+	apiGroup.Delete("/channels/:uid", h.Delete)
+	apiGroup.Post("/channels/:uid/keys", h.AddKey)
+	apiGroup.Delete("/channels/:uid/keys/:keyHash", h.RemoveKey)
 }
 
 // ListResponse 列表响应。
@@ -41,13 +42,14 @@ type ListResponse struct {
 }
 
 // List 返回全部渠道视图与共享能力。
-func (h *Handler) List(c *gin.Context) {
+func (h *Handler) List(c fiber.Ctx) error {
 	views, caps := h.cm.GetChannelViews()
-	c.JSON(http.StatusOK, ListResponse{
+	httpbridge.JSON(c, http.StatusOK, ListResponse{
 		SchemaVersion: config.ChannelSchemaVersion,
 		Channels:      views,
 		Capabilities:  caps,
 	})
+	return nil
 }
 
 // GetResponse 单渠道响应，仅附带该渠道 key 引用到的能力子集。
@@ -57,8 +59,8 @@ type GetResponse struct {
 }
 
 // Get 按聚合 ChannelUID 返回单个渠道视图及其引用的能力子集。
-func (h *Handler) Get(c *gin.Context) {
-	uid := c.Param("uid")
+func (h *Handler) Get(c fiber.Ctx) error {
+	uid := httpbridge.Param(c, "uid")
 	views, caps := h.cm.GetChannelViews()
 	capByUID := make(map[string]config.EndpointCapability, len(caps))
 	for _, cap := range caps {
@@ -68,10 +70,11 @@ func (h *Handler) Get(c *gin.Context) {
 		if v.ChannelUID != uid {
 			continue
 		}
-		c.JSON(http.StatusOK, GetResponse{Channel: v, Capabilities: referencedCapabilities(v, capByUID)})
-		return
+		httpbridge.JSON(c, http.StatusOK, GetResponse{Channel: v, Capabilities: referencedCapabilities(v, capByUID)})
+		return nil
 	}
-	c.JSON(http.StatusNotFound, gin.H{"error": "channel not found", "uid": uid})
+	httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "channel not found", "uid": uid})
+	return nil
 }
 
 // referencedCapabilities 收集某渠道所有 key endpoint 引用到的能力（保序去重）。
@@ -117,17 +120,17 @@ type CreateRequest struct {
 }
 
 // Create 创建渠道（统一入口，按 kind 路由到对应数组）。
-func (h *Handler) Create(c *gin.Context) {
+func (h *Handler) Create(c fiber.Ctx) error {
 	var req CreateRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
-		return
+	if err := httpbridge.BindJSON(c, &req); err != nil {
+		httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "Invalid request body: " + err.Error()})
+		return nil
 	}
 
 	k, err := config.ChannelKindByName(req.Kind)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
+		httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
+		return nil
 	}
 
 	up := config.UpstreamConfig{
@@ -153,11 +156,11 @@ func (h *Handler) Create(c *gin.Context) {
 
 	if err := config.AddUpstreamByKind(h.cm, k, up, req.Placement); err != nil {
 		log.Printf("[Channels-Create] 创建渠道失败: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create channel: " + err.Error()})
-		return
+		httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": "Failed to create channel: " + err.Error()})
+		return nil
 	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "渠道已创建"})
+	httpbridge.JSON(c, http.StatusOK, fiber.Map{"message": "渠道已创建"})
+	return nil
 }
 
 // UpdateRequest 统一渠道更新请求体。
@@ -222,18 +225,18 @@ type UpdateRequest struct {
 }
 
 // Update 更新渠道（按 ChannelUID 寻址，内部按 kind 路由）。
-func (h *Handler) Update(c *gin.Context) {
-	uid := c.Param("uid")
+func (h *Handler) Update(c fiber.Ctx) error {
+	uid := httpbridge.Param(c, "uid")
 	loc, _, found := h.cm.FindUpstreamByUID(uid)
 	if !found {
-		c.JSON(http.StatusNotFound, gin.H{"error": "channel not found", "uid": uid})
-		return
+		httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "channel not found", "uid": uid})
+		return nil
 	}
 
 	var req UpdateRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
-		return
+	if err := httpbridge.BindJSON(c, &req); err != nil {
+		httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "Invalid request body: " + err.Error()})
+		return nil
 	}
 
 	updates := config.UpstreamUpdate{
@@ -298,32 +301,32 @@ func (h *Handler) Update(c *gin.Context) {
 	shouldResetMetrics, err := config.UpdateUpstreamByKind(h.cm, loc, updates)
 	if err != nil {
 		log.Printf("[Channels-Update] 更新渠道失败: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update channel: " + err.Error()})
-		return
+		httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": "Failed to update channel: " + err.Error()})
+		return nil
 	}
 
 	if shouldResetMetrics && h.scheduler != nil {
 		kind := schedulerChannelKind(loc.Kind)
 		h.scheduler.ResetChannelMetrics(loc.Index, kind)
 	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "渠道已更新"})
+	httpbridge.JSON(c, http.StatusOK, fiber.Map{"message": "渠道已更新"})
+	return nil
 }
 
 // Delete 删除渠道（按 ChannelUID 寻址）。
-func (h *Handler) Delete(c *gin.Context) {
-	uid := c.Param("uid")
+func (h *Handler) Delete(c fiber.Ctx) error {
+	uid := httpbridge.Param(c, "uid")
 	loc, _, found := h.cm.FindUpstreamByUID(uid)
 	if !found {
-		c.JSON(http.StatusNotFound, gin.H{"error": "channel not found", "uid": uid})
-		return
+		httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "channel not found", "uid": uid})
+		return nil
 	}
 
 	removed, err := config.RemoveUpstreamByKind(h.cm, loc)
 	if err != nil {
 		log.Printf("[Channels-Delete] 删除渠道失败: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete channel: " + err.Error()})
-		return
+		httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": "Failed to delete channel: " + err.Error()})
+		return nil
 	}
 
 	if h.scheduler != nil {
@@ -331,8 +334,8 @@ func (h *Handler) Delete(c *gin.Context) {
 		h.scheduler.DeleteChannelLogs(removed, kind)
 		h.scheduler.DeleteChannelMetrics(removed, kind)
 	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "渠道已删除", "removed": removed})
+	httpbridge.JSON(c, http.StatusOK, fiber.Map{"message": "渠道已删除", "removed": removed})
+	return nil
 }
 
 // AddKeyRequest 添加 key 请求体。
@@ -341,45 +344,45 @@ type AddKeyRequest struct {
 }
 
 // AddKey 添加 API Key（按 ChannelUID 寻址）。
-func (h *Handler) AddKey(c *gin.Context) {
-	uid := c.Param("uid")
+func (h *Handler) AddKey(c fiber.Ctx) error {
+	uid := httpbridge.Param(c, "uid")
 	loc, _, found := h.cm.FindUpstreamByUID(uid)
 	if !found {
-		c.JSON(http.StatusNotFound, gin.H{"error": "channel not found", "uid": uid})
-		return
+		httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "channel not found", "uid": uid})
+		return nil
 	}
 
 	var req AddKeyRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
-		return
+	if err := httpbridge.BindJSON(c, &req); err != nil {
+		httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "Invalid request body: " + err.Error()})
+		return nil
 	}
 	if strings.TrimSpace(req.APIKey) == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "apiKey is required"})
-		return
+		httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "apiKey is required"})
+		return nil
 	}
 
 	if err := config.AddChannelKeyByKind(h.cm, loc, req.APIKey); err != nil {
 		if strings.Contains(err.Error(), "API密钥已存在") {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "API密钥已存在"})
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "API密钥已存在"})
 		} else {
 			log.Printf("[Channels-Key] 添加 key 失败: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to add key: " + err.Error()})
+			httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": "Failed to add key: " + err.Error()})
 		}
-		return
+		return nil
 	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "API密钥已添加", "success": true})
+	httpbridge.JSON(c, http.StatusOK, fiber.Map{"message": "API密钥已添加", "success": true})
+	return nil
 }
 
 // RemoveKey 删除 API Key（按 ChannelUID + keyHash 寻址，keyHash 是 key 的前 16 位 hex）。
-func (h *Handler) RemoveKey(c *gin.Context) {
-	uid := c.Param("uid")
-	keyHash := c.Param("keyHash")
+func (h *Handler) RemoveKey(c fiber.Ctx) error {
+	uid := httpbridge.Param(c, "uid")
+	keyHash := httpbridge.Param(c, "keyHash")
 	loc, upstream, found := h.cm.FindUpstreamByUID(uid)
 	if !found {
-		c.JSON(http.StatusNotFound, gin.H{"error": "channel not found", "uid": uid})
-		return
+		httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "channel not found", "uid": uid})
+		return nil
 	}
 
 	// keyHash 是 key 的 SHA256 前 16 位 hex，查找匹配的明文 key
@@ -400,21 +403,21 @@ func (h *Handler) RemoveKey(c *gin.Context) {
 		}
 	}
 	if matchedKey == "" {
-		c.JSON(http.StatusNotFound, gin.H{"error": "key not found", "keyHash": keyHash})
-		return
+		httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "key not found", "keyHash": keyHash})
+		return nil
 	}
 
 	if err := config.RemoveChannelKeyByKind(h.cm, loc, matchedKey); err != nil {
 		if strings.Contains(err.Error(), "API密钥不存在") {
-			c.JSON(http.StatusNotFound, gin.H{"error": "API key not found"})
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "API key not found"})
 		} else {
 			log.Printf("[Channels-Key] 删除 key 失败: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to remove key: " + err.Error()})
+			httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": "Failed to remove key: " + err.Error()})
 		}
-		return
+		return nil
 	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "API密钥已删除"})
+	httpbridge.JSON(c, http.StatusOK, fiber.Map{"message": "API密钥已删除"})
+	return nil
 }
 
 // schedulerChannelKind 将 config.channelKind 转为 scheduler.ChannelKind。

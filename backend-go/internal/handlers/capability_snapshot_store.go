@@ -7,9 +7,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/metrics"
-	"github.com/gin-gonic/gin"
 )
 
 type CapabilityProtocolJobRef struct {
@@ -364,22 +365,22 @@ func filterSameSourceVirtualProtocols(tests []CapabilityProtocolJobResult, prese
 	return filtered
 }
 
-func GetCapabilitySnapshot(cfgManager *config.ConfigManager, channelKind string) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func GetCapabilitySnapshot(cfgManager *config.ConfigManager, channelKind string) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		id, err := parseCapabilityChannelID(c)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid channel ID"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "Invalid channel ID"})
+			return nil
 		}
 
 		channel, getErr := getCapabilityTestChannel(cfgManager, channelKind, id)
 		if getErr != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "channel not found"})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "channel not found"})
+			return nil
 		}
 
 		// 获取 sourceTab 参数（从查询参数）
-		sourceTab := c.Query("sourceTab")
+		sourceTab := httpbridge.Query(c, "sourceTab")
 
 		identityKey := resolveCapabilityIdentityKey(channel)
 		snapshot, ok := capabilitySnapshots.get(identityKey)
@@ -491,7 +492,7 @@ func GetCapabilitySnapshot(cfgManager *config.ConfigManager, channelKind string)
 			preserveVirtualProtocol = sourceTab + "->" + channelServiceType
 		}
 		snapshot.Tests = filterSameSourceVirtualProtocols(snapshot.Tests, preserveVirtualProtocol)
-
-		c.JSON(http.StatusOK, snapshot)
+		httpbridge.JSON(c, http.StatusOK, snapshot)
+		return nil
 	}
 }

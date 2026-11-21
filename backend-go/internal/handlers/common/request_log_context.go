@@ -7,9 +7,10 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/gofiber/fiber/v3"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/types"
-	"github.com/gin-gonic/gin"
 )
 
 const (
@@ -26,12 +27,12 @@ type RequestLogContext struct {
 	AgentRole string
 }
 
-func SetRequestLogContext(c *gin.Context, sessionID string, round int) {
+func SetRequestLogContext(c fiber.Ctx, sessionID string, round int) {
 	SetRequestLogContextWithAgent(c, sessionID, round, nil)
 }
 
 // SetRequestLogContextWithAgent 设置请求日志上下文，附带代理上下文信息。
-func SetRequestLogContextWithAgent(c *gin.Context, sessionID string, round int, agentCtx *types.AgentContext) {
+func SetRequestLogContextWithAgent(c fiber.Ctx, sessionID string, round int, agentCtx *types.AgentContext) {
 	if c == nil {
 		return
 	}
@@ -39,7 +40,7 @@ func SetRequestLogContextWithAgent(c *gin.Context, sessionID string, round int, 
 	if agentCtx != nil {
 		agentRole = agentCtx.AgentRole
 	}
-	c.Set(requestLogContextKey, RequestLogContext{
+	httpbridge.SetValue(c, requestLogContextKey, RequestLogContext{
 		SessionID: strings.TrimSpace(sessionID),
 		Round:     round,
 		AgentCtx:  agentCtx,
@@ -47,12 +48,12 @@ func SetRequestLogContextWithAgent(c *gin.Context, sessionID string, round int, 
 	})
 }
 
-// AgentContextFromGin 从 gin.Context 读取代理上下文，供日志记录使用。
+// AgentContextFromFiber 从 fiber.Ctx 读取代理上下文，供日志记录使用。
 // 返回带 SessionID 填充的副本（nil 安全）。
-// AgentContextFromGin 从 gin.Context 读取代理上下文，供日志记录使用。
+// AgentContextFromFiber 从 fiber.Ctx 读取代理上下文，供日志记录使用。
 // 返回 AgentContext 的副本（nil 安全）。SessionID 由 CreatePendingLog 单独从日志上下文填充。
-func AgentContextFromGin(c *gin.Context) *types.AgentContext {
-	ctx, ok := requestLogContextFromGin(c)
+func AgentContextFromFiber(c fiber.Ctx) *types.AgentContext {
+	ctx, ok := requestLogContextFromFiber(c)
 	if !ok || ctx.AgentCtx == nil {
 		return nil
 	}
@@ -60,38 +61,38 @@ func AgentContextFromGin(c *gin.Context) *types.AgentContext {
 	return &snapshot
 }
 
-// RequestConversationContextFromGin 获取请求对应的会话上下文（nil 安全）。
-func RequestConversationContextFromGin(c *gin.Context) (sessionID string, round int, agentRole string, ok bool) {
-	ctx, ok := requestLogContextFromGin(c)
+// RequestConversationContextFromFiber 获取请求对应的会话上下文（nil 安全）。
+func RequestConversationContextFromFiber(c fiber.Ctx) (sessionID string, round int, agentRole string, ok bool) {
+	ctx, ok := requestLogContextFromFiber(c)
 	if !ok {
 		return "", 0, "", false
 	}
 	return ctx.SessionID, ctx.Round, ctx.AgentRole, true
 }
 
-// sessionIDFromGin 从 gin.Context 读取会话标识（用于 ChannelLog.SessionID 关联）。
-// SessionIDFromGin 从 gin.Context 读取会话标识（用于 ChannelLog.SessionID 关联）。
-func SessionIDFromGin(c *gin.Context) string {
-	ctx, ok := requestLogContextFromGin(c)
+// sessionIDFromFiber 从 fiber.Ctx 读取会话标识（用于 ChannelLog.SessionID 关联）。
+// SessionIDFromFiber 从 fiber.Ctx 读取会话标识（用于 ChannelLog.SessionID 关联）。
+func SessionIDFromFiber(c fiber.Ctx) string {
+	ctx, ok := requestLogContextFromFiber(c)
 	if !ok {
 		return ""
 	}
 	return ctx.SessionID
 }
 
-func RequestLogTag(c *gin.Context) string {
-	ctx, ok := requestLogContextFromGin(c)
+func RequestLogTag(c fiber.Ctx) string {
+	ctx, ok := requestLogContextFromFiber(c)
 	if !ok {
 		return ""
 	}
 	return requestLogTag(ctx)
 }
 
-func WithRequestLogContext(req *http.Request, c *gin.Context) *http.Request {
+func WithRequestLogContext(req *http.Request, c fiber.Ctx) *http.Request {
 	if req == nil {
 		return nil
 	}
-	ctx, ok := requestLogContextFromGin(c)
+	ctx, ok := requestLogContextFromFiber(c)
 	if !ok {
 		return req
 	}
@@ -109,11 +110,11 @@ func requestLogTagFromRequest(req *http.Request) string {
 	return requestLogTag(ctx)
 }
 
-func requestLogContextFromGin(c *gin.Context) (RequestLogContext, bool) {
+func requestLogContextFromFiber(c fiber.Ctx) (RequestLogContext, bool) {
 	if c == nil {
 		return RequestLogContext{}, false
 	}
-	value, ok := c.Get(requestLogContextKey)
+	value, ok := httpbridge.Value(c, requestLogContextKey)
 	if !ok {
 		return RequestLogContext{}, false
 	}
@@ -138,7 +139,7 @@ func requestLogTag(ctx RequestLogContext) string {
 	return "[" + strings.Join(parts, " ") + "]"
 }
 
-func RequestLogf(c *gin.Context, format string, args ...interface{}) {
+func RequestLogf(c fiber.Ctx, format string, args ...interface{}) {
 	tag := RequestLogTag(c)
 	logWithTag(tag, format, args...)
 }
@@ -147,7 +148,7 @@ func LogWithTag(tag string, format string, args ...interface{}) {
 	logWithTag(tag, format, args...)
 }
 
-func requestLogToConsole(c *gin.Context, format string, args ...interface{}) {
+func requestLogToConsole(c fiber.Ctx, format string, args ...interface{}) {
 	tag := RequestLogTag(c)
 	if tag == "" {
 		logToConsole(format, args...)
@@ -156,7 +157,7 @@ func requestLogToConsole(c *gin.Context, format string, args ...interface{}) {
 	logToConsole(taggedFormat(format, tag), args...)
 }
 
-func requestLogToFile(c *gin.Context, format string, args ...interface{}) {
+func requestLogToFile(c fiber.Ctx, format string, args ...interface{}) {
 	tag := RequestLogTag(c)
 	if tag == "" {
 		logToFile(format, args...)

@@ -16,14 +16,15 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/copilot"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/httpclient"
 	"github.com/soulteary/yunqi/internal/keypool"
 	"github.com/soulteary/yunqi/internal/middleware"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/utils"
-	"github.com/gin-gonic/gin"
 )
 
 const (
@@ -71,21 +72,21 @@ type ModelEntry struct {
 }
 
 // ModelsHandler 处理 /v1/models 请求，从 Messages、Responses、Chat、Gemini、Images 和 Vectors 渠道获取并合并模型列表
-func ModelsHandler(envCfg *config.EnvConfig, cfgManager *config.ConfigManager, channelScheduler *scheduler.ChannelScheduler) gin.HandlerFunc {
+func ModelsHandler(envCfg *config.EnvConfig, cfgManager *config.ConfigManager, channelScheduler *scheduler.ChannelScheduler) fiber.Handler {
 	cache := newModelsDiscoveryCache()
 
-	return func(c *gin.Context) {
-		middleware.ProxyAuthMiddleware(envCfg)(c)
-		if c.IsAborted() {
-			return
+	return func(c fiber.Ctx) error {
+		middleware.AuthenticateProxy(c, envCfg)
+		if httpbridge.IsAborted(c) {
+			return nil
 		}
 
 		req := modelsCollectionRequest{
-			ctx:              c.Request.Context(),
+			ctx:              httpbridge.Request(c).Context(),
 			cfgManager:       cfgManager,
 			channelScheduler: channelScheduler,
-			routePrefix:      c.Param("routePrefix"),
-			channelName:      c.GetHeader("X-Channel"),
+			routePrefix:      httpbridge.Param(c, "routePrefix"),
+			channelName:      httpbridge.GetHeader(c, "X-Channel"),
 		}
 		cacheKey := modelsDiscoveryCacheKey{
 			routePrefix: req.routePrefix,
@@ -106,32 +107,32 @@ func ModelsHandler(envCfg *config.EnvConfig, cfgManager *config.ConfigManager, c
 			if cached, ok := cache.Get(cacheKey); ok {
 				log.Printf("[Models] 实时发现失败，返回缓存: routePrefix=%q, channel=%q, merged=%d",
 					req.routePrefix, req.channelName, len(cached.Data))
-				c.JSON(http.StatusOK, cached)
-				return
+				httpbridge.JSON(c, http.StatusOK, cached)
+				return nil
 			}
 			if configuredModels := configuredModelsFromAllKinds(req); len(configuredModels) > 0 {
 				response := buildModelsResponse(configuredModels)
 				log.Printf("[Models] 实时发现失败，返回配置模型回退: routePrefix=%q, channel=%q, merged=%d",
 					req.routePrefix, req.channelName, len(response.Data))
-				c.JSON(http.StatusOK, response)
-				return
+				httpbridge.JSON(c, http.StatusOK, response)
+				return nil
 			}
 			if hasModelsDiscoveryCandidate(req) {
-				c.JSON(http.StatusServiceUnavailable, gin.H{
-					"error": gin.H{
+				httpbridge.JSON(c, http.StatusServiceUnavailable, fiber.Map{
+					"error": fiber.Map{
 						"message": "models endpoint temporarily unavailable from configured upstreams",
 						"type":    "upstream_unavailable",
 					},
 				})
-				return
+				return nil
 			}
-			c.JSON(http.StatusNotFound, gin.H{
-				"error": gin.H{
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{
+				"error": fiber.Map{
 					"message": "models endpoint not available from any upstream",
 					"type":    "not_found_error",
 				},
 			})
-			return
+			return nil
 		}
 
 		response := buildModelsResponse(mergedModels)
@@ -139,8 +140,8 @@ func ModelsHandler(envCfg *config.EnvConfig, cfgManager *config.ConfigManager, c
 
 		log.Printf("[Models] 合并完成: messages=%d, responses=%d, chat=%d, gemini=%d, images=%d, vectors=%d, merged=%d",
 			len(messagesModels), len(responsesModels), len(chatModels), len(geminiModels), len(imagesModels), len(vectorsModels), len(mergedModels))
-
-		c.JSON(http.StatusOK, response)
+		httpbridge.JSON(c, http.StatusOK, response)
+		return nil
 	}
 }
 
@@ -213,22 +214,22 @@ func cloneModelsResponse(response ModelsResponse) ModelsResponse {
 }
 
 // ModelsDetailHandler 处理 /v1/models/:model 请求，转发到上游
-func ModelsDetailHandler(envCfg *config.EnvConfig, cfgManager *config.ConfigManager, channelScheduler *scheduler.ChannelScheduler) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		middleware.ProxyAuthMiddleware(envCfg)(c)
-		if c.IsAborted() {
-			return
+func ModelsDetailHandler(envCfg *config.EnvConfig, cfgManager *config.ConfigManager, channelScheduler *scheduler.ChannelScheduler) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		middleware.AuthenticateProxy(c, envCfg)
+		if httpbridge.IsAborted(c) {
+			return nil
 		}
 
-		modelID := c.Param("model")
+		modelID := httpbridge.Param(c, "model")
 		if modelID == "" {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": gin.H{
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{
+				"error": fiber.Map{
 					"message": "model id is required",
 					"type":    "invalid_request_error",
 				},
 			})
-			return
+			return nil
 		}
 
 		for _, kind := range []scheduler.ChannelKind{
@@ -240,17 +241,17 @@ func ModelsDetailHandler(envCfg *config.EnvConfig, cfgManager *config.ConfigMana
 			scheduler.ChannelKindVectors,
 		} {
 			if body, _, ok := tryModelsRequest(c, cfgManager, channelScheduler, "GET", "/"+modelID, kind); ok {
-				c.Data(http.StatusOK, "application/json", body)
-				return
+				httpbridge.Data(c, http.StatusOK, "application/json", body)
+				return nil
 			}
 		}
-
-		c.JSON(http.StatusNotFound, gin.H{
-			"error": gin.H{
+		httpbridge.JSON(c, http.StatusNotFound, fiber.Map{
+			"error": fiber.Map{
 				"message": "model not found",
 				"type":    "not_found_error",
 			},
 		})
+		return nil
 	}
 }
 
@@ -962,14 +963,14 @@ func mergeModels(modelLists ...[]ModelEntry) []ModelEntry {
 }
 
 // tryModelsRequest 使用调度器选择渠道，按故障转移顺序尝试请求 models 端点
-func tryModelsRequest(c *gin.Context, cfgManager *config.ConfigManager, channelScheduler *scheduler.ChannelScheduler, method, suffix string, kind scheduler.ChannelKind) ([]byte, *config.UpstreamConfig, bool) {
+func tryModelsRequest(c fiber.Ctx, cfgManager *config.ConfigManager, channelScheduler *scheduler.ChannelScheduler, method, suffix string, kind scheduler.ChannelKind) ([]byte, *config.UpstreamConfig, bool) {
 	failedChannels := make(map[int]bool)
 	channelType := channelKindLabel(kind)
 
 	for attempt := 0; attempt < modelsMaxAttempts; attempt++ {
-		selection, err := channelScheduler.SelectChannel(c.Request.Context(), "", failedChannels, kind, "", c.Param("routePrefix"), c.GetHeader("X-Channel"))
+		selection, err := channelScheduler.SelectChannel(httpbridge.Request(c).Context(), "", failedChannels, kind, "", httpbridge.Param(c, "routePrefix"), httpbridge.GetHeader(c, "X-Channel"))
 		if err != nil {
-			fallbackSelection, fallbackErr := selectChannelWithDisabledKeys(cfgManager, failedChannels, kind, c.Param("routePrefix"))
+			fallbackSelection, fallbackErr := selectChannelWithDisabledKeys(cfgManager, failedChannels, kind, httpbridge.Param(c, "routePrefix"))
 			if fallbackErr != nil {
 				log.Printf("[%s-Models] 渠道无可用: %v", channelType, err)
 				break
@@ -978,7 +979,7 @@ func tryModelsRequest(c *gin.Context, cfgManager *config.ConfigManager, channelS
 			log.Printf("[%s-Models] 活跃渠道不可用，回退到挂起渠道查询模型: channel=%s, reason=%s", channelType, selection.Upstream.Name, selection.Reason)
 		}
 
-		body, upstream, ok := requestModelsFromSelection(c.Request.Context(), cfgManager, selection, method, suffix, kind)
+		body, upstream, ok := requestModelsFromSelection(httpbridge.Request(c).Context(), cfgManager, selection, method, suffix, kind)
 		if ok {
 			return body, upstream, true
 		}

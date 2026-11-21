@@ -12,17 +12,17 @@ import (
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/errutil"
 	"github.com/soulteary/yunqi/internal/handlers/common"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/session"
 	"github.com/soulteary/yunqi/internal/thinkingcache"
 	"github.com/soulteary/yunqi/internal/types"
-	"github.com/gin-gonic/gin"
 )
 
 func TestHandleStreamSuccess_SessionWritebackPreservesReasoningEncryptedContent(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","stream":true}`))
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","stream":true}`)))
 
 	sessionManager := session.NewSessionManager(time.Hour, 100, 100000)
 
@@ -112,10 +112,10 @@ func TestHandleStreamSuccess_SessionWritebackPreservesReasoningEncryptedContent(
 }
 
 func TestHandleStreamSuccess_PostCommitStallSynthesizesIncompleteEvent(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","stream":true}`))
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","stream":true}`)))
 
 	reader, writer := io.Pipe()
 	resp := &http.Response{
@@ -175,10 +175,10 @@ func TestHandleStreamSuccess_PostCommitStallSynthesizesIncompleteEvent(t *testin
 }
 
 func TestHandleStreamSuccess_StoresReasoningEncryptedContentToThinkingCache(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","stream":true}`))
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","stream":true}`)))
 
 	thinkingcache.ResetForTest()
 	sessionManager := session.NewSessionManager(time.Hour, 100, 100000)

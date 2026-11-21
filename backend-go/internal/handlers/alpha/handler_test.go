@@ -12,11 +12,12 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/session"
-	"github.com/gin-gonic/gin"
 )
 
 func setupAlphaTestConfigManager(t *testing.T, upstreams []config.UpstreamConfig) *config.ConfigManager {
@@ -38,9 +39,8 @@ func setupAlphaTestConfigManager(t *testing.T, upstreams []config.UpstreamConfig
 	return cm
 }
 
-func newAlphaTestRouter(t *testing.T, upstreams []config.UpstreamConfig) (*gin.Engine, *scheduler.ChannelScheduler) {
+func newAlphaTestRouter(t *testing.T, upstreams []config.UpstreamConfig) (*fiber.App, *scheduler.ChannelScheduler) {
 	t.Helper()
-	gin.SetMode(gin.TestMode)
 
 	cfgManager := setupAlphaTestConfigManager(t, upstreams)
 	messagesMetrics := metrics.NewMetricsManager()
@@ -75,14 +75,14 @@ func newAlphaTestRouter(t *testing.T, upstreams []config.UpstreamConfig) (*gin.E
 		MaxRequestBodySize: 1024 * 1024,
 	}
 
-	r := gin.New()
+	r := httpbridge.NewApp()
 	handler := Handler(envCfg, cfgManager, sch)
-	r.POST("/v1/alpha/*rest", handler)
-	r.POST("/:routePrefix/v1/alpha/*rest", handler)
+	r.Post("/v1/alpha/*", handler)
+	r.Post("/:routePrefix/v1/alpha/*", handler)
 	return r, sch
 }
 
-func performAlphaRequest(t *testing.T, router *gin.Engine, path, body string, headers map[string]string) *httptest.ResponseRecorder {
+func performAlphaRequest(t *testing.T, router *fiber.App, path, body string, headers map[string]string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -91,7 +91,7 @@ func performAlphaRequest(t *testing.T, router *gin.Engine, path, body string, he
 		req.Header.Set(k, v)
 	}
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 	return w
 }
 
@@ -337,7 +337,7 @@ func TestAlphaHandler_AuthRejected(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-api-key", "wrong-key")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", w.Code)
 	}

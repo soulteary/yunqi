@@ -6,9 +6,10 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/autopilot"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/scheduler"
-	"github.com/gin-gonic/gin"
 )
 
 const (
@@ -66,18 +67,18 @@ func recordEndpointAttempt(traceUID string, attempt autopilot.EndpointAttemptSum
 
 // recordAttemptCompleted 记录一次 endpoint 尝试的终态摘要。
 // attemptUID 对应 "started" 时登记的 logRequestID，result 为 success/upstream_error/cancelled/attempt_failed。
-func recordAttemptCompleted(c *gin.Context, attemptUID, channelUID string, result string, statusCode int, durationMs int64) {
+func recordAttemptCompleted(c fiber.Ctx, attemptUID, channelUID string, result string, statusCode int, durationMs int64) {
 	if attemptRecorderHook == nil {
 		return
 	}
-	traceUIDVal, _ := c.Get("ccx.autopilot_trace_uid")
+	traceUIDVal, _ := httpbridge.Value(c, "ccx.autopilot_trace_uid")
 	uid, _ := traceUIDVal.(string)
 	if uid == "" {
 		return
 	}
 	actualModel, actualEffort := autopilotTraceActualDetails(c)
-	consumptionPolicy, _ := c.Get("ccx.autopilot_consumption_policy")
-	configuredCostMultiplier, _ := c.Get("ccx.autopilot_configured_cost_multiplier")
+	consumptionPolicy, _ := httpbridge.Value(c, "ccx.autopilot_consumption_policy")
+	configuredCostMultiplier, _ := httpbridge.Value(c, "ccx.autopilot_configured_cost_multiplier")
 	policy, _ := consumptionPolicy.(string)
 	multiplier, _ := configuredCostMultiplier.(float64)
 	recordEndpointAttempt(uid, autopilot.EndpointAttemptSummary{
@@ -95,38 +96,39 @@ func recordAttemptCompleted(c *gin.Context, attemptUID, channelUID string, resul
 	})
 }
 
-func resetAutopilotAttemptTelemetry(c *gin.Context) {
+func resetAutopilotAttemptTelemetry(c fiber.Ctx) error {
 	if c != nil {
-		c.Set(autopilotFirstByteAtKey, time.Time{})
-		c.Set(autopilotActualModelKey, "")
-		c.Set(autopilotActualEffortKey, "")
+		httpbridge.SetValue(c, autopilotFirstByteAtKey, time.Time{})
+		httpbridge.SetValue(c, autopilotActualModelKey, "")
+		httpbridge.SetValue(c, autopilotActualEffortKey, "")
+	}
+	return nil
+}
+
+func recordAutopilotFirstByte(c fiber.Ctx, at time.Time) {
+	if c != nil {
+		httpbridge.SetValue(c, autopilotFirstByteAtKey, at)
 	}
 }
 
-func recordAutopilotFirstByte(c *gin.Context, at time.Time) {
-	if c != nil {
-		c.Set(autopilotFirstByteAtKey, at)
-	}
-}
-
-func autopilotTraceActualDetails(c *gin.Context) (model, effort string) {
+func autopilotTraceActualDetails(c fiber.Ctx) (model, effort string) {
 	if c == nil {
 		return "", ""
 	}
-	if value, ok := c.Get(autopilotActualModelKey); ok {
+	if value, ok := httpbridge.Value(c, autopilotActualModelKey); ok {
 		model, _ = value.(string)
 	}
-	if value, ok := c.Get(autopilotActualEffortKey); ok {
+	if value, ok := httpbridge.Value(c, autopilotActualEffortKey); ok {
 		effort, _ = value.(string)
 	}
 	return model, effort
 }
 
-func autopilotFirstByteLatency(c *gin.Context, requestStartedAt time.Time) int64 {
+func autopilotFirstByteLatency(c fiber.Ctx, requestStartedAt time.Time) int64 {
 	if c == nil {
 		return 0
 	}
-	value, ok := c.Get(autopilotFirstByteAtKey)
+	value, ok := httpbridge.Value(c, autopilotFirstByteAtKey)
 	if !ok {
 		return 0
 	}
@@ -138,7 +140,7 @@ func autopilotFirstByteLatency(c *gin.Context, requestStartedAt time.Time) int64
 }
 
 func buildRoutingOutcome(
-	c *gin.Context,
+	c fiber.Ctx,
 	selection *scheduler.SelectionResult,
 	result MultiChannelAttemptResult,
 	terminal bool,
@@ -150,8 +152,8 @@ func buildRoutingOutcome(
 	if result.FailoverError != nil {
 		statusCode = result.FailoverError.Status
 	}
-	if terminal && c != nil && c.Writer.Status() > 0 {
-		statusCode = c.Writer.Status()
+	if terminal && c != nil && httpbridge.Writer(c).Status() > 0 {
+		statusCode = httpbridge.Writer(c).Status()
 	}
 
 	outcomeName := "attempt_failed"

@@ -3,28 +3,41 @@ package middleware
 import (
 	"strings"
 
-	"github.com/gin-contrib/gzip"
-	"github.com/gin-gonic/gin"
+	"compress/gzip"
+
+	"github.com/gofiber/fiber/v3"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 // GzipMiddleware 为静态资源启用 Gzip 压缩
 // 使用白名单模式：仅压缩已知的静态资源路径，避免意外压缩流式响应
-func GzipMiddleware() gin.HandlerFunc {
-	gzipHandler := gzip.Gzip(gzip.DefaultCompression)
-
-	return func(c *gin.Context) {
-		path := c.Request.URL.Path
-
-		// 白名单：仅压缩静态资源
-		if isCompressibleResource(path) {
-			gzipHandler(c)
-			return
+func GzipMiddleware() fiber.Handler {
+	return func(c fiber.Ctx) error {
+		if !isCompressibleResource(c.Path()) || !strings.Contains(httpbridge.GetHeader(c, "Accept-Encoding"), "gzip") {
+			return c.Next()
 		}
-
-		// 其他路径不压缩，直接放行
-		c.Next()
+		original := httpbridge.Writer(c)
+		original.Header().Set("Content-Encoding", "gzip")
+		original.Header().Add("Vary", "Accept-Encoding")
+		original.Header().Del("Content-Length")
+		compressor := gzip.NewWriter(original)
+		httpbridge.SetWriter(c, &gzipResponseWriter{ResponseWriter: original, compressor: compressor})
+		defer func() { _ = compressor.Close(); httpbridge.SetWriter(c, original) }()
+		return c.Next()
 	}
 }
+
+type gzipResponseWriter struct {
+	httpbridge.ResponseWriter
+	compressor *gzip.Writer
+}
+
+func (w *gzipResponseWriter) Write(p []byte) (int, error) {
+	w.Header().Del("Content-Length")
+	return w.compressor.Write(p)
+}
+func (w *gzipResponseWriter) WriteString(s string) (int, error) { return w.Write([]byte(s)) }
+func (w *gzipResponseWriter) Flush()                            { _ = w.compressor.Flush(); w.ResponseWriter.Flush() }
 
 // isCompressibleResource 判断是否为可压缩的静态资源路径
 func isCompressibleResource(path string) bool {

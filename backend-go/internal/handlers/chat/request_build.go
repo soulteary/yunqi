@@ -7,13 +7,14 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/converters"
 	"github.com/soulteary/yunqi/internal/copilot"
 	"github.com/soulteary/yunqi/internal/handlers/common"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/providers"
 	"github.com/soulteary/yunqi/internal/utils"
-	"github.com/gin-gonic/gin"
 )
 
 func countChatUserMessages(req map[string]interface{}) int {
@@ -182,7 +183,7 @@ func stripThinkingBlocksFromBody(bodyBytes []byte) []byte {
 }
 
 func buildProviderRequest(
-	c *gin.Context,
+	c fiber.Ctx,
 	upstream *config.UpstreamConfig,
 	baseURL string,
 	apiKey string,
@@ -238,14 +239,14 @@ func buildProviderRequest(
 		}
 		// copilot 使用 token exchange 返回的动态端点，而非渠道静态 baseURL
 		if upstream.ServiceType == "copilot" {
-			copilotToken, copilotBaseURL, err := copilot.ResolveTokenWithProxy(c.Request.Context(), apiKey, upstream.ProxyURL)
+			copilotToken, copilotBaseURL, err := copilot.ResolveTokenWithProxy(httpbridge.Request(c).Context(), apiKey, upstream.ProxyURL)
 			if err != nil {
 				return nil, fmt.Errorf("copilot token 交换失败: %w", err)
 			}
 			if copilotBaseURL != "" {
 				url = strings.TrimRight(copilotBaseURL, "/") + "/responses"
 			}
-			req, err := http.NewRequestWithContext(c.Request.Context(), "POST", url, bytes.NewReader(requestBody))
+			req, err := http.NewRequestWithContext(httpbridge.Request(c).Context(), "POST", url, bytes.NewReader(requestBody))
 			if err != nil {
 				return nil, err
 			}
@@ -308,7 +309,7 @@ func buildProviderRequest(
 		}
 	}
 
-	req, err := http.NewRequestWithContext(c.Request.Context(), "POST", url, bytes.NewReader(requestBody))
+	req, err := http.NewRequestWithContext(httpbridge.Request(c).Context(), "POST", url, bytes.NewReader(requestBody))
 	if err != nil {
 		return nil, err
 	}

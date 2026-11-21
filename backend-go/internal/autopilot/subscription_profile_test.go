@@ -10,8 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/errutil"
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 // newSubTestDB 创建内存 SQLite 数据库用于订阅测试。
@@ -729,7 +730,7 @@ func TestSubscriptionStore_AccountAccessToken_EncryptedAtRest(t *testing.T) {
 // ── HTTP Handler 测试 ──────────────────────────────────────────────────────────
 
 // performRequest 发起 HTTP 请求并返回录制的响应。
-func performRequest(router *gin.Engine, method, path, body string) *httptest.ResponseRecorder {
+func performRequest(router *fiber.App, method, path, body string) *httptest.ResponseRecorder {
 	var reqBody *strings.Reader
 	if body != "" {
 		reqBody = strings.NewReader(body)
@@ -739,18 +740,18 @@ func performRequest(router *gin.Engine, method, path, body string) *httptest.Res
 	req := httptest.NewRequest(method, path, reqBody)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 	return w
 }
 
-func setupSubRouter(t *testing.T) (*SubscriptionStore, *gin.Engine) {
+func setupSubRouter(t *testing.T) (*SubscriptionStore, *fiber.App) {
 	t.Helper()
 	db := newSubTestDB(t)
 	store, err := NewSubscriptionStoreWithDB(db)
 	if err != nil {
 		t.Fatalf("NewSubscriptionStoreWithDB 失败: %v", err)
 	}
-	router := gin.New()
+	router := httpbridge.NewApp()
 	RegisterSubscriptionRoutes(router, store, nil)
 	return store, router
 }

@@ -7,15 +7,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/scheduler"
-	"github.com/gin-gonic/gin"
 )
 
 // TestHandleAllChannelsFailed_ContextCapacity 上下文容量选路错误必须以
 // 400 context_length_exceeded 透传，而不是被吞成 503 service_unavailable——
 // Codex 等客户端只有拿到这个语义才会压缩上下文而不是无限重试。
 func TestHandleAllChannelsFailed_ContextCapacity(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	cases := []struct {
 		name          string
@@ -56,8 +55,8 @@ func TestHandleAllChannelsFailed_ContextCapacity(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			recorder := httptest.NewRecorder()
-			c, _ := gin.CreateTestContext(recorder)
-			c.Request = httptest.NewRequest("POST", "/v1/responses", strings.NewReader("{}"))
+			c, _ := httpbridge.TestContext(recorder)
+			httpbridge.SetRequest(c, httptest.NewRequest("POST", "/v1/responses", strings.NewReader("{}")))
 
 			HandleAllChannelsFailed(c, nil, tc.lastError, "Responses")
 

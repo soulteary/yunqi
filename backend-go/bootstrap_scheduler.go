@@ -4,15 +4,16 @@ import (
 	"context"
 	"log"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/autopilot"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/eventbus"
 	"github.com/soulteary/yunqi/internal/handlers"
 	"github.com/soulteary/yunqi/internal/handlers/common"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/presetstore"
 	"github.com/soulteary/yunqi/internal/racing"
 	"github.com/soulteary/yunqi/internal/scheduler"
-	"github.com/gin-gonic/gin"
 )
 
 func (a *application) initScheduler() {
@@ -114,15 +115,15 @@ func (a *application) configureSchedulerPolicies() {
 		})
 
 		// endpoint policy hook：为每个请求构建 EndpointAttemptPolicy
-		common.SetEndpointPolicyProviderHook(func(c *gin.Context, model string, upstream *config.UpstreamConfig) *autopilot.EndpointAttemptPolicy {
+		common.SetEndpointPolicyProviderHook(func(c fiber.Ctx, model string, upstream *config.UpstreamConfig) *autopilot.EndpointAttemptPolicy {
 			autopilotCfg := a.cfgManager.GetAutopilotRouting()
 			if autopilotCfg.KillSwitch {
 				return nil
 			}
 			mode := autopilot.RoutingModeAuto
 			req := autopilot.BuildRequestProfile(autopilot.RequestProfileFeatures{Model: model})
-			if c != nil && c.Request != nil {
-				if profile, ok := autopilot.RequestProfileFromContext(c.Request.Context()); ok {
+			if c != nil && httpbridge.Request(c) != nil {
+				if profile, ok := autopilot.RequestProfileFromContext(httpbridge.Request(c).Context()); ok {
 					req = profile
 					req.Model = model
 				}

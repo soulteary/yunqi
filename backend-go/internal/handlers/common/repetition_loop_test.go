@@ -10,12 +10,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/types"
 	"github.com/soulteary/yunqi/internal/warmup"
-	"github.com/gin-gonic/gin"
 )
 
 // 用户实际遇到的重复样例（planning 文本循环），约 130B 短语。
@@ -282,9 +283,9 @@ func TestRepetitionLoopDetailSuffix(t *testing.T) {
 // TestProcessStreamEventsRepetitionLoopAbort messages 事件循环级集成测试：
 // text 增量构成无限重复时，中止流、向客户端写错误事件并返回哨兵。
 func TestProcessStreamEventsRepetitionLoopAbort(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
+	c, _ := httpbridge.TestContext(rec)
 	envCfg := &config.EnvConfig{}
 	ctx := NewStreamContext(envCfg)
 
@@ -300,7 +301,7 @@ func TestProcessStreamEventsRepetitionLoopAbort(t *testing.T) {
 		close(errChan)
 	}()
 
-	usage, err := ProcessStreamEvents(c, c.Writer, nopFlusher{}, eventChan, errChan, ctx, envCfg, time.Now(), nil, StreamPreflightTimeouts{})
+	usage, err := ProcessStreamEvents(c, httpbridge.Writer(c), nopFlusher{}, eventChan, errChan, ctx, envCfg, time.Now(), nil, StreamPreflightTimeouts{})
 	if !errors.Is(err, ErrStreamRepetitionLoop) {
 		t.Fatalf("期望 ErrStreamRepetitionLoop, got %v", err)
 	}
@@ -317,7 +318,6 @@ func TestProcessStreamEventsRepetitionLoopAbort(t *testing.T) {
 // handleSuccess 返回哨兵时不换渠道（handled=true），并按「一次确证即隔离」
 // 强制熔断渠道×Key×模型（区别于双阈值的空响应族）。
 func TestTryUpstreamWithAllKeysRepetitionLoopForcedCircuit(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -339,8 +339,8 @@ func TestTryUpstreamWithAllKeysRepetitionLoopForcedCircuit(t *testing.T) {
 	upstream := &cfg.Upstream[0]
 
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"gpt-5.5"}`))
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"gpt-5.5"}`)))
 
 	handled, successKey, _, failoverErr, _, lastErr := TryUpstreamWithAllKeys(
 		c,
@@ -358,13 +358,13 @@ func TestTryUpstreamWithAllKeysRepetitionLoopForcedCircuit(t *testing.T) {
 		func(upstream *config.UpstreamConfig, failedKeys map[string]bool) (string, error) {
 			return cfgManager.GetNextAPIKey(upstream, failedKeys, "Messages")
 		},
-		func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
-			return http.NewRequestWithContext(c.Request.Context(), http.MethodPost, upstreamCopy.BaseURL, strings.NewReader(`{}`))
+		func(c fiber.Ctx, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
+			return http.NewRequestWithContext(httpbridge.Request(c).Context(), http.MethodPost, upstreamCopy.BaseURL, strings.NewReader(`{}`))
 		},
 		func(apiKey string) {},
 		nil,
 		nil,
-		func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
+		func(c fiber.Ctx, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 			return nil, ErrStreamRepetitionLoop
 		},
 		"gpt-5.5",

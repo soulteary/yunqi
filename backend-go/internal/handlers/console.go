@@ -4,23 +4,25 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 // ConsoleStatus exposes an explicit allowlist of non-secret runtime information.
 // Register only behind the existing management API authentication middleware.
-func ConsoleStatus(env *config.EnvConfig, manager *config.ConfigManager) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func ConsoleStatus(env *config.EnvConfig, manager *config.ConfigManager) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		cfg := manager.GetConfig()
-		c.Header("Cache-Control", "no-store")
-		c.JSON(http.StatusOK, gin.H{
+		httpbridge.Header(c, "Cache-Control", "no-store")
+		httpbridge.JSON(c, http.StatusOK, fiber.Map{
 			"version": getVersion(), "uptimeSeconds": time.Since(startTime).Seconds(),
 			"mode":     env.Env,
-			"settings": gin.H{"port": env.Port, "bindHost": env.BindHost, "webUI": env.EnableWebUI},
-			"channels": gin.H{"messages": len(cfg.Upstream), "chat": len(cfg.ChatUpstream),
+			"settings": fiber.Map{"port": env.Port, "bindHost": env.BindHost, "webUI": env.EnableWebUI},
+			"channels": fiber.Map{"messages": len(cfg.Upstream), "chat": len(cfg.ChatUpstream),
 				"responses": len(cfg.ResponsesUpstream), "gemini": len(cfg.GeminiUpstream),
 				"images": len(cfg.ImagesUpstream), "vectors": len(cfg.VectorsUpstream)},
 		})
+		return nil
 	}
 }

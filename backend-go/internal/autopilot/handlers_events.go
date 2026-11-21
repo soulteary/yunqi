@@ -5,9 +5,10 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/soulteary/yunqi/internal/errutil"
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v3"
 	"github.com/gorilla/websocket"
+	"github.com/soulteary/yunqi/internal/errutil"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 // ── Phase 3A：画像变更事件 API（只读展示，不影响调度）──
@@ -22,15 +23,15 @@ type ChangelogResponse struct {
 // 查询参数：
 //   - limit=N        返回最近 N 条（默认 50，最大 200）
 //   - channelUid=xxx  只返回指定渠道的变更记录
-func handleChangelog(mgr *Manager) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handleChangelog(mgr *Manager) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		if mgr == nil || mgr.ChangelogStore() == nil {
-			c.JSON(http.StatusOK, ChangelogResponse{Events: []*ProfileChangeEvent{}, Total: 0})
-			return
+			httpbridge.JSON(c, http.StatusOK, ChangelogResponse{Events: []*ProfileChangeEvent{}, Total: 0})
+			return nil
 		}
 
 		limit := 50
-		if limitStr := c.Query("limit"); limitStr != "" {
+		if limitStr := httpbridge.Query(c, "limit"); limitStr != "" {
 			if parsed, err := strconv.Atoi(limitStr); err == nil && parsed > 0 {
 				limit = parsed
 			}
@@ -40,13 +41,13 @@ func handleChangelog(mgr *Manager) gin.HandlerFunc {
 		}
 
 		var events []*ProfileChangeEvent
-		if channelUID := c.Query("channelUid"); channelUID != "" {
+		if channelUID := httpbridge.Query(c, "channelUid"); channelUID != "" {
 			events = mgr.ChangelogStore().ListByChannel(channelUID, limit)
 		} else {
 			events = mgr.ChangelogStore().ListRecent(limit)
 		}
-
-		c.JSON(http.StatusOK, ChangelogResponse{Events: events, Total: len(events)})
+		httpbridge.JSON(c, http.StatusOK, ChangelogResponse{Events: events, Total: len(events)})
+		return nil
 	}
 }
 
@@ -66,24 +67,24 @@ const changelogEventsWriteTimeout = 15 * time.Second
 // 推送 ProfileChangeEvent：profile_updated / health_changed /
 // discovery_completed / auto_mapping_applied。纯只读广播，不接收/处理客户端消息，
 // 不影响调度。事件本身已脱敏（不含明文 API Key / Authorization / prompt）。
-func handleChangelogEvents(mgr *Manager) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handleChangelogEvents(mgr *Manager) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		if mgr == nil || mgr.EventHub() == nil {
-			c.Status(http.StatusServiceUnavailable)
-			return
+			httpbridge.Status(c, http.StatusServiceUnavailable)
+			return nil
 		}
 
 		// 若客户端通过 Sec-WebSocket-Protocol 传了子协议（即 API key），
 		// 原样在握手响应中回显，避免部分浏览器因未选定子协议而拒绝连接。
 		// 此时 key 已在 WebAuthMiddleware 中校验通过，这里只做协议回显，不重复鉴权。
 		var respHeader http.Header
-		if proto := c.GetHeader("Sec-WebSocket-Protocol"); proto != "" {
+		if proto := httpbridge.GetHeader(c, "Sec-WebSocket-Protocol"); proto != "" {
 			respHeader = http.Header{"Sec-WebSocket-Protocol": []string{proto}}
 		}
 
-		conn, err := changelogEventsUpgrader.Upgrade(c.Writer, c.Request, respHeader)
+		conn, err := changelogEventsUpgrader.Upgrade(httpbridge.Writer(c), httpbridge.Request(c), respHeader)
 		if err != nil {
-			return
+			return nil
 		}
 		defer errutil.IgnoreDeferred(conn.Close)
 
@@ -104,14 +105,14 @@ func handleChangelogEvents(mgr *Manager) gin.HandlerFunc {
 		for {
 			select {
 			case <-closed:
-				return
+				return nil
 			case ev, ok := <-ch:
 				if !ok {
-					return
+					return nil
 				}
 				_ = conn.SetWriteDeadline(time.Now().Add(changelogEventsWriteTimeout))
 				if err := conn.WriteJSON(ev); err != nil {
-					return
+					return nil
 				}
 			}
 		}

@@ -15,11 +15,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/errutil"
 	"github.com/soulteary/yunqi/internal/handlers/common"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/utils"
-	"github.com/gin-gonic/gin"
 )
 
 // ============== 缓存 ==============
@@ -77,17 +78,17 @@ type URLRecommendation struct {
 // ============== 主 Handler ==============
 
 // DiagnoseChannelCompat 兼容性诊断处理器
-func DiagnoseChannelCompat(cfgManager *config.ConfigManager, channelKind string) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		id, err := strconv.Atoi(c.Param("id"))
+func DiagnoseChannelCompat(cfgManager *config.ConfigManager, channelKind string) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		id, err := strconv.Atoi(httpbridge.Param(c, "id"))
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid channel id"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "invalid channel id"})
+			return nil
 		}
 		channel, err := getCapabilityTestChannel(cfgManager, channelKind, id)
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": err.Error()})
+			return nil
 		}
 
 		apiKey := ""
@@ -97,21 +98,21 @@ func DiagnoseChannelCompat(cfgManager *config.ConfigManager, channelKind string)
 			apiKey = channel.DisabledAPIKeys[0].Key
 		}
 		if apiKey == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "no_api_key"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "no_api_key"})
+			return nil
 		}
 
 		baseURL := capabilityTestBaseURL(channel)
 		if baseURL == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "no base url"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "no base url"})
+			return nil
 		}
 
 		cacheKey := fmt.Sprintf("compat:%s:%s:%s:%s", channelKind, baseURL, apiKey, channel.ServiceType)
 		if cached, ok := getCompatDiagnoseCache(cacheKey); ok {
 			cached.Cached = true
-			c.JSON(http.StatusOK, cached)
-			return
+			httpbridge.JSON(c, http.StatusOK, cached)
+			return nil
 		}
 
 		start := time.Now()
@@ -120,7 +121,8 @@ func DiagnoseChannelCompat(cfgManager *config.ConfigManager, channelKind string)
 		result.Cached = false
 
 		setCompatDiagnoseCache(cacheKey, result)
-		c.JSON(http.StatusOK, result)
+		httpbridge.JSON(c, http.StatusOK, result)
+		return nil
 	}
 }
 

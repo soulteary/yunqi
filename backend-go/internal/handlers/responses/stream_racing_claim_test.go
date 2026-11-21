@@ -11,10 +11,10 @@ import (
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/errutil"
 	"github.com/soulteary/yunqi/internal/handlers/common"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/racing"
 	"github.com/soulteary/yunqi/internal/session"
 	"github.com/soulteary/yunqi/internal/types"
-	"github.com/gin-gonic/gin"
 )
 
 // 竞速闸门回归测试：流式 preflight 通过后必须经 RacingClaimClientCommit 裁决。
@@ -45,17 +45,17 @@ func newRacingClaimTestStream(t *testing.T) (*http.Response, *types.ResponsesReq
 
 // 败者：闸门已被其他分支 claim，本分支必须以 ErrRacingSuperseded 收尾且零字节写出。
 func TestHandleStreamSuccess_RacingLostBranchReturnsSuperseded(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","stream":true}`))
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","stream":true}`)))
 
 	gate := racing.NewGate()
 	if !gate.ClaimBy(7) {
 		t.Fatal("预置闸门 claim 失败")
 	}
-	c.Set(racing.ContextKeyGate, gate)
-	c.Set(racing.ContextKeyRole, racing.RoleShadow)
+	httpbridge.SetValue(c, racing.ContextKeyGate, gate)
+	httpbridge.SetValue(c, racing.ContextKeyRole, racing.RoleShadow)
 
 	resp, originalReq := newRacingClaimTestStream(t)
 
@@ -78,14 +78,14 @@ func TestHandleStreamSuccess_RacingLostBranchReturnsSuperseded(t *testing.T) {
 
 // 赢家：闸门空闲，本分支 claim 成功后内容必须真正到达客户端 writer。
 func TestHandleStreamSuccess_RacingWinnerBridgesBody(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","stream":true}`))
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","stream":true}`)))
 
 	gate := racing.NewGate()
-	c.Set(racing.ContextKeyGate, gate)
-	c.Set(racing.ContextKeyRole, racing.RolePrimary)
+	httpbridge.SetValue(c, racing.ContextKeyGate, gate)
+	httpbridge.SetValue(c, racing.ContextKeyRole, racing.RolePrimary)
 
 	resp, originalReq := newRacingClaimTestStream(t)
 
@@ -111,16 +111,16 @@ func TestHandleStreamSuccess_RacingWinnerBridgesBody(t *testing.T) {
 // 工具调用写成 Qwen/DSML 标记文本）时，即使闸门空闲也不得 claim——
 // 分支按 ErrRacingSuperseded 让位，主分支/其他影子继续服务。
 func TestHandleStreamSuccess_RacingQualityGateBlocksPseudoToolMarker(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
+	c, _ := httpbridge.TestContext(w)
 	requestBody := `{"model":"gpt-5","stream":true,"tools":[{"type":"function","name":"exec"}],"input":"hi"}`
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(requestBody))
-	c.Set("requestBodyBytes", []byte(requestBody))
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(requestBody)))
+	httpbridge.SetValue(c, "requestBodyBytes", []byte(requestBody))
 
 	gate := racing.NewGate()
-	c.Set(racing.ContextKeyGate, gate)
-	c.Set(racing.ContextKeyRole, racing.RoleShadow)
+	httpbridge.SetValue(c, racing.ContextKeyGate, gate)
+	httpbridge.SetValue(c, racing.ContextKeyRole, racing.RoleShadow)
 
 	reader, writer := io.Pipe()
 	resp := &http.Response{
@@ -162,14 +162,14 @@ func TestHandleStreamSuccess_RacingQualityGateBlocksPseudoToolMarker(t *testing.
 // 让位；主分支（RolePrimary）不受观察窗影响，保持原有放行节奏正常透传。
 func TestHandleStreamSuccess_PseudoMarkerLateDeltaCaughtForShadowOnly(t *testing.T) {
 	run := func(t *testing.T, role string) (string, error) {
-		gin.SetMode(gin.TestMode)
+
 		w := httptest.NewRecorder()
-		c, _ := gin.CreateTestContext(w)
+		c, _ := httpbridge.TestContext(w)
 		requestBody := `{"model":"gpt-5","stream":true,"tools":[{"type":"function","name":"exec"}],"input":"hi"}`
-		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(requestBody))
-		c.Set("requestBodyBytes", []byte(requestBody))
-		c.Set(racing.ContextKeyGate, racing.NewGate())
-		c.Set(racing.ContextKeyRole, role)
+		httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(requestBody)))
+		httpbridge.SetValue(c, "requestBodyBytes", []byte(requestBody))
+		httpbridge.SetValue(c, racing.ContextKeyGate, racing.NewGate())
+		httpbridge.SetValue(c, racing.ContextKeyRole, role)
 
 		reader, writer := io.Pipe()
 		resp := &http.Response{

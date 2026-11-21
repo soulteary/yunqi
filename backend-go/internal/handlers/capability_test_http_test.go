@@ -15,8 +15,8 @@ import (
 
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/errutil"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/metrics"
-	"github.com/gin-gonic/gin"
 )
 
 // waitForCapabilityJobsSettled 等待 job store 中所有 job 到达终态。
@@ -85,7 +85,6 @@ func captureCapabilityLogs(t *testing.T) *bytes.Buffer {
 
 func TestCancelCapabilityTestJob_HTTP(t *testing.T) {
 	resetCapabilityTestState()
-	gin.SetMode(gin.TestMode)
 
 	job := newCapabilityTestJob(0, "channel", "messages", "claude", []string{"messages"}, 10*time.Second, 10)
 	job.Status = CapabilityJobStatusRunning
@@ -108,12 +107,12 @@ func TestCancelCapabilityTestJob_HTTP(t *testing.T) {
 	}
 	defer errutil.IgnoreDeferred(cfgManager.Close)
 
-	r := gin.New()
-	r.DELETE("/messages/channels/:id/capability-test/:jobId", CancelCapabilityTestJob(cfgManager, "messages"))
+	r := httpbridge.NewApp()
+	r.Delete("/messages/channels/:id/capability-test/:jobId", CancelCapabilityTestJob(cfgManager, "messages"))
 
 	req := httptest.NewRequest(http.MethodDelete, "/messages/channels/0/capability-test/"+job.JobID, nil)
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status=%d, want=%d, body=%s", w.Code, http.StatusOK, w.Body.String())
@@ -136,7 +135,6 @@ func TestCancelCapabilityTestJob_HTTP(t *testing.T) {
 
 func TestStartCapabilityTest_DefaultRPM(t *testing.T) {
 	resetCapabilityTestState()
-	gin.SetMode(gin.TestMode)
 
 	tmpDir := t.TempDir()
 	configFile := filepath.Join(tmpDir, "config.json")
@@ -150,13 +148,13 @@ func TestStartCapabilityTest_DefaultRPM(t *testing.T) {
 	}
 	defer errutil.IgnoreDeferred(cfgManager.Close)
 
-	r := gin.New()
-	r.POST("/messages/channels/:id/capability-test", TestChannelCapability(cfgManager, nil, "messages"))
+	r := httpbridge.NewApp()
+	r.Post("/messages/channels/:id/capability-test", TestChannelCapability(cfgManager, nil, "messages"))
 
 	req := httptest.NewRequest(http.MethodPost, "/messages/channels/0/capability-test", strings.NewReader(`{"targetProtocols":["messages"]}`))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status=%d, want=%d, body=%s", w.Code, http.StatusOK, w.Body.String())
@@ -175,7 +173,6 @@ func TestStartCapabilityTest_DefaultRPM(t *testing.T) {
 
 func TestGetCapabilityTestJobStatus_HTTP(t *testing.T) {
 	resetCapabilityTestState()
-	gin.SetMode(gin.TestMode)
 
 	job := newCapabilityTestJob(0, "channel", "messages", "claude", []string{"messages"}, 10*time.Second, 10)
 	job.Lifecycle = CapabilityLifecycleDone
@@ -194,12 +191,12 @@ func TestGetCapabilityTestJobStatus_HTTP(t *testing.T) {
 	}
 	defer errutil.IgnoreDeferred(cfgManager.Close)
 
-	r := gin.New()
-	r.GET("/messages/channels/:id/capability-test/:jobId", GetCapabilityTestJobStatus(cfgManager, "messages"))
+	r := httpbridge.NewApp()
+	r.Get("/messages/channels/:id/capability-test/:jobId", GetCapabilityTestJobStatus(cfgManager, "messages"))
 
 	req := httptest.NewRequest(http.MethodGet, "/messages/channels/0/capability-test/"+job.JobID, nil)
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status=%d, want=%d, body=%s", w.Code, http.StatusOK, w.Body.String())
@@ -216,7 +213,6 @@ func TestGetCapabilityTestJobStatus_HTTP(t *testing.T) {
 
 func TestCapabilityCacheHit_DoesNotBindExecutionLookupKey(t *testing.T) {
 	resetCapabilityTestState()
-	gin.SetMode(gin.TestMode)
 
 	tmpDir := t.TempDir()
 	configFile := filepath.Join(tmpDir, "config.json")
@@ -248,14 +244,14 @@ func TestCapabilityCacheHit_DoesNotBindExecutionLookupKey(t *testing.T) {
 		TotalDuration:       12,
 	})
 
-	r := gin.New()
-	r.POST("/messages/channels/:id/capability-test", TestChannelCapability(cfgManager, nil, "messages"))
+	r := httpbridge.NewApp()
+	r.Post("/messages/channels/:id/capability-test", TestChannelCapability(cfgManager, nil, "messages"))
 
 	body := `{"targetProtocols":["messages"],"timeout":10000}`
 	req := httptest.NewRequest(http.MethodPost, "/messages/channels/1/capability-test", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status=%d, want=%d, body=%s", w.Code, http.StatusOK, w.Body.String())
@@ -281,7 +277,6 @@ func TestCapabilityCacheHit_DoesNotBindExecutionLookupKey(t *testing.T) {
 }
 
 func TestRetryCapabilityTestModel_HTTP_RejectsUnknownModel(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	job := newCapabilityTestJob(0, "channel", "messages", "claude", []string{"messages"}, 10*time.Second, 10)
 	job.Status = CapabilityJobStatusCompleted
@@ -301,14 +296,14 @@ func TestRetryCapabilityTestModel_HTTP_RejectsUnknownModel(t *testing.T) {
 	}
 	defer errutil.IgnoreDeferred(cfgManager.Close)
 
-	r := gin.New()
-	r.POST("/messages/channels/:id/capability-test/:jobId/retry", RetryCapabilityTestModel(cfgManager, nil, "messages"))
+	r := httpbridge.NewApp()
+	r.Post("/messages/channels/:id/capability-test/:jobId/retry", RetryCapabilityTestModel(cfgManager, nil, "messages"))
 
 	body := `{"protocol":"messages","model":"unknown"}`
 	req := httptest.NewRequest(http.MethodPost, "/messages/channels/0/capability-test/"+job.JobID+"/retry", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("status=%d, want=%d, body=%s", w.Code, http.StatusNotFound, w.Body.String())
@@ -316,7 +311,6 @@ func TestRetryCapabilityTestModel_HTTP_RejectsUnknownModel(t *testing.T) {
 }
 
 func TestRetryCapabilityTestModel_HTTP_RejectsRunningJob(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	job := newCapabilityTestJob(0, "channel", "messages", "claude", []string{"messages"}, 10*time.Second, 10)
 	job.Status = CapabilityJobStatusRunning
@@ -337,14 +331,14 @@ func TestRetryCapabilityTestModel_HTTP_RejectsRunningJob(t *testing.T) {
 	}
 	defer errutil.IgnoreDeferred(cfgManager.Close)
 
-	r := gin.New()
-	r.POST("/messages/channels/:id/capability-test/:jobId/retry", RetryCapabilityTestModel(cfgManager, nil, "messages"))
+	r := httpbridge.NewApp()
+	r.Post("/messages/channels/:id/capability-test/:jobId/retry", RetryCapabilityTestModel(cfgManager, nil, "messages"))
 
 	body := `{"protocol":"messages","model":"known"}`
 	req := httptest.NewRequest(http.MethodPost, "/messages/channels/0/capability-test/"+job.JobID+"/retry", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusConflict {
 		t.Fatalf("status=%d, want=%d, body=%s", w.Code, http.StatusConflict, w.Body.String())
@@ -352,7 +346,6 @@ func TestRetryCapabilityTestModel_HTTP_RejectsRunningJob(t *testing.T) {
 }
 
 func TestRetryCapabilityTestModel_HTTP_RejectsNonRetryableModel(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	job := newCapabilityTestJob(0, "channel", "messages", "claude", []string{"messages"}, 10*time.Second, 10)
 	job.Status = CapabilityJobStatusCompleted
@@ -374,14 +367,14 @@ func TestRetryCapabilityTestModel_HTTP_RejectsNonRetryableModel(t *testing.T) {
 	}
 	defer errutil.IgnoreDeferred(cfgManager.Close)
 
-	r := gin.New()
-	r.POST("/messages/channels/:id/capability-test/:jobId/retry", RetryCapabilityTestModel(cfgManager, nil, "messages"))
+	r := httpbridge.NewApp()
+	r.Post("/messages/channels/:id/capability-test/:jobId/retry", RetryCapabilityTestModel(cfgManager, nil, "messages"))
 
 	body := `{"protocol":"messages","model":"known"}`
 	req := httptest.NewRequest(http.MethodPost, "/messages/channels/0/capability-test/"+job.JobID+"/retry", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusConflict {
 		t.Fatalf("status=%d, want=%d, body=%s", w.Code, http.StatusConflict, w.Body.String())
@@ -389,7 +382,6 @@ func TestRetryCapabilityTestModel_HTTP_RejectsNonRetryableModel(t *testing.T) {
 }
 
 func TestExecuteModelTest_RecordsCapabilityLogOnSuccess(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	job := newCapabilityTestJob(0, "channel", "messages", "claude", []string{"messages"}, 10*time.Second, 10)
 	job.Tests[0].ModelResults = []CapabilityModelJobResult{{Model: "claude-test", Status: CapabilityModelStatusQueued, Lifecycle: CapabilityLifecyclePending, Outcome: CapabilityOutcomeUnknown}}
@@ -451,7 +443,6 @@ func TestExecuteModelTest_SuccessfulStreamDoesNotLogRawResponseBody(t *testing.T
 	resetCapabilityTestState()
 	t.Setenv("ENV", "development")
 	t.Setenv("ENABLE_RESPONSE_LOGS", "true")
-	gin.SetMode(gin.TestMode)
 
 	logBuf := captureCapabilityLogs(t)
 	job := newCapabilityTestJob(0, "channel", "responses", "responses", []string{"responses"}, 10*time.Second, 10)
@@ -505,7 +496,6 @@ func TestExecuteModelTest_SuccessfulStreamDoesNotLogRawResponseBody(t *testing.T
 
 func TestExecuteModelTest_NativeProtocolDoesNotExposeActualModel(t *testing.T) {
 	resetCapabilityTestState()
-	gin.SetMode(gin.TestMode)
 
 	job := newCapabilityTestJob(0, "channel", "messages", "claude", []string{"messages"}, 10*time.Second, 10)
 	job.Tests[0].ModelResults = []CapabilityModelJobResult{{Model: "claude-test", Status: CapabilityModelStatusQueued, Lifecycle: CapabilityLifecyclePending, Outcome: CapabilityOutcomeUnknown}}
@@ -559,7 +549,6 @@ func TestExecuteModelTest_NativeProtocolDoesNotExposeActualModel(t *testing.T) {
 }
 
 func TestExecuteModelTest_RecordsCapabilityLogOnFailure(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	job := newCapabilityTestJob(0, "channel", "messages", "claude", []string{"messages"}, 10*time.Second, 10)
 	job.Tests[0].ModelResults = []CapabilityModelJobResult{{Model: "claude-test", Status: CapabilityModelStatusQueued, Lifecycle: CapabilityLifecyclePending, Outcome: CapabilityOutcomeUnknown}}
@@ -621,7 +610,6 @@ func TestExecuteModelTest_RecordsCapabilityLogOnFailure(t *testing.T) {
 }
 
 func TestExecuteModelTest_TruncatesLargeFailureBody(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	job := newCapabilityTestJob(0, "channel", "messages", "claude", []string{"messages"}, 10*time.Second, 10)
 	job.Tests[0].ModelResults = []CapabilityModelJobResult{{Model: "claude-test", Status: CapabilityModelStatusQueued, Lifecycle: CapabilityLifecyclePending, Outcome: CapabilityOutcomeUnknown}}
@@ -678,7 +666,6 @@ func TestExecuteModelTest_TruncatesLargeFailureBody(t *testing.T) {
 }
 
 func TestExecuteModelTest_RespectsAutoBlacklistBalance(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	job := newCapabilityTestJob(0, "channel", "messages", "claude", []string{"messages"}, 10*time.Second, 10)
 	capabilityJobs.create(job)
@@ -734,7 +721,6 @@ func TestExecuteModelTest_RespectsAutoBlacklistBalance(t *testing.T) {
 
 func TestResumedCancelledJob_ReturnsUpdatedState(t *testing.T) {
 	resetCapabilityTestState()
-	gin.SetMode(gin.TestMode)
 
 	// 创建一个已取消的 job
 	job := newCapabilityTestJob(0, "test-channel", "messages", "claude", []string{"messages"}, 10*time.Second, 10)
@@ -784,8 +770,8 @@ func TestResumedCancelledJob_ReturnsUpdatedState(t *testing.T) {
 	capabilityJobs.bindLookupKey(executionLookupKey, job.JobID)
 	capabilityJobs.bindLookupKey(lookupKey, job.JobID)
 
-	r := gin.New()
-	r.POST("/messages/channels/:id/capability-test", TestChannelCapability(cfgManager, nil, "messages"))
+	r := httpbridge.NewApp()
+	r.Post("/messages/channels/:id/capability-test", TestChannelCapability(cfgManager, nil, "messages"))
 
 	// 单模型 + 短超时，让新 job 的后台 goroutine 快速到达终态，
 	// 避免其泄漏到后续测试（与 resetCapabilityTestState 的全局重置竞态）。
@@ -793,7 +779,7 @@ func TestResumedCancelledJob_ReturnsUpdatedState(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/messages/channels/0/capability-test", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status=%d, want=%d, body=%s", w.Code, http.StatusOK, w.Body.String())
@@ -833,7 +819,6 @@ func TestResumedCancelledJob_ReturnsUpdatedState(t *testing.T) {
 
 func TestCapabilityPreviousJobReuse_ByIdentityAcrossChannels(t *testing.T) {
 	resetCapabilityTestState()
-	gin.SetMode(gin.TestMode)
 
 	tmpDir := t.TempDir()
 	configFile := filepath.Join(tmpDir, "config.json")
@@ -872,8 +857,8 @@ func TestCapabilityPreviousJobReuse_ByIdentityAcrossChannels(t *testing.T) {
 	}}
 	capabilityJobs.create(prevJob)
 
-	r := gin.New()
-	r.POST("/messages/channels/:id/capability-test", TestChannelCapability(cfgManager, nil, "messages"))
+	r := httpbridge.NewApp()
+	r.Post("/messages/channels/:id/capability-test", TestChannelCapability(cfgManager, nil, "messages"))
 
 	// 单模型限定为 prevJob 已成功的模型：断言跨渠道 identity 复用即可，
 	// 同时避免新 job 真实探测外部地址导致后台 goroutine 泄漏到后续测试。
@@ -881,7 +866,7 @@ func TestCapabilityPreviousJobReuse_ByIdentityAcrossChannels(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/messages/channels/1/capability-test", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status=%d, want=%d, body=%s", w.Code, http.StatusOK, w.Body.String())
@@ -906,7 +891,6 @@ func TestCapabilityPreviousJobReuse_ByIdentityAcrossChannels(t *testing.T) {
 
 func TestCapabilityRunningJobReuse_ByIdentityAcrossChannels(t *testing.T) {
 	resetCapabilityTestState()
-	gin.SetMode(gin.TestMode)
 
 	runningJob := newCapabilityTestJob(0, "channel-a", "messages", "claude", []string{"messages"}, 10*time.Second, 10)
 	runningJob.IdentityKey = "shared-identity"
@@ -935,14 +919,14 @@ func TestCapabilityRunningJobReuse_ByIdentityAcrossChannels(t *testing.T) {
 	capabilityJobs.bindLookupKey(executionLookupKey, runningJob.JobID)
 	capabilityJobs.bindLookupKey(lookupKey, runningJob.JobID)
 
-	r := gin.New()
-	r.POST("/messages/channels/:id/capability-test", TestChannelCapability(cfgManager, nil, "messages"))
+	r := httpbridge.NewApp()
+	r.Post("/messages/channels/:id/capability-test", TestChannelCapability(cfgManager, nil, "messages"))
 
 	body := `{"targetProtocols":["messages"],"timeout":10000}`
 	req := httptest.NewRequest(http.MethodPost, "/messages/channels/1/capability-test", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status=%d, want=%d, body=%s", w.Code, http.StatusOK, w.Body.String())

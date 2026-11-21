@@ -14,11 +14,12 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/providers"
 
 	"github.com/soulteary/yunqi/internal/errutil"
-	"github.com/gin-gonic/gin"
 )
 
 // ── ABTestSampler: 低比例统计抽样双发 ──
@@ -199,7 +200,7 @@ func (s *ABTestSampler) ShouldSample(killSwitch bool) bool {
 // cfgManager 用于获取配置和 API key。
 // primaryChannelUID 是主请求实际使用的渠道。
 // primaryStatusCode 和 primaryLatencyMs 是主请求的结果。
-// gin.Context 不需要：影子请求使用独立 context 和临时 gin.Context。
+// fiber.Ctx 不需要：影子请求使用独立 context 和临时 fiber.Ctx。
 func (s *ABTestSampler) ExecuteShadowRequest(
 	parentCtx context.Context,
 	cfgManager *config.ConfigManager,
@@ -242,7 +243,7 @@ func (s *ABTestSampler) ExecuteShadowRequest(
 
 	// 异步执行影子请求（不等待，不阻塞主请求）
 	go func() {
-		// 独立 context：主请求的 gin.Context 生命周期已结束
+		// 独立 context：主请求的 fiber.Ctx 生命周期已结束
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
@@ -295,8 +296,8 @@ func (s *ABTestSampler) executeShadowHTTPRequest(
 		return nil
 	}
 
-	// 构建临时 gin.Context 用于 provider 转换
-	tempCtx := createTempGinContext(bodyBytes)
+	// 构建临时 fiber.Ctx 用于 provider 转换
+	tempCtx := createTempFiberContext(bodyBytes)
 
 	// 获取 provider 并构建请求
 	provider := providers.GetProvider(shadowUpstream.ServiceType)
@@ -375,14 +376,14 @@ func findUpstreamByUID(cfg *config.Config, channelUID string, channelKind string
 	return nil
 }
 
-// createTempGinContext 创建一个临时 gin.Context 用于 provider 请求转换。
+// createTempFiberContext 创建一个临时 fiber.Ctx 用于 provider 请求转换。
 // 只设置最小必要字段：request body 和 content-type。
-func createTempGinContext(bodyBytes []byte) *gin.Context {
+func createTempFiberContext(bodyBytes []byte) fiber.Ctx {
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
+	c, _ := httpbridge.TestContext(w)
 	req, _ := http.NewRequest("POST", "/", bytes.NewReader(bodyBytes))
 	req.Header.Set("Content-Type", "application/json")
-	c.Request = req
+	httpbridge.SetRequest(c, req)
 	return c
 }
 

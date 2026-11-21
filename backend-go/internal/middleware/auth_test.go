@@ -5,46 +5,53 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 // setupRouterWithAuth builds a minimal router with the auth middleware wired.
-func setupRouterWithAuth(envCfg *config.EnvConfig) *gin.Engine {
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
+func setupRouterWithAuth(envCfg *config.EnvConfig) *fiber.App {
+
+	r := httpbridge.NewApp()
 	r.Use(WebAuthMiddleware(envCfg, nil))
 
 	// Protected management API
-	r.GET("/api/channels", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"ok": true})
+	r.Get("/api/channels", func(c fiber.Ctx) error {
+		httpbridge.JSON(c, http.StatusOK, fiber.Map{"ok": true})
+		return nil
 	})
 
 	// Protected admin endpoint
-	r.POST("/admin/config/save", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"ok": true})
+	r.Post("/admin/config/save", func(c fiber.Ctx) error {
+		httpbridge.JSON(c, http.StatusOK, fiber.Map{"ok": true})
+		return nil
 	})
-	r.GET("/admin/dev/info", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"ok": true})
+	r.Get("/admin/dev/info", func(c fiber.Ctx) error {
+		httpbridge.JSON(c, http.StatusOK, fiber.Map{"ok": true})
+		return nil
 	})
 
 	// SPA routes should pass through without access key
-	r.GET("/", func(c *gin.Context) {
-		c.String(http.StatusOK, "home")
+	r.Get("/", func(c fiber.Ctx) error {
+		httpbridge.Text(c, http.StatusOK, "home")
+		return nil
 	})
-	r.GET("/dashboard", func(c *gin.Context) {
-		c.String(http.StatusOK, "dashboard")
+	r.Get("/dashboard", func(c fiber.Ctx) error {
+		httpbridge.Text(c, http.StatusOK, "dashboard")
+		return nil
 	})
 
 	return r
 }
 
-func setupRouterWithProxyAuth(envCfg *config.EnvConfig) *gin.Engine {
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
+func setupRouterWithProxyAuth(envCfg *config.EnvConfig) *fiber.App {
+
+	r := httpbridge.NewApp()
 	r.Use(ProxyAuthMiddleware(envCfg))
-	r.POST("/v1/messages", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"ok": true})
+	r.Post("/v1/messages", func(c fiber.Ctx) error {
+		httpbridge.JSON(c, http.StatusOK, fiber.Map{"ok": true})
+		return nil
 	})
 	return r
 }
@@ -59,8 +66,7 @@ func TestWebAuthMiddleware_APIRequiresKey(t *testing.T) {
 	t.Run("missing key returns 401", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/api/channels", nil)
 		w := httptest.NewRecorder()
-
-		router.ServeHTTP(w, req)
+		httpbridge.Handler(router).ServeHTTP(w, req)
 
 		if w.Code != http.StatusUnauthorized {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusUnauthorized)
@@ -71,8 +77,7 @@ func TestWebAuthMiddleware_APIRequiresKey(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/api/channels", nil)
 		req.Header.Set("x-api-key", "wrong")
 		w := httptest.NewRecorder()
-
-		router.ServeHTTP(w, req)
+		httpbridge.Handler(router).ServeHTTP(w, req)
 
 		if w.Code != http.StatusUnauthorized {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusUnauthorized)
@@ -83,8 +88,7 @@ func TestWebAuthMiddleware_APIRequiresKey(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/api/channels", nil)
 		req.Header.Set("x-api-key", envCfg.ProxyAccessKey)
 		w := httptest.NewRecorder()
-
-		router.ServeHTTP(w, req)
+		httpbridge.Handler(router).ServeHTTP(w, req)
 
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -106,8 +110,7 @@ func TestWebAuthMiddleware_SecWebSocketProtocolFallback(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/api/channels", nil)
 		req.Header.Set("Sec-WebSocket-Protocol", envCfg.ProxyAccessKey)
 		w := httptest.NewRecorder()
-
-		router.ServeHTTP(w, req)
+		httpbridge.Handler(router).ServeHTTP(w, req)
 
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -118,8 +121,7 @@ func TestWebAuthMiddleware_SecWebSocketProtocolFallback(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/api/channels", nil)
 		req.Header.Set("Sec-WebSocket-Protocol", "wrong")
 		w := httptest.NewRecorder()
-
-		router.ServeHTTP(w, req)
+		httpbridge.Handler(router).ServeHTTP(w, req)
 
 		if w.Code != http.StatusUnauthorized {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusUnauthorized)
@@ -131,8 +133,7 @@ func TestWebAuthMiddleware_SecWebSocketProtocolFallback(t *testing.T) {
 		req.Header.Set("x-api-key", envCfg.ProxyAccessKey)
 		req.Header.Set("Sec-WebSocket-Protocol", "garbage-that-would-fail")
 		w := httptest.NewRecorder()
-
-		router.ServeHTTP(w, req)
+		httpbridge.Handler(router).ServeHTTP(w, req)
 
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d (x-api-key 应优先生效)", w.Code, http.StatusOK)
@@ -149,8 +150,7 @@ func TestWebAuthMiddleware_SPAPassesThrough(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/dashboard", nil)
 	w := httptest.NewRecorder()
-
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -167,8 +167,7 @@ func TestWebAuthMiddleware_AdminRequiresKey(t *testing.T) {
 	t.Run("missing key returns 401", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/admin/config/save", nil)
 		w := httptest.NewRecorder()
-
-		router.ServeHTTP(w, req)
+		httpbridge.Handler(router).ServeHTTP(w, req)
 
 		if w.Code != http.StatusUnauthorized {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusUnauthorized)
@@ -179,8 +178,7 @@ func TestWebAuthMiddleware_AdminRequiresKey(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/admin/config/save", nil)
 		req.Header.Set("x-api-key", envCfg.ProxyAccessKey)
 		w := httptest.NewRecorder()
-
-		router.ServeHTTP(w, req)
+		httpbridge.Handler(router).ServeHTTP(w, req)
 
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -199,8 +197,7 @@ func TestWebAuthMiddleware_DevInfoRequiresKeyInDevelopment(t *testing.T) {
 	t.Run("missing key returns 401", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/admin/dev/info", nil)
 		w := httptest.NewRecorder()
-
-		router.ServeHTTP(w, req)
+		httpbridge.Handler(router).ServeHTTP(w, req)
 
 		if w.Code != http.StatusUnauthorized {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusUnauthorized)
@@ -211,8 +208,7 @@ func TestWebAuthMiddleware_DevInfoRequiresKeyInDevelopment(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/admin/dev/info", nil)
 		req.Header.Set("x-api-key", envCfg.ProxyAccessKey)
 		w := httptest.NewRecorder()
-
-		router.ServeHTTP(w, req)
+		httpbridge.Handler(router).ServeHTTP(w, req)
 
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -226,18 +222,17 @@ func TestWebAuthMiddleware_AllowsV1BetaRoutesWhenWebUIDisabled(t *testing.T) {
 		EnableWebUI:    false,
 	}
 
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
+	r := httpbridge.NewApp()
 	r.Use(WebAuthMiddleware(envCfg, nil))
 
-	r.POST("/v1beta/models/*modelAction", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"ok": true})
+	r.Post("/v1beta/models/*", func(c fiber.Ctx) error {
+		httpbridge.JSON(c, http.StatusOK, fiber.Map{"ok": true})
+		return nil
 	})
 
 	req := httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-2.0-flash:generateContent", nil)
 	w := httptest.NewRecorder()
-
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -257,8 +252,7 @@ func TestWebAuthMiddleware_ExtraProxyKeysDoNotGrantAdminAccess(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/api/channels", nil)
 		req.Header.Set("x-api-key", "extra-key")
 		w := httptest.NewRecorder()
-
-		router.ServeHTTP(w, req)
+		httpbridge.Handler(router).ServeHTTP(w, req)
 
 		if w.Code != http.StatusUnauthorized {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusUnauthorized)
@@ -269,8 +263,7 @@ func TestWebAuthMiddleware_ExtraProxyKeysDoNotGrantAdminAccess(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/api/channels", nil)
 		req.Header.Set("x-api-key", "primary-key")
 		w := httptest.NewRecorder()
-
-		router.ServeHTTP(w, req)
+		httpbridge.Handler(router).ServeHTTP(w, req)
 
 		if w.Code != http.StatusUnauthorized {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusUnauthorized)
@@ -281,8 +274,7 @@ func TestWebAuthMiddleware_ExtraProxyKeysDoNotGrantAdminAccess(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/api/channels", nil)
 		req.Header.Set("x-api-key", "admin-key")
 		w := httptest.NewRecorder()
-
-		router.ServeHTTP(w, req)
+		httpbridge.Handler(router).ServeHTTP(w, req)
 
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -314,8 +306,7 @@ func TestProxyAuthMiddleware_AllowsExtraProxyKeys(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 			req.Header.Set(tt.headerName, tt.key)
 			w := httptest.NewRecorder()
-
-			router.ServeHTTP(w, req)
+			httpbridge.Handler(router).ServeHTTP(w, req)
 
 			if w.Code != tt.wantStatus {
 				t.Fatalf("status = %d, want %d", w.Code, tt.wantStatus)
@@ -330,14 +321,14 @@ func TestProxyAuthMiddleware_WritesProxyKeyMask(t *testing.T) {
 		ExtraProxyAccessKeys: []string{"sk-extrakey-bbbb"},
 	}
 
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
+	r := httpbridge.NewApp()
 	r.Use(ProxyAuthMiddleware(envCfg))
 
 	var capturedMask string
-	r.POST("/v1/messages", func(c *gin.Context) {
+	r.Post("/v1/messages", func(c fiber.Ctx) error {
 		capturedMask = GetProxyKeyMask(c)
-		c.JSON(http.StatusOK, gin.H{"ok": true})
+		httpbridge.JSON(c, http.StatusOK, fiber.Map{"ok": true})
+		return nil
 	})
 
 	t.Run("primary key sets mask", func(t *testing.T) {
@@ -345,7 +336,7 @@ func TestProxyAuthMiddleware_WritesProxyKeyMask(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 		req.Header.Set("x-api-key", "sk-primarykey-aaaa")
 		w := httptest.NewRecorder()
-		r.ServeHTTP(w, req)
+		httpbridge.Handler(r).ServeHTTP(w, req)
 
 		if capturedMask == "" {
 			t.Fatal("expected non-empty proxyKeyMask for primary key")
@@ -361,7 +352,7 @@ func TestProxyAuthMiddleware_WritesProxyKeyMask(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 		req.Header.Set("x-api-key", "sk-extrakey-bbbb")
 		w := httptest.NewRecorder()
-		r.ServeHTTP(w, req)
+		httpbridge.Handler(r).ServeHTTP(w, req)
 
 		if capturedMask == "" {
 			t.Fatal("expected non-empty proxyKeyMask for extra key")
@@ -372,7 +363,7 @@ func TestProxyAuthMiddleware_WritesProxyKeyMask(t *testing.T) {
 		capturedMask = "sentinel"
 		req := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 		w := httptest.NewRecorder()
-		r.ServeHTTP(w, req)
+		httpbridge.Handler(r).ServeHTTP(w, req)
 
 		// Middleware returns 401 and aborts; handler never runs.
 		// capturedMask stays "sentinel" because the handler is never called.
@@ -386,9 +377,9 @@ func TestProxyAuthMiddleware_WritesProxyKeyMask(t *testing.T) {
 }
 
 func TestGetProxyKeyMask_ReturnsEmptyWhenNotSet(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
-	c.Request = httptest.NewRequest(http.MethodGet, "/", nil)
+
+	c, _ := httpbridge.TestContext(httptest.NewRecorder())
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodGet, "/", nil))
 
 	if mask := GetProxyKeyMask(c); mask != "" {
 		t.Fatalf("expected empty mask for fresh context, got %q", mask)

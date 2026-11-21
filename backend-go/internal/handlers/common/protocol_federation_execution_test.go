@@ -8,19 +8,19 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/types"
 	"github.com/soulteary/yunqi/internal/warmup"
-	"github.com/gin-gonic/gin"
 )
 
 // TestTryUpstreamAppliesFederatedExecutionModelBeforeProviderRequest 验证协议联邦候选
 // 在构造上游请求前就把模型改写为 sibling 的实际执行模型，并按该模型应用
 // model-registry 的固定值参数约束（Kimi K3 的 temperature/top_p 等）。
 func TestTryUpstreamAppliesFederatedExecutionModelBeforeProviderRequest(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	type upstreamRequest struct {
 		Model            string   `json:"model"`
@@ -53,8 +53,8 @@ func TestTryUpstreamAppliesFederatedExecutionModelBeforeProviderRequest(t *testi
 	defer cleanup()
 
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-sonnet-5"}`))
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-sonnet-5"}`)))
 
 	requestBody := []byte(`{"model":"claude-sonnet-5","temperature":0.7,"top_p":0.8,"presence_penalty":0.5,"frequency_penalty":0.5,"messages":[]}`)
 	executionRoute := scheduler.ChannelRouteRef{Kind: string(scheduler.ChannelKindChat), Index: 0, ChannelUID: "ch_k3_chat"}
@@ -77,15 +77,15 @@ func TestTryUpstreamAppliesFederatedExecutionModelBeforeProviderRequest(t *testi
 		func(upstream *config.UpstreamConfig, failedKeys map[string]bool) (string, error) {
 			return cfgManager.GetNextAPIKey(upstream, failedKeys, ChannelAPIType(scheduler.ChannelKindChat))
 		},
-		func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
-			body, _ := c.Get("requestBodyBytes")
+		func(c fiber.Ctx, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
+			body, _ := httpbridge.Value(c, "requestBodyBytes")
 			raw, _ := body.([]byte)
-			return http.NewRequestWithContext(c.Request.Context(), http.MethodPost, upstreamCopy.BaseURL, strings.NewReader(string(raw)))
+			return http.NewRequestWithContext(httpbridge.Request(c).Context(), http.MethodPost, upstreamCopy.BaseURL, strings.NewReader(string(raw)))
 		},
 		func(apiKey string) {},
 		nil,
 		nil,
-		func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
+		func(c fiber.Ctx, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 			_ = resp.Body.Close()
 			return nil, nil
 		},
@@ -138,7 +138,6 @@ func TestTryUpstreamAppliesFederatedExecutionModelBeforeProviderRequest(t *testi
 // 联邦到 chat sibling 时，请求体模型被改写为 executionModel，并且指标、日志、Key 降级
 // 都落在执行协议（chat）而非请求协议（responses）。
 func TestTryUpstreamAppliesFederatedExecutionModelForResponsesToChat(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	type upstreamRequest struct {
 		Model string `json:"model"`
@@ -167,8 +166,8 @@ func TestTryUpstreamAppliesFederatedExecutionModelForResponsesToChat(t *testing.
 	defer cleanup()
 
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.6-sol"}`))
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.6-sol"}`)))
 
 	requestBody := []byte(`{"model":"gpt-5.6-sol","input":"ping","stream":false}`)
 	executionRoute := scheduler.ChannelRouteRef{Kind: string(scheduler.ChannelKindChat), Index: 0, ChannelUID: "ch_gpt_chat"}
@@ -191,15 +190,15 @@ func TestTryUpstreamAppliesFederatedExecutionModelForResponsesToChat(t *testing.
 		func(upstream *config.UpstreamConfig, failedKeys map[string]bool) (string, error) {
 			return cfgManager.GetNextAPIKey(upstream, failedKeys, ChannelAPIType(scheduler.ChannelKindChat))
 		},
-		func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
-			body, _ := c.Get("requestBodyBytes")
+		func(c fiber.Ctx, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
+			body, _ := httpbridge.Value(c, "requestBodyBytes")
 			raw, _ := body.([]byte)
-			return http.NewRequestWithContext(c.Request.Context(), http.MethodPost, upstreamCopy.BaseURL, strings.NewReader(string(raw)))
+			return http.NewRequestWithContext(httpbridge.Request(c).Context(), http.MethodPost, upstreamCopy.BaseURL, strings.NewReader(string(raw)))
 		},
 		func(apiKey string) {},
 		nil,
 		nil,
-		func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
+		func(c fiber.Ctx, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 			_ = resp.Body.Close()
 			return nil, nil
 		},
@@ -245,7 +244,6 @@ func TestTryUpstreamAppliesFederatedExecutionModelForResponsesToChat(t *testing.
 // TestTryUpstreamStripsClientBudgetRemindersOnFederationRewrite 验证联邦/溢出
 // 跨模型改写后，客户端按原模型窗口注入的预算提醒被剥离（统一预算提醒机制）。
 func TestTryUpstreamStripsClientBudgetRemindersOnFederationRewrite(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	type rawCapture struct {
 		body []byte
@@ -271,8 +269,8 @@ func TestTryUpstreamStripsClientBudgetRemindersOnFederationRewrite(t *testing.T)
 		defer cleanup()
 
 		w := httptest.NewRecorder()
-		c, _ := gin.CreateTestContext(w)
-		c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader("{}"))
+		c, _ := httpbridge.TestContext(w)
+		httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader("{}")))
 
 		executionRoute := scheduler.ChannelRouteRef{Kind: string(scheduler.ChannelKindChat), Index: 0, ChannelUID: "ch_fed_target"}
 		cfg := cfgManager.GetConfig()
@@ -293,15 +291,15 @@ func TestTryUpstreamStripsClientBudgetRemindersOnFederationRewrite(t *testing.T)
 			func(upstream *config.UpstreamConfig, failedKeys map[string]bool) (string, error) {
 				return cfgManager.GetNextAPIKey(upstream, failedKeys, ChannelAPIType(scheduler.ChannelKindChat))
 			},
-			func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
-				body, _ := c.Get("requestBodyBytes")
+			func(c fiber.Ctx, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
+				body, _ := httpbridge.Value(c, "requestBodyBytes")
 				raw, _ := body.([]byte)
-				return http.NewRequestWithContext(c.Request.Context(), http.MethodPost, upstreamCopy.BaseURL, strings.NewReader(string(raw)))
+				return http.NewRequestWithContext(httpbridge.Request(c).Context(), http.MethodPost, upstreamCopy.BaseURL, strings.NewReader(string(raw)))
 			},
 			func(apiKey string) {},
 			nil,
 			nil,
-			func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
+			func(c fiber.Ctx, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 				_ = resp.Body.Close()
 				return nil, nil
 			},

@@ -6,7 +6,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v3"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 type billingTermsPatchRequest struct {
@@ -26,35 +27,35 @@ type billingTermsResponse struct {
 	Preview       string   `json:"preview"`
 }
 
-func RegisterBillingTermsRoutes(router gin.IRouter, store *SubscriptionStore) {
+func RegisterBillingTermsRoutes(router fiber.Router, store *SubscriptionStore) {
 	if router == nil || store == nil {
 		return
 	}
-	router.PATCH("/subscriptions/:uid/billing-terms", handlePatchBillingTerms(store))
+	router.Patch("/subscriptions/:uid/billing-terms", handlePatchBillingTerms(store))
 }
 
-func handlePatchBillingTerms(store *SubscriptionStore) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		uid := strings.TrimSpace(c.Param("uid"))
+func handlePatchBillingTerms(store *SubscriptionStore) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		uid := strings.TrimSpace(httpbridge.Param(c, "uid"))
 		if uid == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "uid 不能为空"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "uid 不能为空"})
+			return nil
 		}
 		if store.Get(uid) == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "订阅不存在: " + uid})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "订阅不存在: " + uid})
+			return nil
 		}
 
 		var req billingTermsPatchRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数无效: " + err.Error()})
-			return
+		if err := httpbridge.BindJSON(c, &req); err != nil {
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "请求参数无效: " + err.Error()})
+			return nil
 		}
 
 		termsSpecified := req.PaymentAmount.Present || req.PaymentUnit != nil || req.CreditAmount.Present || req.CreditUnit != nil
 		if !termsSpecified {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "至少提供一项 billing terms 字段"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "至少提供一项 billing terms 字段"})
+			return nil
 		}
 
 		paymentReset := req.PaymentAmount.Present && !req.PaymentAmount.Valid
@@ -65,19 +66,19 @@ func handlePatchBillingTerms(store *SubscriptionStore) gin.HandlerFunc {
 
 		setCount := boolCount(req.PaymentAmount.Present, req.PaymentUnit != nil, req.CreditAmount.Present, req.CreditUnit != nil)
 		if setCount != 4 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "paymentAmount/paymentUnit/creditAmount/creditUnit 必须同时设置或同时清空"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "paymentAmount/paymentUnit/creditAmount/creditUnit 必须同时设置或同时清空"})
+			return nil
 		}
 
 		resetAll := !req.PaymentAmount.Valid && !req.CreditAmount.Valid && req.PaymentUnit != nil && req.CreditUnit != nil && strings.TrimSpace(*req.PaymentUnit) == "" && strings.TrimSpace(*req.CreditUnit) == ""
 		if !resetAll {
 			if !req.PaymentAmount.Valid || !req.CreditAmount.Valid {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "金额字段必须同时为数值或同时为 null 清空"})
-				return
+				httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "金额字段必须同时为数值或同时为 null 清空"})
+				return nil
 			}
 			if !isFinitePositiveValue(req.PaymentAmount.Value) || !isFinitePositiveValue(req.CreditAmount.Value) {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "金额必须是有限且大于 0 的数值"})
-				return
+				httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "金额必须是有限且大于 0 的数值"})
+				return nil
 			}
 		}
 
@@ -88,8 +89,8 @@ func handlePatchBillingTerms(store *SubscriptionStore) gin.HandlerFunc {
 		}
 		if !resetAll {
 			if paymentUnit == "" || creditUnit == "" {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "单位不能为空"})
-				return
+				httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "单位不能为空"})
+				return nil
 			}
 		}
 
@@ -111,15 +112,15 @@ func handlePatchBillingTerms(store *SubscriptionStore) gin.HandlerFunc {
 		})
 		if err != nil {
 			if isSubscriptionVersionConflict(err) {
-				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
-				return
+				httpbridge.JSON(c, http.StatusConflict, fiber.Map{"error": err.Error()})
+				return nil
 			}
 			if isSubscriptionNotFound(err) {
-				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-				return
+				httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": err.Error()})
+				return nil
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
+			httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": err.Error()})
+			return nil
 		}
 
 		updated := store.Get(uid)
@@ -130,7 +131,8 @@ func handlePatchBillingTerms(store *SubscriptionStore) gin.HandlerFunc {
 			response.CreditAmount = cloneFloat64Ptr(updated.CreditAmount)
 			response.CreditUnit = updated.CreditUnit
 		}
-		c.JSON(http.StatusOK, response)
+		httpbridge.JSON(c, http.StatusOK, response)
+		return nil
 	}
 }
 

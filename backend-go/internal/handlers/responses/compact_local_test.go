@@ -10,11 +10,11 @@ import (
 
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/converters"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/session"
 	"github.com/soulteary/yunqi/internal/types"
-	"github.com/gin-gonic/gin"
 )
 
 func TestFormatItemsAsTranscript_BasicMessages(t *testing.T) {
@@ -218,7 +218,6 @@ func TestBuildLocalCompactRequestBody_StripsClientAgentControls(t *testing.T) {
 }
 
 func TestLocalCompact_OpenAIUpstream(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -275,15 +274,15 @@ func TestLocalCompact_OpenAIUpstream(t *testing.T) {
 		MaxRequestBodySize: 1024 * 1024,
 	}
 
-	r := gin.New()
-	r.POST("/v1/responses/compact", CompactHandler(envCfg, cfgManager, sessionManager, sch))
+	r := httpbridge.NewApp()
+	r.Post("/v1/responses/compact", CompactHandler(envCfg, cfgManager, sessionManager, sch))
 
 	body := `{"model":"gpt-4o","input":[{"type":"message","role":"user","content":"Hello"}],"stream":false}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses/compact", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-api-key", "secret-key")
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != 200 {
 		t.Fatalf("status = %d, want 200, body=%s", w.Code, w.Body.String())

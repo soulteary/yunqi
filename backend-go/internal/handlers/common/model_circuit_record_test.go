@@ -5,15 +5,16 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/metrics"
-	"github.com/gin-gonic/gin"
 )
 
-func newModelCircuitTestContext() *gin.Context {
-	gin.SetMode(gin.TestMode)
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
-	c.Request = httptest.NewRequest(http.MethodPost, "/", http.NoBody)
+func newModelCircuitTestContext() fiber.Ctx {
+
+	c, _ := httpbridge.TestContext(httptest.NewRecorder())
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/", http.NoBody))
 	return c
 }
 

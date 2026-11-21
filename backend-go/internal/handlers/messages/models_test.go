@@ -12,11 +12,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/session"
-	"github.com/gin-gonic/gin"
 )
 
 func setupModelsConfigManager(t *testing.T, cfg config.Config) *config.ConfigManager {
@@ -61,13 +62,13 @@ func newModelsTestScheduler(cfgManager *config.ConfigManager) *scheduler.Channel
 	return schedulerInstance
 }
 
-func newModelsRouterForAggregate(envCfg *config.EnvConfig, cfgManager *config.ConfigManager, sch *scheduler.ChannelScheduler) *gin.Engine {
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
-	r.GET("/v1/models", ModelsHandler(envCfg, cfgManager, sch))
-	r.GET("/:routePrefix/v1/models", ModelsHandler(envCfg, cfgManager, sch))
-	r.GET("/v1/models/:model", ModelsDetailHandler(envCfg, cfgManager, sch))
-	r.GET("/:routePrefix/v1/models/:model", ModelsDetailHandler(envCfg, cfgManager, sch))
+func newModelsRouterForAggregate(envCfg *config.EnvConfig, cfgManager *config.ConfigManager, sch *scheduler.ChannelScheduler) *fiber.App {
+
+	r := httpbridge.NewApp()
+	r.Get("/v1/models", ModelsHandler(envCfg, cfgManager, sch))
+	r.Get("/:routePrefix/v1/models", ModelsHandler(envCfg, cfgManager, sch))
+	r.Get("/v1/models/:model", ModelsDetailHandler(envCfg, cfgManager, sch))
+	r.Get("/:routePrefix/v1/models/:model", ModelsDetailHandler(envCfg, cfgManager, sch))
 	return r
 }
 
@@ -95,7 +96,7 @@ func TestModelsHandler_UsesActiveKey(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
@@ -126,7 +127,7 @@ func TestModelsHandler_AddsClaudeDesktopModelMetadata(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
@@ -188,7 +189,7 @@ func TestModelsHandler_FillsContextWindowFromBuiltinRegistry(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
@@ -241,7 +242,7 @@ func TestModelsHandler_FallbackToDisabledKey(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
@@ -301,7 +302,7 @@ func TestModelsHandler_FallbackToDisabledKeyRespectsRoutePrefix(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/kimi/v1/models", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
@@ -357,7 +358,7 @@ func TestModelsHandler_FallbackToDisabledKeySkipsDisabledChannels(t *testing.T) 
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
@@ -378,7 +379,7 @@ func TestModelsHandler_NoKeysStillFails(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil).WithContext(context.Background())
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
@@ -430,7 +431,7 @@ func TestModelsHandler_MergesChatModels(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
@@ -496,7 +497,7 @@ func TestModelsHandler_IncludesImagesModels(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
@@ -546,7 +547,7 @@ func TestModelsHandler_CollectsTwoSuccessfulChannelsPerProtocol(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
@@ -603,7 +604,7 @@ func TestModelsHandler_DisabledKeyFallbackStopsAtCollectTimeout(t *testing.T) {
 	w := httptest.NewRecorder()
 
 	start := time.Now()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 	elapsed := time.Since(start)
 
 	if w.Code != http.StatusNotFound {
@@ -647,7 +648,7 @@ func TestModelsHandler_XChannelOnlyQueriesPinnedChannel(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer test-key")
 	req.Header.Set("X-Channel", "chat-pinned")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
@@ -703,7 +704,7 @@ func TestModelsHandler_ProbesActiveKeysInChannelConcurrently(t *testing.T) {
 	w := httptest.NewRecorder()
 
 	start := time.Now()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 	elapsed := time.Since(start)
 
 	if w.Code != http.StatusOK {
@@ -767,7 +768,7 @@ func TestModelsHandler_PrefersActiveKeysOverDisabledKeysInSameChannel(t *testing
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
@@ -806,7 +807,7 @@ func TestModelsHandler_ReturnsRecentCacheWhenDiscoveryFails(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("initial status = %d, body=%s", w.Code, w.Body.String())
@@ -816,7 +817,7 @@ func TestModelsHandler_ReturnsRecentCacheWhenDiscoveryFails(t *testing.T) {
 	req = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w = httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("cached status = %d, body=%s", w.Code, w.Body.String())
@@ -851,7 +852,7 @@ func TestModelsHandler_ReturnsConfiguredModelsWhenDiscoveryFails(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
@@ -897,7 +898,7 @@ func TestModelsHandler_CacheSeparatesPinnedChannel(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("default status = %d, body=%s", w.Code, w.Body.String())
@@ -907,7 +908,7 @@ func TestModelsHandler_CacheSeparatesPinnedChannel(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer test-key")
 	req.Header.Set("X-Channel", "chat-pinned")
 	w = httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusServiceUnavailable {
 		t.Fatalf("pinned status = %d, body=%s", w.Code, w.Body.String())
@@ -949,7 +950,7 @@ func TestModelsDetailHandler_FallsBackToImages(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/models/image-model", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
@@ -994,7 +995,7 @@ func TestModelsHandler_EnrichesInputModalitiesByChannelVisionSwitch(t *testing.T
 			req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 			req.Header.Set("Authorization", "Bearer test-key")
 			w := httptest.NewRecorder()
-			router.ServeHTTP(w, req)
+			httpbridge.Handler(router).ServeHTTP(w, req)
 
 			if w.Code != http.StatusOK {
 				t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
@@ -1208,7 +1209,7 @@ func TestModelsDetailHandler_FallsBackToChat(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/models/model-chat", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
@@ -1263,7 +1264,7 @@ func TestModelsDetailHandler_PrefersMessagesOverChat(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/models/model-shared", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
@@ -1323,7 +1324,7 @@ func TestModelsDetailHandler_ChatFallbackRespectsRoutePrefix(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/kimi/v1/models/model-prefix", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
@@ -1457,7 +1458,7 @@ func TestTryModelsRequest_ClaudeCompatFallback(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
@@ -1519,7 +1520,7 @@ func TestModelsHandler_CopilotResolvesTokenAndHitsModelsEndpoint(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
@@ -1576,7 +1577,7 @@ func TestModelsHandler_CopilotTokenExchangeFailure(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if atomic.LoadInt32(&copilotHits) != 0 {
 		t.Fatalf("token exchange 失败时不应命中 Copilot API，实际命中 %d 次", atomic.LoadInt32(&copilotHits))
@@ -1618,7 +1619,7 @@ func TestModelsDetailHandler_Copilot(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/models/gpt-4o", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())

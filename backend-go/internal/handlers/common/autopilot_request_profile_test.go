@@ -7,18 +7,19 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/autopilot"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/types"
-	"github.com/gin-gonic/gin"
 )
 
-func newAutopilotProfileTestContext(t *testing.T, path, body string, agentCtx *types.AgentContext) *gin.Context {
+func newAutopilotProfileTestContext(t *testing.T, path, body string, agentCtx *types.AgentContext) fiber.Ctx {
 	t.Helper()
-	gin.SetMode(gin.TestMode)
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
-	c.Request = httptest.NewRequest("POST", path, strings.NewReader(body))
+
+	c, _ := httpbridge.TestContext(httptest.NewRecorder())
+	httpbridge.SetRequest(c, httptest.NewRequest("POST", path, strings.NewReader(body)))
 	SetRequestLogContextWithAgent(c, "session-test", 1, agentCtx)
 	return c
 }
@@ -315,8 +316,8 @@ func TestAttachAutopilotRequestProfileRoutingHeaders(t *testing.T) {
 	t.Run("scenario and cost preference headers", func(t *testing.T) {
 		body := `{"model":"gpt-5.6-luna","messages":[{"role":"user","content":"hello"}]}`
 		c := newAutopilotProfileTestContext(t, "/v1/messages", body, nil)
-		c.Request.Header.Set("X-Routing-Scenario", "daily_dev")
-		c.Request.Header.Set("X-Cost-Preference", "cost_first")
+		httpbridge.Request(c).Header.Set("X-Routing-Scenario", "daily_dev")
+		httpbridge.Request(c).Header.Set("X-Cost-Preference", "cost_first")
 
 		profile := AttachAutopilotRequestProfile(c, scheduler.ChannelKindMessages, "gpt-5.6-luna", "completion", "session-test", []byte(body), 0)
 		if profile.ScenarioPreset == nil || profile.ScenarioPreset.Key != "daily_dev" {
@@ -334,8 +335,8 @@ func TestAttachAutopilotRequestProfileRoutingHeaders(t *testing.T) {
 	t.Run("invalid headers ignored", func(t *testing.T) {
 		body := `{"model":"gpt-5.6-luna","messages":[{"role":"user","content":"hello"}]}`
 		c := newAutopilotProfileTestContext(t, "/v1/messages", body, nil)
-		c.Request.Header.Set("X-Routing-Scenario", "bogus-scenario")
-		c.Request.Header.Set("X-Cost-Preference", "garbage")
+		httpbridge.Request(c).Header.Set("X-Routing-Scenario", "bogus-scenario")
+		httpbridge.Request(c).Header.Set("X-Cost-Preference", "garbage")
 
 		profile := AttachAutopilotRequestProfile(c, scheduler.ChannelKindMessages, "gpt-5.6-luna", "completion", "session-test", []byte(body), 0)
 		if profile.ScenarioPreset != nil {
@@ -355,7 +356,7 @@ func TestAttachAutopilotRequestProfileRoutingHeaders(t *testing.T) {
 
 		body := `{"model":"gpt-5.6-luna","messages":[{"role":"user","content":"hello"}]}`
 		c := newAutopilotProfileTestContext(t, "/v1/messages", body, nil)
-		c.Request.Header.Set("X-Routing-Scenario", "hard_problem")
+		httpbridge.Request(c).Header.Set("X-Routing-Scenario", "hard_problem")
 
 		profile := AttachAutopilotRequestProfile(c, scheduler.ChannelKindMessages, "gpt-5.6-luna", "completion", "session-test", []byte(body), 0)
 		if profile.ScenarioPreset != nil {

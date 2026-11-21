@@ -24,14 +24,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/errutil"
 	"github.com/soulteary/yunqi/internal/handlers/common"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/middleware"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/utils"
-	"github.com/gin-gonic/gin"
 )
 
 // alphaMetricsServiceType 独立指标标签：与推理指标（Responses）隔离，
@@ -43,26 +44,26 @@ func Handler(
 	envCfg *config.EnvConfig,
 	cfgManager *config.ConfigManager,
 	channelScheduler *scheduler.ChannelScheduler,
-) gin.HandlerFunc {
-	return gin.HandlerFunc(func(c *gin.Context) {
-		middleware.ProxyAuthMiddleware(envCfg)(c)
-		if c.IsAborted() {
-			return
+) fiber.Handler {
+	return fiber.Handler(func(c fiber.Ctx) error {
+		middleware.AuthenticateProxy(c, envCfg)
+		if httpbridge.IsAborted(c) {
+			return nil
 		}
 
 		bodyBytes, err := common.ReadRequestBody(c, envCfg.MaxRequestBodySize)
 		if err != nil {
-			return
+			return nil
 		}
 
 		sessionID := extractAlphaSessionID(bodyBytes)
-		operation := extractAlphaOperation(c.Request.URL.Path)
+		operation := extractAlphaOperation(httpbridge.Request(c).URL.Path)
 		common.SetRequestLogContext(c, sessionID, 0)
 		common.RequestLogf(c, "[Alpha] %s 请求 (session: %s)", operation, sessionID)
 
 		// 粘性优先级：X-Channel 显式 pin > 推理亲和桶扫描（跨端点尽力而为）
 		// > SelectChannel 自身的无桶亲和（alpha 写、alpha 读，自粘）
-		pinChannel := c.GetHeader("X-Channel")
+		pinChannel := httpbridge.GetHeader(c, "X-Channel")
 		if pinChannel == "" && sessionID != "" {
 			pinChannel = channelScheduler.PreferredChannelNameForUserSweep(sessionID, scheduler.ChannelKindResponses)
 		}
@@ -72,12 +73,13 @@ func Handler(
 		} else {
 			handleSingleChannel(c, envCfg, cfgManager, channelScheduler, bodyBytes, operation)
 		}
+		return nil
 	})
 }
 
 // handleSingleChannel 单渠道模式（带 key 轮转）
 func handleSingleChannel(
-	c *gin.Context,
+	c fiber.Ctx,
 	envCfg *config.EnvConfig,
 	cfgManager *config.ConfigManager,
 	channelScheduler *scheduler.ChannelScheduler,
@@ -86,11 +88,11 @@ func handleSingleChannel(
 ) {
 	upstream, channelIndex, err := cfgManager.GetCurrentResponsesUpstreamWithIndex()
 	if err != nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "未配置任何 Responses 渠道"})
+		httpbridge.JSON(c, http.StatusServiceUnavailable, fiber.Map{"error": "未配置任何 Responses 渠道"})
 		return
 	}
 	if len(upstream.APIKeys) == 0 {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "当前渠道未配置 API 密钥"})
+		httpbridge.JSON(c, http.StatusServiceUnavailable, fiber.Map{"error": "当前渠道未配置 API 密钥"})
 		return
 	}
 
@@ -119,15 +121,15 @@ func handleSingleChannel(
 	// 候选耗尽：回写最后一次上游响应（如 404=上游未实现 alpha），
 	// 让客户端按真实状态降级，而非误导性的 503
 	if lastBody != nil {
-		c.Data(lastStatus, "application/json", lastBody)
+		httpbridge.Data(c, lastStatus, "application/json", lastBody)
 		return
 	}
-	c.JSON(http.StatusServiceUnavailable, gin.H{"error": "All upstream channels are currently unavailable"})
+	httpbridge.JSON(c, http.StatusServiceUnavailable, fiber.Map{"error": "All upstream channels are currently unavailable"})
 }
 
 // handleMultiChannel 多渠道模式（渠道故障转移 + session 粘性）
 func handleMultiChannel(
-	c *gin.Context,
+	c fiber.Ctx,
 	envCfg *config.EnvConfig,
 	cfgManager *config.ConfigManager,
 	channelScheduler *scheduler.ChannelScheduler,
@@ -146,9 +148,8 @@ func handleMultiChannel(
 	var lastUpstreamBody []byte
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		selection, err := channelScheduler.SelectChannel(
-			c.Request.Context(), sessionID, failedChannels,
-			scheduler.ChannelKindResponses, "", c.Param("routePrefix"), pinChannel)
+		selection, err := channelScheduler.SelectChannel(httpbridge.Request(c).Context(), sessionID, failedChannels,
+			scheduler.ChannelKindResponses, "", httpbridge.Param(c, "routePrefix"), pinChannel)
 		if err != nil {
 			break
 		}
@@ -179,15 +180,15 @@ func handleMultiChannel(
 	}
 
 	if lastUpstreamBody != nil {
-		c.Data(lastUpstreamStatus, "application/json", lastUpstreamBody)
+		httpbridge.Data(c, lastUpstreamStatus, "application/json", lastUpstreamBody)
 		return
 	}
-	c.JSON(http.StatusServiceUnavailable, gin.H{"error": "All upstream channels are currently unavailable"})
+	httpbridge.JSON(c, http.StatusServiceUnavailable, fiber.Map{"error": "All upstream channels are currently unavailable"})
 }
 
 // tryAlphaChannelWithAllKeys 尝试渠道的所有 key
 func tryAlphaChannelWithAllKeys(
-	c *gin.Context,
+	c fiber.Ctx,
 	upstream *config.UpstreamConfig,
 	channelIndex int,
 	operation string,
@@ -225,14 +226,14 @@ func tryAlphaChannelWithAllKeys(
 // 注意：刻意不写 RecordSuccess/RecordFailure/MarkKeyAsFailed——alpha 失败
 // 不能污染推理路由的健康度与 key 池。
 func tryAlphaWithKey(
-	c *gin.Context,
+	c fiber.Ctx,
 	upstream *config.UpstreamConfig,
 	apiKey string,
 	bodyBytes []byte,
 	envCfg *config.EnvConfig,
 	operation string) (bool, int, []byte) {
 	targetURL := buildAlphaURL(upstream, c)
-	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, targetURL, bytes.NewReader(bodyBytes))
+	req, err := http.NewRequestWithContext(httpbridge.Request(c).Context(), http.MethodPost, targetURL, bytes.NewReader(bodyBytes))
 	if err != nil {
 		common.RequestLogf(c, "[Alpha] 创建请求失败: %v", err)
 		return false, 0, nil
@@ -265,16 +266,16 @@ func tryAlphaWithKey(
 		shouldFailover, _ := common.ShouldRetryWithNextKey(resp.StatusCode, respBody, "Responses")
 		// 404 = 上游未实现 alpha 端点（中转站常态），也允许换渠道尝试
 		if !shouldFailover && resp.StatusCode != http.StatusNotFound {
-			utils.ForwardResponseHeaders(resp.Header, c.Writer)
-			c.Data(resp.StatusCode, "application/json", respBody)
+			utils.ForwardResponseHeaders(resp.Header, httpbridge.Writer(c))
+			httpbridge.Data(c, resp.StatusCode, "application/json", respBody)
 			return true, resp.StatusCode, respBody
 		}
 		common.RequestLogf(c, "[Alpha] %s 上游返回 %d，尝试下一候选", operation, resp.StatusCode)
 		return false, resp.StatusCode, respBody
 	}
 
-	utils.ForwardResponseHeaders(resp.Header, c.Writer)
-	c.Data(resp.StatusCode, "application/json", respBody)
+	utils.ForwardResponseHeaders(resp.Header, httpbridge.Writer(c))
+	httpbridge.Data(c, resp.StatusCode, "application/json", respBody)
 	return true, resp.StatusCode, respBody
 }
 
@@ -315,15 +316,15 @@ var alphaBaseURLVersionPattern = regexp.MustCompile(`/v\d+[a-z]*$`)
 // buildAlphaURL 构建上游 alpha 端点 URL，拼接语义与 compact 端点一致（用裸 BaseURL，
 // 不走 GetEffectiveBaseURL 的版本尾规范化）：BaseURL 含版本尾或以 # 结尾 → 直接拼
 // 剥掉 /v1 前缀的进站路径；否则补 /v1（与 /v1/responses 的拼法对齐）。
-func buildAlphaURL(upstream *config.UpstreamConfig, c *gin.Context) string {
+func buildAlphaURL(upstream *config.UpstreamConfig, c fiber.Ctx) string {
 	baseURL := strings.TrimSuffix(upstream.BaseURL, "/")
 	skipVersionPrefix := strings.HasSuffix(baseURL, "#")
 	if skipVersionPrefix {
 		baseURL = strings.TrimSuffix(baseURL, "#")
 	}
 
-	path := c.Request.URL.Path
-	if routePrefix := c.Param("routePrefix"); routePrefix != "" {
+	path := httpbridge.Request(c).URL.Path
+	if routePrefix := httpbridge.Param(c, "routePrefix"); routePrefix != "" {
 		path = strings.TrimPrefix(path, "/"+routePrefix)
 	}
 	endpoint := strings.TrimPrefix(path, "/v1")

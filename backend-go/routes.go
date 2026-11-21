@@ -1,22 +1,19 @@
 package main
 
 import (
+	"github.com/gofiber/fiber/v3"
+	"github.com/gofiber/fiber/v3/middleware/recover"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/middleware"
-	"github.com/gin-gonic/gin"
 )
 
 // newRouter only registers middleware and routes. All runtime dependencies and
 // workers are wired by runService before the server starts accepting requests.
-func (a *application) newRouter() *gin.Engine {
-	// 设置 Gin 模式
-	if a.envCfg.IsProduction() {
-		gin.SetMode(gin.ReleaseMode)
-	}
-
+func (a *application) newRouter() *fiber.App {
 	// 创建路由器（使用自定义 Logger，根据 QUIET_POLLING_LOGS 配置过滤轮询日志）
-	r := gin.New()
+	r := httpbridge.NewApp()
 	r.Use(middleware.FilteredLogger(a.envCfg))
-	r.Use(gin.Recovery())
+	r.Use(recover.New())
 
 	// 配置 CORS
 	r.Use(middleware.CORSMiddleware(a.envCfg))

@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/soulteary/yunqi/internal/config"
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 func setupGeminiConfigManager(t *testing.T, upstream []config.UpstreamConfig) *config.ConfigManager {
@@ -46,13 +46,12 @@ func TestPingChannel_WithoutBaseURLReturnsError(t *testing.T) {
 		ServiceType: "gemini",
 	}})
 
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
-	r.GET("/gemini/ping/:id", PingChannel(cm))
+	r := httpbridge.NewApp()
+	r.Get("/gemini/ping/:id", PingChannel(cm))
 
 	req := httptest.NewRequest(http.MethodGet, "/gemini/ping/0", nil)
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK && w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 200 or 400, body=%s", w.Code, w.Body.String())
@@ -73,13 +72,12 @@ func TestPingAllChannels_WithoutBaseURLMarksChannelError(t *testing.T) {
 		ServiceType: "gemini",
 	}})
 
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
-	r.GET("/gemini/ping", PingAllChannels(cm))
+	r := httpbridge.NewApp()
+	r.Get("/gemini/ping", PingAllChannels(cm))
 
 	req := httptest.NewRequest(http.MethodGet, "/gemini/ping", nil)
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200, body=%s", w.Code, w.Body.String())

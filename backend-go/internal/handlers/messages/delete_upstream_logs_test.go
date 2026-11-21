@@ -9,10 +9,10 @@ import (
 	"testing"
 
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/session"
-	"github.com/gin-gonic/gin"
 )
 
 func setupDeleteLogsConfigManager(t *testing.T, upstream []config.UpstreamConfig) *config.ConfigManager {
@@ -84,13 +84,12 @@ func TestDeleteUpstream_PreservesRemainingChannelLogs(t *testing.T) {
 	logStore.Record(keyA, &metrics.ChannelLog{RequestID: "r1", Model: "deleted-channel", BaseURL: "https://shared.example.com", KeyMask: "***a"})
 	logStore.Record(keyB, &metrics.ChannelLog{RequestID: "r2", Model: "remaining-channel", BaseURL: "https://shared.example.com", KeyMask: "***b"})
 
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
-	r.DELETE("/messages/channels/:id", DeleteUpstream(cm, sch))
+	r := httpbridge.NewApp()
+	r.Delete("/messages/channels/:id", DeleteUpstream(cm, sch))
 
 	req := httptest.NewRequest(http.MethodDelete, "/messages/channels/0", nil)
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200, body = %s", w.Code, w.Body.String())

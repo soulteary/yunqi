@@ -11,7 +11,8 @@ import (
 	"net/textproto"
 	"strings"
 
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v3"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 func isMultipartContentType(contentType string) bool {
@@ -41,8 +42,8 @@ func extractImagesModel(bodyBytes []byte, contentType string) string {
 	return model
 }
 
-func isImagesStreamRequest(c *gin.Context, bodyBytes []byte, contentType string) bool {
-	if strings.EqualFold(c.Query("stream"), "true") {
+func isImagesStreamRequest(c fiber.Ctx, bodyBytes []byte, contentType string) bool {
+	if strings.EqualFold(httpbridge.Query(c, "stream"), "true") {
 		return true
 	}
 	if isMultipartContentType(contentType) {

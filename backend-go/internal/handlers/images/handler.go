@@ -12,15 +12,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/errutil"
 	"github.com/soulteary/yunqi/internal/handlers/common"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/httpclient"
 	"github.com/soulteary/yunqi/internal/middleware"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/types"
 	"github.com/soulteary/yunqi/internal/utils"
-	"github.com/gin-gonic/gin"
 )
 
 const (
@@ -37,35 +38,35 @@ func Handler(
 	envCfg *config.EnvConfig,
 	cfgManager *config.ConfigManager,
 	channelScheduler *scheduler.ChannelScheduler,
-) gin.HandlerFunc {
-	return gin.HandlerFunc(func(c *gin.Context) {
-		middleware.ProxyAuthMiddleware(envCfg)(c)
-		if c.IsAborted() {
-			return
+) fiber.Handler {
+	return fiber.Handler(func(c fiber.Ctx) error {
+		middleware.AuthenticateProxy(c, envCfg)
+		if httpbridge.IsAborted(c) {
+			return nil
 		}
 
-		operation := extractOperation(c.Request.URL.Path)
+		operation := extractOperation(httpbridge.Request(c).URL.Path)
 		if operation == "" {
 			imagesErrorResponse(c, http.StatusNotFound, "Images endpoint not found", "invalid_request_error", "endpoint_not_found")
-			return
+			return nil
 		}
 
 		startTime := time.Now()
 		bodyBytes, err := common.ReadRequestBody(c, envCfg.MaxRequestBodySize)
 		if err != nil {
-			return
+			return nil
 		}
-		c.Set("requestBodyBytes", bodyBytes)
+		httpbridge.SetValue(c, "requestBodyBytes", bodyBytes)
 
-		contentType := c.GetHeader("Content-Type")
+		contentType := httpbridge.GetHeader(c, "Content-Type")
 		model, isStream, ok := parseImagesRequest(c, bodyBytes, contentType, operation)
 		if !ok {
-			return
+			return nil
 		}
 
 		userID := utils.ExtractUnifiedSessionID(c, bodyBytes)
 		agentCtx := utils.ExtractAgentContext(c, bodyBytes)
-		c.Set("agentContext", agentCtx)
+		httpbridge.SetValue(c, "agentContext", agentCtx)
 		common.SetRequestLogContextWithAgent(c, userID, 0, agentCtx)
 		common.LogOriginalRequest(c, bodyBytes, envCfg, "Images")
 		common.AttachAutopilotRequestProfile(c, scheduler.ChannelKindImages, model, operation, userID, bodyBytes, 0)
@@ -75,6 +76,7 @@ func Handler(
 		} else {
 			handleSingleChannel(c, envCfg, cfgManager, channelScheduler, bodyBytes, model, startTime, operation, contentType, isStream)
 		}
+		return nil
 	})
 }
 
@@ -105,12 +107,9 @@ func sanitizeDiagnosticError(err error) string {
 	return msg
 }
 
-func logImagesValidationFailure(c *gin.Context, operation string, contentType string, bodyBytes []byte, stage string, reason string, err error) {
+func logImagesValidationFailure(c fiber.Ctx, operation string, contentType string, bodyBytes []byte, stage string, reason string, err error) {
 	common.RequestLogf(c, "[Images-Validation] operation=%s method=%s path=%s content_type=%q body_bytes=%d stage=%s reason=%s error=%q",
-		operation,
-		c.Request.Method,
-		c.Request.URL.Path,
-		contentType,
+		operation, httpbridge.Request(c).Method, httpbridge.Request(c).URL.Path, contentType,
 		len(bodyBytes),
 		stage,
 		reason,
@@ -118,13 +117,10 @@ func logImagesValidationFailure(c *gin.Context, operation string, contentType st
 	)
 }
 
-func logImagesMultipartFailure(c *gin.Context, operation string, contentType string, bodyBytes []byte, err error) {
+func logImagesMultipartFailure(c fiber.Ctx, operation string, contentType string, bodyBytes []byte, err error) {
 	stage, reason := describeMultipartDiagnostic(err)
 	common.RequestLogf(c, "[Images-Multipart] operation=%s method=%s path=%s content_type=%q body_bytes=%d stage=%s reason=%s multipart=true boundary_present=%t error=%q",
-		operation,
-		c.Request.Method,
-		c.Request.URL.Path,
-		contentType,
+		operation, httpbridge.Request(c).Method, httpbridge.Request(c).URL.Path, contentType,
 		len(bodyBytes),
 		stage,
 		reason,
@@ -133,7 +129,7 @@ func logImagesMultipartFailure(c *gin.Context, operation string, contentType str
 	)
 }
 
-func logImagesBuildRequestFailure(c *gin.Context, operation string, baseURL string, apiKey string, model string, contentType string, bodyBytes []byte, stage string, reason string, err error) {
+func logImagesBuildRequestFailure(c fiber.Ctx, operation string, baseURL string, apiKey string, model string, contentType string, bodyBytes []byte, stage string, reason string, err error) {
 	common.RequestLogf(c, "[Images-BuildRequest] operation=%s base_url=%q key_mask=%s model=%q content_type=%q body_bytes=%d stage=%s reason=%s error=%q",
 		operation,
 		baseURL,
@@ -147,7 +143,7 @@ func logImagesBuildRequestFailure(c *gin.Context, operation string, baseURL stri
 	)
 }
 
-func parseImagesRequest(c *gin.Context, bodyBytes []byte, contentType string, operation string) (string, bool, bool) {
+func parseImagesRequest(c fiber.Ctx, bodyBytes []byte, contentType string, operation string) (string, bool, bool) {
 	if operation != operationGenerations {
 		if isJSONContentType(contentType) {
 			var reqMap map[string]interface{}
@@ -206,7 +202,7 @@ func parseImagesRequest(c *gin.Context, bodyBytes []byte, contentType string, op
 }
 
 func handleMultiChannel(
-	c *gin.Context,
+	c fiber.Ctx,
 	envCfg *config.EnvConfig,
 	cfgManager *config.ConfigManager,
 	channelScheduler *scheduler.ChannelScheduler,
@@ -220,7 +216,7 @@ func handleMultiChannel(
 ) {
 	metricsManager := channelScheduler.GetImagesMetricsManager()
 	agentRole := ""
-	if ac := common.AgentContextFromGin(c); ac != nil {
+	if ac := common.AgentContextFromFiber(c); ac != nil {
 		agentRole = ac.AgentRole
 	}
 	common.HandleMultiChannelFailover(
@@ -233,7 +229,7 @@ func handleMultiChannel(
 		model,
 		false,
 		agentRole,
-		func(c *gin.Context, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
+		func(c fiber.Ctx, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
 			upstream := selection.Upstream
 			channelIndex := selection.ChannelIndex
 			if upstream == nil {
@@ -258,7 +254,7 @@ func handleMultiChannel(
 				func(upstream *config.UpstreamConfig, failedKeys map[string]bool) (string, error) {
 					return cfgManager.GetNextImagesAPIKey(upstream, failedKeys)
 				},
-				func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
+				func(c fiber.Ctx, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
 					return buildOperationRequest(c, upstreamCopy, upstreamCopy.BaseURL, apiKey, bodyBytes, model, operation, contentType)
 				},
 				func(apiKey string) {
@@ -270,7 +266,7 @@ func handleMultiChannel(
 				func(url string) {
 					channelScheduler.MarkURLSuccess(scheduler.ChannelKindImages, channelIndex, url)
 				},
-				func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
+				func(c fiber.Ctx, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 					return handleSuccess(c, resp, envCfg, startTime, isStream, common.ResolveStreamPreflightTimeouts(upstreamCopy, metricsManager.GetCircuitBreakerConfig()), upstreamCopy, actualRequestBody, contentType)
 				},
 				model,
@@ -291,14 +287,14 @@ func handleMultiChannel(
 			}
 		},
 		nil,
-		func(ctx *gin.Context, failoverErr *common.FailoverError, lastError error) {
+		func(ctx fiber.Ctx, failoverErr *common.FailoverError, lastError error) {
 			handleAllChannelsFailed(ctx, failoverErr, lastError)
 		},
 	)
 }
 
 func handleSingleChannel(
-	c *gin.Context,
+	c fiber.Ctx,
 	envCfg *config.EnvConfig,
 	cfgManager *config.ConfigManager,
 	channelScheduler *scheduler.ChannelScheduler,
@@ -338,7 +334,7 @@ func handleSingleChannel(
 		func(upstream *config.UpstreamConfig, failedKeys map[string]bool) (string, error) {
 			return cfgManager.GetNextImagesAPIKey(upstream, failedKeys)
 		},
-		func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
+		func(c fiber.Ctx, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
 			return buildOperationRequest(c, upstreamCopy, upstreamCopy.BaseURL, apiKey, bodyBytes, model, operation, contentType)
 		},
 		func(apiKey string) {
@@ -346,7 +342,7 @@ func handleSingleChannel(
 		},
 		nil,
 		nil,
-		func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
+		func(c fiber.Ctx, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 			return handleSuccess(c, resp, envCfg, startTime, isStream, common.ResolveStreamPreflightTimeouts(upstreamCopy, metricsManager.GetCircuitBreakerConfig()), upstreamCopy, actualRequestBody, contentType)
 		},
 		model,
@@ -363,7 +359,7 @@ func handleSingleChannel(
 }
 
 func buildProviderRequest(
-	c *gin.Context,
+	c fiber.Ctx,
 	upstream *config.UpstreamConfig,
 	baseURL string,
 	apiKey string,
@@ -374,7 +370,7 @@ func buildProviderRequest(
 }
 
 func buildOperationRequest(
-	c *gin.Context,
+	c fiber.Ctx,
 	upstream *config.UpstreamConfig,
 	baseURL string,
 	apiKey string,
@@ -419,13 +415,13 @@ func buildOperationRequest(
 	}
 
 	url := buildOperationURL(baseURL, operation)
-	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, url, bytes.NewReader(requestBody))
+	req, err := http.NewRequestWithContext(httpbridge.Request(c).Context(), http.MethodPost, url, bytes.NewReader(requestBody))
 	if err != nil {
 		logImagesBuildRequestFailure(c, operation, baseURL, apiKey, redirectedModel, requestContentType, requestBody, "new_request", "request_init_failed", err)
 		return nil, err
 	}
-	if c.Request.URL != nil {
-		req.URL.RawQuery = c.Request.URL.RawQuery
+	if httpbridge.Request(c).URL != nil {
+		req.URL.RawQuery = httpbridge.Request(c).URL.RawQuery
 	}
 	req.Header = prepareImagesUpstreamHeaders(c, req.URL.Host, requestContentType)
 	utils.SetAuthenticationHeader(req.Header, apiKey)
@@ -464,8 +460,8 @@ func buildJSONRequestBody(bodyBytes []byte, model string, redirectedModel string
 	return requestBody, "application/json", nil
 }
 
-func prepareImagesUpstreamHeaders(c *gin.Context, targetHost string, contentType string) http.Header {
-	headers := c.Request.Header.Clone()
+func prepareImagesUpstreamHeaders(c fiber.Ctx, targetHost string, contentType string) http.Header {
+	headers := httpbridge.Request(c).Header.Clone()
 	headers.Set("Host", targetHost)
 	headers.Del("x-proxy-key")
 	headers.Del("X-Forwarded-For")
@@ -551,7 +547,7 @@ func preflightImagesStream(resp *http.Response, timeouts common.StreamPreflightT
 	}
 }
 
-func handleSuccess(c *gin.Context, resp *http.Response, envCfg *config.EnvConfig, startTime time.Time, isStream bool, timeouts common.StreamPreflightTimeouts, upstream *config.UpstreamConfig, requestBody []byte, requestContentType string) (*types.Usage, error) {
+func handleSuccess(c fiber.Ctx, resp *http.Response, envCfg *config.EnvConfig, startTime time.Time, isStream bool, timeouts common.StreamPreflightTimeouts, upstream *config.UpstreamConfig, requestBody []byte, requestContentType string) (*types.Usage, error) {
 	defer errutil.IgnoreDeferred(resp.Body.Close)
 	if isStream {
 		return nil, passthroughStreamingResponseWithLog(c, resp, envCfg, startTime, timeouts)
@@ -570,7 +566,7 @@ func handleSuccess(c *gin.Context, resp *http.Response, envCfg *config.EnvConfig
 	var respMap map[string]interface{}
 	if err := json.Unmarshal(bodyBytes, &respMap); err == nil {
 		if shouldConvertImageURLToB64JSON(upstream, requestBody, requestContentType) {
-			convertedBody, err := convertImageURLResponseToB64JSON(c.Request.Context(), respMap, upstream)
+			convertedBody, err := convertImageURLResponseToB64JSON(httpbridge.Request(c).Context(), respMap, upstream)
 			if err != nil {
 				return nil, fmt.Errorf("%w: image url to b64_json conversion failed: %v", common.ErrInvalidResponseBody, err)
 			}
@@ -580,10 +576,10 @@ func handleSuccess(c *gin.Context, resp *http.Response, envCfg *config.EnvConfig
 	} else {
 		respMap = nil
 	}
-	utils.ForwardResponseHeaders(resp.Header, c.Writer)
-	utils.ForwardContentType(resp.Header, c.Writer)
-	c.Status(resp.StatusCode)
-	if _, err := c.Writer.Write(bodyBytes); err != nil {
+	utils.ForwardResponseHeaders(resp.Header, httpbridge.Writer(c))
+	utils.ForwardContentType(resp.Header, httpbridge.Writer(c))
+	httpbridge.Status(c, resp.StatusCode)
+	if _, err := httpbridge.Writer(c).Write(bodyBytes); err != nil {
 		return nil, err
 	}
 	if respMap == nil {
@@ -710,11 +706,11 @@ func downloadImageAsBase64(ctx context.Context, rawURL string, upstream *config.
 	return base64.StdEncoding.EncodeToString(imageBytes), nil
 }
 
-func passthroughStreamingResponse(c *gin.Context, resp *http.Response) error {
+func passthroughStreamingResponse(c fiber.Ctx, resp *http.Response) error {
 	return passthroughStreamingResponseWithLog(c, resp, config.NewEnvConfig(), time.Now(), common.StreamPreflightTimeouts{})
 }
 
-func passthroughStreamingResponseWithLog(c *gin.Context, resp *http.Response, envCfg *config.EnvConfig, startTime time.Time, timeouts common.StreamPreflightTimeouts) error {
+func passthroughStreamingResponseWithLog(c fiber.Ctx, resp *http.Response, envCfg *config.EnvConfig, startTime time.Time, timeouts common.StreamPreflightTimeouts) error {
 	if envCfg.EnableResponseLogs {
 		responseTime := time.Since(startTime).Milliseconds()
 		common.RequestLogf(c, "[Images-Stream] 流式响应开始: %dms, 状态: %d", responseTime, resp.StatusCode)
@@ -732,16 +728,16 @@ func passthroughStreamingResponseWithLog(c *gin.Context, resp *http.Response, en
 		return err
 	}
 
-	utils.ForwardResponseHeaders(resp.Header, c.Writer)
-	utils.ForwardContentType(resp.Header, c.Writer)
-	c.Status(resp.StatusCode)
+	utils.ForwardResponseHeaders(resp.Header, httpbridge.Writer(c))
+	utils.ForwardContentType(resp.Header, httpbridge.Writer(c))
+	httpbridge.Status(c, resp.StatusCode)
 
-	flusher, ok := c.Writer.(http.Flusher)
+	flusher, ok := httpbridge.Writer(c).(http.Flusher)
 	if !ok {
 		bodyBytes, err := io.ReadAll(resp.Body)
 		if len(bodyBytes) > 0 {
 			common.LogUpstreamResponseBody(c, bodyBytes, envCfg, "Images")
-			if _, writeErr := c.Writer.Write(bodyBytes); writeErr != nil {
+			if _, writeErr := httpbridge.Writer(c).Write(bodyBytes); writeErr != nil {
 				err = writeErr
 			}
 		}
@@ -758,7 +754,7 @@ func passthroughStreamingResponseWithLog(c *gin.Context, resp *http.Response, en
 	if len(bufferedBytes) > 0 {
 		progress.AddBytes(len(bufferedBytes))
 		progress.Tick()
-		if _, writeErr := c.Writer.Write(bufferedBytes); writeErr != nil {
+		if _, writeErr := httpbridge.Writer(c).Write(bufferedBytes); writeErr != nil {
 			if common.IsClientDisconnectError(writeErr) || writeErr == io.ErrClosedPipe || strings.Contains(strings.ToLower(writeErr.Error()), "closed pipe") {
 				return context.Canceled
 			}
@@ -791,7 +787,7 @@ func passthroughStreamingResponseWithLog(c *gin.Context, resp *http.Response, en
 				if streamLoggingEnabled {
 					_, _ = logBuffer.Write(chunk)
 				}
-				if _, writeErr := c.Writer.Write(chunk); writeErr != nil {
+				if _, writeErr := httpbridge.Writer(c).Write(chunk); writeErr != nil {
 					if common.IsClientDisconnectError(writeErr) || writeErr == io.ErrClosedPipe || strings.Contains(strings.ToLower(writeErr.Error()), "closed pipe") {
 						return context.Canceled
 					}
@@ -832,9 +828,9 @@ streamEnd:
 	return nil
 }
 
-func imagesErrorResponse(c *gin.Context, statusCode int, message, errorType, code string) {
-	c.JSON(statusCode, gin.H{
-		"error": gin.H{
+func imagesErrorResponse(c fiber.Ctx, statusCode int, message, errorType, code string) {
+	httpbridge.JSON(c, statusCode, fiber.Map{
+		"error": fiber.Map{
 			"message": message,
 			"type":    errorType,
 			"code":    code,
@@ -842,9 +838,9 @@ func imagesErrorResponse(c *gin.Context, statusCode int, message, errorType, cod
 	})
 }
 
-func handleAllChannelsFailed(c *gin.Context, failoverErr *common.FailoverError, lastError error) {
+func handleAllChannelsFailed(c fiber.Ctx, failoverErr *common.FailoverError, lastError error) {
 	if failoverErr != nil {
-		c.Data(failoverErr.Status, "application/json", failoverErr.Body)
+		httpbridge.Data(c, failoverErr.Status, "application/json", failoverErr.Body)
 		return
 	}
 	errMsg := "All channels failed"
@@ -854,9 +850,9 @@ func handleAllChannelsFailed(c *gin.Context, failoverErr *common.FailoverError, 
 	imagesErrorResponse(c, http.StatusServiceUnavailable, errMsg, "service_unavailable", "service_unavailable")
 }
 
-func handleAllKeysFailed(c *gin.Context, failoverErr *common.FailoverError, lastError error) {
+func handleAllKeysFailed(c fiber.Ctx, failoverErr *common.FailoverError, lastError error) {
 	if failoverErr != nil {
-		c.Data(failoverErr.Status, "application/json", failoverErr.Body)
+		httpbridge.Data(c, failoverErr.Status, "application/json", failoverErr.Body)
 		return
 	}
 	errMsg := "All API keys failed"

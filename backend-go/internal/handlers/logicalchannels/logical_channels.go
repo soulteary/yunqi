@@ -6,23 +6,24 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/handlers/common"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/scheduler"
-	"github.com/gin-gonic/gin"
 )
 
 // RegisterRoutes 注册逻辑渠道相关路由到 apiGroup。
-func RegisterRoutes(apiGroup *gin.RouterGroup, cfgManager *config.ConfigManager, channelScheduler *scheduler.ChannelScheduler) {
+func RegisterRoutes(apiGroup fiber.Router, cfgManager *config.ConfigManager, channelScheduler *scheduler.ChannelScheduler) {
 	h := &Handler{cm: cfgManager, scheduler: channelScheduler}
 
-	apiGroup.GET("/logical-channels", h.List)
-	apiGroup.GET("/logical-channels/dashboard", h.Dashboard)
-	apiGroup.GET("/logical-channels/:uid", h.Get)
-	apiGroup.POST("/logical-channels", h.Create)
-	apiGroup.PUT("/logical-channels/:uid", h.Update)
-	apiGroup.DELETE("/logical-channels/:uid", h.Delete)
+	apiGroup.Get("/logical-channels", h.List)
+	apiGroup.Get("/logical-channels/dashboard", h.Dashboard)
+	apiGroup.Get("/logical-channels/:uid", h.Get)
+	apiGroup.Post("/logical-channels", h.Create)
+	apiGroup.Put("/logical-channels/:uid", h.Update)
+	apiGroup.Delete("/logical-channels/:uid", h.Delete)
 }
 
 // Handler 逻辑渠道 HTTP 处理器。
@@ -107,28 +108,29 @@ type UpdateRequestBodyProtocol struct {
 }
 
 // List GET /api/logical-channels?kind=llm
-func (h *Handler) List(c *gin.Context) {
-	kind := c.Query("kind")
+func (h *Handler) List(c fiber.Ctx) error {
+	kind := httpbridge.Query(c, "kind")
 	if kind == "" {
-		c.JSON(http.StatusOK, ListResponse{LogicalChannels: h.cm.ListLogicalChannels()})
-		return
+		httpbridge.JSON(c, http.StatusOK, ListResponse{LogicalChannels: h.cm.ListLogicalChannels()})
+		return nil
 	}
-	c.JSON(http.StatusOK, ListResponse{LogicalChannels: h.cm.ListLogicalChannelsWithKind(config.LogicalChannelKind(kind))})
+	httpbridge.JSON(c, http.StatusOK, ListResponse{LogicalChannels: h.cm.ListLogicalChannelsWithKind(config.LogicalChannelKind(kind))})
+	return nil
 }
 
 // Dashboard GET /api/logical-channels/dashboard?kind=llm
 // 返回按 logical channel 聚合的 dashboard 数据：每个 channel 对象代表一个逻辑渠道，
 // 包含 protocolRoutes[] 指明其下的物理协议路由，供 Desktop 统一列表使用。
-func (h *Handler) Dashboard(c *gin.Context) {
-	kind := c.Query("kind")
+func (h *Handler) Dashboard(c fiber.Ctx) error {
+	kind := httpbridge.Query(c, "kind")
 	if kind == "" {
 		kind = "llm"
 	}
 	cfg := h.cm.GetConfig()
 	logicalChannels := h.cm.ListLogicalChannelsWithKind(config.LogicalChannelKind(kind))
 
-	channels := make([]gin.H, 0, len(logicalChannels))
-	metricsResult := make([]gin.H, 0, len(logicalChannels))
+	channels := make([]fiber.Map, 0, len(logicalChannels))
+	metricsResult := make([]fiber.Map, 0, len(logicalChannels))
 	recentActivity := make([]*metrics.ChannelRecentActivity, 0, len(logicalChannels))
 
 	for _, lc := range logicalChannels {
@@ -160,7 +162,7 @@ func (h *Handler) Dashboard(c *gin.Context) {
 		idx := channelsIndexForLogical(len(channels) - 1)
 		if mm != nil {
 			resp := mm.ToResponseMultiURL(primaryIndex, primary.GetAllBaseURLs(), primary.APIKeys, scheduler.NormalizedMetricsServiceType(primaryKind, primary.ServiceType), 0, logicalChannelHistoricalAPIKeys(*primary))
-			metricsResult = append(metricsResult, gin.H{
+			metricsResult = append(metricsResult, fiber.Map{
 				"channelIndex":        idx,
 				"channelName":         lc.Name,
 				"requestCount":        resp.RequestCount,
@@ -174,23 +176,23 @@ func (h *Handler) Dashboard(c *gin.Context) {
 			})
 			recentActivity = append(recentActivity, mm.GetRecentActivityMultiURL(primaryIndex, primary.GetAllBaseURLs(), logicalChannelStatsAPIKeys(*primary), scheduler.NormalizedMetricsServiceType(primaryKind, primary.ServiceType)))
 		} else {
-			metricsResult = append(metricsResult, gin.H{"channelIndex": idx})
+			metricsResult = append(metricsResult, fiber.Map{"channelIndex": idx})
 			recentActivity = append(recentActivity, nil)
 		}
 	}
 
-	stats := gin.H{
+	stats := fiber.Map{
 		"multiChannelMode":   h.scheduler != nil && h.scheduler.IsMultiChannelMode(scheduler.ChannelKindMessages),
 		"activeChannelCount": countActiveLogical(logicalChannels),
 	}
-
-	c.JSON(http.StatusOK, gin.H{
+	httpbridge.JSON(c, http.StatusOK, fiber.Map{
 		"channels":       channels,
 		"current":        -1,
 		"metrics":        metricsResult,
 		"stats":          stats,
 		"recentActivity": recentActivity,
 	})
+	return nil
 }
 
 func channelsIndexForLogical(i int) int { return i }
@@ -255,8 +257,8 @@ func findPhysicalChannel(cfg config.Config, kind, channelUID string) (*config.Up
 	return nil, -1
 }
 
-func buildLogicalProtocolRoutes(cfg config.Config, lc config.LogicalChannel) []gin.H {
-	out := make([]gin.H, 0, len(lc.Protocols))
+func buildLogicalProtocolRoutes(cfg config.Config, lc config.LogicalChannel) []fiber.Map {
+	out := make([]fiber.Map, 0, len(lc.Protocols))
 	order := []string{"messages", "chat", "responses", "gemini", "images", "vectors"}
 	seen := make(map[string]struct{})
 	for _, kind := range order {
@@ -277,7 +279,7 @@ func buildLogicalProtocolRoutes(cfg config.Config, lc config.LogicalChannel) []g
 				apiKeys = up.APIKeys
 				disabledGroupModels = up.DisabledGroupModels
 			}
-			out = append(out, gin.H{
+			out = append(out, fiber.Map{
 				"kind":        p.Kind,
 				"index":       idx,
 				"name":        name,
@@ -363,26 +365,27 @@ func logicalChannelStatsAPIKeys(upstream config.UpstreamConfig) []string {
 }
 
 // Get GET /api/logical-channels/:uid
-func (h *Handler) Get(c *gin.Context) {
-	uid := c.Param("uid")
+func (h *Handler) Get(c fiber.Ctx) error {
+	uid := httpbridge.Param(c, "uid")
 	l := h.cm.GetLogicalChannel(uid)
 	if l == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "logical channel not found"})
-		return
+		httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "logical channel not found"})
+		return nil
 	}
-	c.JSON(http.StatusOK, l)
+	httpbridge.JSON(c, http.StatusOK, l)
+	return nil
 }
 
 // Create POST /api/logical-channels
-func (h *Handler) Create(c *gin.Context) {
+func (h *Handler) Create(c fiber.Ctx) error {
 	var body CreateRequestBody
-	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
-		return
+	if err := httpbridge.BindJSON(c, &body); err != nil {
+		httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "Invalid request body: " + err.Error()})
+		return nil
 	}
 	if len(body.Protocols) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "protocols 不能为空"})
-		return
+		httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "protocols 不能为空"})
+		return nil
 	}
 	in := config.CreateLogicalChannelInput{
 		Name:        body.Name,
@@ -425,19 +428,20 @@ func (h *Handler) Create(c *gin.Context) {
 	}
 	logical, err := h.cm.CreateLogicalChannel(in)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
+		httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
+		return nil
 	}
-	c.JSON(http.StatusOK, logical)
+	httpbridge.JSON(c, http.StatusOK, logical)
+	return nil
 }
 
 // Update PUT /api/logical-channels/:uid
-func (h *Handler) Update(c *gin.Context) {
-	uid := c.Param("uid")
+func (h *Handler) Update(c fiber.Ctx) error {
+	uid := httpbridge.Param(c, "uid")
 	var body UpdateRequestBody
-	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
-		return
+	if err := httpbridge.BindJSON(c, &body); err != nil {
+		httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "Invalid request body: " + err.Error()})
+		return nil
 	}
 	in := config.UpdateLogicalChannelInput{
 		LogicalChannelUID: uid,
@@ -499,23 +503,24 @@ func (h *Handler) Update(c *gin.Context) {
 	}
 	logical, err := h.cm.UpdateLogicalChannel(in)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
+		httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
+		return nil
 	}
 	// 与 DELETE 走同一个清理汇聚点（DeleteChannelMetrics → 指标/日志/亲和/配额）。
 	if h.scheduler != nil && len(removed) > 0 {
 		cleanupRemovedChannels(h.scheduler, removed)
 	}
-	c.JSON(http.StatusOK, logical)
+	httpbridge.JSON(c, http.StatusOK, logical)
+	return nil
 }
 
 // Delete DELETE /api/logical-channels/:uid
-func (h *Handler) Delete(c *gin.Context) {
-	uid := c.Param("uid")
+func (h *Handler) Delete(c fiber.Ctx) error {
+	uid := httpbridge.Param(c, "uid")
 	removed, err := h.cm.DeleteLogicalChannel(uid)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-		return
+		httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": err.Error()})
+		return nil
 	}
 	// 清理 metrics / logs
 	if h.scheduler != nil {
@@ -530,11 +535,12 @@ func (h *Handler) Delete(c *gin.Context) {
 		// 通过查询内存副本（锁内）已不实际；这里按 serviceType 推断 kind 走 fallback
 		cleanupRemovedChannels(h.scheduler, removed)
 	}
-	c.JSON(http.StatusOK, gin.H{
+	httpbridge.JSON(c, http.StatusOK, fiber.Map{
 		"message":           "逻辑渠道已删除",
 		"logicalChannelUid": uid,
 		"removedChannels":   removedChannelUIDs(removed),
 	})
+	return nil
 }
 
 func inferKindFromProtocols(protocols []config.CreateLogicalChannelProtocol) config.LogicalChannelKind {

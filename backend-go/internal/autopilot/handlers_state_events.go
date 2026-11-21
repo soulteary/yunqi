@@ -5,10 +5,11 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
+	"github.com/gorilla/websocket"
 	"github.com/soulteary/yunqi/internal/errutil"
 	"github.com/soulteary/yunqi/internal/eventbus"
-	"github.com/gin-gonic/gin"
-	"github.com/gorilla/websocket"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 // ── Phase B.1：跨模块状态事件 API ──
@@ -23,15 +24,15 @@ type StateEventsResponse struct {
 // 查询参数：
 //   - limit=N         返回最近 N 条（默认 50，最大 200）
 //   - subject=xxx     只返回指定 subject（channelUID / metricsKey / logicalChannelUid）
-func handleStateEvents(mgr *Manager) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handleStateEvents(mgr *Manager) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		store := mgr.StateEventStore()
 		if mgr == nil || store == nil {
-			c.JSON(http.StatusOK, StateEventsResponse{Events: []eventbus.Event{}, Total: 0})
-			return
+			httpbridge.JSON(c, http.StatusOK, StateEventsResponse{Events: []eventbus.Event{}, Total: 0})
+			return nil
 		}
 		limit := 50
-		if limitStr := c.Query("limit"); limitStr != "" {
+		if limitStr := httpbridge.Query(c, "limit"); limitStr != "" {
 			if parsed, err := strconv.Atoi(limitStr); err == nil && parsed > 0 {
 				limit = parsed
 			}
@@ -40,7 +41,7 @@ func handleStateEvents(mgr *Manager) gin.HandlerFunc {
 			limit = 200
 		}
 		var events []eventbus.Event
-		if subject := c.Query("subject"); subject != "" {
+		if subject := httpbridge.Query(c, "subject"); subject != "" {
 			ptrs := store.ListBySubject(subject, limit)
 			events = make([]eventbus.Event, 0, len(ptrs))
 			for _, p := range ptrs {
@@ -53,7 +54,8 @@ func handleStateEvents(mgr *Manager) gin.HandlerFunc {
 				events = append(events, *p)
 			}
 		}
-		c.JSON(http.StatusOK, StateEventsResponse{Events: events, Total: len(events)})
+		httpbridge.JSON(c, http.StatusOK, StateEventsResponse{Events: events, Total: len(events)})
+		return nil
 	}
 }
 
@@ -68,23 +70,23 @@ const stateEventsStreamWriteTimeout = 15 * time.Second
 // 推送 eventbus.Event：circuit_breaker_state_changed / key_blacklisted / key_restored /
 // key_model_disabled / key_model_restored 等。纯只读广播，不接收/处理客户端消息。
 // 鉴权沿用 WebAuthMiddleware（已支持 Sec-WebSocket-Protocol 子协议回退）。
-func handleStateEventsStream(mgr *Manager) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handleStateEventsStream(mgr *Manager) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		bus := mgr.EventBus()
 		if mgr == nil || bus == nil {
-			c.Status(http.StatusServiceUnavailable)
-			return
+			httpbridge.Status(c, http.StatusServiceUnavailable)
+			return nil
 		}
 
 		// 回显子协议（同 changelog handler）
 		var respHeader http.Header
-		if proto := c.GetHeader("Sec-WebSocket-Protocol"); proto != "" {
+		if proto := httpbridge.GetHeader(c, "Sec-WebSocket-Protocol"); proto != "" {
 			respHeader = http.Header{"Sec-WebSocket-Protocol": []string{proto}}
 		}
 
-		conn, err := stateEventsStreamUpgrader.Upgrade(c.Writer, c.Request, respHeader)
+		conn, err := stateEventsStreamUpgrader.Upgrade(httpbridge.Writer(c), httpbridge.Request(c), respHeader)
 		if err != nil {
-			return
+			return nil
 		}
 		defer errutil.IgnoreDeferred(conn.Close)
 
@@ -105,14 +107,14 @@ func handleStateEventsStream(mgr *Manager) gin.HandlerFunc {
 		for {
 			select {
 			case <-closed:
-				return
+				return nil
 			case ev, ok := <-ch:
 				if !ok {
-					return
+					return nil
 				}
 				_ = conn.SetWriteDeadline(time.Now().Add(stateEventsStreamWriteTimeout))
 				if err := conn.WriteJSON(ev); err != nil {
-					return
+					return nil
 				}
 			}
 		}

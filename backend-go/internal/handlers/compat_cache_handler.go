@@ -3,9 +3,9 @@ package handlers
 import (
 	"net/http"
 
-	"github.com/gin-gonic/gin"
-
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 // ── 渠道兼容性能力记忆查看/清除 API ──
@@ -45,24 +45,24 @@ const compatCacheSectionContextWindow = "context-window"
 const compatCacheSectionLatencyPenalty = "latency-penalty"
 
 // RegisterCompatCacheRoutes 注册兼容性记忆管理端点到给定路由组。
-func RegisterCompatCacheRoutes(router gin.IRouter) {
+func RegisterCompatCacheRoutes(router fiber.Router) {
 	group := router.Group("/compat-cache")
 	{
-		group.GET("", handleListCompatCache)
-		group.DELETE("", handleClearCompatCache)
+		group.Get("", handleListCompatCache)
+		group.Delete("", handleClearCompatCache)
 	}
 }
 
-func handleListCompatCache(c *gin.Context) {
+func handleListCompatCache(c fiber.Ctx) error {
 	cache := config.SharedChannelCompatCache()
 	if cache == nil {
-		c.JSON(http.StatusOK, CompatCacheResponse{
+		httpbridge.JSON(c, http.StatusOK, CompatCacheResponse{
 			Entries:          []config.CompatSnapshotEntry{},
 			ContextWindows:   []config.ContextWindowSnapshotEntry{},
 			LatencyPenalties: []config.LatencyPenaltySnapshotEntry{},
 			Total:            0,
 		})
-		return
+		return nil
 	}
 	entries := cache.Snapshot()
 	if entries == nil {
@@ -76,44 +76,49 @@ func handleListCompatCache(c *gin.Context) {
 	if latency == nil {
 		latency = []config.LatencyPenaltySnapshotEntry{}
 	}
-	c.JSON(http.StatusOK, CompatCacheResponse{
+	httpbridge.JSON(c, http.StatusOK, CompatCacheResponse{
 		Entries:          entries,
 		ContextWindows:   windows,
 		LatencyPenalties: latency,
 		Total:            len(entries),
 	})
+	return nil
 }
 
-func handleClearCompatCache(c *gin.Context) {
+func handleClearCompatCache(c fiber.Ctx) error {
 	cache := config.SharedChannelCompatCache()
 	if cache == nil {
-		c.JSON(http.StatusOK, ClearCompatCacheResponse{})
-		return
+		httpbridge.JSON(c, http.StatusOK, ClearCompatCacheResponse{})
+		return nil
 	}
-	trait := config.CompatTrait(c.Query("trait"))
-	section := c.Query("section")
+	trait := config.CompatTrait(httpbridge.Query(c, "trait"))
+	section := httpbridge.Query(c, "section")
 
 	if section == compatCacheSectionContextWindow {
-		// 只清窗口分区；与 trait 参数互斥（section 优先判定，trait 忽略）。
-		c.JSON(http.StatusOK, ClearCompatCacheResponse{
-			Removed: cache.ClearContextWindows(),
-			Section: compatCacheSectionContextWindow,
-		})
-		return
+		httpbridge.
+			// 只清窗口分区；与 trait 参数互斥（section 优先判定，trait 忽略）。
+			JSON(c, http.StatusOK, ClearCompatCacheResponse{
+				Removed: cache.ClearContextWindows(),
+				Section: compatCacheSectionContextWindow,
+			})
+		return nil
 	}
 	if section == compatCacheSectionLatencyPenalty {
-		// 只清延迟慢证据分区。
-		c.JSON(http.StatusOK, ClearCompatCacheResponse{
-			Removed: cache.ClearLatencyPenalties(),
-			Section: compatCacheSectionLatencyPenalty,
-		})
-		return
+		httpbridge.
+			// 只清延迟慢证据分区。
+			JSON(c, http.StatusOK, ClearCompatCacheResponse{
+				Removed: cache.ClearLatencyPenalties(),
+				Section: compatCacheSectionLatencyPenalty,
+			})
+		return nil
 	}
 	removed := cache.ClearTrait(trait)
 	if trait != "" {
-		// ClearTrait 空参数即全清（含窗口分区）；这里显式区分两种语义便于响应回显。
-		c.JSON(http.StatusOK, ClearCompatCacheResponse{Removed: removed, Trait: string(trait)})
-		return
+		httpbridge.
+			// ClearTrait 空参数即全清（含窗口分区）；这里显式区分两种语义便于响应回显。
+			JSON(c, http.StatusOK, ClearCompatCacheResponse{Removed: removed, Trait: string(trait)})
+		return nil
 	}
-	c.JSON(http.StatusOK, ClearCompatCacheResponse{Removed: removed})
+	httpbridge.JSON(c, http.StatusOK, ClearCompatCacheResponse{Removed: removed})
+	return nil
 }

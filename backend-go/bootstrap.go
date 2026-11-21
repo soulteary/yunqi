@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 
+	"github.com/joho/godotenv"
 	"github.com/soulteary/yunqi/internal/autopilot"
 	"github.com/soulteary/yunqi/internal/balanceprobe"
 	"github.com/soulteary/yunqi/internal/config"
@@ -23,7 +24,6 @@ import (
 	"github.com/soulteary/yunqi/internal/session"
 	"github.com/soulteary/yunqi/internal/thinkingcache"
 	"github.com/soulteary/yunqi/internal/warmup"
-	"github.com/joho/godotenv"
 )
 
 type application struct {

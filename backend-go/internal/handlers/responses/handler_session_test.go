@@ -12,16 +12,16 @@ import (
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/errutil"
 	"github.com/soulteary/yunqi/internal/handlers/common"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/providers"
 	"github.com/soulteary/yunqi/internal/session"
 	"github.com/soulteary/yunqi/internal/types"
-	"github.com/gin-gonic/gin"
 )
 
 func TestHandleSuccess_PreservesPreviousResponseID(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
+	c, _ := httpbridge.TestContext(w)
 
 	sessionManager := session.NewSessionManager(time.Hour, 100, 100000)
 	provider := &providers.ResponsesProvider{SessionManager: sessionManager}
@@ -67,10 +67,10 @@ func TestHandleSuccess_PreservesPreviousResponseID(t *testing.T) {
 }
 
 func TestHandleStreamSuccess_PostCommitActivityResetsIdleWatchdog(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","stream":true}`))
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","stream":true}`)))
 
 	reader, writer := io.Pipe()
 	resp := &http.Response{
@@ -126,10 +126,10 @@ func TestHandleStreamSuccess_PostCommitActivityResetsIdleWatchdog(t *testing.T) 
 }
 
 func TestHandleStreamSuccess_AcceptsLargeSSEDataLine(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","stream":true}`))
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","stream":true}`)))
 
 	largeDelta := strings.Repeat("x", 1024*1024+1)
 	body := `event: response.output_text.delta
@@ -168,10 +168,10 @@ data: {"type":"response.completed","response":{"status":"completed","usage":{"in
 }
 
 func TestHandleStreamSuccess_RetryableResponsesErrorPreflightTriggersFailover(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","stream":true}`))
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","stream":true}`)))
 
 	body := `event: response.created
 data: {"type":"response.created","response":{"id":"resp_1","status":"in_progress"}}
@@ -215,10 +215,10 @@ data: {"type":"response.failed","response":{"id":"resp_1","status":"failed","err
 }
 
 func TestHandleStreamSuccess_ReasoningOnlyCompletedTriggersFailover(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-6-sol","stream":true}`))
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-6-sol","stream":true}`)))
 
 	body := `event: response.output_item.added
 data: {"type":"response.output_item.added","item":{"type":"reasoning","id":"rs_1","status":"in_progress"}}
@@ -256,10 +256,10 @@ data: {"type":"response.completed","response":{"status":"completed","output":[{"
 }
 
 func TestHandleStreamSuccess_ReasoningDoesNotDisableFirstContentTimeout(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-6-sol","stream":true}`))
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-6-sol","stream":true}`)))
 
 	reader, writer := io.Pipe()
 	defer reader.Close()
@@ -294,10 +294,10 @@ func TestHandleStreamSuccess_ReasoningDoesNotDisableFirstContentTimeout(t *testi
 }
 
 func TestHandleStreamSuccess_ResponseFailedQuotaTriggersBlacklist(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","stream":true}`))
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","stream":true}`)))
 
 	body := `event: response.failed
 data: {"type":"response.failed","response":{"id":"resp_1","status":"failed","error":{"code":"insufficient_quota","message":"insufficient account balance"}}}
@@ -338,10 +338,10 @@ data: {"type":"response.failed","response":{"id":"resp_1","status":"failed","err
 // 但流内 error 事件（HTTP 已 200 开流）几乎全是渠道侧运行时故障，换渠道可能成功。
 // 客户端侧确定性错误（模型不存在、格式错误等）走 HTTP 非 2xx 的独立分类链路，不经过此处。
 func TestHandleStreamSuccess_NonListedResponsesErrorPreflightTriggersFailover(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","stream":true}`))
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","stream":true}`)))
 
 	body := `event: response.created
 data: {"type":"response.created","response":{"id":"resp_1","status":"in_progress"}}

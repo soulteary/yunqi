@@ -6,16 +6,15 @@ import (
 	"testing"
 
 	"github.com/soulteary/yunqi/internal/handlers/responses"
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 func TestResponsesWebSocketPlainGetReturns405(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
-	router := gin.New()
+	router := httpbridge.NewApp()
 	handler := responses.WebSocketHandler(nil, nil, nil, nil)
-	router.GET("/v1/responses", handler)
-	router.GET("/:routePrefix/v1/responses", handler)
+	router.Get("/v1/responses", handler)
+	router.Get("/:routePrefix/v1/responses", handler)
 
 	tests := []struct {
 		name       string
@@ -39,7 +38,7 @@ func TestResponsesWebSocketPlainGetReturns405(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
 
 			w := httptest.NewRecorder()
-			router.ServeHTTP(w, req)
+			httpbridge.Handler(router).ServeHTTP(w, req)
 
 			if w.Code != tt.wantStatus {
 				t.Fatalf("status = %d, want %d", w.Code, tt.wantStatus)

@@ -9,13 +9,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/handlers/common"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/transitions"
 	"github.com/soulteary/yunqi/internal/utils"
-	"github.com/gin-gonic/gin"
 )
 
 func channelHistoricalAPIKeys(upstream config.UpstreamConfig) []string {
@@ -84,12 +85,12 @@ func channelUpstreamsByKind(cfg config.Config, kind scheduler.ChannelKind) []con
 	}
 }
 
-func buildChannelMetricsResult(metricsManager *metrics.MetricsManager, upstreams []config.UpstreamConfig, kind scheduler.ChannelKind, includeRuntimeState bool) []gin.H {
-	result := make([]gin.H, 0, len(upstreams))
+func buildChannelMetricsResult(metricsManager *metrics.MetricsManager, upstreams []config.UpstreamConfig, kind scheduler.ChannelKind, includeRuntimeState bool) []fiber.Map {
+	result := make([]fiber.Map, 0, len(upstreams))
 	for i, upstream := range upstreams {
 		resp := metricsManager.ToResponseMultiURL(i, upstream.GetAllBaseURLs(), upstream.APIKeys, scheduler.NormalizedMetricsServiceType(kind, upstream.ServiceType), 0, channelHistoricalAPIKeys(upstream))
 
-		item := gin.H{
+		item := fiber.Map{
 			"channelIndex":        i,
 			"channelName":         upstream.Name,
 			"requestCount":        resp.RequestCount,
@@ -126,15 +127,16 @@ func buildChannelMetricsResult(metricsManager *metrics.MetricsManager, upstreams
 	return result
 }
 
-func getChannelMetricsWithKind(metricsManager *metrics.MetricsManager, cfgManager *config.ConfigManager, kind scheduler.ChannelKind, includeRuntimeState bool) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func getChannelMetricsWithKind(metricsManager *metrics.MetricsManager, cfgManager *config.ConfigManager, kind scheduler.ChannelKind, includeRuntimeState bool) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		upstreams := channelUpstreamsByKind(cfgManager.GetConfig(), kind)
-		c.JSON(200, buildChannelMetricsResult(metricsManager, upstreams, kind, includeRuntimeState))
+		httpbridge.JSON(c, 200, buildChannelMetricsResult(metricsManager, upstreams, kind, includeRuntimeState))
+		return nil
 	}
 }
 
 // GetChannelMetricsWithConfig 获取渠道指标（需要配置管理器来获取 baseURL 和 keys）
-func GetChannelMetricsWithConfig(metricsManager *metrics.MetricsManager, cfgManager *config.ConfigManager, isResponses bool) gin.HandlerFunc {
+func GetChannelMetricsWithConfig(metricsManager *metrics.MetricsManager, cfgManager *config.ConfigManager, isResponses bool) fiber.Handler {
 	kind := scheduler.ChannelKindMessages
 	if isResponses {
 		kind = scheduler.ChannelKindResponses
@@ -143,11 +145,11 @@ func GetChannelMetricsWithConfig(metricsManager *metrics.MetricsManager, cfgMana
 }
 
 // GetAllKeyMetrics 获取所有 Key 的原始指标
-func GetAllKeyMetrics(metricsManager *metrics.MetricsManager) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func GetAllKeyMetrics(metricsManager *metrics.MetricsManager) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		allMetrics := metricsManager.GetAllKeyMetrics()
 
-		result := make([]gin.H, 0, len(allMetrics))
+		result := make([]fiber.Map, 0, len(allMetrics))
 		for _, m := range allMetrics {
 			if m == nil {
 				continue
@@ -158,7 +160,7 @@ func GetAllKeyMetrics(metricsManager *metrics.MetricsManager) gin.HandlerFunc {
 				successRate = float64(m.SuccessCount) / float64(m.RequestCount) * 100
 			}
 
-			item := gin.H{
+			item := fiber.Map{
 				"metricsKey":          m.MetricsKey,
 				"baseUrl":             m.BaseURL,
 				"keyMask":             m.KeyMask,
@@ -186,19 +188,19 @@ func GetAllKeyMetrics(metricsManager *metrics.MetricsManager) gin.HandlerFunc {
 
 			result = append(result, item)
 		}
-
-		c.JSON(200, result)
+		httpbridge.JSON(c, 200, result)
+		return nil
 	}
 }
 
 // GetChannelMetrics 获取渠道指标（兼容旧 API，返回空数据）
 // Deprecated: 使用 GetChannelMetricsWithConfig 代替
-func GetChannelMetrics(metricsManager *metrics.MetricsManager) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func GetChannelMetrics(metricsManager *metrics.MetricsManager) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		// 返回所有 Key 的指标
 		allMetrics := metricsManager.GetAllKeyMetrics()
 
-		result := make([]gin.H, 0, len(allMetrics))
+		result := make([]fiber.Map, 0, len(allMetrics))
 		for _, m := range allMetrics {
 			if m == nil {
 				continue
@@ -209,7 +211,7 @@ func GetChannelMetrics(metricsManager *metrics.MetricsManager) gin.HandlerFunc {
 				successRate = float64(m.SuccessCount) / float64(m.RequestCount) * 100
 			}
 
-			item := gin.H{
+			item := fiber.Map{
 				"metricsKey":          m.MetricsKey,
 				"baseUrl":             m.BaseURL,
 				"keyMask":             m.KeyMask,
@@ -237,20 +239,20 @@ func GetChannelMetrics(metricsManager *metrics.MetricsManager) gin.HandlerFunc {
 
 			result = append(result, item)
 		}
-
-		c.JSON(200, result)
+		httpbridge.JSON(c, 200, result)
+		return nil
 	}
 }
 
 // GetResponsesChannelMetrics 获取 Responses 渠道指标
 // Deprecated: 使用 GetChannelMetricsWithConfig 代替
-func GetResponsesChannelMetrics(metricsManager *metrics.MetricsManager) gin.HandlerFunc {
+func GetResponsesChannelMetrics(metricsManager *metrics.MetricsManager) fiber.Handler {
 	return GetChannelMetrics(metricsManager)
 }
 
 // ResumeChannel 恢复熔断渠道（重置熔断状态、恢复不可用 Key，保留历史统计）
 // isResponses 参数指定是 Messages 渠道还是 Responses 渠道
-func ResumeChannel(sch *scheduler.ChannelScheduler, cfgManager *config.ConfigManager, isResponses bool) gin.HandlerFunc {
+func ResumeChannel(sch *scheduler.ChannelScheduler, cfgManager *config.ConfigManager, isResponses bool) fiber.Handler {
 	kind := scheduler.ChannelKindMessages
 	if isResponses {
 		kind = scheduler.ChannelKindResponses
@@ -259,9 +261,9 @@ func ResumeChannel(sch *scheduler.ChannelScheduler, cfgManager *config.ConfigMan
 }
 
 // GetSchedulerStats 获取调度器统计信息
-func GetSchedulerStats(sch *scheduler.ChannelScheduler) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		queryType := strings.ToLower(c.Query("type"))
+func GetSchedulerStats(sch *scheduler.ChannelScheduler) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		queryType := strings.ToLower(httpbridge.Query(c, "type"))
 
 		var kind scheduler.ChannelKind
 		var metricsManager *metrics.MetricsManager
@@ -287,7 +289,7 @@ func GetSchedulerStats(sch *scheduler.ChannelScheduler) gin.HandlerFunc {
 			metricsManager = sch.GetMessagesMetricsManager()
 		}
 
-		stats := gin.H{
+		stats := fiber.Map{
 			"multiChannelMode":                      sch.IsMultiChannelMode(kind),
 			"activeChannelCount":                    sch.GetActiveChannelCount(kind),
 			"traceAffinityCount":                    sch.GetTraceAffinityManager().Size(),
@@ -300,8 +302,8 @@ func GetSchedulerStats(sch *scheduler.ChannelScheduler) gin.HandlerFunc {
 			"circuitBackoffBase":                    metricsManager.GetCircuitBackoffBase().String(),
 			"circuitBackoffMax":                     metricsManager.GetCircuitBackoffMax().String(),
 		}
-
-		c.JSON(200, stats)
+		httpbridge.JSON(c, 200, stats)
+		return nil
 	}
 }
 
@@ -317,36 +319,36 @@ func (f ChannelStatusConfigManagerFunc) SetChannelStatus(index int, status strin
 }
 
 // NamedChannelStatusHandler 返回带固定文案的渠道状态更新 handler。
-func NamedChannelStatusHandler(cfgManager ChannelStatusConfigManager, successMessage string) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		id, err := strconv.Atoi(c.Param("id"))
+func NamedChannelStatusHandler(cfgManager ChannelStatusConfigManager, successMessage string) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		id, err := strconv.Atoi(httpbridge.Param(c, "id"))
 		if err != nil {
-			c.JSON(400, gin.H{"error": "Invalid channel ID"})
-			return
+			httpbridge.JSON(c, 400, fiber.Map{"error": "Invalid channel ID"})
+			return nil
 		}
 
 		var req struct {
 			Status string `json:"status"`
 		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(400, gin.H{"error": "Invalid request body"})
-			return
+		if err := httpbridge.BindJSON(c, &req); err != nil {
+			httpbridge.JSON(c, 400, fiber.Map{"error": "Invalid request body"})
+			return nil
 		}
 
 		if err := cfgManager.SetChannelStatus(id, req.Status); err != nil {
 			if strings.Contains(err.Error(), "无效的上游索引") {
-				c.JSON(404, gin.H{"error": "Channel not found"})
+				httpbridge.JSON(c, 404, fiber.Map{"error": "Channel not found"})
 			} else {
-				c.JSON(400, gin.H{"error": err.Error()})
+				httpbridge.JSON(c, 400, fiber.Map{"error": err.Error()})
 			}
-			return
+			return nil
 		}
-
-		c.JSON(200, gin.H{
+		httpbridge.JSON(c, 200, fiber.Map{
 			"success": true,
 			"message": successMessage,
 			"status":  req.Status,
 		})
+		return nil
 	}
 }
 
@@ -362,52 +364,52 @@ func (f PromotionConfigManagerFunc) SetChannelPromotion(index int, duration time
 }
 
 // NamedChannelPromotionHandler 返回带固定文案的渠道促销期 handler。
-func NamedChannelPromotionHandler(cfgManager PromotionConfigManager, invalidIDMsg, invalidReqMsg, clearedMsg, setMsg string) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		id, err := strconv.Atoi(c.Param("id"))
+func NamedChannelPromotionHandler(cfgManager PromotionConfigManager, invalidIDMsg, invalidReqMsg, clearedMsg, setMsg string) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		id, err := strconv.Atoi(httpbridge.Param(c, "id"))
 		if err != nil {
-			c.JSON(400, gin.H{"error": invalidIDMsg})
-			return
+			httpbridge.JSON(c, 400, fiber.Map{"error": invalidIDMsg})
+			return nil
 		}
 
 		var req struct {
 			Duration int `json:"duration"`
 		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(400, gin.H{"error": invalidReqMsg})
-			return
+		if err := httpbridge.BindJSON(c, &req); err != nil {
+			httpbridge.JSON(c, 400, fiber.Map{"error": invalidReqMsg})
+			return nil
 		}
 
 		duration := time.Duration(req.Duration) * time.Second
 		if err := cfgManager.SetChannelPromotion(id, duration); err != nil {
-			c.JSON(400, gin.H{"error": err.Error()})
-			return
+			httpbridge.JSON(c, 400, fiber.Map{"error": err.Error()})
+			return nil
 		}
 
 		if req.Duration <= 0 {
-			c.JSON(200, gin.H{
+			httpbridge.JSON(c, 200, fiber.Map{
 				"success": true,
 				"message": clearedMsg,
 			})
-			return
+			return nil
 		}
-
-		c.JSON(200, gin.H{
+		httpbridge.JSON(c, 200, fiber.Map{
 			"success":  true,
 			"message":  setMsg,
 			"duration": req.Duration,
 		})
+		return nil
 	}
 }
 
 // SetChannelPromotion 设置渠道促销期
 // 促销期内的渠道会被优先选择，忽略 trace 亲和性
-func SetChannelPromotion(cfgManager ConfigManager) gin.HandlerFunc {
+func SetChannelPromotion(cfgManager ConfigManager) fiber.Handler {
 	return NamedChannelPromotionHandler(cfgManager, "无效的渠道 ID", "无效的请求参数", "渠道促销期已清除", "渠道促销期已设置")
 }
 
 // SetResponsesChannelPromotion 设置 Responses 渠道促销期
-func SetResponsesChannelPromotion(cfgManager ResponsesConfigManager) gin.HandlerFunc {
+func SetResponsesChannelPromotion(cfgManager ResponsesConfigManager) fiber.Handler {
 	adapter := promotionConfigAdapter(func(index int, duration time.Duration) error {
 		return cfgManager.SetResponsesChannelPromotion(index, duration)
 	})
@@ -438,35 +440,35 @@ type MetricsHistoryResponse struct {
 	Summary      metrics.GlobalStatsSummary `json:"summary"`
 }
 
-func getChannelMetricsHistoryWithKind(metricsManager *metrics.MetricsManager, cfgManager *config.ConfigManager, kind scheduler.ChannelKind, strictValidation bool) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func getChannelMetricsHistoryWithKind(metricsManager *metrics.MetricsManager, cfgManager *config.ConfigManager, kind scheduler.ChannelKind, strictValidation bool) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		var duration time.Duration
 		var interval time.Duration
 		var err error
 
 		if strictValidation {
-			durationStr := c.DefaultQuery("duration", "24h")
+			durationStr := httpbridge.Query(c, "duration", "24h")
 			duration, err = parseExtendedDuration(durationStr)
 			if err != nil || duration <= 0 {
-				c.JSON(400, gin.H{"error": "Invalid duration parameter"})
-				return
+				httpbridge.JSON(c, 400, fiber.Map{"error": "Invalid duration parameter"})
+				return nil
 			}
 			if duration > 366*24*time.Hour {
 				duration = 366 * 24 * time.Hour
 			}
-			interval = selectIntervalForDuration(c.Query("interval"), duration)
+			interval = selectIntervalForDuration(httpbridge.Query(c, "interval"), duration)
 		} else {
 			duration, interval = parseHistoryDuration(c)
 		}
 
-		durationLabel := c.DefaultQuery("duration", "24h")
+		durationLabel := httpbridge.Query(c, "duration", "24h")
 		upstreams := channelUpstreamsByKind(cfgManager.GetConfig(), kind)
 
 		if duration > 24*time.Hour {
 			store := metricsManager.GetPersistenceStore()
 			if store == nil {
-				c.JSON(400, gin.H{"error": "长时间范围查询需要启用 SQLite 持久化存储"})
-				return
+				httpbridge.JSON(c, 400, fiber.Map{"error": "长时间范围查询需要启用 SQLite 持久化存储"})
+				return nil
 			}
 			apiType := metricsManager.GetAPIType()
 			since := time.Now().Add(-duration)
@@ -485,8 +487,8 @@ func getChannelMetricsHistoryWithKind(metricsManager *metrics.MetricsManager, cf
 					Summary:      summary,
 				})
 			}
-			c.JSON(200, result)
-			return
+			httpbridge.JSON(c, 200, result)
+			return nil
 		}
 
 		result := make([]MetricsHistoryResponse, 0, len(upstreams))
@@ -501,8 +503,8 @@ func getChannelMetricsHistoryWithKind(metricsManager *metrics.MetricsManager, cf
 				Summary:      summary,
 			})
 		}
-
-		c.JSON(200, result)
+		httpbridge.JSON(c, 200, result)
+		return nil
 	}
 }
 
@@ -510,7 +512,7 @@ func getChannelMetricsHistoryWithKind(metricsManager *metrics.MetricsManager, cf
 // Query params:
 //   - duration: 时间范围 (1h, 6h, 24h)，默认 24h
 //   - interval: 时间间隔 (5m, 15m, 1h)，默认根据 duration 自动选择
-func GetChannelMetricsHistory(metricsManager *metrics.MetricsManager, cfgManager *config.ConfigManager, isResponses bool) gin.HandlerFunc {
+func GetChannelMetricsHistory(metricsManager *metrics.MetricsManager, cfgManager *config.ConfigManager, isResponses bool) fiber.Handler {
 	kind := scheduler.ChannelKindMessages
 	if isResponses {
 		kind = scheduler.ChannelKindResponses
@@ -544,14 +546,14 @@ var keyColors = []string{
 	"#ec4899", // Pink - Canary
 }
 
-func getChannelKeyMetricsHistoryWithKind(metricsManager *metrics.MetricsManager, cfgManager *config.ConfigManager, kind scheduler.ChannelKind, strictValidation bool, maxDuration time.Duration) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func getChannelKeyMetricsHistoryWithKind(metricsManager *metrics.MetricsManager, cfgManager *config.ConfigManager, kind scheduler.ChannelKind, strictValidation bool, maxDuration time.Duration) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		var duration time.Duration
 		var interval time.Duration
 		var err error
 
 		if strictValidation {
-			durationStr := c.DefaultQuery("duration", "6h")
+			durationStr := httpbridge.Query(c, "duration", "6h")
 			if durationStr == "today" {
 				duration = metrics.CalculateTodayDuration()
 				if duration < time.Minute {
@@ -560,11 +562,11 @@ func getChannelKeyMetricsHistoryWithKind(metricsManager *metrics.MetricsManager,
 			} else {
 				duration, err = parseExtendedDuration(durationStr)
 				if err != nil {
-					c.JSON(400, gin.H{"error": "Invalid duration parameter. Use: 1h, 6h, 24h, today, 7d, or 30d"})
-					return
+					httpbridge.JSON(c, 400, fiber.Map{"error": "Invalid duration parameter. Use: 1h, 6h, 24h, today, 7d, or 30d"})
+					return nil
 				}
 			}
-			interval = selectIntervalForDuration(c.Query("interval"), duration)
+			interval = selectIntervalForDuration(httpbridge.Query(c, "interval"), duration)
 		} else {
 			duration, interval = parseKeyHistoryDuration(c)
 		}
@@ -573,18 +575,18 @@ func getChannelKeyMetricsHistoryWithKind(metricsManager *metrics.MetricsManager,
 			duration = maxDuration
 		}
 
-		durationLabel := c.DefaultQuery("duration", "6h")
+		durationLabel := httpbridge.Query(c, "duration", "6h")
 
-		channelID, err := strconv.Atoi(c.Param("id"))
+		channelID, err := strconv.Atoi(httpbridge.Param(c, "id"))
 		if err != nil {
-			c.JSON(400, gin.H{"error": "Invalid channel ID"})
-			return
+			httpbridge.JSON(c, 400, fiber.Map{"error": "Invalid channel ID"})
+			return nil
 		}
 
 		upstreams := channelUpstreamsByKind(cfgManager.GetConfig(), kind)
 		if channelID < 0 || channelID >= len(upstreams) {
-			c.JSON(400, gin.H{"error": "Channel not found"})
-			return
+			httpbridge.JSON(c, 400, fiber.Map{"error": "Channel not found"})
+			return nil
 		}
 
 		upstream := upstreams[channelID]
@@ -603,8 +605,8 @@ func getChannelKeyMetricsHistoryWithKind(metricsManager *metrics.MetricsManager,
 			// 长时间范围走 SQLite 聚合
 			store := metricsManager.GetPersistenceStore()
 			if store == nil {
-				c.JSON(400, gin.H{"error": "长时间范围查询需要启用 SQLite 持久化存储"})
-				return
+				httpbridge.JSON(c, 400, fiber.Map{"error": "长时间范围查询需要启用 SQLite 持久化存储"})
+				return nil
 			}
 			apiType := metricsManager.GetAPIType()
 			since := time.Now().Add(-duration)
@@ -704,9 +706,8 @@ func getChannelKeyMetricsHistoryWithKind(metricsManager *metrics.MetricsManager,
 					colorIndex++
 				}
 			}
-
-			c.JSON(200, result)
-			return
+			httpbridge.JSON(c, 200, result)
+			return nil
 		}
 
 		// 短时间范围走内存
@@ -777,14 +778,14 @@ func getChannelKeyMetricsHistoryWithKind(metricsManager *metrics.MetricsManager,
 				}
 			}
 		}
-
-		c.JSON(200, result)
+		httpbridge.JSON(c, 200, result)
+		return nil
 	}
 }
 
 // GetChannelKeyMetricsHistory 获取渠道下各 Key 的历史数据（用于 Key 趋势图表）
 // GET /api/channels/:id/keys/metrics/history?duration=6h
-func GetChannelKeyMetricsHistory(metricsManager *metrics.MetricsManager, cfgManager *config.ConfigManager, isResponses bool) gin.HandlerFunc {
+func GetChannelKeyMetricsHistory(metricsManager *metrics.MetricsManager, cfgManager *config.ConfigManager, isResponses bool) fiber.Handler {
 	kind := scheduler.ChannelKindMessages
 	if isResponses {
 		kind = scheduler.ChannelKindResponses
@@ -802,28 +803,28 @@ func truncateKeyMask(keyMask string, maxLen int) string {
 
 // GetChannelDashboard 获取渠道仪表盘数据（合并 channels + metrics + stats）。
 // type=llm 一次返回四类 LLM 协议，供统一渠道列表轮询；单协议响应保持兼容。
-func GetChannelDashboard(cfgManager *config.ConfigManager, sch *scheduler.ChannelScheduler) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		channelType := strings.ToLower(c.Query("type"))
+func GetChannelDashboard(cfgManager *config.ConfigManager, sch *scheduler.ChannelScheduler) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		channelType := strings.ToLower(httpbridge.Query(c, "type"))
 		if channelType == "" {
 			channelType = "messages"
 		}
 
 		cfg := cfgManager.GetConfig()
 		if channelType == "llm" {
-			dashboards := gin.H{}
+			dashboards := fiber.Map{}
 			for _, kind := range []string{"messages", "chat", "responses", "gemini"} {
 				dashboards[kind] = buildChannelDashboard(cfg, sch, kind)
 			}
-			c.JSON(http.StatusOK, gin.H{"dashboards": dashboards})
-			return
+			httpbridge.JSON(c, http.StatusOK, fiber.Map{"dashboards": dashboards})
+			return nil
 		}
-
-		c.JSON(http.StatusOK, buildChannelDashboard(cfg, sch, channelType))
+		httpbridge.JSON(c, http.StatusOK, buildChannelDashboard(cfg, sch, channelType))
+		return nil
 	}
 }
 
-func buildChannelDashboard(cfg config.Config, sch *scheduler.ChannelScheduler, channelType string) gin.H {
+func buildChannelDashboard(cfg config.Config, sch *scheduler.ChannelScheduler, channelType string) fiber.Map {
 	var upstreams []config.UpstreamConfig
 	var metricsManager *metrics.MetricsManager
 	var kind scheduler.ChannelKind
@@ -856,7 +857,7 @@ func buildChannelDashboard(cfg config.Config, sch *scheduler.ChannelScheduler, c
 		kind = scheduler.ChannelKindMessages
 	}
 
-	channels := make([]gin.H, len(upstreams))
+	channels := make([]fiber.Map, len(upstreams))
 	for i, up := range upstreams {
 		channel := common.BuildChannelView(up, i)
 
@@ -909,7 +910,7 @@ func buildChannelDashboard(cfg config.Config, sch *scheduler.ChannelScheduler, c
 		}
 	}
 
-	stats := gin.H{
+	stats := fiber.Map{
 		"multiChannelMode":                      sch.IsMultiChannelMode(kind),
 		"activeChannelCount":                    sch.GetActiveChannelCount(kind),
 		"traceAffinityCount":                    sch.GetTraceAffinityManager().Size(),
@@ -928,7 +929,7 @@ func buildChannelDashboard(cfg config.Config, sch *scheduler.ChannelScheduler, c
 		recentActivity[i] = metricsManager.GetRecentActivityMultiURL(i, upstream.GetAllBaseURLs(), channelStatsAPIKeys(upstream), scheduler.NormalizedMetricsServiceType(kind, upstream.ServiceType))
 	}
 
-	return gin.H{
+	return fiber.Map{
 		"channels":       channels,
 		"current":        sch.GetCurrentChannelIndex(kind),
 		"metrics":        metricsResult,
@@ -941,73 +942,73 @@ func buildChannelDashboard(cfg config.Config, sch *scheduler.ChannelScheduler, c
 // Query params:
 //   - duration: 时间范围 (1h, 6h, 24h)，默认 24h
 //   - interval: 时间间隔 (5m, 15m, 1h)，默认根据 duration 自动选择
-func GetGeminiChannelMetricsHistory(metricsManager *metrics.MetricsManager, cfgManager *config.ConfigManager) gin.HandlerFunc {
+func GetGeminiChannelMetricsHistory(metricsManager *metrics.MetricsManager, cfgManager *config.ConfigManager) fiber.Handler {
 	return getChannelMetricsHistoryWithKind(metricsManager, cfgManager, scheduler.ChannelKindGemini, true)
 }
 
 // GetGeminiChannelKeyMetricsHistory 获取 Gemini 渠道下各 Key 的历史数据（用于 Key 趋势图表）
 // GET /api/gemini/channels/:id/keys/metrics/history?duration=6h
-func GetGeminiChannelKeyMetricsHistory(metricsManager *metrics.MetricsManager, cfgManager *config.ConfigManager) gin.HandlerFunc {
+func GetGeminiChannelKeyMetricsHistory(metricsManager *metrics.MetricsManager, cfgManager *config.ConfigManager) fiber.Handler {
 	return getChannelKeyMetricsHistoryWithKind(metricsManager, cfgManager, scheduler.ChannelKindGemini, true, 366*24*time.Hour)
 }
 
 // GetGeminiChannelMetrics 获取 Gemini 渠道指标
-func GetGeminiChannelMetrics(metricsManager *metrics.MetricsManager, cfgManager *config.ConfigManager) gin.HandlerFunc {
+func GetGeminiChannelMetrics(metricsManager *metrics.MetricsManager, cfgManager *config.ConfigManager) fiber.Handler {
 	return getChannelMetricsWithKind(metricsManager, cfgManager, scheduler.ChannelKindGemini, false)
 }
 
 // GetImagesChannelMetrics 获取 Images 渠道指标
-func GetImagesChannelMetrics(metricsManager *metrics.MetricsManager, cfgManager *config.ConfigManager) gin.HandlerFunc {
+func GetImagesChannelMetrics(metricsManager *metrics.MetricsManager, cfgManager *config.ConfigManager) fiber.Handler {
 	return getChannelMetricsWithKind(metricsManager, cfgManager, scheduler.ChannelKindImages, true)
 }
 
 // GetImagesChannelMetricsHistory 获取 Images 渠道指标历史数据
-func GetImagesChannelMetricsHistory(metricsManager *metrics.MetricsManager, cfgManager *config.ConfigManager) gin.HandlerFunc {
+func GetImagesChannelMetricsHistory(metricsManager *metrics.MetricsManager, cfgManager *config.ConfigManager) fiber.Handler {
 	return getChannelMetricsHistoryWithKind(metricsManager, cfgManager, scheduler.ChannelKindImages, false)
 }
 
 // GetImagesChannelKeyMetricsHistory 获取 Images 渠道下各 Key 的历史数据
-func GetImagesChannelKeyMetricsHistory(metricsManager *metrics.MetricsManager, cfgManager *config.ConfigManager) gin.HandlerFunc {
+func GetImagesChannelKeyMetricsHistory(metricsManager *metrics.MetricsManager, cfgManager *config.ConfigManager) fiber.Handler {
 	return getChannelKeyMetricsHistoryWithKind(metricsManager, cfgManager, scheduler.ChannelKindImages, false, 366*24*time.Hour)
 }
 
 // GetVectorsChannelMetrics 获取 Vectors 渠道指标
-func GetVectorsChannelMetrics(metricsManager *metrics.MetricsManager, cfgManager *config.ConfigManager) gin.HandlerFunc {
+func GetVectorsChannelMetrics(metricsManager *metrics.MetricsManager, cfgManager *config.ConfigManager) fiber.Handler {
 	return getChannelMetricsWithKind(metricsManager, cfgManager, scheduler.ChannelKindVectors, true)
 }
 
 // GetVectorsChannelMetricsHistory 获取 Vectors 渠道指标历史数据
-func GetVectorsChannelMetricsHistory(metricsManager *metrics.MetricsManager, cfgManager *config.ConfigManager) gin.HandlerFunc {
+func GetVectorsChannelMetricsHistory(metricsManager *metrics.MetricsManager, cfgManager *config.ConfigManager) fiber.Handler {
 	return getChannelMetricsHistoryWithKind(metricsManager, cfgManager, scheduler.ChannelKindVectors, false)
 }
 
 // GetVectorsChannelKeyMetricsHistory 获取 Vectors 渠道下各 Key 的历史数据
-func GetVectorsChannelKeyMetricsHistory(metricsManager *metrics.MetricsManager, cfgManager *config.ConfigManager) gin.HandlerFunc {
+func GetVectorsChannelKeyMetricsHistory(metricsManager *metrics.MetricsManager, cfgManager *config.ConfigManager) fiber.Handler {
 	return getChannelKeyMetricsHistoryWithKind(metricsManager, cfgManager, scheduler.ChannelKindVectors, false, 366*24*time.Hour)
 }
 
 // GetChatChannelMetrics 获取 Chat 渠道指标
-func GetChatChannelMetrics(metricsManager *metrics.MetricsManager, cfgManager *config.ConfigManager) gin.HandlerFunc {
+func GetChatChannelMetrics(metricsManager *metrics.MetricsManager, cfgManager *config.ConfigManager) fiber.Handler {
 	return getChannelMetricsWithKind(metricsManager, cfgManager, scheduler.ChannelKindChat, true)
 }
 
 // GetChatChannelMetricsHistory 获取 Chat 渠道指标历史数据
-func GetChatChannelMetricsHistory(metricsManager *metrics.MetricsManager, cfgManager *config.ConfigManager) gin.HandlerFunc {
+func GetChatChannelMetricsHistory(metricsManager *metrics.MetricsManager, cfgManager *config.ConfigManager) fiber.Handler {
 	return getChannelMetricsHistoryWithKind(metricsManager, cfgManager, scheduler.ChannelKindChat, false)
 }
 
 // GetChatChannelKeyMetricsHistory 获取 Chat 渠道下各 Key 的历史数据
-func GetChatChannelKeyMetricsHistory(metricsManager *metrics.MetricsManager, cfgManager *config.ConfigManager) gin.HandlerFunc {
+func GetChatChannelKeyMetricsHistory(metricsManager *metrics.MetricsManager, cfgManager *config.ConfigManager) fiber.Handler {
 	return getChannelKeyMetricsHistoryWithKind(metricsManager, cfgManager, scheduler.ChannelKindChat, false, 366*24*time.Hour)
 }
 
 // ResumeChannelWithKind 恢复指定类型的熔断渠道（重置熔断状态、恢复不可用 Key，保留历史统计）
-func ResumeChannelWithKind(sch *scheduler.ChannelScheduler, cfgManager *config.ConfigManager, kind scheduler.ChannelKind) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		id, err := strconv.Atoi(c.Param("id"))
+func ResumeChannelWithKind(sch *scheduler.ChannelScheduler, cfgManager *config.ConfigManager, kind scheduler.ChannelKind) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		id, err := strconv.Atoi(httpbridge.Param(c, "id"))
 		if err != nil {
-			c.JSON(400, gin.H{"error": "Invalid channel ID"})
-			return
+			httpbridge.JSON(c, 400, fiber.Map{"error": "Invalid channel ID"})
+			return nil
 		}
 
 		apiType := "Messages"
@@ -1029,8 +1030,8 @@ func ResumeChannelWithKind(sch *scheduler.ChannelScheduler, cfgManager *config.C
 			func() { sch.ResetChannelMetrics(id, kind) },
 		)
 		if err != nil {
-			c.JSON(400, gin.H{"error": err.Error()})
-			return
+			httpbridge.JSON(c, 400, fiber.Map{"error": err.Error()})
+			return nil
 		}
 		restoredCount := result.RestoredCount
 
@@ -1038,14 +1039,14 @@ func ResumeChannelWithKind(sch *scheduler.ChannelScheduler, cfgManager *config.C
 		if restoredCount > 0 {
 			message = fmt.Sprintf("渠道已恢复，熔断状态已重置，同时恢复了 %d 个不可用 Key", restoredCount)
 		}
-
-		c.JSON(200, gin.H{"success": true, "message": message, "restoredKeys": restoredCount})
+		httpbridge.JSON(c, 200, fiber.Map{"success": true, "message": message, "restoredKeys": restoredCount})
+		return nil
 	}
 }
 
 // parseHistoryDuration 解析历史数据查询参数
-func parseHistoryDuration(c *gin.Context) (time.Duration, time.Duration) {
-	durationStr := c.DefaultQuery("duration", "24h")
+func parseHistoryDuration(c fiber.Ctx) (time.Duration, time.Duration) {
+	durationStr := httpbridge.Query(c, "duration", "24h")
 	duration, err := parseExtendedDuration(durationStr)
 	if err != nil || duration <= 0 {
 		duration = 24 * time.Hour
@@ -1054,12 +1055,12 @@ func parseHistoryDuration(c *gin.Context) (time.Duration, time.Duration) {
 	if duration > maxDuration {
 		duration = maxDuration
 	}
-	return duration, selectIntervalForDuration(c.Query("interval"), duration)
+	return duration, selectIntervalForDuration(httpbridge.Query(c, "interval"), duration)
 }
 
 // parseKeyHistoryDuration 解析 Key 历史数据查询参数（支持 today）
-func parseKeyHistoryDuration(c *gin.Context) (time.Duration, time.Duration) {
-	durationStr := c.DefaultQuery("duration", "6h")
+func parseKeyHistoryDuration(c fiber.Ctx) (time.Duration, time.Duration) {
+	durationStr := httpbridge.Query(c, "duration", "6h")
 	duration, err := parseExtendedDuration(durationStr)
 	if err != nil || duration < time.Minute {
 		duration = 6 * time.Hour // 回退到默认值
@@ -1068,7 +1069,7 @@ func parseKeyHistoryDuration(c *gin.Context) (time.Duration, time.Duration) {
 	if duration > maxDuration {
 		duration = maxDuration
 	}
-	return duration, selectIntervalForDuration(c.Query("interval"), duration)
+	return duration, selectIntervalForDuration(httpbridge.Query(c, "interval"), duration)
 }
 
 // selectIntervalForDuration 解析或自动选择 interval

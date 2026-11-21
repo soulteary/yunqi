@@ -18,11 +18,11 @@ import (
 
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/errutil"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/ratelimit"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/session"
-	"github.com/gin-gonic/gin"
 )
 
 func newVectorsTestConfigManager(t *testing.T) *config.ConfigManager {
@@ -66,8 +66,8 @@ func serveVectorsEmbeddingRequest(cfgManager *config.ConfigManager, sch *schedul
 }
 
 func serveVectorsEmbeddingRequestWithHeaders(cfgManager *config.ConfigManager, sch *scheduler.ChannelScheduler, body string, headers map[string]string) *httptest.ResponseRecorder {
-	r := gin.New()
-	r.POST("/v1/embeddings", Handler(newVectorsTestEnvConfig(), cfgManager, sch))
+	r := httpbridge.NewApp()
+	r.Post("/v1/embeddings", Handler(newVectorsTestEnvConfig(), cfgManager, sch))
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer test-proxy-key")
@@ -76,7 +76,7 @@ func serveVectorsEmbeddingRequestWithHeaders(cfgManager *config.ConfigManager, s
 		req.Header.Set(key, value)
 	}
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 	return w
 }
 
@@ -105,12 +105,12 @@ func TestBuildEmbeddingsURL(t *testing.T) {
 }
 
 func TestBuildProviderRequestAppliesMappingAndHeaders(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/embeddings?encoding_format=float", strings.NewReader(""))
-	c.Request.Header.Set("Authorization", "Bearer client-key")
-	c.Request.Header.Set("X-Forwarded-For", "127.0.0.1")
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/embeddings?encoding_format=float", strings.NewReader("")))
+	httpbridge.Request(c).Header.Set("Authorization", "Bearer client-key")
+	httpbridge.Request(c).Header.Set("X-Forwarded-For", "127.0.0.1")
 
 	upstream := &config.UpstreamConfig{
 		ServiceType:   "openai",
@@ -153,7 +153,7 @@ func TestBuildProviderRequestAppliesMappingAndHeaders(t *testing.T) {
 }
 
 func TestParseEmbeddingsRequestValidation(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	tests := []struct {
 		name string
 		body string
@@ -173,7 +173,7 @@ func TestParseEmbeddingsRequestValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
-			c, _ := gin.CreateTestContext(w)
+			c, _ := httpbridge.TestContext(w)
 			_, _, _, ok := parseEmbeddingsRequest(c, []byte(tt.body))
 			if ok != tt.ok {
 				t.Fatalf("parseEmbeddingsRequest() ok = %v, want %v", ok, tt.ok)
@@ -193,7 +193,7 @@ func TestExtractEmbeddingsUsage(t *testing.T) {
 }
 
 func TestHandlerFailoverAndUsage(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	cfgManager := newVectorsTestConfigManager(t)
 	defer errutil.IgnoreDeferred(cfgManager.Close)
 
@@ -240,14 +240,14 @@ func TestHandlerFailoverAndUsage(t *testing.T) {
 
 	vectorsMetrics := metrics.NewMetricsManager()
 	sch := newVectorsTestScheduler(cfgManager, vectorsMetrics)
-	r := gin.New()
-	r.POST("/v1/embeddings", Handler(newVectorsTestEnvConfig(), cfgManager, sch))
+	r := httpbridge.NewApp()
+	r.Post("/v1/embeddings", Handler(newVectorsTestEnvConfig(), cfgManager, sch))
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(`{"model":"text-embedding-3-small","input":"hello"}`))
 	req.Header.Set("Authorization", "Bearer test-proxy-key")
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d, body=%s", w.Code, w.Body.String())
@@ -258,7 +258,6 @@ func TestHandlerFailoverAndUsage(t *testing.T) {
 }
 
 func TestHandlerInvalidSuccessResponseFailsOver(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	tests := []struct {
 		name        string
@@ -342,7 +341,7 @@ func TestHandlerInvalidSuccessResponseFailsOver(t *testing.T) {
 }
 
 func TestHandlerPassesThroughVectorsModel(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	cfgManager := newVectorsTestConfigManager(t)
 	defer errutil.IgnoreDeferred(cfgManager.Close)
 
@@ -385,7 +384,7 @@ func TestHandlerPassesThroughVectorsModel(t *testing.T) {
 }
 
 func TestHandlerDoesNotFallbackAcrossEmbeddingSpaces(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	cfgManager := newVectorsTestConfigManager(t)
 	defer errutil.IgnoreDeferred(cfgManager.Close)
 
@@ -451,7 +450,7 @@ func TestHandlerDoesNotFallbackAcrossEmbeddingSpaces(t *testing.T) {
 }
 
 func TestHandlerAllowsFallbackWithinSameEmbeddingSpace(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	cfgManager := newVectorsTestConfigManager(t)
 	defer errutil.IgnoreDeferred(cfgManager.Close)
 
@@ -515,7 +514,7 @@ func TestHandlerAllowsFallbackWithinSameEmbeddingSpace(t *testing.T) {
 }
 
 func TestHandlerIgnoresSuspendedChannelAsEmbeddingCompatibilityAnchor(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	cfgManager := newVectorsTestConfigManager(t)
 	defer errutil.IgnoreDeferred(cfgManager.Close)
 
@@ -576,7 +575,7 @@ func TestHandlerIgnoresSuspendedChannelAsEmbeddingCompatibilityAnchor(t *testing
 }
 
 func TestHandlerIgnoresChannelWithoutKeysAsEmbeddingCompatibilityAnchor(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	cfgManager := newVectorsTestConfigManager(t)
 	defer errutil.IgnoreDeferred(cfgManager.Close)
 
@@ -636,7 +635,7 @@ func TestHandlerIgnoresChannelWithoutKeysAsEmbeddingCompatibilityAnchor(t *testi
 }
 
 func TestHandlerIgnoresCooldownChannelAsEmbeddingCompatibilityAnchor(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	cfgManager := newVectorsTestConfigManager(t)
 	defer errutil.IgnoreDeferred(cfgManager.Close)
 
@@ -698,7 +697,7 @@ func TestHandlerIgnoresCooldownChannelAsEmbeddingCompatibilityAnchor(t *testing.
 }
 
 func TestHandlerFiltersEmbeddingChannelsByRequestedDimensions(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	cfgManager := newVectorsTestConfigManager(t)
 	defer errutil.IgnoreDeferred(cfgManager.Close)
 
@@ -768,7 +767,7 @@ func TestHandlerFiltersEmbeddingChannelsByRequestedDimensions(t *testing.T) {
 }
 
 func TestHandlerRejectsInvalidEmbeddingDimensions(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	cfgManager := newVectorsTestConfigManager(t)
 	defer errutil.IgnoreDeferred(cfgManager.Close)
 
@@ -787,7 +786,6 @@ func TestHandlerRejectsInvalidEmbeddingDimensions(t *testing.T) {
 }
 
 func TestHandlerEmbeddingCompatibilityCannotBeBypassedByPinPromotionOrTraceAffinity(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	tests := []struct {
 		name       string
@@ -900,7 +898,7 @@ func TestHandlerEmbeddingCompatibilityCannotBeBypassedByPinPromotionOrTraceAffin
 }
 
 func TestHandlerVectors422DoesNotFailoverOrAffectBreaker(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	cfgManager := newVectorsTestConfigManager(t)
 	defer errutil.IgnoreDeferred(cfgManager.Close)
 
@@ -973,7 +971,7 @@ func TestHandlerVectors422DoesNotFailoverOrAffectBreaker(t *testing.T) {
 }
 
 func TestHandlerVectorsNonRetryableErrorDoesNotLogEmbeddingInput(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	cfgManager := newVectorsTestConfigManager(t)
 	defer errutil.IgnoreDeferred(cfgManager.Close)
 
@@ -1029,17 +1027,17 @@ func TestHandlerVectorsNonRetryableErrorDoesNotLogEmbeddingInput(t *testing.T) {
 }
 
 func TestAddUpstreamRejectsUnsupportedServiceType(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	cfgManager := newVectorsTestConfigManager(t)
 	defer errutil.IgnoreDeferred(cfgManager.Close)
 
-	r := gin.New()
-	r.POST("/api/vectors/channels", AddUpstream(cfgManager))
+	r := httpbridge.NewApp()
+	r.Post("/api/vectors/channels", AddUpstream(cfgManager))
 
 	req := httptest.NewRequest(http.MethodPost, "/api/vectors/channels", strings.NewReader(`{"name":"bad","serviceType":"gemini","baseUrl":"https://example.com","apiKeys":["sk-test"]}`))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d, body=%s", w.Code, w.Body.String())
@@ -1082,7 +1080,7 @@ func TestVectorsConfigRejectsInvalidEmbeddingCapabilities(t *testing.T) {
 }
 
 func TestGetChannelModelsSSRFLogDoesNotLeakRequestSecrets(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	cfgManager := newVectorsTestConfigManager(t)
 	defer errutil.IgnoreDeferred(cfgManager.Close)
 
@@ -1093,8 +1091,8 @@ func TestGetChannelModelsSSRFLogDoesNotLeakRequestSecrets(t *testing.T) {
 		log.SetOutput(origWriter)
 	})
 
-	r := gin.New()
-	r.POST("/api/vectors/channels/:id/models", GetChannelModels(cfgManager))
+	r := httpbridge.NewApp()
+	r.Post("/api/vectors/channels/:id/models", GetChannelModels(cfgManager))
 
 	const sensitiveBaseURL = "http://user:sk-secret-in-url@169.254.169.254/latest/meta-data?api_key=sk-secret-in-query"
 	body, err := json.Marshal(GetModelsRequest{
@@ -1109,7 +1107,7 @@ func TestGetChannelModelsSSRFLogDoesNotLeakRequestSecrets(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer sk-auth-header-do-not-log")
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d, body=%s", w.Code, w.Body.String())
@@ -1136,7 +1134,7 @@ func TestGetChannelModelsSSRFLogDoesNotLeakRequestSecrets(t *testing.T) {
 }
 
 func TestGetChannelModelsFailureLogDoesNotLeakTemporaryBaseURL(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	cfgManager := newVectorsTestConfigManager(t)
 	defer errutil.IgnoreDeferred(cfgManager.Close)
 
@@ -1151,8 +1149,8 @@ func TestGetChannelModelsFailureLogDoesNotLeakTemporaryBaseURL(t *testing.T) {
 		log.SetOutput(origWriter)
 	})
 
-	r := gin.New()
-	r.POST("/api/vectors/channels/:id/models", GetChannelModels(cfgManager))
+	r := httpbridge.NewApp()
+	r.Post("/api/vectors/channels/:id/models", GetChannelModels(cfgManager))
 
 	body, err := json.Marshal(GetModelsRequest{
 		Key:     "sk-request-key-do-not-log",
@@ -1165,7 +1163,7 @@ func TestGetChannelModelsFailureLogDoesNotLeakTemporaryBaseURL(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/vectors/channels/0/models", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadGateway {
 		t.Fatalf("expected 502, got %d, body=%s", w.Code, w.Body.String())
@@ -1223,7 +1221,7 @@ func TestBuildEmbeddingsRequestBodyStripsClientStreamField(t *testing.T) {
 }
 
 func TestHandlerStripsStreamFieldBeforeForwardingToUpstream(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	cfgManager := newVectorsTestConfigManager(t)
 	defer errutil.IgnoreDeferred(cfgManager.Close)
 
@@ -1362,7 +1360,7 @@ func TestEmbeddingCompatibilityKeyForRejectsInvalidSupportedDimensions(t *testin
 }
 
 func TestHandlerNormalizedInconsistencyBlocksFallback(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	cfgManager := newVectorsTestConfigManager(t)
 	defer errutil.IgnoreDeferred(cfgManager.Close)
 
@@ -1424,7 +1422,7 @@ func TestHandlerNormalizedInconsistencyBlocksFallback(t *testing.T) {
 }
 
 func TestHandlerModelNotFoundTriggersFailover(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	cfgManager := newVectorsTestConfigManager(t)
 	defer errutil.IgnoreDeferred(cfgManager.Close)
 
@@ -1494,7 +1492,7 @@ func TestHandlerModelNotFoundTriggersFailover(t *testing.T) {
 }
 
 func TestHandlerEmptyResponseBodyTriggersFailover(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	cfgManager := newVectorsTestConfigManager(t)
 	defer errutil.IgnoreDeferred(cfgManager.Close)
 
@@ -1663,7 +1661,6 @@ func BenchmarkHandlerVectorsEmbeddingPipeline(b *testing.B) {
 
 func benchmarkHandlerVectorsEmbeddingPipeline(b *testing.B, withFallback bool) {
 	b.Helper()
-	gin.SetMode(gin.TestMode)
 
 	cfgManager := newVectorsTestConfigManagerFromBench(b)
 	defer errutil.IgnoreDeferred(cfgManager.Close)
@@ -1734,8 +1731,8 @@ func benchmarkHandlerVectorsEmbeddingPipeline(b *testing.B, withFallback bool) {
 		b.Fatalf("AddVectorsUpstream(fallback-extra) error = %v", err)
 	}
 
-	r := gin.New()
-	r.POST("/v1/embeddings", Handler(newVectorsTestEnvConfig(), cfgManager, newVectorsTestScheduler(cfgManager, metrics.NewMetricsManager())))
+	r := httpbridge.NewApp()
+	r.Post("/v1/embeddings", Handler(newVectorsTestEnvConfig(), cfgManager, newVectorsTestScheduler(cfgManager, metrics.NewMetricsManager())))
 
 	body := []byte(`{"model":"embedding-model-a","input":"hello benchmark embedding payload","dimensions":1536}`)
 
@@ -1747,7 +1744,7 @@ func benchmarkHandlerVectorsEmbeddingPipeline(b *testing.B, withFallback bool) {
 		req.Header.Set("Authorization", "Bearer test-proxy-key")
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
-		r.ServeHTTP(w, req)
+		httpbridge.Handler(r).ServeHTTP(w, req)
 		if w.Code != http.StatusOK {
 			b.Fatalf("expected 200, got %d, body=%s", w.Code, w.Body.String())
 		}

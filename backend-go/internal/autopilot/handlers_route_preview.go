@@ -6,10 +6,11 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/utils"
-	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 )
 
@@ -17,9 +18,9 @@ import (
 
 // RegisterRoutePreviewRoutes 注册路由预演 API 到给定路由组。
 // 挂载到 /api group 后为 /api/autopilot/route-preview。
-func RegisterRoutePreviewRoutes(router gin.IRouter, smartRouter *SmartRouter, sch *scheduler.ChannelScheduler) {
+func RegisterRoutePreviewRoutes(router fiber.Router, smartRouter *SmartRouter, sch *scheduler.ChannelScheduler) {
 	handler := handleRoutePreview(smartRouter, sch)
-	router.POST("/autopilot/route-preview", handler)
+	router.Post("/autopilot/route-preview", handler)
 }
 
 // RoutePreviewRequest 路由预演请求体。
@@ -75,30 +76,30 @@ type RoutePreviewResponse struct {
 // 错误契约（route-preview.md）：外层/嵌套 body 非法或不支持 channelKind → 400；
 // SmartRouter 未初始化 → 503（与 /api/smart-routing/diagnose 一致）；
 // kill switch → 200 + message，跳过 scheduler 预演（不展示不会真实生效的选择）。
-func handleRoutePreview(smartRouter *SmartRouter, sch *scheduler.ChannelScheduler) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handleRoutePreview(smartRouter *SmartRouter, sch *scheduler.ChannelScheduler) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		var req RoutePreviewRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "请求体格式错误: " + err.Error()})
-			return
+		if err := httpbridge.BindJSON(c, &req); err != nil {
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "请求体格式错误: " + err.Error()})
+			return nil
 		}
 
 		kind := scheduler.ChannelKind(strings.TrimSpace(req.ChannelKind))
 		if !isValidRoutePreviewKind(kind) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "不支持的 channelKind: " + req.ChannelKind + "（合法值: messages | chat | responses | gemini | images | vectors）"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "不支持的 channelKind: " + req.ChannelKind + "（合法值: messages | chat | responses | gemini | images | vectors）"})
+			return nil
 		}
 
 		// 嵌套 body 必须是合法的 JSON 对象（协议请求体都是对象形态）。
 		// json.RawMessage 绑定字符串字面量也能通过外层校验，这里显式拦截。
 		if trimmed := bytes.TrimSpace(req.Body); len(trimmed) > 0 && (trimmed[0] != '{' || !json.Valid(trimmed)) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "body 必须是合法的 JSON 对象"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "body 必须是合法的 JSON 对象"})
+			return nil
 		}
 
 		if smartRouter == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "SmartRouter 未初始化"})
-			return
+			httpbridge.JSON(c, http.StatusServiceUnavailable, fiber.Map{"error": "SmartRouter 未初始化"})
+			return nil
 		}
 
 		bodyBytes := []byte(req.Body)
@@ -156,7 +157,7 @@ func handleRoutePreview(smartRouter *SmartRouter, sch *scheduler.ChannelSchedule
 				Reason: "scheduler 不可用，未执行调度层预演",
 			}
 		default:
-			selectionCtx := ContextWithRequestProfile(c.Request.Context(), profile)
+			selectionCtx := ContextWithRequestProfile(httpbridge.Request(c).Context(), profile)
 			result, err := sch.SelectChannelWithOptions(selectionCtx, scheduler.SelectionOptions{
 				Kind:            kind,
 				Model:           model,
@@ -195,14 +196,14 @@ func handleRoutePreview(smartRouter *SmartRouter, sch *scheduler.ChannelSchedule
 
 		// 把 profile 的 Model 固定为最终使用的值，便于前端展示
 		profile.Model = model
-
-		c.JSON(http.StatusOK, RoutePreviewResponse{
+		httpbridge.JSON(c, http.StatusOK, RoutePreviewResponse{
 			Plan:              plan,
 			Mode:              mode,
 			ExtractedProfile:  &profile,
 			SchedulerDiagnose: schedDiag,
 			Message:           message,
 		})
+		return nil
 	}
 }
 
@@ -224,7 +225,7 @@ func isValidRoutePreviewKind(kind scheduler.ChannelKind) bool {
 // prompt 信号分析共用 autopilot.AnalyzePromptSignals，全局场景配置由
 // handler 从 ConfigManager 读取传入（与真实路径的 scenarioConfigProvider 同源）。
 func buildRoutePreviewProfile(
-	c *gin.Context,
+	c fiber.Ctx,
 	kind scheduler.ChannelKind,
 	model string,
 	operation string,
@@ -248,8 +249,8 @@ func buildRoutePreviewProfile(
 	routingScenarioHeader := ""
 	costPreferenceHeader := ""
 	if c != nil {
-		routingScenarioHeader = c.GetHeader("X-Routing-Scenario")
-		costPreferenceHeader = c.GetHeader("X-Cost-Preference")
+		routingScenarioHeader = httpbridge.GetHeader(c, "X-Routing-Scenario")
+		costPreferenceHeader = httpbridge.GetHeader(c, "X-Cost-Preference")
 	}
 
 	return BuildRequestProfile(RequestProfileFeatures{
@@ -280,11 +281,11 @@ func buildRoutePreviewProfile(
 }
 
 // routePreviewExplicitDomain 读取请求头 X-Task-Domain（与真实入口一致）。
-func routePreviewExplicitDomain(c *gin.Context) string {
+func routePreviewExplicitDomain(c fiber.Ctx) string {
 	if c == nil {
 		return ""
 	}
-	return c.GetHeader("X-Task-Domain")
+	return httpbridge.GetHeader(c, "X-Task-Domain")
 }
 
 // extractRoutePreviewEmbeddingDimension 从 vectors 请求体解析 dimensions 字段。
@@ -364,7 +365,7 @@ func hasNonEmptyRoutePreviewFeature(value interface{}) bool {
 	}
 }
 
-func normalizeRoutePreviewOperation(kind scheduler.ChannelKind, operation string, c *gin.Context) string {
+func normalizeRoutePreviewOperation(kind scheduler.ChannelKind, operation string, c fiber.Ctx) string {
 	op := strings.ToLower(strings.TrimSpace(operation))
 	switch op {
 	case "generations", "generation", "image_generation":
@@ -385,8 +386,8 @@ func normalizeRoutePreviewOperation(kind scheduler.ChannelKind, operation string
 	case scheduler.ChannelKindVectors:
 		return "embedding"
 	}
-	if c != nil && c.Request != nil && c.Request.URL != nil {
-		path := strings.ToLower(c.Request.URL.Path)
+	if c != nil && httpbridge.Request(c) != nil && httpbridge.Request(c).URL != nil {
+		path := strings.ToLower(httpbridge.Request(c).URL.Path)
 		if strings.Contains(path, "count_tokens") {
 			return "count_tokens"
 		}

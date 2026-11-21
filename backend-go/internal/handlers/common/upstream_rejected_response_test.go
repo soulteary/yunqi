@@ -7,11 +7,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/types"
 	"github.com/soulteary/yunqi/internal/warmup"
-	"github.com/gin-gonic/gin"
 )
 
 // 回归：预检识别的请求侧拒绝（UpstreamRequestRejectedError）终态化后，
@@ -20,7 +21,6 @@ import (
 // 返回且无人补写，客户端拿到 200 + 零字节——正是该提交要修的空 200 模式。
 // 用真实 TryUpstreamWithAllKeys 驱动执行器分支，断言错误体确实写出。
 func TestRequestRejectedWritesClientResponse(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	cases := []struct {
 		name         string
@@ -62,9 +62,9 @@ func TestRequestRejectedWritesClientResponse(t *testing.T) {
 			t.Cleanup(cleanup)
 
 			w := httptest.NewRecorder()
-			c, _ := gin.CreateTestContext(w)
+			c, _ := httpbridge.TestContext(w)
 			reqBody := `{"model":"test-model","messages":[{"role":"user","content":"hi"}]}`
-			c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(reqBody))
+			httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(reqBody)))
 
 			cfg := cfgManager.GetConfig()
 			upstream := &cfg.Upstream[0]
@@ -88,13 +88,13 @@ func TestRequestRejectedWritesClientResponse(t *testing.T) {
 				nil,
 				true,
 				nextKey,
-				func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
-					return http.NewRequestWithContext(c.Request.Context(), http.MethodPost, upstreamCopy.BaseURL+"/v1/chat/completions", strings.NewReader(reqBody))
+				func(c fiber.Ctx, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
+					return http.NewRequestWithContext(httpbridge.Request(c).Context(), http.MethodPost, upstreamCopy.BaseURL+"/v1/chat/completions", strings.NewReader(reqBody))
 				},
 				func(apiKey string) {},
 				func(url string) {},
 				func(url string) {},
-				func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
+				func(c fiber.Ctx, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 					_ = resp.Body.Close()
 					// 模拟 chat/gemini 预检已识别的请求侧拒绝：真实预检链路
 					// （RequestSideStreamError → ClassifyPreflightStreamError）
@@ -130,7 +130,6 @@ func TestRequestRejectedWritesClientResponse(t *testing.T) {
 // RespondUpstreamRequestRejected 的字段兜底：type/code 缺失时逐级回退，
 // message 缺失时回退到 Error() 摘要，保证错误体永远可解析且非空。
 func TestRespondUpstreamRequestRejectedFallbacks(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	cases := []struct {
 		name         string
@@ -156,7 +155,7 @@ func TestRespondUpstreamRequestRejectedFallbacks(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
-			c, _ := gin.CreateTestContext(w)
+			c, _ := httpbridge.TestContext(w)
 			RespondUpstreamRequestRejected(c, "Chat", tc.rejected)
 			if w.Code != http.StatusBadRequest {
 				t.Fatalf("状态码 = %d, want 400", w.Code)

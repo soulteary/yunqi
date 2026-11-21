@@ -8,9 +8,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	corecopilot "github.com/soulteary/yunqi/internal/copilot"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/httpclient"
-	"github.com/gin-gonic/gin"
 )
 
 var oauthRequestTimeout = 30 * time.Second
@@ -45,108 +46,109 @@ func oauthHTTPClient(proxyURL string) *http.Client {
 	return httpclient.GetManager().NewStandardClient(oauthRequestTimeout, false, proxyURL)
 }
 
-func bindOptionalOAuthRequest(c *gin.Context, out interface{}) bool {
-	if c.Request.Body == nil || c.Request.ContentLength == 0 {
+func bindOptionalOAuthRequest(c fiber.Ctx, out interface{}) bool {
+	if httpbridge.Request(c).Body == nil || httpbridge.Request(c).ContentLength == 0 {
 		return true
 	}
-	if err := c.ShouldBindJSON(out); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+	if err := httpbridge.BindJSON(c, out); err != nil {
+		httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "invalid request body"})
 		return false
 	}
 	return true
 }
 
 // RequestDeviceCode 发起 GitHub Copilot OAuth Device Flow。
-func RequestDeviceCode() gin.HandlerFunc {
-	return func(c *gin.Context) {
+func RequestDeviceCode() fiber.Handler {
+	return func(c fiber.Ctx) error {
 		var req deviceCodeRequest
 		if !bindOptionalOAuthRequest(c, &req) {
-			return
+			return nil
 		}
 
-		ctx, cancel := context.WithTimeout(c.Request.Context(), oauthRequestTimeout)
+		ctx, cancel := context.WithTimeout(httpbridge.Request(c).Context(), oauthRequestTimeout)
 		defer cancel()
 
-		log.Printf("[Copilot-OAuth] 请求 GitHub device code: ip=%s timeout=%s", c.ClientIP(), oauthRequestTimeout)
+		log.Printf("[Copilot-OAuth] 请求 GitHub device code: ip=%s timeout=%s", httpbridge.ClientIP(c), oauthRequestTimeout)
 		client := newOAuthClient(oauthHTTPClient(req.ProxyURL))
 		deviceCode, err := client.RequestDeviceCode(ctx)
 		if err != nil {
-			log.Printf("[Copilot-OAuth] GitHub device code 请求失败: ip=%s error=%v", c.ClientIP(), err)
-			c.JSON(http.StatusBadGateway, gin.H{"error": oauthErrorMessage(err)})
-			return
+			log.Printf("[Copilot-OAuth] GitHub device code 请求失败: ip=%s error=%v", httpbridge.ClientIP(c), err)
+			httpbridge.JSON(c, http.StatusBadGateway, fiber.Map{"error": oauthErrorMessage(err)})
+			return nil
 		}
 
-		log.Printf("[Copilot-OAuth] GitHub device code 请求成功: ip=%s expiresIn=%d interval=%d", c.ClientIP(), deviceCode.ExpiresIn, deviceCode.Interval)
-		c.JSON(http.StatusOK, gin.H{
+		log.Printf("[Copilot-OAuth] GitHub device code 请求成功: ip=%s expiresIn=%d interval=%d", httpbridge.ClientIP(c), deviceCode.ExpiresIn, deviceCode.Interval)
+		httpbridge.JSON(c, http.StatusOK, fiber.Map{
 			"deviceCode":      deviceCode.DeviceCode,
 			"userCode":        deviceCode.UserCode,
 			"verificationUri": deviceCode.VerificationURI,
 			"expiresIn":       deviceCode.ExpiresIn,
 			"interval":        deviceCode.Interval,
 		})
+		return nil
 	}
 }
 
 // PollAccessToken 轮询 GitHub OAuth access token。
-func PollAccessToken() gin.HandlerFunc {
-	return func(c *gin.Context) {
+func PollAccessToken() fiber.Handler {
+	return func(c fiber.Ctx) error {
 		var req tokenRequest
-		if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.DeviceCode) == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "deviceCode is required"})
-			return
+		if err := httpbridge.BindJSON(c, &req); err != nil || strings.TrimSpace(req.DeviceCode) == "" {
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "deviceCode is required"})
+			return nil
 		}
 
-		ctx, cancel := context.WithTimeout(c.Request.Context(), oauthRequestTimeout)
+		ctx, cancel := context.WithTimeout(httpbridge.Request(c).Context(), oauthRequestTimeout)
 		defer cancel()
 
 		client := newOAuthClient(oauthHTTPClient(req.ProxyURL))
 		token, err := client.PollAccessToken(ctx, req.DeviceCode)
 		if err != nil {
-			log.Printf("[Copilot-OAuth] GitHub access token 轮询失败: ip=%s error=%v", c.ClientIP(), err)
-			c.JSON(http.StatusBadGateway, gin.H{"error": oauthErrorMessage(err)})
-			return
+			log.Printf("[Copilot-OAuth] GitHub access token 轮询失败: ip=%s error=%v", httpbridge.ClientIP(c), err)
+			httpbridge.JSON(c, http.StatusBadGateway, fiber.Map{"error": oauthErrorMessage(err)})
+			return nil
 		}
 		if token.Error != "" {
-			c.JSON(http.StatusOK, gin.H{
+			httpbridge.JSON(c, http.StatusOK, fiber.Map{
 				"error":            token.Error,
 				"errorDescription": token.ErrorDescription,
 			})
-			return
+			return nil
 		}
-
-		c.JSON(http.StatusOK, gin.H{
+		httpbridge.JSON(c, http.StatusOK, fiber.Map{
 			"accessToken": token.AccessToken,
 			"tokenType":   token.TokenType,
 			"scope":       token.Scope,
 		})
+		return nil
 	}
 }
 
 // VerifyToken 验证 GitHub OAuth token 并返回用户信息。
-func VerifyToken() gin.HandlerFunc {
-	return func(c *gin.Context) {
+func VerifyToken() fiber.Handler {
+	return func(c fiber.Ctx) error {
 		var req verifyRequest
-		if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.AccessToken) == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "accessToken is required"})
-			return
+		if err := httpbridge.BindJSON(c, &req); err != nil || strings.TrimSpace(req.AccessToken) == "" {
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "accessToken is required"})
+			return nil
 		}
 
-		ctx, cancel := context.WithTimeout(c.Request.Context(), oauthRequestTimeout)
+		ctx, cancel := context.WithTimeout(httpbridge.Request(c).Context(), oauthRequestTimeout)
 		defer cancel()
 
 		client := newOAuthClient(oauthHTTPClient(req.ProxyURL))
 		user, err := client.VerifyUser(ctx, req.AccessToken)
 		if err != nil {
-			log.Printf("[Copilot-OAuth] GitHub token 验证失败: ip=%s error=%v", c.ClientIP(), err)
-			c.JSON(http.StatusBadRequest, gin.H{"error": oauthErrorMessage(err)})
-			return
+			log.Printf("[Copilot-OAuth] GitHub token 验证失败: ip=%s error=%v", httpbridge.ClientIP(c), err)
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": oauthErrorMessage(err)})
+			return nil
 		}
-
-		c.JSON(http.StatusOK, gin.H{
+		httpbridge.JSON(c, http.StatusOK, fiber.Map{
 			"login":     user.Login,
 			"id":        user.ID,
 			"avatarUrl": user.AvatarURL,
 			"htmlUrl":   user.HTMLURL,
 		})
+		return nil
 	}
 }

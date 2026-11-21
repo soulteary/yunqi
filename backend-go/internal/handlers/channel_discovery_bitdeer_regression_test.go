@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 // bitdeerRegressionModels 模拟 bitdeer 目录的 API 原始顺序：免费 chat 模型排在
@@ -82,14 +82,14 @@ func bitdeerUpstream() *httptest.Server {
 
 func runFastDiscovery(t *testing.T, upstream *httptest.Server) *httptest.ResponseRecorder {
 	t.Helper()
-	gin.SetMode(gin.TestMode)
-	router := gin.New()
-	router.POST("/api/channel-discovery-fast", ChannelDiscoveryFast(nil))
+
+	router := httpbridge.NewApp()
+	router.Post("/api/channel-discovery-fast", ChannelDiscoveryFast(nil))
 	body := []byte(`{"baseUrls":["` + upstream.URL + `"],"apiKeys":["sk-bitdeer-test"]}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/channel-discovery-fast", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, req)
+	httpbridge.Handler(router).ServeHTTP(recorder, req)
 	return recorder
 }
 

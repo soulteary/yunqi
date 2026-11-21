@@ -5,14 +5,16 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v3"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
-func newTestContext() *gin.Context {
-	gin.SetMode(gin.TestMode)
+func newTestContext() fiber.Ctx {
+
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request, _ = http.NewRequest("POST", "/", nil)
+	c, _ := httpbridge.TestContext(w)
+	fiberRequest, _ := http.NewRequest("POST", "/", nil)
+	httpbridge.SetRequest(c, fiberRequest)
 	return c
 }
 

@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/soulteary/yunqi/internal/config"
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 func setupChatConfigManager(t *testing.T, upstream []config.UpstreamConfig) *config.ConfigManager {
@@ -64,13 +64,12 @@ func TestGetUpstreams_IncludesUnifiedStateFields(t *testing.T) {
 	channel.SetCompatSeed(config.TraitNormalizeNonstandardChatRoles, true)
 	cm := setupChatConfigManager(t, []config.UpstreamConfig{channel})
 
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
-	r.GET("/chat/channels", GetUpstreams(cm))
+	r := httpbridge.NewApp()
+	r.Get("/chat/channels", GetUpstreams(cm))
 
 	req := httptest.NewRequest(http.MethodGet, "/chat/channels", nil)
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", w.Code)
@@ -108,13 +107,12 @@ func TestPingChannel_WithoutBaseURLReturnsError(t *testing.T) {
 		ServiceType: "openai",
 	}})
 
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
-	r.GET("/chat/ping/:id", PingChannel(cm))
+	r := httpbridge.NewApp()
+	r.Get("/chat/ping/:id", PingChannel(cm))
 
 	req := httptest.NewRequest(http.MethodGet, "/chat/ping/0", nil)
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK && w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 200 or 400, body=%s", w.Code, w.Body.String())
@@ -135,13 +133,12 @@ func TestPingAllChannels_WithoutBaseURLMarksChannelError(t *testing.T) {
 		ServiceType: "openai",
 	}})
 
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
-	r.GET("/chat/ping", PingAllChannels(cm))
+	r := httpbridge.NewApp()
+	r.Get("/chat/ping", PingAllChannels(cm))
 
 	req := httptest.NewRequest(http.MethodGet, "/chat/ping", nil)
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200, body=%s", w.Code, w.Body.String())

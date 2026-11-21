@@ -5,15 +5,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 // SawToolCall 初始为 false，工具调用活动标记后置真（docs/specs/tool-call-capability.md §4.4）。
 func TestStreamObserverSawToolCall(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+
+	c, _ := httpbridge.TestContext(httptest.NewRecorder())
 	observer := &StreamTimeoutObserver{}
-	c.Set(streamTimeoutObservationKey, observer)
+	httpbridge.SetValue(c, streamTimeoutObservationKey, observer)
 
 	if observer.SawToolCall() {
 		t.Fatal("新建 observer 的 SawToolCall 应为 false")

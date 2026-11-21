@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/soulteary/yunqi/internal/errutil"
 	"github.com/google/uuid"
+	"github.com/soulteary/yunqi/internal/errutil"
 )
 
 // ── OutputMode 枚举 ──

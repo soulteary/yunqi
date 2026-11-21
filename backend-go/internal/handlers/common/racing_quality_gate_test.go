@@ -5,11 +5,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/autopilot"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/racing"
 	"github.com/soulteary/yunqi/internal/scheduler"
-	"github.com/gin-gonic/gin"
 )
 
 // 竞速质量闸门测试：伪工具调用标记检测 + 软裁决边界。
@@ -44,18 +45,18 @@ func TestDetectPseudoToolCallMarker(t *testing.T) {
 	}
 }
 
-func newQualityGateTestContext(t *testing.T, withGate bool, requestBody string) (*gin.Context, *httptest.ResponseRecorder) {
+func newQualityGateTestContext(t *testing.T, withGate bool, requestBody string) (fiber.Ctx, *httptest.ResponseRecorder) {
 	t.Helper()
-	gin.SetMode(gin.TestMode)
+
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest("POST", "/v1/responses", strings.NewReader(requestBody))
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest("POST", "/v1/responses", strings.NewReader(requestBody)))
 	if requestBody != "" {
-		c.Set("requestBodyBytes", []byte(requestBody))
+		httpbridge.SetValue(c, "requestBodyBytes", []byte(requestBody))
 	}
 	if withGate {
-		c.Set(racing.ContextKeyGate, racing.NewGate())
-		c.Set(racing.ContextKeyRole, racing.RoleShadow)
+		httpbridge.SetValue(c, racing.ContextKeyGate, racing.NewGate())
+		httpbridge.SetValue(c, racing.ContextKeyRole, racing.RoleShadow)
 	}
 	return c, w
 }

@@ -4,12 +4,13 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
-func responsesReasoningTestContext() *gin.Context {
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+func responsesReasoningTestContext() fiber.Ctx {
+	c, _ := httpbridge.TestContext(httptest.NewRecorder())
 	return c
 }
 

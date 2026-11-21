@@ -2,7 +2,7 @@
 FROM --platform=$BUILDPLATFORM oven/bun:alpine AS bun-runtime
 
 # --- 阶段 2: 构建阶段（使用构建平台架构，Go 交叉编译目标平台）---
-FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS builder
 
 ARG VERSION
 ARG TARGETOS

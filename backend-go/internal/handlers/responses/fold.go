@@ -11,15 +11,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/converters"
 	"github.com/soulteary/yunqi/internal/handlers/common"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/providers"
 	"github.com/soulteary/yunqi/internal/session"
 	"github.com/soulteary/yunqi/internal/thinkingcache"
 	"github.com/soulteary/yunqi/internal/types"
 	"github.com/soulteary/yunqi/internal/utils"
-	"github.com/gin-gonic/gin"
 )
 
 const (
@@ -45,7 +46,7 @@ type responsesFoldBufferedOutput struct {
 }
 
 func handleFoldedResponsesStreamSuccess(
-	c *gin.Context,
+	c fiber.Ctx,
 	resp *http.Response,
 	provider *providers.ResponsesProvider,
 	upstream *config.UpstreamConfig,
@@ -70,8 +71,8 @@ func handleFoldedResponsesStreamSuccess(
 
 	emitter := newResponsesFoldHTTPEmitter(c, resp, sessionManager, originalReq)
 	var codexCtx *converters.CodexToolContext
-	if hoisted, ok := c.Get("codex_additional_tools_hoisted"); ok && hoisted == true {
-		if ctxVal, ok := c.Get("codex_tool_context"); ok {
+	if hoisted, ok := httpbridge.Value(c, "codex_additional_tools_hoisted"); ok && hoisted == true {
+		if ctxVal, ok := httpbridge.Value(c, "codex_tool_context"); ok {
 			if typed, ok := ctxVal.(converters.CodexToolContext); ok {
 				codexCtx = &typed
 			}
@@ -82,7 +83,7 @@ func handleFoldedResponsesStreamSuccess(
 		if err != nil {
 			return nil, nil, err
 		}
-		req, _, err := provider.ConvertBodyToProviderRequest(c, upstream, apiKey, bodyBytes, c.Request.URL.Path)
+		req, _, err := provider.ConvertBodyToProviderRequest(c, upstream, apiKey, bodyBytes, httpbridge.Request(c).URL.Path)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -427,7 +428,7 @@ func remapFoldCodexEntry(ctx *converters.CodexToolContext, entry *responsesFoldB
 }
 
 type responsesFoldHTTPEmitter struct {
-	c                  *gin.Context
+	c                  fiber.Ctx
 	resp               *http.Response
 	sessionManager     *session.SessionManager
 	originalReq        *types.ResponsesRequest
@@ -445,7 +446,7 @@ type responsesFoldHTTPEmitter struct {
 }
 
 func newResponsesFoldHTTPEmitter(
-	c *gin.Context,
+	c fiber.Ctx,
 	resp *http.Response,
 	sessionManager *session.SessionManager,
 	originalReq *types.ResponsesRequest,
@@ -547,12 +548,12 @@ func (e *responsesFoldHTTPEmitter) commit() error {
 	if !common.RacingClaimClientCommitForStream(e.c, e.preflightText.String()) {
 		return common.ErrRacingSuperseded
 	}
-	utils.ForwardResponseHeaders(e.resp.Header, e.c.Writer)
-	e.c.Header("Content-Type", "text/event-stream")
-	e.c.Header("Cache-Control", "no-cache")
-	e.c.Header("Connection", "keep-alive")
-	e.c.Header("X-Accel-Buffering", "no")
-	e.c.Status(e.resp.StatusCode)
+	utils.ForwardResponseHeaders(e.resp.Header, httpbridge.Writer(e.c))
+	httpbridge.Header(e.c, "Content-Type", "text/event-stream")
+	httpbridge.Header(e.c, "Cache-Control", "no-cache")
+	httpbridge.Header(e.c, "Connection", "keep-alive")
+	httpbridge.Header(e.c, "X-Accel-Buffering", "no")
+	httpbridge.Status(e.c, e.resp.StatusCode)
 	e.committed = true
 	for _, event := range e.preflightEvents {
 		if err := e.writeEvent(event); err != nil {
@@ -566,10 +567,10 @@ func (e *responsesFoldHTTPEmitter) commit() error {
 func (e *responsesFoldHTTPEmitter) writeEvent(event string) error {
 	e.outputCollector.processEvent(event)
 	e.reasoningCollector.ProcessEvent(event)
-	if _, err := e.c.Writer.Write([]byte(event)); err != nil {
+	if _, err := httpbridge.Writer(e.c).Write([]byte(event)); err != nil {
 		return err
 	}
-	if flusher, ok := e.c.Writer.(http.Flusher); ok {
+	if flusher, ok := httpbridge.Writer(e.c).(http.Flusher); ok {
 		flusher.Flush()
 	}
 	return nil

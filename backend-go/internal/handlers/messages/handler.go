@@ -9,25 +9,26 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/errutil"
 	"github.com/soulteary/yunqi/internal/handlers/common"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/middleware"
 	"github.com/soulteary/yunqi/internal/providers"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/types"
 	"github.com/soulteary/yunqi/internal/utils"
-	"github.com/gin-gonic/gin"
 )
 
 // Handler Messages API 代理处理器
 // 支持多渠道调度：当配置多个渠道时自动启用
-func Handler(envCfg *config.EnvConfig, cfgManager *config.ConfigManager, channelScheduler *scheduler.ChannelScheduler) gin.HandlerFunc {
-	return gin.HandlerFunc(func(c *gin.Context) {
+func Handler(envCfg *config.EnvConfig, cfgManager *config.ConfigManager, channelScheduler *scheduler.ChannelScheduler) fiber.Handler {
+	return fiber.Handler(func(c fiber.Ctx) error {
 		// 先进行认证
-		middleware.ProxyAuthMiddleware(envCfg)(c)
-		if c.IsAborted() {
-			return
+		middleware.AuthenticateProxy(c, envCfg)
+		if httpbridge.IsAborted(c) {
+			return nil
 		}
 
 		startTime := time.Now()
@@ -35,7 +36,7 @@ func Handler(envCfg *config.EnvConfig, cfgManager *config.ConfigManager, channel
 		// 读取请求体
 		bodyBytes, err := common.ReadRequestBody(c, envCfg.MaxRequestBodySize)
 		if err != nil {
-			return
+			return nil
 		}
 
 		earlyAffinityBody := common.NormalizeMetadataUserID(bodyBytes)
@@ -56,7 +57,7 @@ func Handler(envCfg *config.EnvConfig, cfgManager *config.ConfigManager, channel
 		_ = thinkingModified // 保留以便未来扩展（如需在 handler 层面做额外处理）
 
 		// 入口保留原始请求体；按渠道在发往上游前决定是否做渠道级预处理（如规范化 metadata.user_id）
-		c.Set("requestBodyBytes", bodyBytes)
+		httpbridge.SetValue(c, "requestBodyBytes", bodyBytes)
 
 		// 解析请求
 		var claudeReq types.ClaudeRequest
@@ -69,7 +70,7 @@ func Handler(envCfg *config.EnvConfig, cfgManager *config.ConfigManager, channel
 		userID := utils.ExtractUnifiedSessionID(c, affinityBody)
 		agentCtx := utils.ExtractAgentContext(c, bodyBytes)
 		common.SetRequestLogContextWithAgent(c, userID, countUserMessages(claudeReq.Messages), agentCtx)
-		c.Set("agentContext", agentCtx)
+		httpbridge.SetValue(c, "agentContext", agentCtx)
 
 		isTitleRequest := isClaudeCodeTitleRequest(bodyBytes)
 		isRecapRequest := isClaudeCodeRecapRequest(bodyBytes)
@@ -85,20 +86,20 @@ func Handler(envCfg *config.EnvConfig, cfgManager *config.ConfigManager, channel
 		// 提取用户最后一条消息用于对话标题 fallback
 		if !isTitleRequest && !isRecapRequest {
 			lastUserMessages := extractRecentUserMessages(claudeReq.Messages)
-			c.Set("lastUserMessages", lastUserMessages)
-			c.Set("lastUserMessage", strings.Join(lastUserMessages, " / "))
-			c.Set("userMessageCount", countUserMessages(claudeReq.Messages))
+			httpbridge.SetValue(c, "lastUserMessages", lastUserMessages)
+			httpbridge.SetValue(c, "lastUserMessage", strings.Join(lastUserMessages, " / "))
+			httpbridge.SetValue(c, "userMessageCount", countUserMessages(claudeReq.Messages))
 		}
 
 		// 记录原始请求信息（仅在入口处记录一次）
 		common.LogOriginalRequest(c, bodyBytes, envCfg, "Messages")
 
 		if handleClaudeDesktopConnectionTest(c, claudeReq) {
-			return
+			return nil
 		}
 
 		if handleClaudeCodeModelSwitchProbe(c, claudeReq) {
-			return
+			return nil
 		}
 
 		operation := "completion"
@@ -117,12 +118,13 @@ func Handler(envCfg *config.EnvConfig, cfgManager *config.ConfigManager, channel
 		} else {
 			handleSingleChannel(c, envCfg, cfgManager, channelScheduler, bodyBytes, claudeReq, startTime)
 		}
+		return nil
 	})
 }
 
 // handleMultiChannel 处理多渠道代理请求
 func handleMultiChannel(
-	c *gin.Context,
+	c fiber.Ctx,
 	envCfg *config.EnvConfig,
 	cfgManager *config.ConfigManager,
 	channelScheduler *scheduler.ChannelScheduler,
@@ -139,7 +141,7 @@ func handleMultiChannel(
 	common.ApplyAgentModelProfile(contextRequirement, claudeReq.Model, cfg)
 	common.LogContextEstimate(c, "Messages", contextRequirement)
 	agentRole := ""
-	if ac := common.AgentContextFromGin(c); ac != nil {
+	if ac := common.AgentContextFromFiber(c); ac != nil {
 		agentRole = ac.AgentRole
 	}
 	common.HandleMultiChannelFailoverWithContextRequirement(
@@ -153,7 +155,7 @@ func handleMultiChannel(
 		contextRequirement,
 		claudeReq.Stream,
 		agentRole,
-		func(c *gin.Context, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
+		func(c fiber.Ctx, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
 			upstream := selection.Upstream
 			executionRoute := selection.Route
 
@@ -186,7 +188,7 @@ func handleMultiChannel(
 				func(upstream *config.UpstreamConfig, failedKeys map[string]bool) (string, error) {
 					return cfgManager.GetNextAPIKey(upstream, failedKeys, common.ChannelAPIType(scheduler.ChannelKind(executionRoute.Kind)))
 				},
-				func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
+				func(c fiber.Ctx, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
 					req, _, err := provider.ConvertToProviderRequest(c, upstreamCopy, apiKey)
 					return req, err
 				},
@@ -201,7 +203,7 @@ func handleMultiChannel(
 				func(url string) {
 					channelScheduler.MarkURLSuccessForRoute(executionRoute, url)
 				},
-				func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
+				func(c fiber.Ctx, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 					if claudeReq.Stream {
 						timeouts := common.ResolveStreamPreflightTimeouts(upstreamCopy, metricsManager.GetCircuitBreakerConfig())
 						return common.HandleStreamResponse(c, resp, provider, envCfg, startTime, upstreamCopy, actualRequestBody, claudeReq.Model, timeouts)
@@ -217,7 +219,7 @@ func handleMultiChannel(
 				common.WithExecutionModel(selection.ExecutionModel),
 			)
 
-			responseText, _ := c.Get("responseText")
+			responseText, _ := httpbridge.Value(c, "responseText")
 			return common.MultiChannelAttemptResult{
 				Route:             executionRoute,
 				Handled:           handled,
@@ -252,7 +254,7 @@ func handleMultiChannel(
 				}
 			}
 		},
-		func(ctx *gin.Context, failoverErr *common.FailoverError, lastError error) {
+		func(ctx fiber.Ctx, failoverErr *common.FailoverError, lastError error) {
 			common.HandleAllChannelsFailed(ctx, failoverErr, lastError, "Messages")
 		},
 	)
@@ -260,7 +262,7 @@ func handleMultiChannel(
 
 // handleSingleChannel 处理单渠道代理请求
 func handleSingleChannel(
-	c *gin.Context,
+	c fiber.Ctx,
 	envCfg *config.EnvConfig,
 	cfgManager *config.ConfigManager,
 	channelScheduler *scheduler.ChannelScheduler,
@@ -270,7 +272,7 @@ func handleSingleChannel(
 ) {
 	upstream, channelIndex, err := cfgManager.GetCurrentUpstreamWithIndex()
 	if err != nil {
-		c.JSON(503, gin.H{
+		httpbridge.JSON(c, 503, fiber.Map{
 			"error": "未配置任何渠道，请先在管理界面添加渠道",
 			"code":  "NO_UPSTREAM",
 		})
@@ -278,7 +280,7 @@ func handleSingleChannel(
 	}
 
 	if len(upstream.APIKeys) == 0 {
-		c.JSON(503, gin.H{
+		httpbridge.JSON(c, 503, fiber.Map{
 			"error": fmt.Sprintf("当前渠道 \"%s\" 未配置API密钥", upstream.Name),
 			"code":  "NO_API_KEYS",
 		})
@@ -290,7 +292,7 @@ func handleSingleChannel(
 	common.ApplyAgentModelProfile(contextRequirement, claudeReq.Model, cfg)
 	common.LogContextEstimate(c, "Messages", contextRequirement)
 	if err := channelScheduler.ValidateUpstreamContext(scheduler.ChannelKindMessages, claudeReq.Model, upstream, contextRequirement); err != nil {
-		c.JSON(400, gin.H{
+		httpbridge.JSON(c, 400, fiber.Map{
 			"error": err.Error(),
 			"code":  "CONTEXT_WINDOW_EXCEEDED",
 		})
@@ -299,7 +301,7 @@ func handleSingleChannel(
 
 	provider := providers.GetProvider(upstream.ServiceType)
 	if provider == nil {
-		c.JSON(400, gin.H{"error": "Unsupported service type"})
+		httpbridge.JSON(c, 400, fiber.Map{"error": "Unsupported service type"})
 		return
 	}
 
@@ -324,7 +326,7 @@ func handleSingleChannel(
 		func(upstream *config.UpstreamConfig, failedKeys map[string]bool) (string, error) {
 			return cfgManager.GetNextAPIKey(upstream, failedKeys, "Messages")
 		},
-		func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
+		func(c fiber.Ctx, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
 			req, _, err := provider.ConvertToProviderRequest(c, upstreamCopy, apiKey)
 			return req, err
 		},
@@ -335,7 +337,7 @@ func handleSingleChannel(
 		},
 		nil,
 		nil,
-		func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
+		func(c fiber.Ctx, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 			if claudeReq.Stream {
 				timeouts := common.ResolveStreamPreflightTimeouts(upstreamCopy, metricsManager.GetCircuitBreakerConfig())
 				return common.HandleStreamResponse(c, resp, provider, envCfg, startTime, upstreamCopy, actualRequestBody, claudeReq.Model, timeouts)
@@ -357,7 +359,7 @@ func handleSingleChannel(
 			userMessageCount := countUserMessages(claudeReq.Messages)
 			agentRole := ""
 			affinityUserID := userID
-			agentCtx := common.AgentContextFromGin(c)
+			agentCtx := common.AgentContextFromFiber(c)
 			if agentCtx != nil {
 				agentRole = agentCtx.AgentRole
 				if agentRole == "subagent" {
@@ -371,7 +373,7 @@ func handleSingleChannel(
 					scheduler.MaskUserIDForLog(userID), claudeReq.Model, channelIndex, userMessageCount, lastUserMessage != "")
 			}
 		} else if isTitleRequest {
-			responseText, _ := c.Get("responseText")
+			responseText, _ := httpbridge.Value(c, "responseText")
 			title := extractTitleFromResponseText(responseTextString(responseText))
 			updated := channelScheduler.UpdateConversationTitle(scheduler.ChannelKindMessages, userID, title)
 			if envCfg.ShouldLog("debug") {
@@ -379,7 +381,7 @@ func handleSingleChannel(
 					scheduler.MaskUserIDForLog(userID), title, updated, len(responseTextString(responseText)))
 			}
 		} else if isRecapRequest {
-			responseText, _ := c.Get("responseText")
+			responseText, _ := httpbridge.Value(c, "responseText")
 			recap := extractRecapFromResponseText(responseTextString(responseText))
 			updated := channelScheduler.UpdateConversationRecap(scheduler.ChannelKindMessages, userID, recap)
 			if envCfg.ShouldLog("debug") {
@@ -396,7 +398,7 @@ func handleSingleChannel(
 
 // handleNormalResponse 处理非流式响应
 func handleNormalResponse(
-	c *gin.Context,
+	c fiber.Ctx,
 	resp *http.Response,
 	provider providers.Provider,
 	envCfg *config.EnvConfig,
@@ -411,7 +413,7 @@ func handleNormalResponse(
 	// 后续 ConvertToClaudeResponse 转换与原生非流式路径完全一致。
 	bodyBytes, err := common.ReadUpstreamNonStreamBody(c, resp, upstream.ServiceType)
 	if err != nil {
-		c.JSON(500, gin.H{"error": "Failed to read response"})
+		httpbridge.JSON(c, 500, fiber.Map{"error": "Failed to read response"})
 		return nil, err
 	}
 
@@ -447,7 +449,7 @@ func handleNormalResponse(
 		common.RequestLogf(c, "[Messages-EmptyResponse] 上游返回空响应（非流式，Key: %s），触发 failover", utils.MaskAPIKey(apiKey))
 		return nil, common.ErrEmptyNonStreamResponse
 	}
-	c.Set("responseText", extractClaudeResponseText(claudeResp.Content))
+	httpbridge.SetValue(c, "responseText", extractClaudeResponseText(claudeResp.Content))
 
 	// Token 补全逻辑
 	if claudeResp.Usage == nil {
@@ -488,11 +490,11 @@ func handleNormalResponse(
 		}
 	}
 
-	// 监听客户端断开连接
-	ctx := c.Request.Context()
-	go func() {
-		<-ctx.Done()
-		if !c.Writer.Written() {
+	// 在当前处理函数返回时检查取消状态，不能让后台任务持有池化的 Fiber 上下文。
+	// net/http 会在响应完成后取消请求，此时 Fiber 上下文可能已经释放或复用。
+	ctx := httpbridge.Request(c).Context()
+	defer func() {
+		if ctx.Err() != nil && !httpbridge.Writer(c).Written() {
 			if envCfg.EnableResponseLogs {
 				responseTime := time.Since(startTime).Milliseconds()
 				common.RequestLogf(c, "[Messages-Timing] 响应中断: %dms, 状态: %d", responseTime, resp.StatusCode)
@@ -505,14 +507,13 @@ func handleNormalResponse(
 		return nil, common.ErrRacingSuperseded
 	}
 	// 转发上游响应头
-	utils.ForwardResponseHeaders(resp.Header, c.Writer)
+	utils.ForwardResponseHeaders(resp.Header, httpbridge.Writer(c))
 	if normalProtocolDebugEnabled(envCfg) {
-		common.RequestLogf(c, "[Messages-Protocol-Debug] 写回前响应头: client_content_type=%q", c.Writer.Header().Get("Content-Type"))
+		common.RequestLogf(c, "[Messages-Protocol-Debug] 写回前响应头: client_content_type=%q", httpbridge.Writer(c).Header().Get("Content-Type"))
 	}
-
-	c.JSON(200, claudeResp)
+	httpbridge.JSON(c, 200, claudeResp)
 	if normalProtocolDebugEnabled(envCfg) {
-		common.RequestLogf(c, "[Messages-Protocol-Debug] 写回后响应头: client_content_type=%q, written=%t", c.Writer.Header().Get("Content-Type"), c.Writer.Written())
+		common.RequestLogf(c, "[Messages-Protocol-Debug] 写回后响应头: client_content_type=%q, written=%t", httpbridge.Writer(c).Header().Get("Content-Type"), httpbridge.Writer(c).Written())
 	}
 
 	if envCfg.EnableResponseLogs {
@@ -523,7 +524,7 @@ func handleNormalResponse(
 	return claudeResp.Usage, nil
 }
 
-func logNormalProtocolDebug(c *gin.Context, resp *http.Response, bodyBytes []byte, envCfg *config.EnvConfig) {
+func logNormalProtocolDebug(c fiber.Ctx, resp *http.Response, bodyBytes []byte, envCfg *config.EnvConfig) {
 	if !normalProtocolDebugEnabled(envCfg) || resp == nil {
 		return
 	}
@@ -534,7 +535,7 @@ func logNormalProtocolDebug(c *gin.Context, resp *http.Response, bodyBytes []byt
 	}
 
 	common.RequestLogf(c, "[Messages-Protocol-Debug] stream=false, client_accept=%q, upstream_accept=%q, upstream_content_type=%q, status=%d, body_len=%d, json_valid=%t, looks_sse=%t, body前300字节=%q, body后300字节=%q",
-		c.GetHeader("Accept"),
+		httpbridge.GetHeader(c, "Accept"),
 		upstreamAccept,
 		resp.Header.Get("Content-Type"),
 		resp.StatusCode,
@@ -685,7 +686,7 @@ var claudeDesktopConnectionTestDeltas = []string{
 	" on?",
 }
 
-func handleClaudeDesktopConnectionTest(c *gin.Context, req types.ClaudeRequest) bool {
+func handleClaudeDesktopConnectionTest(c fiber.Ctx, req types.ClaudeRequest) bool {
 	if !isClaudeDesktopConnectionTestRequest(req) {
 		return false
 	}
@@ -695,16 +696,15 @@ func handleClaudeDesktopConnectionTest(c *gin.Context, req types.ClaudeRequest) 
 		writeClaudeDesktopConnectionTestStream(c, req.Model)
 		return true
 	}
-
-	c.JSON(http.StatusOK, gin.H{
+	httpbridge.JSON(c, http.StatusOK, fiber.Map{
 		"id":            "msg_ccx_connection_test",
 		"type":          "message",
 		"role":          "assistant",
 		"model":         req.Model,
-		"content":       []gin.H{{"type": "text", "text": claudeDesktopConnectionTestText}},
+		"content":       []fiber.Map{{"type": "text", "text": claudeDesktopConnectionTestText}},
 		"stop_reason":   "end_turn",
 		"stop_sequence": nil,
-		"usage": gin.H{
+		"usage": fiber.Map{
 			"input_tokens":                15,
 			"output_tokens":               14,
 			"cache_creation_input_tokens": 0,
@@ -727,22 +727,22 @@ func isClaudeDesktopConnectionTestRequest(req types.ClaudeRequest) bool {
 	return len(texts) == 1 && strings.TrimSpace(texts[0]) == "."
 }
 
-func writeClaudeDesktopConnectionTestStream(c *gin.Context, model string) {
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-	c.Header("X-Accel-Buffering", "no")
-	c.Status(http.StatusOK)
+func writeClaudeDesktopConnectionTestStream(c fiber.Ctx, model string) {
+	httpbridge.Header(c, "Content-Type", "text/event-stream")
+	httpbridge.Header(c, "Cache-Control", "no-cache")
+	httpbridge.Header(c, "Connection", "keep-alive")
+	httpbridge.Header(c, "X-Accel-Buffering", "no")
+	httpbridge.Status(c, http.StatusOK)
 
-	writeClaudeSSEEvent(c, "message_start", gin.H{
+	writeClaudeSSEEvent(c, "message_start", fiber.Map{
 		"type": "message_start",
-		"message": gin.H{
+		"message": fiber.Map{
 			"id":      "msg_ccx_connection_test",
 			"type":    "message",
 			"role":    "assistant",
 			"model":   model,
 			"content": []interface{}{},
-			"usage": gin.H{
+			"usage": fiber.Map{
 				"input_tokens":                15,
 				"output_tokens":               0,
 				"cache_creation_input_tokens": 0,
@@ -750,37 +750,37 @@ func writeClaudeDesktopConnectionTestStream(c *gin.Context, model string) {
 			},
 		},
 	})
-	writeClaudeSSEEvent(c, "content_block_start", gin.H{
+	writeClaudeSSEEvent(c, "content_block_start", fiber.Map{
 		"type":          "content_block_start",
 		"index":         0,
-		"content_block": gin.H{"type": "text", "text": ""},
+		"content_block": fiber.Map{"type": "text", "text": ""},
 	})
 	for _, delta := range claudeDesktopConnectionTestDeltas {
-		writeClaudeSSEEvent(c, "content_block_delta", gin.H{
+		writeClaudeSSEEvent(c, "content_block_delta", fiber.Map{
 			"type":  "content_block_delta",
 			"index": 0,
-			"delta": gin.H{"type": "text_delta", "text": delta},
+			"delta": fiber.Map{"type": "text_delta", "text": delta},
 		})
 	}
-	writeClaudeSSEEvent(c, "content_block_stop", gin.H{
+	writeClaudeSSEEvent(c, "content_block_stop", fiber.Map{
 		"type":  "content_block_stop",
 		"index": 0,
 	})
-	writeClaudeSSEEvent(c, "message_delta", gin.H{
+	writeClaudeSSEEvent(c, "message_delta", fiber.Map{
 		"type": "message_delta",
-		"delta": gin.H{
+		"delta": fiber.Map{
 			"stop_reason":   "end_turn",
 			"stop_sequence": nil,
 			"stop_details":  nil,
 		},
-		"usage": gin.H{
+		"usage": fiber.Map{
 			"input_tokens":                15,
 			"output_tokens":               14,
 			"cache_creation_input_tokens": 0,
 			"cache_read_input_tokens":     0,
 		},
 	})
-	writeClaudeSSEEvent(c, "message_stop", gin.H{
+	writeClaudeSSEEvent(c, "message_stop", fiber.Map{
 		"type": "message_stop",
 	})
 }
@@ -789,7 +789,7 @@ func writeClaudeDesktopConnectionTestStream(c *gin.Context, model string) {
 // 探针特征：max_tokens=1 + 单条短 user 消息 + 无 tools，用于验证目标模型可用性。
 // 部分上游（如 MiMo）在 max_tokens=1 下返回空 content，会被 Fuzzy 模式空响应拦截误判为故障，
 // 触发 failover 最终报错，导致模型切换失败。命中探针时直接返回内置最小非空响应，不请求上游。
-func handleClaudeCodeModelSwitchProbe(c *gin.Context, req types.ClaudeRequest) bool {
+func handleClaudeCodeModelSwitchProbe(c fiber.Ctx, req types.ClaudeRequest) bool {
 	if !isClaudeCodeModelSwitchProbe(req) {
 		return false
 	}
@@ -799,16 +799,15 @@ func handleClaudeCodeModelSwitchProbe(c *gin.Context, req types.ClaudeRequest) b
 		writeClaudeCodeModelSwitchProbeStream(c, req.Model)
 		return true
 	}
-
-	c.JSON(http.StatusOK, gin.H{
+	httpbridge.JSON(c, http.StatusOK, fiber.Map{
 		"id":            "msg_ccx_model_switch_probe",
 		"type":          "message",
 		"role":          "assistant",
 		"model":         req.Model,
-		"content":       []gin.H{{"type": "text", "text": claudeCodeModelSwitchProbeText}},
+		"content":       []fiber.Map{{"type": "text", "text": claudeCodeModelSwitchProbeText}},
 		"stop_reason":   "end_turn",
 		"stop_sequence": nil,
-		"usage": gin.H{
+		"usage": fiber.Map{
 			"input_tokens":                1,
 			"output_tokens":               1,
 			"cache_creation_input_tokens": 0,
@@ -839,22 +838,22 @@ func isClaudeCodeModelSwitchProbe(req types.ClaudeRequest) bool {
 }
 
 // writeClaudeCodeModelSwitchProbeStream 写入模型切换探针的流式内置响应。
-func writeClaudeCodeModelSwitchProbeStream(c *gin.Context, model string) {
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-	c.Header("X-Accel-Buffering", "no")
-	c.Status(http.StatusOK)
+func writeClaudeCodeModelSwitchProbeStream(c fiber.Ctx, model string) {
+	httpbridge.Header(c, "Content-Type", "text/event-stream")
+	httpbridge.Header(c, "Cache-Control", "no-cache")
+	httpbridge.Header(c, "Connection", "keep-alive")
+	httpbridge.Header(c, "X-Accel-Buffering", "no")
+	httpbridge.Status(c, http.StatusOK)
 
-	writeClaudeSSEEvent(c, "message_start", gin.H{
+	writeClaudeSSEEvent(c, "message_start", fiber.Map{
 		"type": "message_start",
-		"message": gin.H{
+		"message": fiber.Map{
 			"id":      "msg_ccx_model_switch_probe",
 			"type":    "message",
 			"role":    "assistant",
 			"model":   model,
 			"content": []interface{}{},
-			"usage": gin.H{
+			"usage": fiber.Map{
 				"input_tokens":                1,
 				"output_tokens":               0,
 				"cache_creation_input_tokens": 0,
@@ -862,43 +861,43 @@ func writeClaudeCodeModelSwitchProbeStream(c *gin.Context, model string) {
 			},
 		},
 	})
-	writeClaudeSSEEvent(c, "content_block_start", gin.H{
+	writeClaudeSSEEvent(c, "content_block_start", fiber.Map{
 		"type":          "content_block_start",
 		"index":         0,
-		"content_block": gin.H{"type": "text", "text": ""},
+		"content_block": fiber.Map{"type": "text", "text": ""},
 	})
-	writeClaudeSSEEvent(c, "content_block_delta", gin.H{
+	writeClaudeSSEEvent(c, "content_block_delta", fiber.Map{
 		"type":  "content_block_delta",
 		"index": 0,
-		"delta": gin.H{"type": "text_delta", "text": claudeCodeModelSwitchProbeText},
+		"delta": fiber.Map{"type": "text_delta", "text": claudeCodeModelSwitchProbeText},
 	})
-	writeClaudeSSEEvent(c, "content_block_stop", gin.H{
+	writeClaudeSSEEvent(c, "content_block_stop", fiber.Map{
 		"type":  "content_block_stop",
 		"index": 0,
 	})
-	writeClaudeSSEEvent(c, "message_delta", gin.H{
+	writeClaudeSSEEvent(c, "message_delta", fiber.Map{
 		"type": "message_delta",
-		"delta": gin.H{
+		"delta": fiber.Map{
 			"stop_reason":   "end_turn",
 			"stop_sequence": nil,
 			"stop_details":  nil,
 		},
-		"usage": gin.H{
+		"usage": fiber.Map{
 			"input_tokens":                1,
 			"output_tokens":               1,
 			"cache_creation_input_tokens": 0,
 			"cache_read_input_tokens":     0,
 		},
 	})
-	writeClaudeSSEEvent(c, "message_stop", gin.H{
+	writeClaudeSSEEvent(c, "message_stop", fiber.Map{
 		"type": "message_stop",
 	})
 }
 
-func writeClaudeSSEEvent(c *gin.Context, event string, data gin.H) {
+func writeClaudeSSEEvent(c fiber.Ctx, event string, data fiber.Map) {
 	payload, _ := json.Marshal(data)
-	_, _ = fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", event, payload)
-	if flusher, ok := c.Writer.(http.Flusher); ok {
+	_, _ = fmt.Fprintf(httpbridge.Writer(c), "event: %s\ndata: %s\n\n", event, payload)
+	if flusher, ok := httpbridge.Writer(c).(http.Flusher); ok {
 		flusher.Flush()
 	}
 }
@@ -1078,20 +1077,20 @@ func removeTaggedBlocks(text, tag string) string {
 }
 
 // CountTokensHandler 处理 /v1/messages/count_tokens 请求
-func CountTokensHandler(envCfg *config.EnvConfig, cfgManager *config.ConfigManager, channelScheduler *scheduler.ChannelScheduler) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		middleware.ProxyAuthMiddleware(envCfg)(c)
-		if c.IsAborted() {
-			return
+func CountTokensHandler(envCfg *config.EnvConfig, cfgManager *config.ConfigManager, channelScheduler *scheduler.ChannelScheduler) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		middleware.AuthenticateProxy(c, envCfg)
+		if httpbridge.IsAborted(c) {
+			return nil
 		}
 
 		// 使用统一的请求体读取函数，应用大小限制
 		bodyBytes, err := common.ReadRequestBody(c, envCfg.MaxRequestBodySize)
 		if err != nil {
 			// ReadRequestBody 已经返回了错误响应
-			return
+			return nil
 		}
-		c.Set("requestBodyBytes", bodyBytes)
+		httpbridge.SetValue(c, "requestBodyBytes", bodyBytes)
 
 		var req struct {
 			Model    string      `json:"model"`
@@ -1100,24 +1099,24 @@ func CountTokensHandler(envCfg *config.EnvConfig, cfgManager *config.ConfigManag
 			Tools    interface{} `json:"tools"`
 		}
 		if err := json.Unmarshal(bodyBytes, &req); err != nil {
-			c.JSON(400, gin.H{"error": "Invalid JSON"})
-			return
+			httpbridge.JSON(c, 400, fiber.Map{"error": "Invalid JSON"})
+			return nil
 		}
 		var claudeReq types.ClaudeRequest
 		_ = json.Unmarshal(bodyBytes, &claudeReq)
 		userID := utils.ExtractUnifiedSessionID(c, common.NormalizeMetadataUserID(bodyBytes))
 		agentCtx := utils.ExtractAgentContext(c, bodyBytes)
 		common.SetRequestLogContextWithAgent(c, userID, countUserMessages(claudeReq.Messages), agentCtx)
-		c.Set("agentContext", agentCtx)
+		httpbridge.SetValue(c, "agentContext", agentCtx)
 
 		inputTokens := utils.EstimateRequestTokens(bodyBytes)
-
-		c.JSON(200, gin.H{
+		httpbridge.JSON(c, 200, fiber.Map{
 			"input_tokens": inputTokens,
 		})
 
 		if envCfg.EnableResponseLogs {
 			common.RequestLogf(c, "[Messages-Token] CountTokens本地估算: model=%s, input_tokens=%d", req.Model, inputTokens)
 		}
+		return nil
 	}
 }

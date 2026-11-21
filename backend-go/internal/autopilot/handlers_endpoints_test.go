@@ -7,11 +7,11 @@ import (
 	"testing"
 
 	"github.com/soulteary/yunqi/internal/config"
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 func TestHandleEndpointsSeparatesKeyHashAndMask(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	apiKey := "sk-real-minimax-token-plan-key"
 	channelUID := "ch-minimax"
 	profile := newTestProfile("ep-minimax", channelUID, "messages", "https://api.minimax.io")
@@ -35,10 +35,10 @@ func TestHandleEndpointsSeparatesKeyHashAndMask(t *testing.T) {
 	})
 	mgr.store = store
 
-	router := gin.New()
-	router.GET("/health-center/channels/:channelUid/endpoints", handleEndpoints(mgr))
+	router := httpbridge.NewApp()
+	router.Get("/health-center/channels/:channelUid/endpoints", handleEndpoints(mgr))
 	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/health-center/channels/"+channelUID+"/endpoints", nil))
+	httpbridge.Handler(router).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/health-center/channels/"+channelUID+"/endpoints", nil))
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("状态码 = %d, want 200: %s", recorder.Code, recorder.Body.String())

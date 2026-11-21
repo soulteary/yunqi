@@ -8,11 +8,11 @@ import (
 	"testing"
 
 	"github.com/soulteary/yunqi/internal/config"
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 func TestChatEntry_RequestMatrix_AllFourUpstreams(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	tests := []struct {
 		name            string
 		serviceType     string
@@ -30,8 +30,8 @@ func TestChatEntry_RequestMatrix_AllFourUpstreams(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
-			c, _ := gin.CreateTestContext(w)
-			c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(context.Background())
+			c, _ := httpbridge.TestContext(w)
+			httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(context.Background()))
 
 			upstream := &config.UpstreamConfig{BaseURL: "https://api.example.com", ServiceType: tt.serviceType}
 			if tt.name == "chat_hash_baseurl" {

@@ -14,15 +14,14 @@ import (
 
 	"github.com/soulteary/yunqi/internal/autopilot"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/session"
 	"github.com/soulteary/yunqi/internal/warmup"
-	"github.com/gin-gonic/gin"
 )
 
 func TestDiagnoseSchedulerSelectionReturnsSelectionTrace(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	sch, cleanup := newSchedulerDiagnoseTestScheduler(t, config.Config{
 		Upstream: []config.UpstreamConfig{
@@ -71,7 +70,6 @@ func TestDiagnoseSchedulerSelectionReturnsSelectionTrace(t *testing.T) {
 }
 
 func TestDiagnoseSchedulerSelectionReturnsContextError(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	sch, cleanup := newSchedulerDiagnoseTestScheduler(t, config.Config{
 		Upstream: []config.UpstreamConfig{
@@ -106,7 +104,6 @@ func TestDiagnoseSchedulerSelectionReturnsContextError(t *testing.T) {
 }
 
 func TestDiagnoseSchedulerSelectionReturnsModelFilterTrace(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	sch, cleanup := newSchedulerDiagnoseTestScheduler(t, config.Config{
 		Upstream: []config.UpstreamConfig{
@@ -151,7 +148,6 @@ func TestDiagnoseSchedulerSelectionReturnsModelFilterTrace(t *testing.T) {
 }
 
 func TestDiagnoseSchedulerSelectionAttachesAutopilotRequestProfile(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	sch, cleanup := newSchedulerDiagnoseTestScheduler(t, config.Config{
 		ResponsesUpstream: []config.UpstreamConfig{
@@ -211,17 +207,16 @@ func TestDiagnoseSchedulerSelectionAttachesAutopilotRequestProfile(t *testing.T)
 }
 
 func TestDiagnoseSchedulerSelectionRejectsInvalidBody(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	sch, cleanup := newSchedulerDiagnoseTestScheduler(t, config.Config{})
 	defer cleanup()
 
-	r := gin.New()
-	r.POST("/messages/channels/scheduler/diagnose", DiagnoseSchedulerSelection(sch, scheduler.ChannelKindMessages))
+	r := httpbridge.NewApp()
+	r.Post("/messages/channels/scheduler/diagnose", DiagnoseSchedulerSelection(sch, scheduler.ChannelKindMessages))
 
 	req := httptest.NewRequest(http.MethodPost, "/messages/channels/scheduler/diagnose", bytes.NewReader([]byte(`{`)))
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", w.Code)
@@ -247,12 +242,12 @@ type schedulerDiagnoseSelected struct {
 func postSchedulerDiagnose(t *testing.T, sch *scheduler.ChannelScheduler, kind scheduler.ChannelKind, body []byte) schedulerDiagnoseTestResponse {
 	t.Helper()
 
-	r := gin.New()
-	r.POST("/messages/channels/scheduler/diagnose", DiagnoseSchedulerSelection(sch, kind))
+	r := httpbridge.NewApp()
+	r.Post("/messages/channels/scheduler/diagnose", DiagnoseSchedulerSelection(sch, kind))
 
 	req := httptest.NewRequest(http.MethodPost, "/messages/channels/scheduler/diagnose", bytes.NewReader(body))
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200, body = %s", w.Code, w.Body.String())

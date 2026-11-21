@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/middleware"
-	"github.com/gin-gonic/gin"
 )
 
 func TestConsoleStatusManagementAuthAndNoSecrets(t *testing.T) {
@@ -24,9 +24,9 @@ func TestConsoleStatusManagementAuthAndNoSecrets(t *testing.T) {
 	}
 	defer manager.Close()
 	env := &config.EnvConfig{EnableWebUI: true, Port: 3688, Env: "production", ProxyAccessKey: "proxy-only-test-key", AdminAccessKey: "admin-only-test-key"}
-	router := gin.New()
+	router := httpbridge.NewApp()
 	router.Use(middleware.WebAuthMiddleware(env, manager))
-	router.GET("/api/console/status", ConsoleStatus(env, manager))
+	router.Get("/api/console/status", ConsoleStatus(env, manager))
 	for _, tc := range []struct {
 		key    string
 		status int
@@ -34,7 +34,7 @@ func TestConsoleStatusManagementAuthAndNoSecrets(t *testing.T) {
 		req := httptest.NewRequest("GET", "/api/console/status", nil)
 		req.Header.Set("x-api-key", tc.key)
 		response := httptest.NewRecorder()
-		router.ServeHTTP(response, req)
+		httpbridge.Handler(router).ServeHTTP(response, req)
 		if response.Code != tc.status {
 			t.Fatalf("status %d, expected %d", response.Code, tc.status)
 		}

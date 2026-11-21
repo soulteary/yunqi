@@ -10,16 +10,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/errutil"
 	"github.com/soulteary/yunqi/internal/handlers/common"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/middleware"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/session"
 	"github.com/soulteary/yunqi/internal/types"
 	"github.com/soulteary/yunqi/internal/utils"
-	"github.com/gin-gonic/gin"
 )
 
 // compactError 封装 compact 请求错误
@@ -53,19 +54,19 @@ func CompactHandler(
 	cfgManager *config.ConfigManager,
 	sessionManager *session.SessionManager,
 	channelScheduler *scheduler.ChannelScheduler,
-) gin.HandlerFunc {
-	return gin.HandlerFunc(func(c *gin.Context) {
+) fiber.Handler {
+	return fiber.Handler(func(c fiber.Ctx) error {
 		// 认证
-		middleware.ProxyAuthMiddleware(envCfg)(c)
-		if c.IsAborted() {
-			return
+		middleware.AuthenticateProxy(c, envCfg)
+		if httpbridge.IsAborted(c) {
+			return nil
 		}
 
 		// 读取请求体
 		maxBodySize := envCfg.MaxRequestBodySize
 		bodyBytes, err := common.ReadRequestBody(c, maxBodySize)
 		if err != nil {
-			return
+			return nil
 		}
 
 		// 提取对话标识用于 Trace 亲和性
@@ -85,12 +86,13 @@ func CompactHandler(
 		} else {
 			handleSingleChannelCompact(c, envCfg, cfgManager, channelScheduler, sessionManager, bodyBytes)
 		}
+		return nil
 	})
 }
 
 // handleSingleChannelCompact 单渠道 compact 请求（带 key 轮转）
 func handleSingleChannelCompact(
-	c *gin.Context,
+	c fiber.Ctx,
 	envCfg *config.EnvConfig,
 	cfgManager *config.ConfigManager,
 	channelScheduler *scheduler.ChannelScheduler,
@@ -99,12 +101,12 @@ func handleSingleChannelCompact(
 ) {
 	upstream, channelIndex, err := cfgManager.GetCurrentResponsesUpstreamWithIndex()
 	if err != nil {
-		c.JSON(503, gin.H{"error": "未配置任何 Responses 渠道"})
+		httpbridge.JSON(c, 503, fiber.Map{"error": "未配置任何 Responses 渠道"})
 		return
 	}
 
 	if len(upstream.APIKeys) == 0 {
-		c.JSON(503, gin.H{"error": "当前渠道未配置 API 密钥"})
+		httpbridge.JSON(c, 503, fiber.Map{"error": "当前渠道未配置 API 密钥"})
 		return
 	}
 
@@ -140,24 +142,25 @@ func handleSingleChannelCompact(
 			}
 			// 非故障转移错误，直接返回
 			common.RecordChannelLog(channelLogStore, metricsKey, channelIndex, requestModel, "", compactErr.status, time.Since(attemptStart).Milliseconds(), false, apiKey, upstream.BaseURL, compactErr.errorInfo(), "Responses", attempt > 0, upstream.Name)
-			c.Data(compactErr.status, "application/json", compactErr.body)
+			httpbridge.Data(c, compactErr.status, "application/json", compactErr.body)
 			return
 		}
 	}
+	httpbridge.
 
-	// 所有 key 都失败
-	c.JSON(503, gin.H{
-		"type": "error",
-		"error": gin.H{
-			"type":    "service_unavailable",
-			"message": "All upstream channels are currently unavailable",
-		},
-	})
+		// 所有 key 都失败
+		JSON(c, 503, fiber.Map{
+			"type": "error",
+			"error": fiber.Map{
+				"type":    "service_unavailable",
+				"message": "All upstream channels are currently unavailable",
+			},
+		})
 }
 
 // handleMultiChannelCompact 多渠道 compact 请求（带故障转移和亲和性）
 func handleMultiChannelCompact(
-	c *gin.Context,
+	c fiber.Ctx,
 	envCfg *config.EnvConfig,
 	cfgManager *config.ConfigManager,
 	channelScheduler *scheduler.ChannelScheduler,
@@ -171,7 +174,7 @@ func handleMultiChannelCompact(
 	channelLogStore := channelScheduler.GetChannelLogStore(scheduler.ChannelKindResponses)
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		selection, err := channelScheduler.SelectChannel(c.Request.Context(), userID, failedChannels, scheduler.ChannelKindResponses, requestModel, c.Param("routePrefix"), c.GetHeader("X-Channel"))
+		selection, err := channelScheduler.SelectChannel(httpbridge.Request(c).Context(), userID, failedChannels, scheduler.ChannelKindResponses, requestModel, httpbridge.Param(c, "routePrefix"), httpbridge.GetHeader(c, "X-Channel"))
 		if err != nil {
 			break
 		}
@@ -189,27 +192,28 @@ func handleMultiChannelCompact(
 				if upstream != nil {
 					channelName = upstream.Name
 				}
-				channelScheduler.TrackConversation(scheduler.ChannelKindResponses, userID, requestModel, channelIndex, channelName, "", "", 0, "", common.AgentContextFromGin(c))
+				channelScheduler.TrackConversation(scheduler.ChannelKindResponses, userID, requestModel, channelIndex, channelName, "", "", 0, "", common.AgentContextFromFiber(c))
 			}
 			return
 		}
 
 		failedChannels[channelIndex] = true
 	}
+	httpbridge.
 
-	// 所有渠道都失败
-	c.JSON(503, gin.H{
-		"type": "error",
-		"error": gin.H{
-			"type":    "service_unavailable",
-			"message": "All upstream channels are currently unavailable",
-		},
-	})
+		// 所有渠道都失败
+		JSON(c, 503, fiber.Map{
+			"type": "error",
+			"error": fiber.Map{
+				"type":    "service_unavailable",
+				"message": "All upstream channels are currently unavailable",
+			},
+		})
 }
 
 // tryCompactChannelWithAllKeys 尝试渠道的所有 key
 func tryCompactChannelWithAllKeys(
-	c *gin.Context,
+	c fiber.Ctx,
 	upstream *config.UpstreamConfig,
 	channelIndex int,
 	requestModel string,
@@ -294,7 +298,7 @@ func tryCompactChannelWithAllKeys(
 				metricsManager.ReleaseProbe(upstream.BaseURL, apiKey, metricsServiceType)
 				delete(probeAcquired, probeKey)
 			}
-			c.Data(compactErr.status, "application/json", compactErr.body)
+			httpbridge.Data(c, compactErr.status, "application/json", compactErr.body)
 			return true, "", nil
 		}
 	}
@@ -304,7 +308,7 @@ func tryCompactChannelWithAllKeys(
 
 // tryCompactWithKey 使用单个 key 尝试 compact 请求
 func tryCompactWithKey(
-	c *gin.Context,
+	c fiber.Ctx,
 	upstream *config.UpstreamConfig,
 	apiKey string,
 	bodyBytes []byte,
@@ -318,7 +322,7 @@ func tryCompactWithKey(
 	}
 
 	targetURL := buildCompactURL(upstream)
-	req, err := http.NewRequestWithContext(c.Request.Context(), "POST", targetURL, bytes.NewReader(bodyBytes))
+	req, err := http.NewRequestWithContext(httpbridge.Request(c).Context(), "POST", targetURL, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return false, &compactError{status: 500, body: []byte(`{"error":"创建请求失败"}`), shouldFailover: true, err: err}
 	}
@@ -354,8 +358,8 @@ func tryCompactWithKey(
 
 	// 成功。原生 compact 返回也规范化为单个 message item，避免 reasoning item 破坏 Codex compaction v2 解析。
 	respBody = normalizeCompactResponseBody(respBody)
-	utils.ForwardResponseHeaders(resp.Header, c.Writer)
-	c.Data(resp.StatusCode, "application/json", respBody)
+	utils.ForwardResponseHeaders(resp.Header, httpbridge.Writer(c))
+	httpbridge.Data(c, resp.StatusCode, "application/json", respBody)
 	return true, nil
 }
 

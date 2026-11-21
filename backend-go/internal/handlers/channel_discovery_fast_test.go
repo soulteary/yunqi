@@ -3,16 +3,17 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
-	"github.com/soulteary/yunqi/internal/utils"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v3"
+	"github.com/soulteary/yunqi/internal/httpbridge"
+	"github.com/soulteary/yunqi/internal/utils"
 )
 
-func channelDiscoveryFastForTest() gin.HandlerFunc {
+func channelDiscoveryFastForTest() fiber.Handler {
 	return ChannelDiscoveryFast(nil)
 }
 
@@ -20,7 +21,6 @@ func channelDiscoveryFastForTest() gin.HandlerFunc {
 // 上游返回真实 NIM 模型清单 + chat 协议成功 → primaryKind=chat，testedModel 为真实模型名，
 // testedKeyHash 非空，不返回明文 key。
 func TestChannelDiscoveryFastRecommendsChatFromRealNIMModels(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -36,14 +36,14 @@ func TestChannelDiscoveryFastRecommendsChatFromRealNIMModels(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	router := gin.New()
-	router.POST("/api/channel-discovery-fast", channelDiscoveryFastForTest())
+	router := httpbridge.NewApp()
+	router.Post("/api/channel-discovery-fast", channelDiscoveryFastForTest())
 
 	body := []byte(`{"baseUrls":["` + upstream.URL + `"],"apiKeys":["sk-test-nim"]}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/channel-discovery-fast", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, req)
+	httpbridge.Handler(router).ServeHTTP(recorder, req)
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
@@ -70,7 +70,6 @@ func TestChannelDiscoveryFastRecommendsChatFromRealNIMModels(t *testing.T) {
 // 上游 /v1/models 存在客户端指纹校验（裸请求 401 unauthorized client）时，
 // claude 候选首发带 Claude Code 伪装头直接通过（AgentRouter 类中转站场景）。
 func TestChannelDiscoveryFastPassesClientFingerprintRelay(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -91,14 +90,14 @@ func TestChannelDiscoveryFastPassesClientFingerprintRelay(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	router := gin.New()
-	router.POST("/api/channel-discovery-fast", channelDiscoveryFastForTest())
+	router := httpbridge.NewApp()
+	router.Post("/api/channel-discovery-fast", channelDiscoveryFastForTest())
 
 	body := []byte(`{"baseUrls":["` + upstream.URL + `"],"apiKeys":["sk-relay-test"]}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/channel-discovery-fast", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, req)
+	httpbridge.Handler(router).ServeHTTP(recorder, req)
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
@@ -118,21 +117,20 @@ func TestChannelDiscoveryFastPassesClientFingerprintRelay(t *testing.T) {
 // TestChannelDiscoveryFastNoModelsNoManifestReturnsError 验证：
 // models 端点失败且无已知 manifest 兜底时返回 4xx，不建渠道，不泄露 key。
 func TestChannelDiscoveryFastNoModelsNoManifestReturnsError(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 	}))
 	defer upstream.Close()
 
-	router := gin.New()
-	router.POST("/api/channel-discovery-fast", channelDiscoveryFastForTest())
+	router := httpbridge.NewApp()
+	router.Post("/api/channel-discovery-fast", channelDiscoveryFastForTest())
 
 	body := []byte(`{"baseUrls":["` + upstream.URL + `"],"apiKeys":["sk-leak"]}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/channel-discovery-fast", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, req)
+	httpbridge.Handler(router).ServeHTTP(recorder, req)
 
 	if recorder.Code == http.StatusOK {
 		t.Fatalf("expected non-200, got %d body=%s", recorder.Code, recorder.Body.String())
@@ -145,7 +143,6 @@ func TestChannelDiscoveryFastNoModelsNoManifestReturnsError(t *testing.T) {
 // TestChannelDiscoveryFastSecondKeySucceedsWhenFirstFails 验证：
 // 第一组凭证 models 失败（401）但第二组成功时，使用第二组完成探测，不固定只用 apiKeys[0]。
 func TestChannelDiscoveryFastSecondKeySucceedsWhenFirstFails(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		auth := r.Header.Get("Authorization")
@@ -170,14 +167,14 @@ func TestChannelDiscoveryFastSecondKeySucceedsWhenFirstFails(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	router := gin.New()
-	router.POST("/api/channel-discovery-fast", channelDiscoveryFastForTest())
+	router := httpbridge.NewApp()
+	router.Post("/api/channel-discovery-fast", channelDiscoveryFastForTest())
 
 	body := []byte(`{"baseUrls":["` + upstream.URL + `"],"apiKeys":["sk-bad","sk-good"]}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/channel-discovery-fast", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, req)
+	httpbridge.Handler(router).ServeHTTP(recorder, req)
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
@@ -194,7 +191,6 @@ func TestChannelDiscoveryFastSecondKeySucceedsWhenFirstFails(t *testing.T) {
 // TestChannelDiscoveryFastDualProtocolRecommendsResponses 验证：
 // responses 与 chat 同时成功时，推荐逻辑优先返回 responses（而非协议数组顺序首个）。
 func TestChannelDiscoveryFastDualProtocolRecommendsResponses(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -214,14 +210,14 @@ func TestChannelDiscoveryFastDualProtocolRecommendsResponses(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	router := gin.New()
-	router.POST("/api/channel-discovery-fast", channelDiscoveryFastForTest())
+	router := httpbridge.NewApp()
+	router.Post("/api/channel-discovery-fast", channelDiscoveryFastForTest())
 
 	body := []byte(`{"baseUrls":["` + upstream.URL + `"],"apiKeys":["sk-test"]}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/channel-discovery-fast", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, req)
+	httpbridge.Handler(router).ServeHTTP(recorder, req)
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
@@ -238,7 +234,6 @@ func TestChannelDiscoveryFastDualProtocolRecommendsResponses(t *testing.T) {
 // TestChannelDiscoveryFastFallsBackToSecondModel 验证：
 // 第一个模型全部协议失败时，自动尝试下一个候选模型，第二个模型成功即返回 OK。
 func TestChannelDiscoveryFastFallsBackToSecondModel(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -265,14 +260,14 @@ func TestChannelDiscoveryFastFallsBackToSecondModel(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	router := gin.New()
-	router.POST("/api/channel-discovery-fast", channelDiscoveryFastForTest())
+	router := httpbridge.NewApp()
+	router.Post("/api/channel-discovery-fast", channelDiscoveryFastForTest())
 
 	body := []byte(`{"baseUrls":["` + upstream.URL + `"],"apiKeys":["sk-test"]}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/channel-discovery-fast", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, req)
+	httpbridge.Handler(router).ServeHTTP(recorder, req)
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
@@ -292,7 +287,6 @@ func TestChannelDiscoveryFastFallsBackToSecondModel(t *testing.T) {
 // TestChannelDiscoveryFastAllProtocolsFailReturnsError 验证：
 // 模型可获取但所有协议探测均失败时返回 4xx，不建渠道。
 func TestChannelDiscoveryFastAllProtocolsFailReturnsError(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -305,14 +299,14 @@ func TestChannelDiscoveryFastAllProtocolsFailReturnsError(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	router := gin.New()
-	router.POST("/api/channel-discovery-fast", channelDiscoveryFastForTest())
+	router := httpbridge.NewApp()
+	router.Post("/api/channel-discovery-fast", channelDiscoveryFastForTest())
 
 	body := []byte(`{"baseUrls":["` + upstream.URL + `"],"apiKeys":["sk-test"]}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/channel-discovery-fast", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, req)
+	httpbridge.Handler(router).ServeHTTP(recorder, req)
 
 	if recorder.Code == http.StatusOK {
 		t.Fatalf("expected non-200, got %d body=%s", recorder.Code, recorder.Body.String())

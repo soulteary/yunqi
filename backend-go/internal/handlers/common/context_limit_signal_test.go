@@ -7,7 +7,7 @@ import (
 
 	"github.com/soulteary/yunqi/internal/autopilot"
 	"github.com/soulteary/yunqi/internal/config"
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 func TestContextLimitFromError(t *testing.T) {
@@ -134,8 +134,8 @@ func TestEstimatedInputTokensForContextLimitPrefersInputEstimate(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 	profile := autopilot.RequestProfile{EstTokens: 80_000, ContextNeed: 96_000}
 	req = req.WithContext(autopilot.ContextWithRequestProfile(req.Context(), profile))
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
-	c.Request = req
+	c, _ := httpbridge.TestContext(httptest.NewRecorder())
+	httpbridge.SetRequest(c, req)
 
 	if got := estimatedInputTokensForContextLimit(c, []byte(`{"messages":[]}`)); got != profile.EstTokens {
 		t.Fatalf("estimatedInputTokensForContextLimit() = %d, want %d", got, profile.EstTokens)

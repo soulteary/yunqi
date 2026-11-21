@@ -9,13 +9,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
+	"github.com/gorilla/websocket"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/errutil"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/session"
-	"github.com/gin-gonic/gin"
-	"github.com/gorilla/websocket"
 )
 
 func TestNormalizeWebSocketResponseCreatePayload(t *testing.T) {
@@ -77,7 +78,6 @@ func TestNormalizeNativeWebSocketResponseCreatePayload_PreservesV2Fields(t *test
 }
 
 func TestResponsesWebSocketHandler_ResponsesUpstreamUsesHTTPBridge(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	upstreamBody := make(chan map[string]interface{}, 1)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -115,7 +115,7 @@ func TestResponsesWebSocketHandler_ResponsesUpstreamUsesHTTPBridge(t *testing.T)
 		ServiceType: "responses",
 		Status:      "active",
 	})
-	server := httptest.NewServer(router)
+	server := httptest.NewServer(httpbridge.Handler(router))
 	defer server.Close()
 
 	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http")+"/v1/responses", http.Header{
@@ -163,7 +163,6 @@ func TestResponsesWebSocketHandler_ResponsesUpstreamUsesHTTPBridge(t *testing.T)
 }
 
 func TestResponsesWebSocketHandler_NonResponsesUpstreamKeepsHTTPBridge(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	upstreamBody := make(chan map[string]interface{}, 1)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -196,7 +195,7 @@ func TestResponsesWebSocketHandler_NonResponsesUpstreamKeepsHTTPBridge(t *testin
 		ServiceType: "openai",
 		Status:      "active",
 	})
-	server := httptest.NewServer(router)
+	server := httptest.NewServer(httpbridge.Handler(router))
 	defer server.Close()
 
 	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http")+"/v1/responses", http.Header{
@@ -239,7 +238,7 @@ func TestResponsesWebSocketHandler_NonResponsesUpstreamKeepsHTTPBridge(t *testin
 	}
 }
 
-func newResponsesWebSocketTestRouter(t *testing.T, upstream config.UpstreamConfig) *gin.Engine {
+func newResponsesWebSocketTestRouter(t *testing.T, upstream config.UpstreamConfig) *fiber.App {
 	t.Helper()
 	cfgManager := setupResponsesTestConfigManager(t, []config.UpstreamConfig{upstream})
 	channelScheduler := scheduler.NewChannelScheduler(
@@ -257,8 +256,8 @@ func newResponsesWebSocketTestRouter(t *testing.T, upstream config.UpstreamConfi
 		MaxRequestBodySize: 1024 * 1024,
 	}
 
-	r := gin.New()
-	r.GET("/v1/responses", WebSocketHandler(envCfg, cfgManager, session.NewSessionManager(time.Hour, 100, 100000), channelScheduler))
+	r := httpbridge.NewApp()
+	r.Get("/v1/responses", WebSocketHandler(envCfg, cfgManager, session.NewSessionManager(time.Hour, 100, 100000), channelScheduler))
 	return r
 }
 

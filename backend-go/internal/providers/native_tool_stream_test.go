@@ -47,7 +47,7 @@ func TestGLMProviderConversionsEnableNativeToolStreaming(t *testing.T) {
 
 	t.Run("Messages 转 Chat", func(t *testing.T) {
 		body := []byte(`{"model":"glm-5.2","stream":true,"messages":[{"role":"user","content":"天气"}],"tools":[{"name":"get_weather","description":"weather","input_schema":{"type":"object","properties":{}}}]}`)
-		c := newGinContext(http.MethodPost, "/v1/messages", body, context.Background())
+		c := newFiberContext(http.MethodPost, "/v1/messages", body, context.Background())
 		req, _, err := (&OpenAIProvider{}).ConvertToProviderRequest(c, upstream, "test-key")
 		if err != nil {
 			t.Fatal(err)
@@ -57,7 +57,7 @@ func TestGLMProviderConversionsEnableNativeToolStreaming(t *testing.T) {
 
 	t.Run("Responses 转 Chat", func(t *testing.T) {
 		body := []byte(`{"model":"glm-5.2","stream":true,"input":"天气","tools":[{"type":"function","name":"get_weather","description":"weather","parameters":{"type":"object","properties":{}}}]}`)
-		c := newGinContext(http.MethodPost, "/v1/responses", body, context.Background())
+		c := newFiberContext(http.MethodPost, "/v1/responses", body, context.Background())
 		req, _, err := (&ResponsesProvider{}).ConvertToProviderRequest(c, upstream, "test-key")
 		if err != nil {
 			t.Fatal(err)

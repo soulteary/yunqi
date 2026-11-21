@@ -7,10 +7,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/types"
 	"github.com/soulteary/yunqi/internal/utils"
-	"github.com/gin-gonic/gin"
 )
 
 // GenerateRequestID 生成唯一的请求标识
@@ -24,7 +25,7 @@ func GenerateRequestID() string {
 type ChannelLogOption func(*metrics.ChannelLog)
 
 // WithProxyKeyMask 将代理 Key 掩码写入 pending 渠道日志。
-// 由 ProxyAuthMiddleware 写入 gin context，upstream_failover 提取后通过此选项传入。
+// 由 ProxyAuthMiddleware 写入 Fiber context，upstream_failover 提取后通过此选项传入。
 func WithProxyKeyMask(mask string) ChannelLogOption {
 	return func(log *metrics.ChannelLog) {
 		if log == nil || mask == "" {
@@ -105,7 +106,7 @@ func WithEffortClampedByClient(clamped bool) ChannelLogOption {
 const racingLostErrorPrefix = "racing superseded"
 
 // WithRacingRole 标记本次渠道尝试的竞速角色（primary/shadow）。
-// 由竞速编排器写入分支 gin context，CreatePendingLog 组装处读取。
+// 由竞速编排器写入分支 Fiber context，CreatePendingLog 组装处读取。
 func WithRacingRole(role string) ChannelLogOption {
 	return func(log *metrics.ChannelLog) {
 		if log == nil || role == "" {
@@ -116,30 +117,31 @@ func WithRacingRole(role string) ChannelLogOption {
 }
 
 // racingOutcomeKey 记录竞速分支在提交闸门上的结果（won）。
-// 由 claim 成功点写入 gin context，成功路径 CompleteLog 前读取补记。
+// 由 claim 成功点写入 Fiber context，成功路径 CompleteLog 前读取补记。
 const racingOutcomeKey = "ccx.racing.outcome"
 
 // SetChannelLogRacingWon 在提交闸门 claim 成功时标记本分支获胜。
-func SetChannelLogRacingWon(c *gin.Context) {
+func SetChannelLogRacingWon(c fiber.Ctx) error {
 	if c != nil {
-		c.Set(racingOutcomeKey, metrics.RacingStatusWon)
+		httpbridge.SetValue(c, racingOutcomeKey, metrics.RacingStatusWon)
 	}
+	return nil
 }
 
 // CompleteChannelLogWithRacingOutcome 完成日志并补记竞速结果：
-// gin context 带 won 标记（赢家）时置 RacingStatus=won；武装竞速但无对手分支
+// Fiber context 带 won 标记（赢家）时置 RacingStatus=won；武装竞速但无对手分支
 // （未实际发生竞速）时清除创建期预置的角色标记，保证「空=未参与竞速」的日志口径。
 func CompleteChannelLogWithRacingOutcome(
 	channelLogStore *metrics.ChannelLogStore,
 	metricsKey string,
 	requestID string,
-	c *gin.Context,
+	c fiber.Ctx,
 ) {
 	if channelLogStore == nil || metricsKey == "" || requestID == "" || c == nil {
 		return
 	}
 	won := false
-	if v, ok := c.Get(racingOutcomeKey); ok {
+	if v, ok := httpbridge.Value(c, racingOutcomeKey); ok {
 		if s, ok := v.(string); ok {
 			won = s == metrics.RacingStatusWon
 		}

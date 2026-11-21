@@ -7,18 +7,19 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/session"
 	"github.com/soulteary/yunqi/internal/types"
-	"github.com/gin-gonic/gin"
 )
 
 const requestBodyBytesContextKey = "requestBodyBytes"
 
 // Provider 提供商接口
 type Provider interface {
-	// ConvertToProviderRequest 将 gin context 中的请求转换为目标上游的 http.Request，并返回用于日志的原始请求体
-	ConvertToProviderRequest(c *gin.Context, upstream *config.UpstreamConfig, apiKey string) (*http.Request, []byte, error)
+	// ConvertToProviderRequest 将 Fiber context 中的请求转换为目标上游的 http.Request，并返回用于日志的原始请求体
+	ConvertToProviderRequest(c fiber.Ctx, upstream *config.UpstreamConfig, apiKey string) (*http.Request, []byte, error)
 
 	// ConvertToClaudeResponse 将提供商响应转换为 Claude 响应
 	ConvertToClaudeResponse(providerResp *types.ProviderResponse) (*types.ClaudeResponse, error)
@@ -44,20 +45,20 @@ func newDefaultSessionManager() *session.SessionManager {
 	return session.NewSessionManager(24*time.Hour, 100, 100000)
 }
 
-func getRequestBodyBytes(c *gin.Context) ([]byte, error) {
-	if cached, ok := c.Get(requestBodyBytesContextKey); ok {
+func getRequestBodyBytes(c fiber.Ctx) ([]byte, error) {
+	if cached, ok := httpbridge.Value(c, requestBodyBytesContextKey); ok {
 		if bodyBytes, ok := cached.([]byte); ok {
-			c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+			httpbridge.Request(c).Body = io.NopCloser(bytes.NewReader(bodyBytes))
 			return bodyBytes, nil
 		}
 	}
 
-	bodyBytes, err := io.ReadAll(c.Request.Body)
+	bodyBytes, err := io.ReadAll(httpbridge.Request(c).Body)
 	if err != nil {
 		return nil, err
 	}
-	c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-	c.Set(requestBodyBytesContextKey, bodyBytes)
+	httpbridge.Request(c).Body = io.NopCloser(bytes.NewReader(bodyBytes))
+	httpbridge.SetValue(c, requestBodyBytesContextKey, bodyBytes)
 	return bodyBytes, nil
 }
 

@@ -14,8 +14,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/errutil"
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 const (
@@ -708,12 +709,13 @@ func normalizeHost(u *url.URL) string {
 
 // StatusHandler 返回 GET /api/presets/status 的只读处理器。
 // updater 为 nil 时返回 disabled 状态而非错误，避免预置更新功能影响服务健康。
-func StatusHandler(updater *PresetUpdater) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func StatusHandler(updater *PresetUpdater) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		if updater == nil {
-			c.JSON(http.StatusOK, UpdaterStatus{Enabled: false, Source: "embedded"})
-			return
+			httpbridge.JSON(c, http.StatusOK, UpdaterStatus{Enabled: false, Source: "embedded"})
+			return nil
 		}
-		c.JSON(http.StatusOK, updater.Status())
+		httpbridge.JSON(c, http.StatusOK, updater.Status())
+		return nil
 	}
 }

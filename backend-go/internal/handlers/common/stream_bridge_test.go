@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/soulteary/yunqi/internal/config"
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 const chatStreamSSE = "data: {\"id\":\"chatcmpl-1\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"gpt-5\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"你好\"},\"finish_reason\":null}]}\n" +
@@ -270,8 +270,8 @@ func TestReadUpstreamNonStreamBodyUnsupportedType(t *testing.T) {
 
 // 端到端合成：chat 上游返回 SSE，非流式路径应拿到合成后的 chat.completion 体。
 func TestReadUpstreamNonStreamBodySynthesizesChatSSE(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+
+	c, _ := httpbridge.TestContext(httptest.NewRecorder())
 
 	resp := &http.Response{
 		Header: http.Header{"Content-Type": []string{"text/event-stream"}},

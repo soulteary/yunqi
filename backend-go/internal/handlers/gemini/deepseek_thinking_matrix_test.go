@@ -8,8 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 func TestGeminiHandler_DeepSeekChatAndMessagesThinkingMatrix(t *testing.T) {
@@ -113,14 +114,14 @@ func TestGeminiHandler_DeepSeekChatAndMessagesThinkingMatrix(t *testing.T) {
 	}
 }
 
-func performGeminiStreamHandlerRequest(t *testing.T, router *gin.Engine, model string, body string) *httptest.ResponseRecorder {
+func performGeminiStreamHandlerRequest(t *testing.T, router *fiber.App, model string, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	url := "/v1beta/models/" + model + ":streamGenerateContent"
 	req := httptest.NewRequest(http.MethodPost, url, bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-api-key", "secret-key")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 	return w
 }
 

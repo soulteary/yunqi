@@ -3,11 +3,12 @@ package common
 import (
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/autopilot"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/racing"
 	"github.com/soulteary/yunqi/internal/scheduler"
-	"github.com/gin-gonic/gin"
 )
 
 // ── 延迟负反馈学习：渠道×Key×模型×任务类 组合的慢证据累积 → 调度软降权 ──
@@ -23,18 +24,18 @@ import (
 
 // requestTaskClassForLatency 从请求 context 取 TaskClass（未分类返回空串，
 // 存储侧统一落 unknown 桶）。
-func requestTaskClassForLatency(c *gin.Context) string {
-	if c == nil || c.Request == nil {
+func requestTaskClassForLatency(c fiber.Ctx) string {
+	if c == nil || httpbridge.Request(c) == nil {
 		return ""
 	}
-	if profile, ok := autopilot.RequestProfileFromContext(c.Request.Context()); ok {
+	if profile, ok := autopilot.RequestProfileFromContext(httpbridge.Request(c).Context()); ok {
 		return string(profile.TaskClass)
 	}
 	return ""
 }
 
 // recordLatencySlowEvidence 记一次慢证据。跨过降权阈值时打一行日志（首次劣化可观测）。
-func recordLatencySlowEvidence(c *gin.Context, channelUID, apiKey, model, signal string, firstByteMs int64) {
+func recordLatencySlowEvidence(c fiber.Ctx, channelUID, apiKey, model, signal string, firstByteMs int64) {
 	if channelUID == "" || model == "" || apiKey == "" {
 		return
 	}
@@ -51,7 +52,7 @@ func recordLatencySlowEvidence(c *gin.Context, channelUID, apiKey, model, signal
 
 // RecordLatencyFastEvidenceFromSuccess 成功请求的快样本翻转：
 // 首字显著低于该家族自适应阈值时清零 streak（渠道恢复即回升）。
-func RecordLatencyFastEvidenceFromSuccess(c *gin.Context, channelUID, apiKey, model string) {
+func RecordLatencyFastEvidenceFromSuccess(c fiber.Ctx, channelUID, apiKey, model string) {
 	if channelUID == "" || model == "" || apiKey == "" {
 		return
 	}
@@ -78,7 +79,7 @@ func RecordLatencyFastEvidenceFromSuccess(c *gin.Context, channelUID, apiKey, mo
 // 首字超过同家族自适应阈值记慢证据，显著低于阈值记快样本。
 // 挂载点与 MaybeLearnSeverityClassOutcome 同点（handleSuccess 成功路径）。
 // 竞速败出/被取消分支不学习。
-func MaybeLearnLatencyDegradation(c *gin.Context, channelUID, apiKey, model string, superseded bool) {
+func MaybeLearnLatencyDegradation(c fiber.Ctx, channelUID, apiKey, model string, superseded bool) {
 	if superseded || channelUID == "" || model == "" || apiKey == "" {
 		return
 	}
@@ -100,7 +101,7 @@ func MaybeLearnLatencyDegradation(c *gin.Context, channelUID, apiKey, model stri
 // 主分支 apiKey 用 selection 的 key 身份 pin 反查；反查不到即跳过本信号——
 // 不得 fallback 到 APIKeys[0] 把慢证据记到未参与请求的 keyHash 上
 // （败出豁免点还会用精确 attempt key 记一次更准的）。
-func recordPrimaryRacingTriggerEvidence(c *gin.Context, selection *scheduler.SelectionResult, requestModel string) {
+func recordPrimaryRacingTriggerEvidence(c fiber.Ctx, selection *scheduler.SelectionResult, requestModel string) {
 	if selection == nil || selection.Upstream == nil {
 		return
 	}
@@ -119,7 +120,7 @@ func recordPrimaryRacingTriggerEvidence(c *gin.Context, selection *scheduler.Sel
 // RecordLatencySupersededEvidence 慢证据信号一：竞速 primary 被影子击败。
 // 由败者豁免点（upstream_failover）调用——那里有精确的 attempt apiKey 与实际出站模型，
 // 比编排器层反查更可靠。
-func RecordLatencySupersededEvidence(c *gin.Context, channelUID, apiKey, model string) {
+func RecordLatencySupersededEvidence(c fiber.Ctx, channelUID, apiKey, model string) {
 	recordLatencySlowEvidence(c, channelUID, apiKey, model, "racing_lost", GetStreamTimeoutObserver(c).FirstContentMs())
 }
 

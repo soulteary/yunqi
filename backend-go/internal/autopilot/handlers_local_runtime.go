@@ -4,7 +4,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v3"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 // ─── 请求/响应类型 ──────────────────────────────────────────────────────────────
@@ -73,46 +74,47 @@ type ProbeResultResponse struct {
 //	GET    /api/local-runtimes/:uid      — 详情
 //	DELETE /api/local-runtimes/:uid      — 删除
 //	POST   /api/local-runtimes/:uid/probe — 探测
-func RegisterLocalRuntimeRoutes(router gin.IRouter, store *LocalRuntimeStore) {
+func RegisterLocalRuntimeRoutes(router fiber.Router, store *LocalRuntimeStore) {
 	group := router.Group("/local-runtimes")
 	{
-		group.GET("", handleListLocalRuntimes(store))
-		group.POST("", handleCreateLocalRuntime(store))
-		group.GET("/:uid", handleGetLocalRuntime(store))
-		group.DELETE("/:uid", handleDeleteLocalRuntime(store))
-		group.POST("/:uid/probe", handleProbeLocalRuntime(store))
+		group.Get("", handleListLocalRuntimes(store))
+		group.Post("", handleCreateLocalRuntime(store))
+		group.Get("/:uid", handleGetLocalRuntime(store))
+		group.Delete("/:uid", handleDeleteLocalRuntime(store))
+		group.Post("/:uid/probe", handleProbeLocalRuntime(store))
 	}
 }
 
 // ─── Handler 实现 ────────────────────────────────────────────────────────────────
 
 // handleListLocalRuntimes GET /api/local-runtimes
-func handleListLocalRuntimes(store *LocalRuntimeStore) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handleListLocalRuntimes(store *LocalRuntimeStore) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		runtimes := store.ListAll()
 		items := make([]LocalRuntimeResponse, 0, len(runtimes))
 		for _, p := range runtimes {
 			items = append(items, toLocalRuntimeResponse(p))
 		}
-		c.JSON(http.StatusOK, LocalRuntimesResponse{
+		httpbridge.JSON(c, http.StatusOK, LocalRuntimesResponse{
 			Runtimes: items,
 			Total:    len(items),
 		})
+		return nil
 	}
 }
 
 // handleCreateLocalRuntime POST /api/local-runtimes
-func handleCreateLocalRuntime(store *LocalRuntimeStore) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handleCreateLocalRuntime(store *LocalRuntimeStore) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		var req CreateLocalRuntimeRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数无效: " + err.Error()})
-			return
+		if err := httpbridge.BindJSON(c, &req); err != nil {
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "请求参数无效: " + err.Error()})
+			return nil
 		}
 
 		if !IsValidRuntimeType(req.RuntimeType) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 runtimeType，合法值: ollama, lmstudio, llama_server, openai_compatible"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "无效的 runtimeType，合法值: ollama, lmstudio, llama_server, openai_compatible"})
+			return nil
 		}
 
 		now := time.Now()
@@ -133,77 +135,77 @@ func handleCreateLocalRuntime(store *LocalRuntimeStore) gin.HandlerFunc {
 		}
 
 		if err := store.Upsert(profile); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "创建失败: " + err.Error()})
-			return
+			httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": "创建失败: " + err.Error()})
+			return nil
 		}
-
-		c.JSON(http.StatusCreated, toLocalRuntimeResponse(profile))
+		httpbridge.JSON(c, http.StatusCreated, toLocalRuntimeResponse(profile))
+		return nil
 	}
 }
 
 // handleGetLocalRuntime GET /api/local-runtimes/:uid
-func handleGetLocalRuntime(store *LocalRuntimeStore) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		uid := c.Param("uid")
+func handleGetLocalRuntime(store *LocalRuntimeStore) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		uid := httpbridge.Param(c, "uid")
 		if uid == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "uid 不能为空"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "uid 不能为空"})
+			return nil
 		}
 
 		profile := store.Get(uid)
 		if profile == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "运行时不存在"})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "运行时不存在"})
+			return nil
 		}
-
-		c.JSON(http.StatusOK, toLocalRuntimeResponse(profile))
+		httpbridge.JSON(c, http.StatusOK, toLocalRuntimeResponse(profile))
+		return nil
 	}
 }
 
 // handleDeleteLocalRuntime DELETE /api/local-runtimes/:uid
-func handleDeleteLocalRuntime(store *LocalRuntimeStore) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		uid := c.Param("uid")
+func handleDeleteLocalRuntime(store *LocalRuntimeStore) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		uid := httpbridge.Param(c, "uid")
 		if uid == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "uid 不能为空"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "uid 不能为空"})
+			return nil
 		}
 
 		if store.Get(uid) == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "运行时不存在"})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "运行时不存在"})
+			return nil
 		}
 
 		if err := store.Delete(uid); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "删除失败: " + err.Error()})
-			return
+			httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": "删除失败: " + err.Error()})
+			return nil
 		}
-
-		c.JSON(http.StatusOK, gin.H{"message": "已删除", "runtimeUid": uid})
+		httpbridge.JSON(c, http.StatusOK, fiber.Map{"message": "已删除", "runtimeUid": uid})
+		return nil
 	}
 }
 
 // handleProbeLocalRuntime POST /api/local-runtimes/:uid/probe
-func handleProbeLocalRuntime(store *LocalRuntimeStore) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		uid := c.Param("uid")
+func handleProbeLocalRuntime(store *LocalRuntimeStore) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		uid := httpbridge.Param(c, "uid")
 		if uid == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "uid 不能为空"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "uid 不能为空"})
+			return nil
 		}
 
 		profile := store.Get(uid)
 		if profile == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "运行时不存在"})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "运行时不存在"})
+			return nil
 		}
 
-		probeErr := ProbeRuntime(c.Request.Context(), profile)
+		probeErr := ProbeRuntime(httpbridge.Request(c).Context(), profile)
 		profile.UpdatedAt = time.Now()
 
 		if err := store.Upsert(profile); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "更新画像失败: " + err.Error()})
-			return
+			httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": "更新画像失败: " + err.Error()})
+			return nil
 		}
 
 		resp := ProbeResultResponse{
@@ -216,8 +218,8 @@ func handleProbeLocalRuntime(store *LocalRuntimeStore) gin.HandlerFunc {
 		if probeErr != nil {
 			resp.Error = probeErr.Error()
 		}
-
-		c.JSON(http.StatusOK, resp)
+		httpbridge.JSON(c, http.StatusOK, resp)
+		return nil
 	}
 }
 

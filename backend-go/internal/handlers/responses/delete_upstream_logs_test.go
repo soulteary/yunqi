@@ -9,10 +9,10 @@ import (
 	"testing"
 
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/session"
-	"github.com/gin-gonic/gin"
 )
 
 func TestDeleteUpstream_PreservesRemainingChannelLogs(t *testing.T) {
@@ -57,13 +57,12 @@ func TestDeleteUpstream_PreservesRemainingChannelLogs(t *testing.T) {
 	logStore.Record(keyA, &metrics.ChannelLog{RequestID: "r1", Model: "deleted-channel"})
 	logStore.Record(keyB, &metrics.ChannelLog{RequestID: "r2", Model: "remaining-channel"})
 
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
-	r.DELETE("/responses/channels/:id", DeleteUpstream(cm, sch))
+	r := httpbridge.NewApp()
+	r.Delete("/responses/channels/:id", DeleteUpstream(cm, sch))
 
 	req := httptest.NewRequest(http.MethodDelete, "/responses/channels/0", nil)
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200, body = %s", w.Code, w.Body.String())

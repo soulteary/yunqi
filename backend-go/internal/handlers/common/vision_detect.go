@@ -1,18 +1,19 @@
 package common
 
 import (
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v3"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/tidwall/gjson"
 )
 
 const visionDetectedContextKey = "ccx_has_image_content"
 
 // HasImageContentCached 返回已缓存的图片内容检测结果，不触发请求体解析。
-func HasImageContentCached(c *gin.Context) bool {
+func HasImageContentCached(c fiber.Ctx) bool {
 	if c == nil {
 		return false
 	}
-	if cached, exists := c.Get(visionDetectedContextKey); exists {
+	if cached, exists := httpbridge.Value(c, visionDetectedContextKey); exists {
 		if detected, ok := cached.(bool); ok {
 			return detected
 		}
@@ -21,13 +22,13 @@ func HasImageContentCached(c *gin.Context) bool {
 }
 
 // HasImageContent 检测请求体是否包含图片内容（覆盖 Claude/OpenAI/Responses/Gemini 四种协议格式）。
-// 结果缓存在 gin.Context 中，failover 重试时不重复解析。
-func HasImageContent(c *gin.Context, bodyBytes []byte) bool {
-	if cached, exists := c.Get(visionDetectedContextKey); exists {
+// 结果缓存在 fiber.Ctx 中，failover 重试时不重复解析。
+func HasImageContent(c fiber.Ctx, bodyBytes []byte) bool {
+	if cached, exists := httpbridge.Value(c, visionDetectedContextKey); exists {
 		return cached.(bool)
 	}
 	detected := detectImageInBody(bodyBytes)
-	c.Set(visionDetectedContextKey, detected)
+	httpbridge.SetValue(c, visionDetectedContextKey, detected)
 	return detected
 }
 

@@ -10,11 +10,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/handlers/common"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/httpclient"
 	"github.com/soulteary/yunqi/internal/utils"
-	"github.com/gin-gonic/gin"
 )
 
 const (
@@ -220,13 +221,13 @@ type ChannelDiscoveryResponse struct {
 	Evidence       []DiscoveryEvidence         `json:"evidence,omitempty"`
 }
 
-func ChannelDiscovery(cfgManager *config.ConfigManager) gin.HandlerFunc {
+func ChannelDiscovery(cfgManager *config.ConfigManager) fiber.Handler {
 	return channelDiscoveryWithPacerFactory(cfgManager, nil, func() *discoveryProbePacer {
 		return newDiscoveryProbePacer(defaultChannelDiscoveryRPM)
 	})
 }
 
-func ChannelDiscoveryWithModelFetchers(cfgManager *config.ConfigManager, modelFetchers ChannelDiscoveryModelFetchers) gin.HandlerFunc {
+func ChannelDiscoveryWithModelFetchers(cfgManager *config.ConfigManager, modelFetchers ChannelDiscoveryModelFetchers) fiber.Handler {
 	return channelDiscoveryWithPacerFactory(cfgManager, modelFetchers, func() *discoveryProbePacer {
 		return newDiscoveryProbePacer(defaultChannelDiscoveryRPM)
 	})
@@ -236,18 +237,18 @@ func channelDiscoveryWithPacerFactory(
 	cfgManager *config.ConfigManager,
 	modelFetchers ChannelDiscoveryModelFetchers,
 	pacerFactory func() *discoveryProbePacer,
-) gin.HandlerFunc {
-	return func(c *gin.Context) {
+) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		var req ChannelDiscoveryRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
-			return
+		if err := httpbridge.BindJSON(c, &req); err != nil {
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "invalid request body"})
+			return nil
 		}
 
 		channel, err := buildTransientDiscoveryChannel(req)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
+			return nil
 		}
 
 		globalCapabilities := map[string]config.UpstreamModelCapability(nil)
@@ -256,7 +257,7 @@ func channelDiscoveryWithPacerFactory(
 		}
 
 		autoDetectServiceType := strings.TrimSpace(req.ServiceType) == ""
-		models := discoverTransientModelsWithFetchers(c.Request.Context(), channel, normalizeDiscoveryChannelKind(req.ChannelKind), channel.APIKeys[0], modelFetchers)
+		models := discoverTransientModelsWithFetchers(httpbridge.Request(c).Context(), channel, normalizeDiscoveryChannelKind(req.ChannelKind), channel.APIKeys[0], modelFetchers)
 		if len(models.Items) == 0 {
 			models.Items = fallbackDiscoveryProbeModels(req.ChannelKind, channel.ServiceType)
 			models.Source = "fallback"
@@ -266,7 +267,7 @@ func channelDiscoveryWithPacerFactory(
 
 		probeModels := discoveryProtocolProbeModels(models, req.ProbeAllModels || autoDetectServiceType)
 		pacer := pacerFactory()
-		protocols := runDiscoveryProtocolProbes(c.Request.Context(), channel, probeModels, cfgManager, pacer)
+		protocols := runDiscoveryProtocolProbes(httpbridge.Request(c).Context(), channel, probeModels, cfgManager, pacer)
 		successByProtocol := discoverySuccessModelsByProtocol(protocols)
 		recommendedKind := recommendDiscoveryChannelKind(req.ChannelKind, req.TargetClients, protocols)
 		channel.ServiceType = resolveDiscoveryServiceType(req.ServiceType, recommendedKind)
@@ -298,7 +299,7 @@ func channelDiscoveryWithPacerFactory(
 		}
 
 		evidence := buildDiscoveryEvidence(models, protocols, recommendation)
-		c.JSON(http.StatusOK, ChannelDiscoveryResponse{
+		httpbridge.JSON(c, http.StatusOK, ChannelDiscoveryResponse{
 			Models:         models,
 			Protocols:      protocols,
 			Capabilities:   capabilities,
@@ -306,6 +307,7 @@ func channelDiscoveryWithPacerFactory(
 			RateLimit:      pacer.result(),
 			Evidence:       evidence,
 		})
+		return nil
 	}
 }
 

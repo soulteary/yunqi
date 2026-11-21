@@ -9,11 +9,10 @@ import (
 	"time"
 
 	"github.com/soulteary/yunqi/internal/conversation"
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 func TestSetConversationOverride_SubagentOnlyAndClear(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	tracker := conversation.NewConversationTracker(1*time.Hour, 24*time.Hour, "")
 	defer tracker.Stop()
@@ -39,10 +38,10 @@ func TestSetConversationOverride_SubagentOnlyAndClear(t *testing.T) {
 		}
 
 		w := httptest.NewRecorder()
-		c, _ := gin.CreateTestContext(w)
-		c.Params = gin.Params{{Key: "id", Value: conv.ID}}
-		c.Request = httptest.NewRequest("POST", "/api/conversations/"+conv.ID+"/override", bytes.NewReader(reqJSON))
-		c.Request.Header.Set("Content-Type", "application/json")
+		c, _ := httpbridge.TestContext(w)
+		httpbridge.SetParams(c, httpbridge.Params{{Key: "id", Value: conv.ID}})
+		httpbridge.SetRequest(c, httptest.NewRequest("POST", "/api/conversations/"+conv.ID+"/override", bytes.NewReader(reqJSON)))
+		httpbridge.Request(c).Header.Set("Content-Type", "application/json")
 		SetConversationOverride(deps)(c)
 		return w
 	}

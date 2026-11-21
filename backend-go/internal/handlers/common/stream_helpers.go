@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/soulteary/yunqi/internal/utils"
 	"github.com/google/uuid"
+	"github.com/soulteary/yunqi/internal/utils"
 )
 
 const streamEmptyRetryClientMessage = "Empty response from upstream; please try again."

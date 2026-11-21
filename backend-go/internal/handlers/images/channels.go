@@ -11,70 +11,71 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	handlers "github.com/soulteary/yunqi/internal/handlers"
 	"github.com/soulteary/yunqi/internal/handlers/common"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/httpclient"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/utils"
-	"github.com/gin-gonic/gin"
 )
 
 // GetUpstreams 获取 Images 上游列表
-func GetUpstreams(cfgManager *config.ConfigManager) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func GetUpstreams(cfgManager *config.ConfigManager) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		cfg := cfgManager.GetConfig()
 
-		upstreams := make([]gin.H, len(cfg.ImagesUpstream))
+		upstreams := make([]fiber.Map, len(cfg.ImagesUpstream))
 		for i, up := range cfg.ImagesUpstream {
 			upstreams[i] = common.BuildChannelView(up, i)
 		}
-
-		c.JSON(200, gin.H{
+		httpbridge.JSON(c, 200, fiber.Map{
 			"channels": upstreams,
 		})
+		return nil
 	}
 }
 
 // AddUpstream 添加 Images 上游
-func AddUpstream(cfgManager *config.ConfigManager) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func AddUpstream(cfgManager *config.ConfigManager) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		var req struct {
 			config.UpstreamConfig
 			Placement string `json:"placement"` // 故障转移位置：front（首位）| back（末尾，默认）
 		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(400, gin.H{"error": err.Error()})
-			return
+		if err := httpbridge.BindJSON(c, &req); err != nil {
+			httpbridge.JSON(c, 400, fiber.Map{"error": err.Error()})
+			return nil
 		}
 
 		if err := cfgManager.AddImagesUpstream(req.UpstreamConfig, req.Placement); err != nil {
 			if strings.Contains(err.Error(), "仅支持 openai serviceType") {
-				c.JSON(400, gin.H{"error": err.Error()})
+				httpbridge.JSON(c, 400, fiber.Map{"error": err.Error()})
 			} else {
-				c.JSON(500, gin.H{"error": err.Error()})
+				httpbridge.JSON(c, 500, fiber.Map{"error": err.Error()})
 			}
-			return
+			return nil
 		}
-
-		c.JSON(200, gin.H{"message": "Images upstream added successfully"})
+		httpbridge.JSON(c, 200, fiber.Map{"message": "Images upstream added successfully"})
+		return nil
 	}
 }
 
 // UpdateUpstream 更新 Images 上游
-func UpdateUpstream(cfgManager *config.ConfigManager, sch *scheduler.ChannelScheduler) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		idStr := c.Param("id")
+func UpdateUpstream(cfgManager *config.ConfigManager, sch *scheduler.ChannelScheduler) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		idStr := httpbridge.Param(c, "id")
 		id, err := strconv.Atoi(idStr)
 		if err != nil {
-			c.JSON(400, gin.H{"error": "Invalid upstream ID"})
-			return
+			httpbridge.JSON(c, 400, fiber.Map{"error": "Invalid upstream ID"})
+			return nil
 		}
 
 		var updates config.UpstreamUpdate
-		if err := c.ShouldBindJSON(&updates); err != nil {
-			c.JSON(400, gin.H{"error": err.Error()})
-			return
+		if err := httpbridge.BindJSON(c, &updates); err != nil {
+			httpbridge.JSON(c, 400, fiber.Map{"error": err.Error()})
+			return nil
 		}
 
 		oldName := ""
@@ -88,11 +89,11 @@ func UpdateUpstream(cfgManager *config.ConfigManager, sch *scheduler.ChannelSche
 		shouldResetMetrics, err := cfgManager.UpdateImagesUpstream(id, updates)
 		if err != nil {
 			if strings.Contains(err.Error(), "仅支持 openai serviceType") {
-				c.JSON(400, gin.H{"error": err.Error()})
+				httpbridge.JSON(c, 400, fiber.Map{"error": err.Error()})
 			} else {
-				c.JSON(500, gin.H{"error": err.Error()})
+				httpbridge.JSON(c, 500, fiber.Map{"error": err.Error()})
 			}
-			return
+			return nil
 		}
 
 		if updates.Name != nil && oldName != "" && oldName != *updates.Name {
@@ -105,169 +106,171 @@ func UpdateUpstream(cfgManager *config.ConfigManager, sch *scheduler.ChannelSche
 		if shouldResetMetrics {
 			sch.ResetChannelMetrics(id, scheduler.ChannelKindImages)
 		}
-
-		c.JSON(200, gin.H{"message": "Images upstream updated successfully"})
+		httpbridge.JSON(c, 200, fiber.Map{"message": "Images upstream updated successfully"})
+		return nil
 	}
 }
 
 // DeleteUpstream 删除 Images 上游
-func DeleteUpstream(cfgManager *config.ConfigManager, channelScheduler *scheduler.ChannelScheduler) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		idStr := c.Param("id")
+func DeleteUpstream(cfgManager *config.ConfigManager, channelScheduler *scheduler.ChannelScheduler) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		idStr := httpbridge.Param(c, "id")
 		id, err := strconv.Atoi(idStr)
 		if err != nil {
-			c.JSON(400, gin.H{"error": "Invalid upstream ID"})
-			return
+			httpbridge.JSON(c, 400, fiber.Map{"error": "Invalid upstream ID"})
+			return nil
 		}
 
 		removed, err := cfgManager.RemoveImagesUpstream(id)
 		if err != nil {
 			if strings.Contains(err.Error(), "无效的") {
-				c.JSON(404, gin.H{"error": "Upstream not found"})
+				httpbridge.JSON(c, 404, fiber.Map{"error": "Upstream not found"})
 			} else {
-				c.JSON(500, gin.H{"error": err.Error()})
+				httpbridge.JSON(c, 500, fiber.Map{"error": err.Error()})
 			}
-			return
+			return nil
 		}
 
 		channelScheduler.DeleteChannelLogs(removed, scheduler.ChannelKindImages)
 		channelScheduler.DeleteChannelMetrics(removed, scheduler.ChannelKindImages)
-
-		c.JSON(200, gin.H{"message": "Images upstream deleted successfully"})
+		httpbridge.JSON(c, 200, fiber.Map{"message": "Images upstream deleted successfully"})
+		return nil
 	}
 }
 
 // AddApiKey 添加 Images 渠道 API 密钥
-func AddApiKey(cfgManager *config.ConfigManager) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		idStr := c.Param("id")
+func AddApiKey(cfgManager *config.ConfigManager) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		idStr := httpbridge.Param(c, "id")
 		id, err := strconv.Atoi(idStr)
 		if err != nil {
-			c.JSON(400, gin.H{"error": "Invalid upstream ID"})
-			return
+			httpbridge.JSON(c, 400, fiber.Map{"error": "Invalid upstream ID"})
+			return nil
 		}
 
 		var req struct {
 			APIKey string `json:"apiKey"`
 		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(400, gin.H{"error": "Invalid request body"})
-			return
+		if err := httpbridge.BindJSON(c, &req); err != nil {
+			httpbridge.JSON(c, 400, fiber.Map{"error": "Invalid request body"})
+			return nil
 		}
 
 		if err := cfgManager.AddImagesAPIKey(id, req.APIKey); err != nil {
 			if strings.Contains(err.Error(), "无效的上游索引") {
-				c.JSON(404, gin.H{"error": "Upstream not found"})
+				httpbridge.JSON(c, 404, fiber.Map{"error": "Upstream not found"})
 			} else if strings.Contains(err.Error(), "API密钥已存在") {
-				c.JSON(400, gin.H{"error": "API密钥已存在"})
+				httpbridge.JSON(c, 400, fiber.Map{"error": "API密钥已存在"})
 			} else {
-				c.JSON(500, gin.H{"error": "Failed to save config"})
+				httpbridge.JSON(c, 500, fiber.Map{"error": "Failed to save config"})
 			}
-			return
+			return nil
 		}
-
-		c.JSON(200, gin.H{
+		httpbridge.JSON(c, 200, fiber.Map{
 			"message": "API密钥已添加",
 			"success": true,
 		})
+		return nil
 	}
 }
 
 // DeleteApiKey 删除 Images 渠道 API 密钥
-func DeleteApiKey(cfgManager *config.ConfigManager) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		idStr := c.Param("id")
+func DeleteApiKey(cfgManager *config.ConfigManager) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		idStr := httpbridge.Param(c, "id")
 		id, err := strconv.Atoi(idStr)
 		if err != nil {
-			c.JSON(400, gin.H{"error": "Invalid upstream ID"})
-			return
+			httpbridge.JSON(c, 400, fiber.Map{"error": "Invalid upstream ID"})
+			return nil
 		}
 
-		apiKey := c.Param("apiKey")
+		apiKey := httpbridge.Param(c, "apiKey")
 		if apiKey == "" {
-			c.JSON(400, gin.H{"error": "API key is required"})
-			return
+			httpbridge.JSON(c, 400, fiber.Map{"error": "API key is required"})
+			return nil
 		}
 
 		if err := cfgManager.RemoveImagesAPIKey(id, apiKey); err != nil {
 			if strings.Contains(err.Error(), "无效的上游索引") {
-				c.JSON(404, gin.H{"error": "Upstream not found"})
+				httpbridge.JSON(c, 404, fiber.Map{"error": "Upstream not found"})
 			} else if strings.Contains(err.Error(), "API密钥不存在") {
-				c.JSON(404, gin.H{"error": "API key not found"})
+				httpbridge.JSON(c, 404, fiber.Map{"error": "API key not found"})
 			} else {
-				c.JSON(500, gin.H{"error": "Failed to save config"})
+				httpbridge.JSON(c, 500, fiber.Map{"error": "Failed to save config"})
 			}
-			return
+			return nil
 		}
-
-		c.JSON(200, gin.H{
+		httpbridge.JSON(c, 200, fiber.Map{
 			"message": "API密钥已删除",
 		})
+		return nil
 	}
 }
 
 // MoveApiKeyToTop 将 Images 渠道 API 密钥移到最前面
-func MoveApiKeyToTop(cfgManager *config.ConfigManager) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		id, err := strconv.Atoi(c.Param("id"))
+func MoveApiKeyToTop(cfgManager *config.ConfigManager) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		id, err := strconv.Atoi(httpbridge.Param(c, "id"))
 		if err != nil {
-			c.JSON(400, gin.H{"error": "Invalid upstream ID"})
-			return
+			httpbridge.JSON(c, 400, fiber.Map{"error": "Invalid upstream ID"})
+			return nil
 		}
-		apiKey := c.Param("apiKey")
+		apiKey := httpbridge.Param(c, "apiKey")
 
 		if err := cfgManager.MoveImagesAPIKeyToTop(id, apiKey); err != nil {
-			c.JSON(400, gin.H{"error": err.Error()})
-			return
+			httpbridge.JSON(c, 400, fiber.Map{"error": err.Error()})
+			return nil
 		}
-		c.JSON(200, gin.H{"message": "API密钥已置顶"})
+		httpbridge.JSON(c, 200, fiber.Map{"message": "API密钥已置顶"})
+		return nil
 	}
 }
 
 // MoveApiKeyToBottom 将 Images 渠道 API 密钥移到最后面
-func MoveApiKeyToBottom(cfgManager *config.ConfigManager) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		id, err := strconv.Atoi(c.Param("id"))
+func MoveApiKeyToBottom(cfgManager *config.ConfigManager) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		id, err := strconv.Atoi(httpbridge.Param(c, "id"))
 		if err != nil {
-			c.JSON(400, gin.H{"error": "Invalid upstream ID"})
-			return
+			httpbridge.JSON(c, 400, fiber.Map{"error": "Invalid upstream ID"})
+			return nil
 		}
-		apiKey := c.Param("apiKey")
+		apiKey := httpbridge.Param(c, "apiKey")
 
 		if err := cfgManager.MoveImagesAPIKeyToBottom(id, apiKey); err != nil {
-			c.JSON(400, gin.H{"error": err.Error()})
-			return
+			httpbridge.JSON(c, 400, fiber.Map{"error": err.Error()})
+			return nil
 		}
-		c.JSON(200, gin.H{"message": "API密钥已置底"})
+		httpbridge.JSON(c, 200, fiber.Map{"message": "API密钥已置底"})
+		return nil
 	}
 }
 
 // ReorderChannels 重新排序 Images 渠道优先级
-func ReorderChannels(cfgManager *config.ConfigManager) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func ReorderChannels(cfgManager *config.ConfigManager) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		var req struct {
 			Order      []int `json:"order"`
 			Priorities []int `json:"priorities"`
 		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(400, gin.H{"error": "Invalid request body"})
-			return
+		if err := httpbridge.BindJSON(c, &req); err != nil {
+			httpbridge.JSON(c, 400, fiber.Map{"error": "Invalid request body"})
+			return nil
 		}
 
 		if err := cfgManager.ReorderImagesUpstreams(req.Order, req.Priorities); err != nil {
-			c.JSON(400, gin.H{"error": err.Error()})
-			return
+			httpbridge.JSON(c, 400, fiber.Map{"error": err.Error()})
+			return nil
 		}
-
-		c.JSON(200, gin.H{
+		httpbridge.JSON(c, 200, fiber.Map{
 			"success": true,
 			"message": "Images 渠道优先级已更新",
 		})
+		return nil
 	}
 }
 
 // SetChannelStatus 设置 Images 渠道状态
-func SetChannelStatus(cfgManager *config.ConfigManager) gin.HandlerFunc {
+func SetChannelStatus(cfgManager *config.ConfigManager) fiber.Handler {
 	adapter := handlers.ChannelStatusConfigManagerFunc(func(index int, status string) error {
 		return cfgManager.SetImagesChannelStatus(index, status)
 	})
@@ -275,7 +278,7 @@ func SetChannelStatus(cfgManager *config.ConfigManager) gin.HandlerFunc {
 }
 
 // SetChannelPromotion 设置 Images 渠道促销期
-func SetChannelPromotion(cfgManager *config.ConfigManager) gin.HandlerFunc {
+func SetChannelPromotion(cfgManager *config.ConfigManager) fiber.Handler {
 	adapter := handlers.PromotionConfigManagerFunc(func(index int, duration time.Duration) error {
 		return cfgManager.SetImagesChannelPromotion(index, duration)
 	})
@@ -283,30 +286,31 @@ func SetChannelPromotion(cfgManager *config.ConfigManager) gin.HandlerFunc {
 }
 
 // PingChannel 测试 Images 渠道连通性
-func PingChannel(cfgManager *config.ConfigManager) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		idStr := c.Param("id")
+func PingChannel(cfgManager *config.ConfigManager) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		idStr := httpbridge.Param(c, "id")
 		id, err := strconv.Atoi(idStr)
 		if err != nil {
-			c.JSON(400, gin.H{"error": "Invalid channel ID"})
-			return
+			httpbridge.JSON(c, 400, fiber.Map{"error": "Invalid channel ID"})
+			return nil
 		}
 
 		cfg := cfgManager.GetConfig()
 		if id < 0 || id >= len(cfg.ImagesUpstream) {
-			c.JSON(404, gin.H{"error": "Channel not found"})
-			return
+			httpbridge.JSON(c, 404, fiber.Map{"error": "Channel not found"})
+			return nil
 		}
-
-		c.JSON(200, common.PingSingleBaseURLUpstream(cfg.ImagesUpstream[id], buildPingRequest))
+		httpbridge.JSON(c, 200, common.PingSingleBaseURLUpstream(cfg.ImagesUpstream[id], buildPingRequest))
+		return nil
 	}
 }
 
 // PingAllChannels 测试所有 Images 渠道连通性
-func PingAllChannels(cfgManager *config.ConfigManager) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func PingAllChannels(cfgManager *config.ConfigManager) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		cfg := cfgManager.GetConfig()
-		c.JSON(200, gin.H{"channels": common.PingAllSingleBaseURLUpstreams(cfg.ImagesUpstream, buildPingRequest, true)["channels"]})
+		httpbridge.JSON(c, 200, fiber.Map{"channels": common.PingAllSingleBaseURLUpstreams(cfg.ImagesUpstream, buildPingRequest, true)["channels"]})
+		return nil
 	}
 }
 
@@ -372,21 +376,21 @@ type GetModelsRequest struct {
 }
 
 // GetChannelModels 获取指定渠道的模型列表（支持临时 Key）
-func GetChannelModels(cfgManager *config.ConfigManager) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func GetChannelModels(cfgManager *config.ConfigManager) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		// 1. 解析渠道 ID
-		idStr := c.Param("id")
+		idStr := httpbridge.Param(c, "id")
 		id, err := strconv.Atoi(idStr)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid channel ID"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "Invalid channel ID"})
+			return nil
 		}
 
 		// 2. 从请求体读取参数
 		var req GetModelsRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
-			return
+		if err := httpbridge.BindJSON(c, &req); err != nil {
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "Invalid request body"})
+			return nil
 		}
 
 		// 3. 获取 baseUrl（优先使用请求体中的临时 baseUrl，用于新增渠道场景）
@@ -403,8 +407,8 @@ func GetChannelModels(cfgManager *config.ConfigManager) gin.HandlerFunc {
 			// SSRF 防护：验证用户提供的 baseURL
 			if err := utils.ValidateBaseURL(req.BaseURL); err != nil {
 				log.Printf("[Images-Models] SSRF 防护拦截: %v", err)
-				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("无效的 baseUrl: %v", err)})
-				return
+				httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": fmt.Sprintf("无效的 baseUrl: %v", err)})
+				return nil
 			}
 			baseURL = req.BaseURL
 			channelName = "临时渠道"
@@ -426,8 +430,8 @@ func GetChannelModels(cfgManager *config.ConfigManager) gin.HandlerFunc {
 			// 编辑模式：从配置中读取渠道信息
 			cfg := cfgManager.GetConfig()
 			if id < 0 || id >= len(cfg.ImagesUpstream) {
-				c.JSON(http.StatusNotFound, gin.H{"error": "Channel not found"})
-				return
+				httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "Channel not found"})
+				return nil
 			}
 
 			channel := cfg.ImagesUpstream[id]
@@ -441,8 +445,8 @@ func GetChannelModels(cfgManager *config.ConfigManager) gin.HandlerFunc {
 			if req.BaseURL != "" {
 				if err := utils.ValidateBaseURL(req.BaseURL); err != nil {
 					log.Printf("[Images-Models] SSRF 防护拦截: %v", err)
-					c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("无效的 baseUrl: %v", err)})
-					return
+					httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": fmt.Sprintf("无效的 baseUrl: %v", err)})
+					return nil
 				}
 				baseURL = req.BaseURL
 			}
@@ -463,8 +467,8 @@ func GetChannelModels(cfgManager *config.ConfigManager) gin.HandlerFunc {
 		// 4. 验证 API Key
 		apiKey := req.Key
 		if apiKey == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "No API key provided"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "No API key provided"})
+			return nil
 		}
 
 		log.Printf("[Images-Models] 请求模型列表: channel=%s, key=%s", channelName, utils.MaskAPIKey(apiKey))
@@ -483,11 +487,11 @@ func GetChannelModels(cfgManager *config.ConfigManager) gin.HandlerFunc {
 			client = httpclient.GetManager().NewClient(clientOpts)
 		}
 
-		httpReq, err := http.NewRequestWithContext(c.Request.Context(), "GET", url, nil)
+		httpReq, err := http.NewRequestWithContext(httpbridge.Request(c).Context(), "GET", url, nil)
 		if err != nil {
 			log.Printf("[Images-Models] 创建请求失败: channel=%s, url=%s, error=%v", channelName, url, err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to create request: %v", err)})
-			return
+			httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": fmt.Sprintf("Failed to create request: %v", err)})
+			return nil
 		}
 		utils.SetAuthenticationHeaderWithOverride(httpReq.Header, apiKey, authHeader)
 		// 已学习客户端伪装标记的上游：请求带 Claude Code 探针头，
@@ -502,34 +506,35 @@ func GetChannelModels(cfgManager *config.ConfigManager) gin.HandlerFunc {
 		if err != nil {
 			log.Printf("[Images-Models] 请求失败: channel=%s, key=%s, url=%s, error=%v",
 				channelName, utils.MaskAPIKey(apiKey), url, err)
-			c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("Failed to fetch models: %v", err)})
-			return
+			httpbridge.JSON(c, http.StatusBadGateway, fiber.Map{"error": fmt.Sprintf("Failed to fetch models: %v", err)})
+			return nil
 		}
 
 		body, err := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
 		if err != nil {
 			log.Printf("[Images-Models] 读取响应失败: channel=%s, error=%v", channelName, err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to read response: %v", err)})
-			return
+			httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": fmt.Sprintf("Failed to read response: %v", err)})
+			return nil
 		}
 
 		log.Printf("[Images-Models] 上游响应: channel=%s, key=%s, status=%d, url=%s",
 			channelName, utils.MaskAPIKey(apiKey), resp.StatusCode, url)
 		// 包装上游 401 错误，避免前端误判为管理 API 认证失败
 		if resp.StatusCode == 401 {
-			c.JSON(http.StatusBadRequest, gin.H{
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{
 				"error":      "上游 API Key 无效",
 				"statusCode": 401,
 				"details":    string(body),
 			})
-			return
+			return nil
 		}
 
 		if resp.StatusCode == http.StatusOK {
 			// 透传上游响应体时注入真实状态码，供前端展示（不再硬编码 200）。
 			body = common.InjectUpstreamStatusCode(body, resp.StatusCode)
 		}
-		c.Data(resp.StatusCode, "application/json", body)
+		httpbridge.Data(c, resp.StatusCode, "application/json", body)
+		return nil
 	}
 }

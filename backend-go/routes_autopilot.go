@@ -1,13 +1,13 @@
 package main
 
 import (
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/autopilot"
 	"github.com/soulteary/yunqi/internal/handlers"
 	"github.com/soulteary/yunqi/internal/scheduler"
-	"github.com/gin-gonic/gin"
 )
 
-func (a *application) registerAutopilotRoutes(apiGroup *gin.RouterGroup) {
+func (a *application) registerAutopilotRoutes(apiGroup fiber.Router) {
 	// 健康中心 API（Phase 1 shadow/read-only）
 	if a.autopilotManager != nil {
 		autopilot.RegisterRoutes(apiGroup, a.autopilotManager)

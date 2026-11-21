@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/soulteary/yunqi/internal/errutil"
 	"github.com/google/uuid"
+	"github.com/soulteary/yunqi/internal/errutil"
 )
 
 // ── 本地模型运行时画像 ──

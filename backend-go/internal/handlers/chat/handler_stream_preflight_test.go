@@ -12,7 +12,7 @@ import (
 
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/handlers/common"
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 type preflightResult struct {
@@ -258,7 +258,7 @@ func TestPreflightChatStream_EmptyStreamAtEOFTriggersFailover(t *testing.T) {
 }
 
 func TestHandleStreamSuccess_RefusalOnly(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	refusal := `data: {"choices":[{"index":0,"delta":{"content":null,"refusal":"I cannot help with that request."}}]}` + "\n\n"
 	tests := []struct {
 		name      string
@@ -291,8 +291,8 @@ func TestHandleStreamSuccess_RefusalOnly(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
-			c, _ := gin.CreateTestContext(w)
-			c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5","stream":true}`))
+			c, _ := httpbridge.TestContext(w)
+			httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5","stream":true}`)))
 			resp := &http.Response{
 				StatusCode: http.StatusOK,
 				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
@@ -308,7 +308,7 @@ func TestHandleStreamSuccess_RefusalOnly(t *testing.T) {
 				if !errors.Is(err, common.ErrEmptyStreamResponse) {
 					t.Fatalf("expected empty stream error, got %v", err)
 				}
-				if c.Writer.Written() || w.Body.Len() != 0 {
+				if httpbridge.Writer(c).Written() || w.Body.Len() != 0 {
 					t.Fatal("empty refusal must not commit a client response")
 				}
 				return
@@ -330,7 +330,7 @@ func TestHandleStreamSuccess_RefusalOnly(t *testing.T) {
 // SSE 终止符、不重发尾行正文（重发会被客户端 SSE 解析器拼到同一行，产生尾部重复输出）。
 // 覆盖尾行整体落在 preflight 预读缓冲与透传阶段跨 chunk 拼装两种送达方式。
 func TestHandleStreamSuccess_PassthroughUnterminatedTail(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	content := `data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"hi"}}]}` + "\n\n"
 	finish := `data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}` + "\n\n"
 	doneNoNewline := `data: [DONE]`
@@ -391,8 +391,8 @@ func TestHandleStreamSuccess_PassthroughUnterminatedTail(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
-			c, _ := gin.CreateTestContext(w)
-			c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5","stream":true}`))
+			c, _ := httpbridge.TestContext(w)
+			httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5","stream":true}`)))
 			resp := &http.Response{
 				StatusCode: http.StatusOK,
 				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
@@ -431,7 +431,6 @@ func TestPreflightChatStream_ContentStreamStillPasses(t *testing.T) {
 // HasOpenAIChatSemanticContent 只建模文本/思考/拒答/工具调用/音频，未建模的形态若被
 // 判失败会从"能正常透传"变成 failover；上限只约束预读，不扩大判空范围。
 func TestHandleStreamSuccess_PreflightSizeCapPassesThrough(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	// 无语义内容的合法 chunk（delta 为空对象），重复到超过 1MB 上限
 	line := `data: {"choices":[{"index":0,"delta":{}}]}` + "\n\n"
@@ -441,8 +440,8 @@ func TestHandleStreamSuccess_PreflightSizeCapPassesThrough(t *testing.T) {
 	}
 
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5","stream":true}`))
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5","stream":true}`)))
 	resp := &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},

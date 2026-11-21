@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/soulteary/yunqi/internal/config"
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 // ── shadowRequestBudget 测试 ──
@@ -286,7 +286,7 @@ func TestABTestSampler_ExecuteShadow_AsyncAfterPrimaryResponse(t *testing.T) {
 	})
 
 	// 需要配置中有 shadow 渠道的上游信息
-	// 由于 createTempGinContext + ConvertToProviderRequest 依赖真实 provider，
+	// 由于 createTempFiberContext + ConvertToProviderRequest 依赖真实 provider，
 	// 这里我们验证的是：ExecuteShadowRequest 立即返回，不阻塞。
 	// 实际 HTTP 调用由 provider 层处理，这里用空配置测试快速返回路径。
 	cfgManager := &config.ConfigManager{}
@@ -453,12 +453,12 @@ func TestABTestResultsHandler_DisabledByDefault(t *testing.T) {
 		Store:   store,
 	}
 
-	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
-	c, router := gin.CreateTestContext(w)
-	router.GET("/api/autopilot/ab-test-results", handleABTestResults(deps))
-	c.Request, _ = http.NewRequest("GET", "/api/autopilot/ab-test-results", nil)
-	router.ServeHTTP(w, c.Request)
+	c, router := httpbridge.TestContext(w)
+	router.Get("/api/autopilot/ab-test-results", handleABTestResults(deps))
+	fiberRequest, _ := http.NewRequest("GET", "/api/autopilot/ab-test-results", nil)
+	httpbridge.SetRequest(c, fiberRequest)
+	httpbridge.Handler(router).ServeHTTP(w, httpbridge.Request(c))
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
@@ -480,12 +480,12 @@ func TestABTestEmergencyStopHandler(t *testing.T) {
 		Store:   store,
 	}
 
-	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
-	c, router := gin.CreateTestContext(w)
-	router.POST("/api/autopilot/ab-test/emergency-stop", handleABTestEmergencyStop(deps))
-	c.Request, _ = http.NewRequest("POST", "/api/autopilot/ab-test/emergency-stop", nil)
-	router.ServeHTTP(w, c.Request)
+	c, router := httpbridge.TestContext(w)
+	router.Post("/api/autopilot/ab-test/emergency-stop", handleABTestEmergencyStop(deps))
+	fiberRequest, _ := http.NewRequest("POST", "/api/autopilot/ab-test/emergency-stop", nil)
+	httpbridge.SetRequest(c, fiberRequest)
+	httpbridge.Handler(router).ServeHTTP(w, httpbridge.Request(c))
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)

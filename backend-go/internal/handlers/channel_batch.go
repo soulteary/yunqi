@@ -7,9 +7,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/utils"
-	"github.com/gin-gonic/gin"
 )
 
 // deriveImportChannelName 按渠道首个 baseURL 派生名称（与 ConfigManager.Add 的派生规则一致），
@@ -162,22 +163,22 @@ func isValidChannelType(ct string) bool {
 //   - 默认排除 APIKeys 明文（includeKeys=false）
 //   - includeKeys=true 需要 admin 鉴权（WebAuthMiddleware 已对 /api/* 强制 admin 鉴权，
 //     此处额外校验请求头中的 admin key 以防止 proxy-only key 越权导出凭证）
-func ExportChannels(envCfg *config.EnvConfig, cfgManager *config.ConfigManager) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func ExportChannels(envCfg *config.EnvConfig, cfgManager *config.ConfigManager) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		var req ExportChannelsRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body", "message": err.Error()})
-			return
+		if err := httpbridge.BindJSON(c, &req); err != nil {
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "Invalid request body", "message": err.Error()})
+			return nil
 		}
 
 		// 如果请求包含明文 key，二次确认 admin 鉴权
 		if req.IncludeKeys {
 			if !requireAdminAuth(c, envCfg) {
-				c.JSON(http.StatusForbidden, gin.H{
+				httpbridge.JSON(c, http.StatusForbidden, fiber.Map{
 					"error":   "Forbidden",
 					"message": "导出明文 APIKeys 需要管理密钥鉴权",
 				})
-				return
+				return nil
 			}
 		}
 
@@ -195,11 +196,11 @@ func ExportChannels(envCfg *config.EnvConfig, cfgManager *config.ConfigManager) 
 		if len(req.ChannelTypes) > 0 {
 			for _, ct := range req.ChannelTypes {
 				if !isValidChannelType(ct) {
-					c.JSON(http.StatusBadRequest, gin.H{
+					httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{
 						"error":   "Invalid channelType",
 						"message": fmt.Sprintf("不支持的渠道类型: %s", ct),
 					})
-					return
+					return nil
 				}
 				typeSet[ct] = true
 			}
@@ -236,40 +237,40 @@ func ExportChannels(envCfg *config.EnvConfig, cfgManager *config.ConfigManager) 
 		}
 
 		log.Printf("[ChannelBatch-Export] 导出 %d 个渠道 (includeKeys=%v)", len(entries), req.IncludeKeys)
-
-		c.JSON(http.StatusOK, pack)
+		httpbridge.JSON(c, http.StatusOK, pack)
+		return nil
 	}
 }
 
 // ExportAllChannels 导出所有渠道（简化接口，支持 query 参数）。
 //
 //	GET /api/channels/export?includeKeys=true&channelTypes=messages,chat
-func ExportAllChannels(envCfg *config.EnvConfig, cfgManager *config.ConfigManager) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		includeKeys := c.Query("includeKeys") == "true"
+func ExportAllChannels(envCfg *config.EnvConfig, cfgManager *config.ConfigManager) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		includeKeys := httpbridge.Query(c, "includeKeys") == "true"
 
 		if includeKeys {
 			if !requireAdminAuth(c, envCfg) {
-				c.JSON(http.StatusForbidden, gin.H{
+				httpbridge.JSON(c, http.StatusForbidden, fiber.Map{
 					"error":   "Forbidden",
 					"message": "导出明文 APIKeys 需要管理密钥鉴权",
 				})
-				return
+				return nil
 			}
 		}
 
 		// 按类型过滤
 		var typeSet map[string]bool
-		if ctParam := c.Query("channelTypes"); ctParam != "" {
+		if ctParam := httpbridge.Query(c, "channelTypes"); ctParam != "" {
 			typeSet = make(map[string]bool)
 			for _, ct := range strings.Split(ctParam, ",") {
 				ct = strings.TrimSpace(ct)
 				if !isValidChannelType(ct) {
-					c.JSON(http.StatusBadRequest, gin.H{
+					httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{
 						"error":   "Invalid channelType",
 						"message": fmt.Sprintf("不支持的渠道类型: %s", ct),
 					})
-					return
+					return nil
 				}
 				typeSet[ct] = true
 			}
@@ -297,8 +298,8 @@ func ExportAllChannels(envCfg *config.EnvConfig, cfgManager *config.ConfigManage
 		}
 
 		log.Printf("[ChannelBatch-Export] 导出全部 %d 个渠道 (includeKeys=%v)", len(entries), includeKeys)
-
-		c.JSON(http.StatusOK, pack)
+		httpbridge.JSON(c, http.StatusOK, pack)
+		return nil
 	}
 }
 
@@ -307,17 +308,17 @@ func ExportAllChannels(envCfg *config.EnvConfig, cfgManager *config.ConfigManage
 // 安全约束：
 // - 不复用原始 ChannelUID，统一重新生成（避免碰撞）
 // - 导入前返回 diff 预览，前端展示后用户二次确认才写入
-func ImportChannels(cfgManager *config.ConfigManager) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func ImportChannels(cfgManager *config.ConfigManager) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		var req ImportChannelsRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body", "message": err.Error()})
-			return
+		if err := httpbridge.BindJSON(c, &req); err != nil {
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "Invalid request body", "message": err.Error()})
+			return nil
 		}
 
 		if len(req.Pack.Channels) == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "渠道包为空"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "渠道包为空"})
+			return nil
 		}
 
 		cfg := cfgManager.GetConfig()
@@ -337,11 +338,11 @@ func ImportChannels(cfgManager *config.ConfigManager) gin.HandlerFunc {
 
 		for _, entry := range req.Pack.Channels {
 			if !isValidChannelType(entry.ChannelType) {
-				c.JSON(http.StatusBadRequest, gin.H{
+				httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{
 					"error":   "Invalid channelType",
 					"message": fmt.Sprintf("渠道类型无效: %s", entry.ChannelType),
 				})
-				return
+				return nil
 			}
 
 			// 名称由首个 baseURL 派生（与 Add 保持一致），用于预览判冲突
@@ -362,10 +363,10 @@ func ImportChannels(cfgManager *config.ConfigManager) gin.HandlerFunc {
 		}
 
 		log.Printf("[ChannelBatch-Import] 生成导入预览: %d 个渠道", len(req.Pack.Channels))
-
-		c.JSON(http.StatusOK, gin.H{
+		httpbridge.JSON(c, http.StatusOK, fiber.Map{
 			"preview": preview,
 		})
+		return nil
 	}
 }
 
@@ -375,17 +376,17 @@ func ImportChannels(cfgManager *config.ConfigManager) gin.HandlerFunc {
 // - 不复用原始 ChannelUID，统一重新生成
 // - 复用现有单渠道创建时已有的迁移/校验/backfill 函数
 // - 名称冲突时自动重命名（加 "-import" 后缀）
-func ImportChannelsConfirm(cfgManager *config.ConfigManager) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func ImportChannelsConfirm(cfgManager *config.ConfigManager) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		var req ImportConfirmRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body", "message": err.Error()})
-			return
+		if err := httpbridge.BindJSON(c, &req); err != nil {
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "Invalid request body", "message": err.Error()})
+			return nil
 		}
 
 		if len(req.Pack.Channels) == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "渠道包为空"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "渠道包为空"})
+			return nil
 		}
 
 		cfg := cfgManager.GetConfig()
@@ -486,39 +487,41 @@ func ImportChannelsConfirm(cfgManager *config.ConfigManager) gin.HandlerFunc {
 		}
 
 		log.Printf("[ChannelBatch-Import] 导入完成: 成功 %d, 失败 %d", len(imported), len(importErrors))
-
-		c.JSON(http.StatusOK, gin.H{
+		httpbridge.JSON(c, http.StatusOK, fiber.Map{
 			"imported": imported,
 			"errors":   importErrors,
 			"total":    len(req.Pack.Channels),
 		})
+		return nil
 	}
 }
 
 // GetChannelTemplates 返回内置渠道模板（常见 provider 的预配置模板）。
 // 模板以渠道包格式返回，用户可编辑后再导入。
-func GetChannelTemplates() gin.HandlerFunc {
-	return func(c *gin.Context) {
+func GetChannelTemplates() fiber.Handler {
+	return func(c fiber.Ctx) error {
 		templates := getBuiltinTemplates()
-		c.JSON(http.StatusOK, gin.H{
+		httpbridge.JSON(c, http.StatusOK, fiber.Map{
 			"templates": templates,
 		})
+		return nil
 	}
 }
 
 // GetProviderTemplates 返回内置 provider 模板（已知 provider 的模板化添加配置）。
 // 前端据此渲染 provider 选择器：用户选 provider + 输 key，系统自动判别 plan/baseURL 并验证。
-func GetProviderTemplates() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{
+func GetProviderTemplates() fiber.Handler {
+	return func(c fiber.Ctx) error {
+		httpbridge.JSON(c, http.StatusOK, fiber.Map{
 			"providers": config.ListProviderTemplates(),
 		})
+		return nil
 	}
 }
 
 // getBuiltinTemplates 返回内置渠道模板列表。
-func getBuiltinTemplates() []gin.H {
-	return []gin.H{
+func getBuiltinTemplates() []fiber.Map {
+	return []fiber.Map{
 		{
 			"name":        "Anthropic Claude (官方)",
 			"description": "Anthropic 官方 Claude API",
@@ -626,20 +629,20 @@ func getBuiltinTemplates() []gin.H {
 //
 // 此函数在 handler 层再次校验，确保 includeKeys=true 时 proxy-only key 无法越权导出凭证。
 // （mem:feedback_extra_proxy_keys_admin 边界契约。）
-func requireAdminAuth(c *gin.Context, envCfg *config.EnvConfig) bool {
+func requireAdminAuth(c fiber.Ctx, envCfg *config.EnvConfig) bool {
 	providedKey := getAPIKeyFromRequest(c)
 	return envCfg.IsValidAdminAccessKey(providedKey)
 }
 
 // getAPIKeyFromRequest 从请求中提取 API key（与 middleware/auth.go 逻辑一致）。
-func getAPIKeyFromRequest(c *gin.Context) string {
-	if key := c.GetHeader("x-api-key"); key != "" {
+func getAPIKeyFromRequest(c fiber.Ctx) string {
+	if key := httpbridge.GetHeader(c, "x-api-key"); key != "" {
 		return key
 	}
-	if auth := c.GetHeader("Authorization"); auth != "" {
+	if auth := httpbridge.GetHeader(c, "Authorization"); auth != "" {
 		return strings.TrimPrefix(auth, "Bearer ")
 	}
-	if key := c.GetHeader("x-goog-api-key"); key != "" {
+	if key := httpbridge.GetHeader(c, "x-goog-api-key"); key != "" {
 		return key
 	}
 	return ""

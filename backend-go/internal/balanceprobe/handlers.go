@@ -5,8 +5,9 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 // BalancePolicyView 解析后余额探测策略的管理 API 视图。
@@ -139,41 +140,43 @@ func derefInt64(p *int64) int64 {
 }
 
 // ChannelBalanceHandler GET /api/{type}/channels/:id/balance
-func (m *Manager) ChannelBalanceHandler(channelType string) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		id, err := strconv.Atoi(c.Param("id"))
+func (m *Manager) ChannelBalanceHandler(channelType string) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		id, err := strconv.Atoi(httpbridge.Param(c, "id"))
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid channel ID"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "Invalid channel ID"})
+			return nil
 		}
 		view := m.ChannelBalance(channelType, id)
 		if view == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Channel not found"})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "Channel not found"})
+			return nil
 		}
-		c.JSON(http.StatusOK, view)
+		httpbridge.JSON(c, http.StatusOK, view)
+		return nil
 	}
 }
 
 // TriggerChannelBalanceCheckHandler POST /api/{type}/channels/:id/balance/check
 // 异步触发该渠道立即探测（202 返回，结果通过 GET balance 查询）。
-func (m *Manager) TriggerChannelBalanceCheckHandler(channelType string) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		id, err := strconv.Atoi(c.Param("id"))
+func (m *Manager) TriggerChannelBalanceCheckHandler(channelType string) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		id, err := strconv.Atoi(httpbridge.Param(c, "id"))
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid channel ID"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "Invalid channel ID"})
+			return nil
 		}
 		cfg := m.getConfig()
 		upstreams := upstreamsFor(&cfg, channelType)
 		if id < 0 || id >= len(upstreams) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Channel not found"})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "Channel not found"})
+			return nil
 		}
 		accepted := m.TriggerChannelBalanceCheck(channelType, id)
-		c.JSON(http.StatusAccepted, gin.H{
+		httpbridge.JSON(c, http.StatusAccepted, fiber.Map{
 			"message": "余额探测已触发，请稍后通过 GET 查询结果",
 			"queued":  accepted,
 		})
+		return nil
 	}
 }

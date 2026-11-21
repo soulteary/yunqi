@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/handlers"
 	"github.com/soulteary/yunqi/internal/handlers/chat"
@@ -15,8 +16,8 @@ import (
 	"github.com/soulteary/yunqi/internal/handlers/messages"
 	"github.com/soulteary/yunqi/internal/handlers/responses"
 	"github.com/soulteary/yunqi/internal/healthcheck"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/upstreamprobe"
-	"github.com/gin-gonic/gin"
 )
 
 func buildChannelDiscoveryModelFetchers(cfgManager *config.ConfigManager) handlers.ChannelDiscoveryModelFetchers {
@@ -28,7 +29,7 @@ func buildChannelDiscoveryModelFetchers(cfgManager *config.ConfigManager) handle
 	}
 }
 
-func channelModelsHandlerFetcher(handler gin.HandlerFunc) handlers.ChannelDiscoveryModelFetcher {
+func channelModelsHandlerFetcher(handler fiber.Handler) handlers.ChannelDiscoveryModelFetcher {
 	return func(ctx context.Context, req handlers.DiscoveryModelsFetchRequest) (handlers.DiscoveryModelsFetchResponse, error) {
 		body, err := json.Marshal(map[string]any{
 			"key":                      req.APIKey,
@@ -47,13 +48,13 @@ func channelModelsHandlerFetcher(handler gin.HandlerFunc) handlers.ChannelDiscov
 		}
 
 		recorder := httptest.NewRecorder()
-		ginCtx, _ := gin.CreateTestContext(recorder)
+		fiberCtx, _ := httpbridge.TestContext(recorder)
 		httpReq := httptest.NewRequest(http.MethodPost, "/internal/channel-discovery/models", bytes.NewReader(body)).WithContext(ctx)
 		httpReq.Header.Set("Content-Type", "application/json")
-		ginCtx.Request = httpReq
-		ginCtx.Params = gin.Params{{Key: "id", Value: "0"}}
+		httpbridge.SetRequest(fiberCtx, httpReq)
+		httpbridge.SetParams(fiberCtx, httpbridge.Params{{Key: "id", Value: "0"}})
 
-		handler(ginCtx)
+		handler(fiberCtx)
 
 		return handlers.DiscoveryModelsFetchResponse{
 			StatusCode: recorder.Code,
@@ -66,7 +67,7 @@ func channelModelsHandlerFetcher(handler gin.HandlerFunc) handlers.ChannelDiscov
 // （与 channelModelsHandlerFetcher 同一包装路径，响应归一化在 healthcheck 包内完成）。
 // 火山 Agent/Coding Plan 官方入口不走通用 /v1/models（套餐 Key 无法通过该接口探测），
 // 改用共享数据面探针 + 内置 manifest 模型清单，并标记 RealCallVerified 跳过同周期等价 L2。
-func healthCheckL1Fetcher(handler gin.HandlerFunc) healthcheck.L1Fetcher {
+func healthCheckL1Fetcher(handler fiber.Handler) healthcheck.L1Fetcher {
 	fetcher := channelModelsHandlerFetcher(handler)
 	return func(ctx context.Context, req healthcheck.L1Request) (healthcheck.L1Response, error) {
 		if upstreamprobe.IsVolcenginePlanBaseURL(req.BaseURL) {

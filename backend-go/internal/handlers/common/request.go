@@ -13,12 +13,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/httpclient"
 	"github.com/soulteary/yunqi/internal/logger"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/utils"
-	"github.com/gin-gonic/gin"
 )
 
 const MaxUpstreamResponseLogBytes = 1024 * 1024
@@ -104,55 +105,56 @@ type RequestLifecycleTrace struct {
 // ReadRequestBody 读取并验证请求体大小
 // 返回: (bodyBytes, error)
 // 如果请求体过大，会自动返回 413 错误并排空剩余数据
-func ReadRequestBody(c *gin.Context, maxBodySize int64) ([]byte, error) {
-	limitedReader := io.LimitReader(c.Request.Body, maxBodySize+1)
+func ReadRequestBody(c fiber.Ctx, maxBodySize int64) ([]byte, error) {
+	limitedReader := io.LimitReader(httpbridge.Request(c).Body, maxBodySize+1)
 	bodyBytes, err := io.ReadAll(limitedReader)
 	if err != nil {
-		c.JSON(400, gin.H{"error": "Failed to read request body"})
+		httpbridge.JSON(c, 400, fiber.Map{"error": "Failed to read request body"})
 		return nil, err
 	}
 
 	if int64(len(bodyBytes)) > maxBodySize {
 		_, _ =
 			// 排空剩余请求体，避免 keep-alive 连接污染
-			io.Copy(io.Discard, c.Request.Body)
-		c.JSON(413, gin.H{"error": fmt.Sprintf("Request body too large, maximum size is %d MB", maxBodySize/1024/1024)})
+			io.Copy(io.Discard, httpbridge.Request(c).Body)
+		httpbridge.JSON(c, 413, fiber.Map{"error": fmt.Sprintf("Request body too large, maximum size is %d MB", maxBodySize/1024/1024)})
 		return nil, fmt.Errorf("request body too large")
 	}
 
-	if encoding := c.Request.Header.Get("Content-Encoding"); encoding != "" {
+	if encoding := httpbridge.Request(c).Header.Get("Content-Encoding"); encoding != "" {
 		decompressed, decompressErr := utils.DecompressBytesByEncoding(bodyBytes, encoding)
 		if decompressErr != nil {
-			c.JSON(400, gin.H{"error": fmt.Sprintf("Failed to decompress request body: %v", decompressErr)})
+			httpbridge.JSON(c, 400, fiber.Map{"error": fmt.Sprintf("Failed to decompress request body: %v", decompressErr)})
 			return nil, decompressErr
 		}
 		bodyBytes = decompressed
-		c.Request.Header.Del("Content-Encoding")
+		httpbridge.Request(c).Header.Del("Content-Encoding")
 		if int64(len(bodyBytes)) > maxBodySize {
-			c.JSON(413, gin.H{"error": fmt.Sprintf("Request body too large after decompression, maximum size is %d MB", maxBodySize/1024/1024)})
+			httpbridge.JSON(c, 413, fiber.Map{"error": fmt.Sprintf("Request body too large after decompression, maximum size is %d MB", maxBodySize/1024/1024)})
 			return nil, fmt.Errorf("request body too large after decompression")
 		}
 	}
+	httpbridge.
 
-	// 恢复请求体供后续使用
-	c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+		// 恢复请求体供后续使用
+		Request(c).Body = io.NopCloser(bytes.NewReader(bodyBytes))
 	return bodyBytes, nil
 }
 
 // RestoreRequestBody 恢复请求体供后续使用
-func RestoreRequestBody(c *gin.Context, bodyBytes []byte) {
-	c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+func RestoreRequestBody(c fiber.Ctx, bodyBytes []byte) {
+	httpbridge.Request(c).Body = io.NopCloser(bytes.NewReader(bodyBytes))
 }
 
 // GetEffectiveRequestBody 返回 context 中缓存的最新请求体（key: requestBodyBytes）。
 // failover 在每次尝试前会把规范化、历史图片裁剪后的 body 写入该 key，
 // 因此绕过 provider 直接构建请求的 handler（chat/gemini）应使用本函数获取实际生效 body，
 // 而非闭包捕获的原始 bodyBytes。读取失败时回退到 fallback。
-func GetEffectiveRequestBody(c *gin.Context, fallback []byte) []byte {
+func GetEffectiveRequestBody(c fiber.Ctx, fallback []byte) []byte {
 	if c == nil {
 		return fallback
 	}
-	if cached, ok := c.Get("requestBodyBytes"); ok {
+	if cached, ok := httpbridge.Value(c, "requestBodyBytes"); ok {
 		if body, ok := cached.([]byte); ok && body != nil {
 			return body
 		}
@@ -161,39 +163,39 @@ func GetEffectiveRequestBody(c *gin.Context, fallback []byte) []byte {
 }
 
 // PassthroughResponse 直接将上游响应转发给客户端，不在内存中整包缓存。
-func PassthroughResponse(c *gin.Context, resp *http.Response) error {
-	utils.ForwardResponseHeaders(resp.Header, c.Writer)
-	utils.ForwardContentType(resp.Header, c.Writer)
-	c.Status(resp.StatusCode)
-	_, err := io.Copy(c.Writer, resp.Body)
+func PassthroughResponse(c fiber.Ctx, resp *http.Response) error {
+	utils.ForwardResponseHeaders(resp.Header, httpbridge.Writer(c))
+	utils.ForwardContentType(resp.Header, httpbridge.Writer(c))
+	httpbridge.Status(c, resp.StatusCode)
+	_, err := io.Copy(httpbridge.Writer(c), resp.Body)
 	return err
 }
 
 // PassthroughJSONResponse 在透传响应给客户端的同时，用流式 Decoder 尝试解析 JSON。
 // 解析失败时会继续排空剩余响应体，确保客户端仍收到完整响应。
-func PassthroughJSONResponse(c *gin.Context, resp *http.Response, target interface{}) error {
+func PassthroughJSONResponse(c fiber.Ctx, resp *http.Response, target interface{}) error {
 	if target == nil {
 		return PassthroughResponse(c, resp)
 	}
 
-	utils.ForwardResponseHeaders(resp.Header, c.Writer)
-	utils.ForwardContentType(resp.Header, c.Writer)
-	c.Status(resp.StatusCode)
+	utils.ForwardResponseHeaders(resp.Header, httpbridge.Writer(c))
+	utils.ForwardContentType(resp.Header, httpbridge.Writer(c))
+	httpbridge.Status(c, resp.StatusCode)
 
-	tee := io.TeeReader(resp.Body, c.Writer)
+	tee := io.TeeReader(resp.Body, httpbridge.Writer(c))
 	decoder := json.NewDecoder(tee)
 	if err := decoder.Decode(target); err != nil {
-		if _, copyErr := io.Copy(c.Writer, resp.Body); copyErr != nil {
+		if _, copyErr := io.Copy(httpbridge.Writer(c), resp.Body); copyErr != nil {
 			return copyErr
 		}
 		return err
 	}
 
-	_, err := io.Copy(c.Writer, resp.Body)
+	_, err := io.Copy(httpbridge.Writer(c), resp.Body)
 	return err
 }
 
-func LogUpstreamResponseHeaders(c *gin.Context, resp *http.Response, envCfg *config.EnvConfig, apiType string) {
+func LogUpstreamResponseHeaders(c fiber.Ctx, resp *http.Response, envCfg *config.EnvConfig, apiType string) {
 	if !envCfg.EnableResponseLogs || !envCfg.IsDevelopment() || resp == nil {
 		return
 	}
@@ -210,7 +212,7 @@ func LogUpstreamResponseHeaders(c *gin.Context, resp *http.Response, envCfg *con
 	requestLogToFile(c, "[%s-Response] 响应头:\n%s", apiType, string(rawHeadersJSON))
 }
 
-func LogUpstreamResponseBody(c *gin.Context, bodyBytes []byte, envCfg *config.EnvConfig, apiType string) {
+func LogUpstreamResponseBody(c fiber.Ctx, bodyBytes []byte, envCfg *config.EnvConfig, apiType string) {
 	if !envCfg.EnableResponseLogs || !envCfg.IsDevelopment() {
 		return
 	}
@@ -224,7 +226,7 @@ func LogUpstreamResponseBody(c *gin.Context, bodyBytes []byte, envCfg *config.En
 	requestLogToFile(c, "[%s-Response] 响应体:\n%s", apiType, utils.FormatJSONBytesRaw(bodyBytes))
 }
 
-func LogUpstreamResponse(c *gin.Context, resp *http.Response, bodyBytes []byte, envCfg *config.EnvConfig, apiType string) {
+func LogUpstreamResponse(c fiber.Ctx, resp *http.Response, bodyBytes []byte, envCfg *config.EnvConfig, apiType string) {
 	LogUpstreamResponseHeaders(c, resp, envCfg, apiType)
 	LogUpstreamResponseBody(c, bodyBytes, envCfg, apiType)
 }
@@ -345,16 +347,16 @@ func logRequestDetails(req *http.Request, envCfg *config.EnvConfig, apiType stri
 }
 
 // LogOriginalRequest 记录原始请求信息
-func LogOriginalRequest(c *gin.Context, bodyBytes []byte, envCfg *config.EnvConfig, apiType string) {
+func LogOriginalRequest(c fiber.Ctx, bodyBytes []byte, envCfg *config.EnvConfig, apiType string) {
 	if !envCfg.EnableRequestLogs {
 		return
 	}
 
-	requestLogToConsole(c, "[Request-Receive] 收到%s请求: %s %s", apiType, c.Request.Method, c.Request.URL.Path)
-	requestLogToFile(c, "[Request-Receive] 收到%s请求: %s %s", apiType, c.Request.Method, c.Request.URL.Path)
+	requestLogToConsole(c, "[Request-Receive] 收到%s请求: %s %s", apiType, httpbridge.Request(c).Method, httpbridge.Request(c).URL.Path)
+	requestLogToFile(c, "[Request-Receive] 收到%s请求: %s %s", apiType, httpbridge.Request(c).Method, httpbridge.Request(c).URL.Path)
 
 	if envCfg.IsDevelopment() {
-		contentType := c.GetHeader("Content-Type")
+		contentType := httpbridge.GetHeader(c, "Content-Type")
 		if shouldOmitBodyForLog(apiType) {
 			requestLogToConsole(c, "[Request-OriginalBody] 原始请求体: [omitted for vectors]")
 			requestLogToFile(c, "[Request-OriginalBody] 原始请求体: [omitted for vectors]")
@@ -367,7 +369,7 @@ func LogOriginalRequest(c *gin.Context, bodyBytes []byte, envCfg *config.EnvConf
 		}
 
 		sanitizedHeaders := make(map[string]string)
-		for key, values := range c.Request.Header {
+		for key, values := range httpbridge.Request(c).Header {
 			if len(values) > 0 {
 				sanitizedHeaders[key] = values[0]
 			}
@@ -408,7 +410,7 @@ func RemoveEmptySignatures(bodyBytes []byte, enableLog bool, apiType string) ([]
 	return RemoveEmptySignaturesWithContext(nil, bodyBytes, enableLog, apiType)
 }
 
-func RemoveEmptySignaturesWithContext(c *gin.Context, bodyBytes []byte, enableLog bool, apiType string) ([]byte, bool) {
+func RemoveEmptySignaturesWithContext(c fiber.Ctx, bodyBytes []byte, enableLog bool, apiType string) ([]byte, bool) {
 	decoder := json.NewDecoder(bytes.NewReader(bodyBytes))
 	decoder.UseNumber() // 保留数字精度
 
@@ -496,7 +498,7 @@ func SanitizeMalformedThinkingBlocks(bodyBytes []byte, enableLog bool, apiType s
 	return SanitizeMalformedThinkingBlocksWithContext(nil, bodyBytes, enableLog, apiType)
 }
 
-func SanitizeMalformedThinkingBlocksWithContext(c *gin.Context, bodyBytes []byte, enableLog bool, apiType string) ([]byte, bool) {
+func SanitizeMalformedThinkingBlocksWithContext(c fiber.Ctx, bodyBytes []byte, enableLog bool, apiType string) ([]byte, bool) {
 	decoder := json.NewDecoder(bytes.NewReader(bodyBytes))
 	decoder.UseNumber() // 保留数字精度
 
@@ -747,7 +749,7 @@ func ExtractUserID(bodyBytes []byte) string {
 
 // Deprecated: 使用 utils.ExtractUnifiedSessionID 替代。
 // ExtractConversationID 从请求中提取对话标识（用于 Responses API）
-func ExtractConversationID(c *gin.Context, bodyBytes []byte) string {
+func ExtractConversationID(c fiber.Ctx, bodyBytes []byte) string {
 	return utils.ExtractUnifiedSessionID(c, bodyBytes)
 }
 
@@ -768,7 +770,7 @@ func RemoveBillingHeaders(bodyBytes []byte, enableLog bool, apiType string) ([]b
 	return RemoveBillingHeadersWithContext(nil, bodyBytes, enableLog, apiType)
 }
 
-func RemoveBillingHeadersWithContext(c *gin.Context, bodyBytes []byte, enableLog bool, apiType string) ([]byte, bool) {
+func RemoveBillingHeadersWithContext(c fiber.Ctx, bodyBytes []byte, enableLog bool, apiType string) ([]byte, bool) {
 	decoder := json.NewDecoder(bytes.NewReader(bodyBytes))
 	decoder.UseNumber() // 保留数字精度
 
@@ -834,7 +836,7 @@ const totalTokensBlockPrefix = "<total_tokens>"
 // 白白消耗上下文预算并撑破上游窗口。保留最后一份（最新计数与 style 提醒仍生效），
 // 移除其余；被删块携带 cache_control 而保留块没有时，把 cache_control 转移给
 // 前一个保留块，尽量保住 prompt caching 断点。
-func DeduplicateTotalTokensSystemBlocks(c *gin.Context, bodyBytes []byte, enableLog bool, apiType string) ([]byte, bool) {
+func DeduplicateTotalTokensSystemBlocks(c fiber.Ctx, bodyBytes []byte, enableLog bool, apiType string) ([]byte, bool) {
 	decoder := json.NewDecoder(bytes.NewReader(bodyBytes))
 	decoder.UseNumber() // 保留数字精度
 
@@ -916,7 +918,7 @@ func DeduplicateTotalTokensSystemBlocks(c *gin.Context, bodyBytes []byte, enable
 // （harness 当前活跃注入位，常携带 cache_control 断点），移除其余；
 // 被删块携带 cache_control 而保留块没有时转移断点（同 total_tokens 去重语义）。
 // 完全相同（TrimSpace 后逐字相等）才处理：唯一块、内容不同的块与空文本永不触碰。
-func DeduplicateIdenticalSystemBlocks(c *gin.Context, bodyBytes []byte, enableLog bool, apiType string) ([]byte, bool) {
+func DeduplicateIdenticalSystemBlocks(c fiber.Ctx, bodyBytes []byte, enableLog bool, apiType string) ([]byte, bool) {
 	decoder := json.NewDecoder(bytes.NewReader(bodyBytes))
 	decoder.UseNumber() // 保留数字精度
 

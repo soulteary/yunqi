@@ -6,8 +6,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/gofiber/fiber/v3"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/types"
-	"github.com/gin-gonic/gin"
 )
 
 // PrepareUpstreamHeaders 准备上游请求头（统一头部处理逻辑）
@@ -18,17 +19,17 @@ import (
 // X-Client-Request-Id 通常是逐请求 ID，只作为最终兜底，避免把同一会话拆成多张驾驶舱卡片。
 // 内容指纹（DerivePromptPrefixID）是匿名请求的最后回退：同一会话各轮的 system 与首条
 // user 消息不变，指纹即稳定会话 ID，使亲和与会话跟踪对无标识客户端同样生效。
-func ExtractUnifiedSessionID(c *gin.Context, bodyBytes []byte) string {
+func ExtractUnifiedSessionID(c fiber.Ctx, bodyBytes []byte) string {
 	if c != nil {
-		if convID := c.GetHeader("Conversation_id"); convID != "" {
+		if convID := httpbridge.GetHeader(c, "Conversation_id"); convID != "" {
 			return convID
 		}
 
-		if sessID := c.GetHeader("Session_id"); sessID != "" {
+		if sessID := httpbridge.GetHeader(c, "Session_id"); sessID != "" {
 			return sessID
 		}
 
-		if claudeCodeSessionID := c.GetHeader("X-Claude-Code-Session-Id"); claudeCodeSessionID != "" {
+		if claudeCodeSessionID := httpbridge.GetHeader(c, "X-Claude-Code-Session-Id"); claudeCodeSessionID != "" {
 			return claudeCodeSessionID
 		}
 	}
@@ -57,11 +58,11 @@ func ExtractUnifiedSessionID(c *gin.Context, bodyBytes []byte) string {
 	}
 
 	if c != nil {
-		if geminiUserID := c.GetHeader("X-Gemini-Api-Privileged-User-Id"); geminiUserID != "" {
+		if geminiUserID := httpbridge.GetHeader(c, "X-Gemini-Api-Privileged-User-Id"); geminiUserID != "" {
 			return geminiUserID
 		}
 
-		if clientRequestID := c.GetHeader("X-Client-Request-Id"); clientRequestID != "" {
+		if clientRequestID := httpbridge.GetHeader(c, "X-Client-Request-Id"); clientRequestID != "" {
 			return clientRequestID
 		}
 	}
@@ -117,7 +118,7 @@ func flattenMetadataUserID(raw interface{}) string {
 // Codex Responses：通过 client_metadata 精确识别 subagent（exact）。
 // Claude Code Messages：优先使用 X-Claude-Code-Agent-Id 精确识别 subagent；无该头时
 // 再通过 metadata.user_id + 消息/工具数量弱识别。
-func ExtractAgentContext(c *gin.Context, bodyBytes []byte) *types.AgentContext {
+func ExtractAgentContext(c fiber.Ctx, bodyBytes []byte) *types.AgentContext {
 	ctx := &types.AgentContext{}
 
 	var req map[string]interface{}
@@ -149,7 +150,7 @@ func ExtractAgentContext(c *gin.Context, bodyBytes []byte) *types.AgentContext {
 	// Claude Code 弱识别（仅观测，不强制路由）
 	if metadata, ok := req["metadata"].(map[string]interface{}); ok {
 		if hasClaudeCodeSessionID(metadata) {
-			if c != nil && strings.TrimSpace(c.GetHeader("X-Claude-Code-Agent-Id")) != "" {
+			if c != nil && strings.TrimSpace(httpbridge.GetHeader(c, "X-Claude-Code-Agent-Id")) != "" {
 				ctx.AgentRole = "subagent"
 				ctx.AgentType = "claude_code_subagent"
 				ctx.Confidence = "exact"
@@ -205,8 +206,8 @@ func isLikelyClaudeCodeSubagent(req map[string]interface{}) bool {
 	return userMsgCount <= 2
 }
 
-func PrepareUpstreamHeaders(c *gin.Context, targetHost string) http.Header {
-	headers := c.Request.Header.Clone()
+func PrepareUpstreamHeaders(c fiber.Ctx, targetHost string) http.Header {
+	headers := httpbridge.Request(c).Header.Clone()
 
 	// 设置正确的Host头部
 	headers.Set("Host", targetHost)

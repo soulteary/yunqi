@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/soulteary/yunqi/internal/config"
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 func TestCapabilitySnapshotStore_ReplaceFromJob(t *testing.T) {
@@ -182,7 +182,6 @@ func TestCapabilitySnapshotStore_MergesMultipleJobsSameIdentity(t *testing.T) {
 
 func TestGetCapabilitySnapshot_IncludesCrossProtocolWithoutModelMapping(t *testing.T) {
 	resetCapabilityTestState()
-	gin.SetMode(gin.TestMode)
 
 	cfg := config.Config{
 		ResponsesUpstream: []config.UpstreamConfig{
@@ -209,12 +208,12 @@ func TestGetCapabilitySnapshot_IncludesCrossProtocolWithoutModelMapping(t *testi
 	}
 	t.Cleanup(func() { _ = cfgManager.Close() })
 
-	r := gin.New()
-	r.GET("/responses/channels/:id/capability-snapshot", GetCapabilitySnapshot(cfgManager, "responses"))
+	r := httpbridge.NewApp()
+	r.Get("/responses/channels/:id/capability-snapshot", GetCapabilitySnapshot(cfgManager, "responses"))
 
 	req := httptest.NewRequest(http.MethodGet, "/responses/channels/0/capability-snapshot?sourceTab=responses", nil)
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
@@ -241,7 +240,6 @@ func TestGetCapabilitySnapshot_IncludesCrossProtocolWithoutModelMapping(t *testi
 
 func TestGetCapabilitySnapshot_SkipsSameProtocolWithoutModelMapping(t *testing.T) {
 	resetCapabilityTestState()
-	gin.SetMode(gin.TestMode)
 
 	cfg := config.Config{
 		ResponsesUpstream: []config.UpstreamConfig{
@@ -268,12 +266,12 @@ func TestGetCapabilitySnapshot_SkipsSameProtocolWithoutModelMapping(t *testing.T
 	}
 	t.Cleanup(func() { _ = cfgManager.Close() })
 
-	r := gin.New()
-	r.GET("/responses/channels/:id/capability-snapshot", GetCapabilitySnapshot(cfgManager, "responses"))
+	r := httpbridge.NewApp()
+	r.Get("/responses/channels/:id/capability-snapshot", GetCapabilitySnapshot(cfgManager, "responses"))
 
 	req := httptest.NewRequest(http.MethodGet, "/responses/channels/0/capability-snapshot?sourceTab=responses", nil)
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())

@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 func TestPresetUpdaterCheckOnceUpdatesStoreAndCache(t *testing.T) {
@@ -380,12 +380,12 @@ func TestPresetUpdaterCheckOnceRejectsRedirectSchemeDowngrade(t *testing.T) {
 }
 
 func TestStatusHandlerNilUpdater(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
-	r.GET("/api/presets/status", StatusHandler(nil))
+
+	r := httpbridge.NewApp()
+	r.Get("/api/presets/status", StatusHandler(nil))
 
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/presets/status", nil))
+	httpbridge.Handler(r).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/presets/status", nil))
 	if w.Code != http.StatusOK {
 		t.Fatalf("状态码=%d，期望 200", w.Code)
 	}

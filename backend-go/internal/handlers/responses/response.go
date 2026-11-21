@@ -5,20 +5,21 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/converters"
 	"github.com/soulteary/yunqi/internal/errutil"
 	"github.com/soulteary/yunqi/internal/handlers/common"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/providers"
 	"github.com/soulteary/yunqi/internal/session"
 	"github.com/soulteary/yunqi/internal/types"
 	"github.com/soulteary/yunqi/internal/utils"
-	"github.com/gin-gonic/gin"
 	"github.com/tidwall/sjson"
 )
 
 func handleSuccess(
-	c *gin.Context,
+	c fiber.Ctx,
 	resp *http.Response,
 	provider *providers.ResponsesProvider,
 	upstream *config.UpstreamConfig,
@@ -44,7 +45,7 @@ func handleSuccess(
 			}
 		}
 	}
-	if rawTools, ok := c.Get("codex_merged_raw_tools"); ok {
+	if rawTools, ok := httpbridge.Value(c, "codex_merged_raw_tools"); ok {
 		if injected, err := sjson.SetBytes(originalRequestJSON, "tools", rawTools); err == nil {
 			originalRequestJSON = injected
 		}
@@ -62,7 +63,7 @@ func handleSuccess(
 	// 后续转换/usage 提取与原生非流式路径完全一致。
 	bodyBytes, err := common.ReadUpstreamNonStreamBody(c, resp, upstreamType)
 	if err != nil {
-		c.JSON(500, gin.H{"error": "Failed to read response"})
+		httpbridge.JSON(c, 500, fiber.Map{"error": "Failed to read response"})
 		return nil, err
 	}
 
@@ -111,12 +112,12 @@ func handleSuccess(
 		}
 		if !codexEnabled {
 			// additional_tools 提升路径（默认开启，不经渠道开关）
-			if hoisted, ok := c.Get("codex_additional_tools_hoisted"); ok {
+			if hoisted, ok := httpbridge.Value(c, "codex_additional_tools_hoisted"); ok {
 				codexEnabled, _ = hoisted.(bool)
 			}
 		}
 		if codexEnabled {
-			codexCtx, ok := c.Get("codex_tool_context")
+			codexCtx, ok := httpbridge.Value(c, "codex_tool_context")
 			if !ok {
 				codexCtx = originalReq.TransformerMetadata["codex_tool_context"]
 			}
@@ -181,8 +182,8 @@ func handleSuccess(
 	if !common.RacingClaimClientCommit(c) {
 		return nil, common.ErrRacingSuperseded
 	}
-	utils.ForwardResponseHeaders(resp.Header, c.Writer)
-	c.JSON(200, responsesResp)
+	utils.ForwardResponseHeaders(resp.Header, httpbridge.Writer(c))
+	httpbridge.JSON(c, 200, responsesResp)
 
 	return metricsUsage, nil
 }
@@ -227,7 +228,7 @@ func patchResponsesUsage(resp *types.ResponsesResponse, requestBody []byte, envC
 	patchResponsesUsageWithContext(nil, resp, requestBody, envCfg)
 }
 
-func patchResponsesUsageWithContext(c *gin.Context, resp *types.ResponsesResponse, requestBody []byte, envCfg *config.EnvConfig) {
+func patchResponsesUsageWithContext(c fiber.Ctx, resp *types.ResponsesResponse, requestBody []byte, envCfg *config.EnvConfig) {
 	// 检查是否有 Claude 原生缓存 token（有时才跳过 input_tokens 修补）
 	// 仅检测 Claude 原生字段：cache_creation_input_tokens, cache_read_input_tokens,
 	// cache_creation_5m_input_tokens, cache_creation_1h_input_tokens

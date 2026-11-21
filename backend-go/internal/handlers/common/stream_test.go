@@ -9,9 +9,9 @@ import (
 	"testing"
 
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/utils"
-	"github.com/gin-gonic/gin"
 )
 
 type nopFlusher struct{}
@@ -137,12 +137,12 @@ func TestResolveStreamInactivityTimeout_ClampsToRange(t *testing.T) {
 }
 
 func TestProcessStreamEvent_TracksPendingToolCall(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+
+	c, _ := httpbridge.TestContext(httptest.NewRecorder())
 	ctx := NewStreamContext(&config.EnvConfig{})
 	event := "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_test\",\"name\":\"Bash\",\"input\":{}}}\n\n"
 
-	ProcessStreamEvent(c, c.Writer, nopFlusher{}, event, ctx, &config.EnvConfig{}, nil)
+	ProcessStreamEvent(c, httpbridge.Writer(c), nopFlusher{}, event, ctx, &config.EnvConfig{}, nil)
 
 	if ctx.ToolCallTracker == nil || !ctx.ToolCallTracker.HasPendingToolCall() {
 		t.Fatalf("expected tool call tracker to mark pending tool call")
@@ -1091,12 +1091,12 @@ func TestEnsureMessageDeltaUsage(t *testing.T) {
 }
 
 func TestProcessStreamEvent_MessageStopInjectsUsageWhenMessageDeltaMissing(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{}`))
 
-	flusher, ok := c.Writer.(http.Flusher)
+	w := httptest.NewRecorder()
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{}`)))
+
+	flusher, ok := httpbridge.Writer(c).(http.Flusher)
 	if !ok {
 		t.Fatalf("response writer does not implement http.Flusher")
 	}
@@ -1109,7 +1109,7 @@ func TestProcessStreamEvent_MessageStopInjectsUsageWhenMessageDeltaMissing(t *te
 	envCfg := &config.EnvConfig{LogLevel: "info"}
 
 	messageStopEvent := "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
-	ProcessStreamEvent(c, c.Writer, flusher, messageStopEvent, ctx, envCfg, []byte(`{"messages":[{"role":"user","content":"hello"}]}`))
+	ProcessStreamEvent(c, httpbridge.Writer(c), flusher, messageStopEvent, ctx, envCfg, []byte(`{"messages":[{"role":"user","content":"hello"}]}`))
 
 	body := w.Body.String()
 	if !strings.Contains(body, "event: message_delta") {
@@ -1124,12 +1124,12 @@ func TestProcessStreamEvent_MessageStopInjectsUsageWhenMessageDeltaMissing(t *te
 }
 
 func TestProcessStreamEvent_PatchedMessageStartDoesNotInferCacheRead(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{}`))
 
-	flusher, ok := c.Writer.(http.Flusher)
+	w := httptest.NewRecorder()
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{}`)))
+
+	flusher, ok := httpbridge.Writer(c).(http.Flusher)
 	if !ok {
 		t.Fatalf("response writer does not implement http.Flusher")
 	}
@@ -1142,14 +1142,14 @@ func TestProcessStreamEvent_PatchedMessageStartDoesNotInferCacheRead(t *testing.
 	requestBody := []byte(`{"messages":[{"role":"user","content":[{"type":"text","text":"hello world hello world hello world hello world"}]}]}`)
 
 	messageStartEvent := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":0,\"output_tokens\":0}}}\n\n"
-	ProcessStreamEvent(c, c.Writer, flusher, messageStartEvent, ctx, envCfg, requestBody)
+	ProcessStreamEvent(c, httpbridge.Writer(c), flusher, messageStartEvent, ctx, envCfg, requestBody)
 
 	if ctx.MessageStartInputTokens != 0 {
 		t.Fatalf("expected patched message_start estimate not to be recorded for cache inference, got %d", ctx.MessageStartInputTokens)
 	}
 
 	messageDeltaEvent := "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"},\"usage\":{\"input_tokens\":10473,\"output_tokens\":27}}\n\n"
-	ProcessStreamEvent(c, c.Writer, flusher, messageDeltaEvent, ctx, envCfg, requestBody)
+	ProcessStreamEvent(c, httpbridge.Writer(c), flusher, messageDeltaEvent, ctx, envCfg, requestBody)
 
 	if ctx.CollectedUsage.CacheReadInputTokens != 0 {
 		t.Fatalf("expected no inferred cache_read from patched message_start estimate, got %d", ctx.CollectedUsage.CacheReadInputTokens)
@@ -1398,9 +1398,9 @@ data: {"type":"content_block_stop","index":0}
 // TestProcessStreamEvent_TruncatesMalformedToolUse 验证当 text 后跟畸形 tool_use 时，
 // 代理层截断畸形 tool_use 并注入 end_turn 终止响应
 func TestProcessStreamEvent_TruncatesMalformedToolUse(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
+	c, _ := httpbridge.TestContext(rec)
 	envCfg := &config.EnvConfig{}
 	ctx := NewStreamContext(envCfg)
 
@@ -1408,9 +1408,9 @@ func TestProcessStreamEvent_TruncatesMalformedToolUse(t *testing.T) {
 	textStart := "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n"
 	textDelta := "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello world\"}}\n\n"
 	textStop := "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n"
-	ProcessStreamEvent(c, c.Writer, nopFlusher{}, textStart, ctx, envCfg, nil)
-	ProcessStreamEvent(c, c.Writer, nopFlusher{}, textDelta, ctx, envCfg, nil)
-	ProcessStreamEvent(c, c.Writer, nopFlusher{}, textStop, ctx, envCfg, nil)
+	ProcessStreamEvent(c, httpbridge.Writer(c), nopFlusher{}, textStart, ctx, envCfg, nil)
+	ProcessStreamEvent(c, httpbridge.Writer(c), nopFlusher{}, textDelta, ctx, envCfg, nil)
+	ProcessStreamEvent(c, httpbridge.Writer(c), nopFlusher{}, textStop, ctx, envCfg, nil)
 
 	// 验证 text 已正常透传
 	body := rec.Body.String()
@@ -1421,8 +1421,8 @@ func TestProcessStreamEvent_TruncatesMalformedToolUse(t *testing.T) {
 	// 2. 发送一个畸形 tool_use（Bash 但参数为空）
 	toolStart := "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_abc\",\"name\":\"Bash\",\"input\":{}}}\n\n"
 	toolStop := "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":1}\n\n"
-	ProcessStreamEvent(c, c.Writer, nopFlusher{}, toolStart, ctx, envCfg, nil)
-	ProcessStreamEvent(c, c.Writer, nopFlusher{}, toolStop, ctx, envCfg, nil)
+	ProcessStreamEvent(c, httpbridge.Writer(c), nopFlusher{}, toolStart, ctx, envCfg, nil)
+	ProcessStreamEvent(c, httpbridge.Writer(c), nopFlusher{}, toolStop, ctx, envCfg, nil)
 
 	// 3. 验证截断行为
 	if !ctx.ToolUseTruncated {
@@ -1449,8 +1449,8 @@ func TestProcessStreamEvent_TruncatesMalformedToolUse(t *testing.T) {
 	prevLen := rec.Body.Len()
 	messageDelta := "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"},\"usage\":{\"output_tokens\":100}}\n\n"
 	messageStop := "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
-	ProcessStreamEvent(c, c.Writer, nopFlusher{}, messageDelta, ctx, envCfg, nil)
-	ProcessStreamEvent(c, c.Writer, nopFlusher{}, messageStop, ctx, envCfg, nil)
+	ProcessStreamEvent(c, httpbridge.Writer(c), nopFlusher{}, messageDelta, ctx, envCfg, nil)
+	ProcessStreamEvent(c, httpbridge.Writer(c), nopFlusher{}, messageStop, ctx, envCfg, nil)
 
 	if rec.Body.Len() != prevLen {
 		t.Fatalf("post-truncation events should not be forwarded, got additional: %s", rec.Body.String()[prevLen:])
@@ -1459,9 +1459,9 @@ func TestProcessStreamEvent_TruncatesMalformedToolUse(t *testing.T) {
 
 // TestProcessStreamEvent_FlushesValidToolUse 验证正常工具调用被正常透传
 func TestProcessStreamEvent_FlushesValidToolUse(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
+	c, _ := httpbridge.TestContext(rec)
 	envCfg := &config.EnvConfig{}
 	ctx := NewStreamContext(envCfg)
 
@@ -1470,9 +1470,9 @@ func TestProcessStreamEvent_FlushesValidToolUse(t *testing.T) {
 	toolDelta := "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"command\\\":\\\"ls\\\"}\"}}\n\n"
 	toolStop := "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n"
 
-	ProcessStreamEvent(c, c.Writer, nopFlusher{}, toolStart, ctx, envCfg, nil)
-	ProcessStreamEvent(c, c.Writer, nopFlusher{}, toolDelta, ctx, envCfg, nil)
-	ProcessStreamEvent(c, c.Writer, nopFlusher{}, toolStop, ctx, envCfg, nil)
+	ProcessStreamEvent(c, httpbridge.Writer(c), nopFlusher{}, toolStart, ctx, envCfg, nil)
+	ProcessStreamEvent(c, httpbridge.Writer(c), nopFlusher{}, toolDelta, ctx, envCfg, nil)
+	ProcessStreamEvent(c, httpbridge.Writer(c), nopFlusher{}, toolStop, ctx, envCfg, nil)
 
 	if ctx.ToolUseTruncated {
 		t.Fatalf("valid tool use should not trigger truncation")
@@ -1491,9 +1491,9 @@ func TestProcessStreamEvent_FlushesValidToolUse(t *testing.T) {
 }
 
 func TestProcessStreamEvent_FlushesOverlappingToolUseBlocksSequentially(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
+	c, _ := httpbridge.TestContext(rec)
 	envCfg := &config.EnvConfig{}
 	ctx := NewStreamContext(envCfg)
 
@@ -1504,12 +1504,12 @@ func TestProcessStreamEvent_FlushesOverlappingToolUseBlocksSequentially(t *testi
 	agentStop := "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":2}\n\n"
 	mcpStop := "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":3}\n\n"
 
-	ProcessStreamEvent(c, c.Writer, nopFlusher{}, agentStart, ctx, envCfg, nil)
-	ProcessStreamEvent(c, c.Writer, nopFlusher{}, agentDelta, ctx, envCfg, nil)
-	ProcessStreamEvent(c, c.Writer, nopFlusher{}, mcpStart, ctx, envCfg, nil)
-	ProcessStreamEvent(c, c.Writer, nopFlusher{}, mcpDelta, ctx, envCfg, nil)
-	ProcessStreamEvent(c, c.Writer, nopFlusher{}, agentStop, ctx, envCfg, nil)
-	ProcessStreamEvent(c, c.Writer, nopFlusher{}, mcpStop, ctx, envCfg, nil)
+	ProcessStreamEvent(c, httpbridge.Writer(c), nopFlusher{}, agentStart, ctx, envCfg, nil)
+	ProcessStreamEvent(c, httpbridge.Writer(c), nopFlusher{}, agentDelta, ctx, envCfg, nil)
+	ProcessStreamEvent(c, httpbridge.Writer(c), nopFlusher{}, mcpStart, ctx, envCfg, nil)
+	ProcessStreamEvent(c, httpbridge.Writer(c), nopFlusher{}, mcpDelta, ctx, envCfg, nil)
+	ProcessStreamEvent(c, httpbridge.Writer(c), nopFlusher{}, agentStop, ctx, envCfg, nil)
+	ProcessStreamEvent(c, httpbridge.Writer(c), nopFlusher{}, mcpStop, ctx, envCfg, nil)
 
 	if ctx.ToolUseTruncated {
 		t.Fatalf("overlapping valid tool_use blocks should not trigger truncation")
@@ -1541,9 +1541,9 @@ func TestProcessStreamEvent_FlushesOverlappingToolUseBlocksSequentially(t *testi
 }
 
 func TestProcessStreamEvent_LogsBufferedToolUseEvents(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
+	c, _ := httpbridge.TestContext(rec)
 	envCfg := &config.EnvConfig{Env: "development", EnableResponseLogs: true}
 	ctx := NewStreamContext(envCfg)
 
@@ -1551,9 +1551,9 @@ func TestProcessStreamEvent_LogsBufferedToolUseEvents(t *testing.T) {
 	toolDelta := "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"command\\\":\\\"ls\\\"}\"}}\n\n"
 	toolStop := "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n"
 
-	ProcessStreamEvent(c, c.Writer, nopFlusher{}, toolStart, ctx, envCfg, nil)
-	ProcessStreamEvent(c, c.Writer, nopFlusher{}, toolDelta, ctx, envCfg, nil)
-	ProcessStreamEvent(c, c.Writer, nopFlusher{}, toolStop, ctx, envCfg, nil)
+	ProcessStreamEvent(c, httpbridge.Writer(c), nopFlusher{}, toolStart, ctx, envCfg, nil)
+	ProcessStreamEvent(c, httpbridge.Writer(c), nopFlusher{}, toolDelta, ctx, envCfg, nil)
+	ProcessStreamEvent(c, httpbridge.Writer(c), nopFlusher{}, toolStop, ctx, envCfg, nil)
 
 	logged := ctx.LogBuffer.String()
 	for _, want := range []string{"toolu_logged", "input_json_delta", "content_block_stop"} {
@@ -1565,9 +1565,9 @@ func TestProcessStreamEvent_LogsBufferedToolUseEvents(t *testing.T) {
 
 // TestProcessStreamEvent_MalformedAfterValidToolUse 验证有已透传 tool_use 后，畸形的不截断
 func TestProcessStreamEvent_MalformedAfterValidToolUse(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
+	c, _ := httpbridge.TestContext(rec)
 	envCfg := &config.EnvConfig{}
 	ctx := NewStreamContext(envCfg)
 
@@ -1575,9 +1575,9 @@ func TestProcessStreamEvent_MalformedAfterValidToolUse(t *testing.T) {
 	toolStart1 := "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_first\",\"name\":\"Bash\",\"input\":{}}}\n\n"
 	toolDelta1 := "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"command\\\":\\\"echo hi\\\"}\"}}\n\n"
 	toolStop1 := "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n"
-	ProcessStreamEvent(c, c.Writer, nopFlusher{}, toolStart1, ctx, envCfg, nil)
-	ProcessStreamEvent(c, c.Writer, nopFlusher{}, toolDelta1, ctx, envCfg, nil)
-	ProcessStreamEvent(c, c.Writer, nopFlusher{}, toolStop1, ctx, envCfg, nil)
+	ProcessStreamEvent(c, httpbridge.Writer(c), nopFlusher{}, toolStart1, ctx, envCfg, nil)
+	ProcessStreamEvent(c, httpbridge.Writer(c), nopFlusher{}, toolDelta1, ctx, envCfg, nil)
+	ProcessStreamEvent(c, httpbridge.Writer(c), nopFlusher{}, toolStop1, ctx, envCfg, nil)
 
 	if ctx.CommittedToolUseCount != 1 {
 		t.Fatalf("expected 1 committed, got %d", ctx.CommittedToolUseCount)
@@ -1586,8 +1586,8 @@ func TestProcessStreamEvent_MalformedAfterValidToolUse(t *testing.T) {
 	// 再发一个畸形 tool_use（参数为空）
 	toolStart2 := "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_bad\",\"name\":\"Read\",\"input\":{}}}\n\n"
 	toolStop2 := "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":1}\n\n"
-	ProcessStreamEvent(c, c.Writer, nopFlusher{}, toolStart2, ctx, envCfg, nil)
-	ProcessStreamEvent(c, c.Writer, nopFlusher{}, toolStop2, ctx, envCfg, nil)
+	ProcessStreamEvent(c, httpbridge.Writer(c), nopFlusher{}, toolStart2, ctx, envCfg, nil)
+	ProcessStreamEvent(c, httpbridge.Writer(c), nopFlusher{}, toolStop2, ctx, envCfg, nil)
 
 	// 不应截断
 	if ctx.ToolUseTruncated {

@@ -3,7 +3,8 @@ package autopilot
 import (
 	"net/http"
 
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v3"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 // ── 驾驶舱 API 响应类型 ────────────────────────────────────────────
@@ -63,17 +64,17 @@ type CockpitTodoItem struct {
 // ── 路由注册 ───────────────────────────────────────────────────────
 
 // RegisterCockpitRoutes 注册驾驶舱只读聚合 API。
-func RegisterCockpitRoutes(router gin.IRouter, mgr *Manager) {
+func RegisterCockpitRoutes(router fiber.Router, mgr *Manager) {
 	group := router.Group("/cockpit")
 	{
-		group.GET("/overview", handleCockpitOverview(mgr))
+		group.Get("/overview", handleCockpitOverview(mgr))
 	}
 }
 
 // ── Handler ─────────────────────────────────────────────────────────
 
-func handleCockpitOverview(mgr *Manager) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handleCockpitOverview(mgr *Manager) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		resp := CockpitOverviewResponse{}
 
 		// 1. 健康概览（复用 ProfileStore）
@@ -90,8 +91,8 @@ func handleCockpitOverview(mgr *Manager) gin.HandlerFunc {
 
 		// 5. 待办列表（dead / misconfigured，最多 20 条）
 		resp.TodoItems = collectTodoItems(mgr, 20)
-
-		c.JSON(http.StatusOK, resp)
+		httpbridge.JSON(c, http.StatusOK, resp)
+		return nil
 	}
 }
 

@@ -5,53 +5,49 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 // WebAuthMiddleware Web 访问控制中间件
-func WebAuthMiddleware(envCfg *config.EnvConfig, cfgManager *config.ConfigManager) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		path := c.Request.URL.Path
+func WebAuthMiddleware(envCfg *config.EnvConfig, cfgManager *config.ConfigManager) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		path := c.Path()
 
 		// OPTIONS 预检请求直接放行（浏览器 CORS 预检不携带自定义 header，不应要求认证）
-		if c.Request.Method == "OPTIONS" {
-			c.Next()
-			return
+		if httpbridge.Request(c).Method == "OPTIONS" {
+			return c.Next()
 		}
 
 		// 公开端点直接放行（健康检查固定为 /health）
 		if path == "/health" {
-			c.Next()
-			return
+			return c.Next()
 		}
 
 		// 静态资源文件直接放行
 		if isStaticResource(path) {
-			c.Next()
-			return
+			return c.Next()
 		}
 
 		// API 代理端点后续处理
 		if strings.HasPrefix(path, "/v1/") || strings.HasPrefix(path, "/v1beta/") {
-			c.Next()
-			return
+			return c.Next()
 		}
 
 		// 如果禁用了 Web UI，返回 404
 		if !envCfg.EnableWebUI {
-			c.JSON(404, gin.H{
+			httpbridge.JSON(c, 404, fiber.Map{
 				"error":   "Web界面已禁用",
 				"message": "此服务器运行在纯API模式下，请通过API端点访问服务",
 			})
-			c.Abort()
-			return
+			httpbridge.Abort(c)
+			return nil
 		}
 
 		// SPA 页面路由直接交给前端处理，但需要排除 /api* 路径
 		if path == "/" || path == "/index.html" || (!strings.Contains(path, ".") && !strings.HasPrefix(path, "/api") && !strings.HasPrefix(path, "/admin")) {
-			c.Next()
-			return
+			return c.Next()
 		}
 
 		// 检查访问密钥（管理 API + 管理端点）
@@ -59,7 +55,7 @@ func WebAuthMiddleware(envCfg *config.EnvConfig, cfgManager *config.ConfigManage
 			providedKey := getAPIKey(c)
 
 			// 记录认证尝试
-			clientIP := c.ClientIP()
+			clientIP := httpbridge.ClientIP(c)
 			timestamp := time.Now().Format(time.RFC3339)
 
 			if !envCfg.IsValidAdminAccessKey(providedKey) {
@@ -70,13 +66,12 @@ func WebAuthMiddleware(envCfg *config.EnvConfig, cfgManager *config.ConfigManage
 				}
 				log.Printf("[Auth-Failed] IP: %s | Path: %s | Time: %s | Reason: %s",
 					clientIP, path, timestamp, reason)
-
-				c.JSON(401, gin.H{
+				httpbridge.JSON(c, 401, fiber.Map{
 					"error":   "Unauthorized",
 					"message": "Invalid or missing access key",
 				})
-				c.Abort()
-				return
+				httpbridge.Abort(c)
+				return nil
 			}
 
 			// 认证成功 - 记录日志(可选，根据日志级别)
@@ -86,7 +81,7 @@ func WebAuthMiddleware(envCfg *config.EnvConfig, cfgManager *config.ConfigManage
 			}
 		}
 
-		c.Next()
+		return c.Next()
 	}
 }
 
@@ -126,67 +121,72 @@ func isStaticResource(path string) bool {
 }
 
 // getAPIKey 获取 API 密钥
-func getAPIKey(c *gin.Context) string {
+func getAPIKey(c fiber.Ctx) string {
 	// 从 header 获取
-	if key := c.GetHeader("x-api-key"); key != "" {
+	if key := httpbridge.GetHeader(c, "x-api-key"); key != "" {
 		return key
 	}
 
-	if auth := c.GetHeader("Authorization"); auth != "" {
+	if auth := httpbridge.GetHeader(c, "Authorization"); auth != "" {
 		// 移除 Bearer 前缀
 		return strings.TrimPrefix(auth, "Bearer ")
 	}
 
 	// 支持 Gemini SDK 的 x-goog-api-key 头部
-	if key := c.GetHeader("x-goog-api-key"); key != "" {
+	if key := httpbridge.GetHeader(c, "x-goog-api-key"); key != "" {
 		return key
 	}
 
 	// 浏览器原生 WebSocket API 无法设置自定义请求头，只能通过握手阶段的
 	// Sec-WebSocket-Protocol 传递鉴权信息（客户端将 key 作为子协议传入）。
 	// 仅作为最后一个回退来源，不影响其他认证方式的行为。
-	if proto := c.GetHeader("Sec-WebSocket-Protocol"); proto != "" {
+	if proto := httpbridge.GetHeader(c, "Sec-WebSocket-Protocol"); proto != "" {
 		return proto
 	}
 
 	return ""
 }
 
-// ContextKeyProxyKeyMask 代理 Key 掩码在 gin.Context 中的存储键。
+// ContextKeyProxyKeyMask 代理 Key 掩码在 fiber.Ctx 中的存储键。
 // ProxyAuthMiddleware 验证通过后写入，下游 handler 通过 GetProxyKeyMask 取出用于成本报表按用户分组。
 // Item 4（渠道推荐）将直接复用此键名和 GetProxyKeyMask helper。
 const ContextKeyProxyKeyMask = "proxyKeyMask"
 
-// GetProxyKeyMask 从 gin.Context 取出本次请求的代理 Key 掩码。
+// GetProxyKeyMask 从 fiber.Ctx 取出本次请求的代理 Key 掩码。
 // 返回空字符串表示未经过 ProxyAuthMiddleware 或密钥为空。
-func GetProxyKeyMask(c *gin.Context) string {
-	v, _ := c.Get(ContextKeyProxyKeyMask)
+func GetProxyKeyMask(c fiber.Ctx) string {
+	v, _ := httpbridge.Value(c, ContextKeyProxyKeyMask)
 	s, _ := v.(string)
 	return s
 }
 
 // ProxyAuthMiddleware 代理访问控制中间件
-func ProxyAuthMiddleware(envCfg *config.EnvConfig) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		providedKey := getAPIKey(c)
-
-		if !envCfg.IsValidProxyAccessKey(providedKey) {
-			if envCfg.ShouldLog("warn") {
-				log.Printf("[Auth-Failed] 代理访问密钥验证失败 - IP: %s", c.ClientIP())
-			}
-
-			c.JSON(401, gin.H{
-				"error": "Invalid proxy access key",
-			})
-			c.Abort()
-			return
+func ProxyAuthMiddleware(envCfg *config.EnvConfig) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		if err := AuthenticateProxy(c, envCfg); err != nil {
+			return err
 		}
-
-		// 写入代理 Key 掩码，用于成本报表按用户维度分组（仅掩码，不存明文）
-		if mask := envCfg.ProxyKeyMaskForRequest(providedKey); mask != "" {
-			c.Set(ContextKeyProxyKeyMask, mask)
+		if httpbridge.IsAborted(c) {
+			return nil
 		}
-
-		c.Next()
+		return c.Next()
 	}
+}
+
+// AuthenticateProxy also supports handlers that perform their own authentication.
+// It must not advance Fiber's router when invoked from inside a terminal handler.
+func AuthenticateProxy(c fiber.Ctx, envCfg *config.EnvConfig) error {
+	providedKey := getAPIKey(c)
+	if !envCfg.IsValidProxyAccessKey(providedKey) {
+		if envCfg.ShouldLog("warn") {
+			log.Printf("[Auth-Failed] 代理访问密钥验证失败 - IP: %s", httpbridge.ClientIP(c))
+		}
+		httpbridge.JSON(c, 401, fiber.Map{"error": "Invalid proxy access key"})
+		httpbridge.Abort(c)
+		return nil
+	}
+	if mask := envCfg.ProxyKeyMaskForRequest(providedKey); mask != "" {
+		httpbridge.SetValue(c, ContextKeyProxyKeyMask, mask)
+	}
+	return nil
 }

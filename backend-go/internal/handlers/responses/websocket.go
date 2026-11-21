@@ -12,14 +12,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
+	"github.com/gorilla/websocket"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/errutil"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/middleware"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/session"
 	"github.com/soulteary/yunqi/internal/utils"
-	"github.com/gin-gonic/gin"
-	"github.com/gorilla/websocket"
 )
 
 const (
@@ -40,25 +41,25 @@ func WebSocketHandler(
 	cfgManager *config.ConfigManager,
 	sessionManager *session.SessionManager,
 	channelScheduler *scheduler.ChannelScheduler,
-) gin.HandlerFunc {
+) fiber.Handler {
 	httpHandler := Handler(envCfg, cfgManager, sessionManager, channelScheduler)
-	bridgeRouter := gin.New()
-	bridgeRouter.POST("/v1/responses", httpHandler)
-	bridgeRouter.POST("/:routePrefix/v1/responses", httpHandler)
+	bridgeRouter := httpbridge.NewApp()
+	bridgeRouter.Post("/v1/responses", httpHandler)
+	bridgeRouter.Post("/:routePrefix/v1/responses", httpHandler)
 
-	return gin.HandlerFunc(func(c *gin.Context) {
-		if !isWebSocketUpgrade(c.Request) {
-			c.Status(http.StatusMethodNotAllowed)
-			return
+	return fiber.Handler(func(c fiber.Ctx) error {
+		if !isWebSocketUpgrade(httpbridge.Request(c)) {
+			httpbridge.Status(c, http.StatusMethodNotAllowed)
+			return nil
 		}
-		middleware.ProxyAuthMiddleware(envCfg)(c)
-		if c.IsAborted() {
-			return
+		middleware.AuthenticateProxy(c, envCfg)
+		if httpbridge.IsAborted(c) {
+			return nil
 		}
 
-		conn, err := responsesWebSocketUpgrader.Upgrade(c.Writer, c.Request, nil)
+		conn, err := responsesWebSocketUpgrader.Upgrade(httpbridge.Writer(c), httpbridge.Request(c), nil)
 		if err != nil {
-			return
+			return nil
 		}
 		defer errutil.IgnoreDeferred(conn.Close)
 		conn.SetReadLimit(responsesWebSocketReadLimit)
@@ -69,11 +70,11 @@ func WebSocketHandler(
 				if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
 					closeWithWebSocketError(conn, http.StatusBadRequest, "websocket_read_error", err.Error())
 				}
-				return
+				return nil
 			}
 			if messageType != websocket.TextMessage {
 				closeWithWebSocketError(conn, http.StatusBadRequest, "invalid_message_type", "only text messages are supported")
-				return
+				return nil
 			}
 			if _, err := parseWebSocketResponseCreatePayload(payload); err != nil {
 				_ = writeWebSocketError(conn, http.StatusBadRequest, "invalid_request", err.Error())
@@ -82,8 +83,8 @@ func WebSocketHandler(
 
 			// 下游保持 Codex 原生 responses_websockets 协议；上游统一走 HTTP/SSE bridge，
 			// 这样原生 Responses 渠道也能复用 518n-2 continuation folding。
-			serveResponsesWebSocketBridgeLoop(c, conn, bridgeRouter, payload)
-			return
+			serveResponsesWebSocketBridgeLoop(c, conn, httpbridge.Handler(bridgeRouter), payload)
+			return nil
 		}
 	})
 }
@@ -151,7 +152,7 @@ func normalizeNativeWebSocketResponseCreatePayload(payload []byte) ([]byte, erro
 }
 
 func serveResponsesWebSocketBridgeLoop(
-	c *gin.Context,
+	c fiber.Ctx,
 	conn *websocket.Conn,
 	bridgeRouter http.Handler,
 	firstPayload []byte,
@@ -196,21 +197,16 @@ func serveResponsesWebSocketBridgeLoop(
 }
 
 func serveResponseCreateOverWebSocket(
-	parent *gin.Context,
+	parent fiber.Ctx,
 	conn *websocket.Conn,
 	httpHandler http.Handler,
 	requestBody []byte,
 ) error {
-	req, err := http.NewRequestWithContext(
-		parent.Request.Context(),
-		http.MethodPost,
-		parent.Request.URL.RequestURI(),
-		bytes.NewReader(requestBody),
-	)
+	req, err := http.NewRequestWithContext(httpbridge.Request(parent).Context(), http.MethodPost, httpbridge.Request(parent).URL.RequestURI(), bytes.NewReader(requestBody))
 	if err != nil {
 		return err
 	}
-	copyWebSocketRequestHeaders(parent.Request.Header, req.Header)
+	copyWebSocketRequestHeaders(httpbridge.Request(parent).Header, req.Header)
 	req.Header.Set("Content-Type", "application/json")
 	req.ContentLength = int64(len(requestBody))
 
@@ -408,10 +404,10 @@ func takeSSELine(buf *bytes.Buffer) (string, bool) {
 }
 
 func writeWebSocketError(conn *websocket.Conn, status int, code, message string) error {
-	payload, err := json.Marshal(gin.H{
+	payload, err := json.Marshal(fiber.Map{
 		"type":        "error",
 		"status_code": status,
-		"error": gin.H{
+		"error": fiber.Map{
 			"code":    code,
 			"message": message,
 		},
@@ -424,29 +420,29 @@ func writeWebSocketError(conn *websocket.Conn, status int, code, message string)
 }
 
 func writeWebSocketWarmupResponse(conn *websocket.Conn) error {
-	created := gin.H{
+	created := fiber.Map{
 		"type": "response.created",
-		"response": gin.H{
+		"response": fiber.Map{
 			"id":     "",
 			"status": "in_progress",
 			"output": []interface{}{},
 		},
 	}
-	completed := gin.H{
+	completed := fiber.Map{
 		"type": "response.completed",
-		"response": gin.H{
+		"response": fiber.Map{
 			"id":       "",
 			"status":   "completed",
 			"output":   []interface{}{},
 			"end_turn": false,
-			"usage": gin.H{
+			"usage": fiber.Map{
 				"input_tokens":  0,
 				"output_tokens": 0,
 				"total_tokens":  0,
 			},
 		},
 	}
-	for _, event := range []gin.H{created, completed} {
+	for _, event := range []fiber.Map{created, completed} {
 		payload, err := json.Marshal(event)
 		if err != nil {
 			return err

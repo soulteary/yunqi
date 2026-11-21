@@ -13,9 +13,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/autopilot"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/errutil"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/keypool"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/ratelimit"
@@ -23,7 +25,6 @@ import (
 	"github.com/soulteary/yunqi/internal/session"
 	"github.com/soulteary/yunqi/internal/types"
 	"github.com/soulteary/yunqi/internal/warmup"
-	"github.com/gin-gonic/gin"
 	"github.com/tidwall/sjson"
 )
 
@@ -115,8 +116,8 @@ func TestEffortInjectionStylePrefersPhysicalServiceType(t *testing.T) {
 }
 
 func TestApplyAdaptiveResponseHeaderTimeoutHonorsModeAndOwnership(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+
+	c, _ := httpbridge.TestContext(httptest.NewRecorder())
 	activePolicy := &autopilot.EndpointAttemptPolicy{
 		Mode: autopilot.RoutingModeActive,
 		ResponseHeaderTimeoutForEndpoint: func(_ string, inheritedMs int, isStream bool) int {
@@ -288,7 +289,6 @@ func TestPlainAPIKeySelectionSkipsDisabledKey(t *testing.T) {
 }
 
 func TestTryUpstreamWithAllKeysOverloadedCooldownSingleModelNoCircuit(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	tests := []struct {
 		name         string
@@ -378,8 +378,8 @@ func TestTryUpstreamWithAllKeysOverloadedCooldownSingleModelNoCircuit(t *testing
 			// 单一模型过载：触发渠道 cooldown 与 failover，但不熔断整个 Key
 			//（模型多样性门槛要求失败跨多个模型才熔断 Key）。
 			w := httptest.NewRecorder()
-			c, _ := gin.CreateTestContext(w)
-			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"gpt-5.5"}`))
+			c, _ := httpbridge.TestContext(w)
+			httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"gpt-5.5"}`)))
 
 			handled, successKey, _, failoverErr, _, lastErr := TryUpstreamWithAllKeys(
 				c,
@@ -400,13 +400,13 @@ func TestTryUpstreamWithAllKeysOverloadedCooldownSingleModelNoCircuit(t *testing
 					}
 					return upstream.APIKeys[0], nil
 				},
-				func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
-					return http.NewRequestWithContext(c.Request.Context(), http.MethodPost, upstreamCopy.BaseURL, strings.NewReader(`{}`))
+				func(c fiber.Ctx, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
+					return http.NewRequestWithContext(httpbridge.Request(c).Context(), http.MethodPost, upstreamCopy.BaseURL, strings.NewReader(`{}`))
 				},
 				func(apiKey string) {},
 				nil,
 				nil,
-				func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
+				func(c fiber.Ctx, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 					t.Fatal("overloaded response should not call handleSuccess")
 					return nil, nil
 				},
@@ -445,7 +445,6 @@ func TestTryUpstreamWithAllKeysOverloadedCooldownSingleModelNoCircuit(t *testing
 // 渠道进入 cooldown 阻断客户端重试回环，且不熔断 Key（请求内容相关，与渠道健康度无关）。
 // 真实上游透传的审核错误维持不 failover、不冷却。
 func TestTryUpstreamWithAllKeysLocalModerationCooldownNoCircuit(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	tests := []struct {
 		name             string
@@ -498,8 +497,8 @@ func TestTryUpstreamWithAllKeysLocalModerationCooldownNoCircuit(t *testing.T) {
 			upstream := &cfg.Upstream[0]
 
 			w := httptest.NewRecorder()
-			c, _ := gin.CreateTestContext(w)
-			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"gpt-5.5"}`))
+			c, _ := httpbridge.TestContext(w)
+			httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"gpt-5.5"}`)))
 
 			handled, successKey, _, failoverErr, _, lastErr := TryUpstreamWithAllKeys(
 				c,
@@ -517,13 +516,13 @@ func TestTryUpstreamWithAllKeysLocalModerationCooldownNoCircuit(t *testing.T) {
 				func(upstream *config.UpstreamConfig, failedKeys map[string]bool) (string, error) {
 					return cfgManager.GetNextAPIKey(upstream, failedKeys, "Messages")
 				},
-				func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
-					return http.NewRequestWithContext(c.Request.Context(), http.MethodPost, upstreamCopy.BaseURL, strings.NewReader(`{}`))
+				func(c fiber.Ctx, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
+					return http.NewRequestWithContext(httpbridge.Request(c).Context(), http.MethodPost, upstreamCopy.BaseURL, strings.NewReader(`{}`))
 				},
 				func(apiKey string) {},
 				nil,
 				nil,
-				func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
+				func(c fiber.Ctx, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 					t.Fatal("moderation response should not call handleSuccess")
 					return nil, nil
 				},
@@ -569,7 +568,6 @@ func TestTryUpstreamWithAllKeysLocalModerationCooldownNoCircuit(t *testing.T) {
 }
 
 func TestTryUpstreamWithAllKeysRecordsSelectionTrace(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -587,8 +585,8 @@ func TestTryUpstreamWithAllKeysRecordsSelectionTrace(t *testing.T) {
 	defer cleanup()
 
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"gpt-trace"}`))
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"gpt-trace"}`)))
 
 	cfg := cfgManager.GetConfig()
 	upstream := &cfg.Upstream[0]
@@ -608,13 +606,13 @@ func TestTryUpstreamWithAllKeysRecordsSelectionTrace(t *testing.T) {
 		func(upstream *config.UpstreamConfig, failedKeys map[string]bool) (string, error) {
 			return cfgManager.GetNextAPIKey(upstream, failedKeys, "Messages")
 		},
-		func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
-			return http.NewRequestWithContext(c.Request.Context(), http.MethodPost, upstreamCopy.BaseURL, strings.NewReader(`{}`))
+		func(c fiber.Ctx, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
+			return http.NewRequestWithContext(httpbridge.Request(c).Context(), http.MethodPost, upstreamCopy.BaseURL, strings.NewReader(`{}`))
 		},
 		func(apiKey string) {},
 		nil,
 		nil,
-		func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
+		func(c fiber.Ctx, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 			_ = resp.Body.Close()
 			return nil, nil
 		},
@@ -664,7 +662,6 @@ func TestTryUpstreamWithAllKeysRecordsSelectionTrace(t *testing.T) {
 }
 
 func TestTryUpstreamWithAllKeysLogsFinalRequestModelAndReasoningEffort(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	type upstreamRequest struct {
 		Model           string `json:"model"`
@@ -696,9 +693,9 @@ func TestTryUpstreamWithAllKeysLogsFinalRequestModelAndReasoningEffort(t *testin
 	defer cleanup()
 
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
+	c, _ := httpbridge.TestContext(w)
 	originalBody := []byte(`{"model":"claude-opus-4-8","messages":[],"reasoning_effort":"high"}`)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(originalBody))
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(originalBody)))
 
 	cfg := cfgManager.GetConfig()
 	upstream := &cfg.Upstream[0]
@@ -727,17 +724,17 @@ func TestTryUpstreamWithAllKeysLogsFinalRequestModelAndReasoningEffort(t *testin
 		func(upstream *config.UpstreamConfig, failedKeys map[string]bool) (string, error) {
 			return cfgManager.GetNextAPIKey(upstream, failedKeys, "Messages")
 		},
-		func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
+		func(c fiber.Ctx, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
 			actualBody, err := sjson.SetBytes(GetEffectiveRequestBody(c, nil), "reasoning_effort", "max")
 			if err != nil {
 				return nil, err
 			}
-			return http.NewRequestWithContext(c.Request.Context(), http.MethodPost, upstreamCopy.BaseURL, bytes.NewReader(actualBody))
+			return http.NewRequestWithContext(httpbridge.Request(c).Context(), http.MethodPost, upstreamCopy.BaseURL, bytes.NewReader(actualBody))
 		},
 		func(string) {},
 		nil,
 		nil,
-		func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
+		func(c fiber.Ctx, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 			_ = resp.Body.Close()
 			return nil, nil
 		},
@@ -791,10 +788,9 @@ func TestTryUpstreamWithAllKeysLogsFinalRequestModelAndReasoningEffort(t *testin
 
 // TestTryUpstreamWithAllKeysMappedModelSurvivesSystemNormalization 回归：
 // auto_resolve 改写模型后，若请求体带 inline system 消息触发归一化（normChanged=true），
-// 归一化必须基于已改写的 body 进行。此前改写结果因 := 影子变量只进入 gin context，
+// 归一化必须基于已改写的 body 进行。此前改写结果因 := 影子变量只进入 Fiber context，
 // 归一化用外层旧 body 再次 Set 把模型改写覆盖，最终以原模型发出（火山渠道 400 根因）。
 func TestTryUpstreamWithAllKeysMappedModelSurvivesSystemNormalization(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	upstreamRequests := make(chan map[string]interface{}, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -822,11 +818,11 @@ func TestTryUpstreamWithAllKeysMappedModelSurvivesSystemNormalization(t *testing
 	defer cleanup()
 
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
+	c, _ := httpbridge.TestContext(w)
 	// inline system 消息确保归一化真正改写 body（normChanged=true），
 	// 这是旧遮蔽 bug 下覆盖模型改写的必要条件。
 	originalBody := []byte(`{"model":"claude-opus-4-8","messages":[{"role":"system","content":"You are helpful."},{"role":"user","content":"hi"}]}`)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(originalBody))
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(originalBody)))
 
 	cfg := cfgManager.GetConfig()
 	upstream := &cfg.Upstream[0]
@@ -852,14 +848,14 @@ func TestTryUpstreamWithAllKeysMappedModelSurvivesSystemNormalization(t *testing
 		func(upstream *config.UpstreamConfig, failedKeys map[string]bool) (string, error) {
 			return cfgManager.GetNextAPIKey(upstream, failedKeys, "Messages")
 		},
-		func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
-			return http.NewRequestWithContext(c.Request.Context(), http.MethodPost, upstreamCopy.BaseURL,
+		func(c fiber.Ctx, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
+			return http.NewRequestWithContext(httpbridge.Request(c).Context(), http.MethodPost, upstreamCopy.BaseURL,
 				bytes.NewReader(GetEffectiveRequestBody(c, nil)))
 		},
 		func(string) {},
 		nil,
 		nil,
-		func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
+		func(c fiber.Ctx, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 			_ = resp.Body.Close()
 			return nil, nil
 		},
@@ -897,8 +893,6 @@ func TestTryUpstreamWithAllKeysMappedModelSurvivesSystemNormalization(t *testing
 func TestTryUpstreamWithAllKeysToolWhitelistConflictPassthrough(t *testing.T) {
 	restore := config.SwapSharedChannelCompatCacheForTest(config.NewChannelCompatCache())
 	defer restore()
-
-	gin.SetMode(gin.TestMode)
 
 	upstreamRequests := make(chan map[string]interface{}, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -946,9 +940,9 @@ func TestTryUpstreamWithAllKeysToolWhitelistConflictPassthrough(t *testing.T) {
 	}
 
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
+	c, _ := httpbridge.TestContext(w)
 	originalBody := []byte(`{"model":"claude-opus-4-8","messages":[{"role":"user","content":"hi"}],"tools":[{"name":"get_time","description":"t","input_schema":{"type":"object"}}]}`)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(originalBody))
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(originalBody)))
 
 	policy := &autopilot.EndpointAttemptPolicy{
 		ResolvedTargetForBinding: func(channelUID, baseURL, apiKey string) (*autopilot.ResolvedRouteTarget, string) {
@@ -972,14 +966,14 @@ func TestTryUpstreamWithAllKeysToolWhitelistConflictPassthrough(t *testing.T) {
 		func(upstream *config.UpstreamConfig, failedKeys map[string]bool) (string, error) {
 			return cfgManager.GetNextAPIKey(upstream, failedKeys, "Messages")
 		},
-		func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
-			return http.NewRequestWithContext(c.Request.Context(), http.MethodPost, upstreamCopy.BaseURL,
+		func(c fiber.Ctx, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
+			return http.NewRequestWithContext(httpbridge.Request(c).Context(), http.MethodPost, upstreamCopy.BaseURL,
 				bytes.NewReader(GetEffectiveRequestBody(c, nil)))
 		},
 		func(string) {},
 		nil,
 		nil,
-		func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
+		func(c fiber.Ctx, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 			_ = resp.Body.Close()
 			return nil, nil
 		},
@@ -998,10 +992,10 @@ func TestTryUpstreamWithAllKeysToolWhitelistConflictPassthrough(t *testing.T) {
 	if gotRequest["model"] != "claude-opus-4-8" {
 		t.Fatalf("upstream request model = %v, want claude-opus-4-8（白名单冲突应放弃 override 透传）", gotRequest["model"])
 	}
-	if reason, _ := c.Get("mappingFailReason"); reason != "tool_whitelist_conflict" {
+	if reason, _ := httpbridge.Value(c, "mappingFailReason"); reason != "tool_whitelist_conflict" {
 		t.Fatalf("mappingFailReason = %v, want tool_whitelist_conflict", reason)
 	}
-	if src, _ := c.Get("effortDecisionSource"); src != "passthrough" {
+	if src, _ := httpbridge.Value(c, "effortDecisionSource"); src != "passthrough" {
 		t.Fatalf("effortDecisionSource = %v, want passthrough", src)
 	}
 }
@@ -1009,7 +1003,6 @@ func TestTryUpstreamWithAllKeysToolWhitelistConflictPassthrough(t *testing.T) {
 // TestTryUpstreamWithAllKeysLogsMappingFailReason 自动映射未命中 fail-open 透传时，
 // 未命中原因必须落到 channel log（mappingFailReason）且不设置映射回显头。
 func TestTryUpstreamWithAllKeysLogsMappingFailReason(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	upstreamRequests := make(chan string, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1039,9 +1032,9 @@ func TestTryUpstreamWithAllKeysLogsMappingFailReason(t *testing.T) {
 	defer cleanup()
 
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
+	c, _ := httpbridge.TestContext(w)
 	originalBody := []byte(`{"model":"claude-opus-4-8","messages":[]}`)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(originalBody))
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(originalBody)))
 
 	policy := &autopilot.EndpointAttemptPolicy{
 		ResolvedTargetForBinding: func(channelUID, baseURL, apiKey string) (*autopilot.ResolvedRouteTarget, string) {
@@ -1065,13 +1058,13 @@ func TestTryUpstreamWithAllKeysLogsMappingFailReason(t *testing.T) {
 		func(upstream *config.UpstreamConfig, failedKeys map[string]bool) (string, error) {
 			return cfgManager.GetNextAPIKey(upstream, failedKeys, "Messages")
 		},
-		func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
-			return http.NewRequestWithContext(c.Request.Context(), http.MethodPost, upstreamCopy.BaseURL, bytes.NewReader(GetEffectiveRequestBody(c, nil)))
+		func(c fiber.Ctx, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
+			return http.NewRequestWithContext(httpbridge.Request(c).Context(), http.MethodPost, upstreamCopy.BaseURL, bytes.NewReader(GetEffectiveRequestBody(c, nil)))
 		},
 		func(string) {},
 		nil,
 		nil,
-		func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
+		func(c fiber.Ctx, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 			_ = resp.Body.Close()
 			return nil, nil
 		},
@@ -1112,7 +1105,6 @@ func TestTryUpstreamWithAllKeysLogsMappingFailReason(t *testing.T) {
 // (Key,模型) 持久化限制复查：autopilot 自动映射的目标模型命中 DisabledKeyModels 时，
 // 发送前复查必须跳过该 Key 并 failover 到同渠道的下一个 Key，而不是照常发出请求。
 func TestTryUpstreamWithAllKeysSkipsKeyModelDisabledMappedModel(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	upstreamRequests := make(chan string, 2)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1147,9 +1139,9 @@ func TestTryUpstreamWithAllKeysSkipsKeyModelDisabledMappedModel(t *testing.T) {
 	defer cleanup()
 
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
+	c, _ := httpbridge.TestContext(w)
 	originalBody := []byte(`{"model":"claude-opus-4-8","messages":[]}`)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(originalBody))
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(originalBody)))
 
 	cfg := cfgManager.GetConfig()
 	upstream := &cfg.Upstream[0]
@@ -1175,13 +1167,13 @@ func TestTryUpstreamWithAllKeysSkipsKeyModelDisabledMappedModel(t *testing.T) {
 		func(upstream *config.UpstreamConfig, failedKeys map[string]bool) (string, error) {
 			return cfgManager.GetNextAPIKey(upstream, failedKeys, "Messages")
 		},
-		func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
-			return http.NewRequestWithContext(c.Request.Context(), http.MethodPost, upstreamCopy.BaseURL, bytes.NewReader(GetEffectiveRequestBody(c, nil)))
+		func(c fiber.Ctx, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
+			return http.NewRequestWithContext(httpbridge.Request(c).Context(), http.MethodPost, upstreamCopy.BaseURL, bytes.NewReader(GetEffectiveRequestBody(c, nil)))
 		},
 		func(string) {},
 		nil,
 		nil,
-		func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
+		func(c fiber.Ctx, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 			_ = resp.Body.Close()
 			return nil, nil
 		},
@@ -1213,7 +1205,6 @@ func TestTryUpstreamWithAllKeysSkipsKeyModelDisabledMappedModel(t *testing.T) {
 }
 
 func TestTryUpstreamWithAllKeysRetriesShortEmptyResponseOnSameKey(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -1231,8 +1222,8 @@ func TestTryUpstreamWithAllKeysRetriesShortEmptyResponseOnSameKey(t *testing.T) 
 	defer cleanup()
 
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"glm-5.1"}`))
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"glm-5.1"}`)))
 
 	cfg := cfgManager.GetConfig()
 	upstream := &cfg.Upstream[0]
@@ -1257,13 +1248,13 @@ func TestTryUpstreamWithAllKeysRetriesShortEmptyResponseOnSameKey(t *testing.T) 
 		func(upstream *config.UpstreamConfig, failedKeys map[string]bool) (string, error) {
 			return cfgManager.GetNextAPIKey(upstream, failedKeys, "Messages")
 		},
-		func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
-			return http.NewRequestWithContext(c.Request.Context(), http.MethodPost, upstreamCopy.BaseURL, strings.NewReader(`{}`))
+		func(c fiber.Ctx, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
+			return http.NewRequestWithContext(httpbridge.Request(c).Context(), http.MethodPost, upstreamCopy.BaseURL, strings.NewReader(`{}`))
 		},
 		func(apiKey string) {},
 		func(url string) { urlFailures++ },
 		func(url string) { urlSuccesses++ },
-		func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
+		func(c fiber.Ctx, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 			handleCalls++
 			usedKeys = append(usedKeys, apiKey)
 			if handleCalls == 1 {
@@ -1317,7 +1308,6 @@ func TestTryUpstreamWithAllKeysRetriesShortEmptyResponseOnSameKey(t *testing.T) 
 }
 
 func TestTryUpstreamWithAllKeysMarksKeyFailedAfterRepeatedShortEmptyResponse(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -1335,8 +1325,8 @@ func TestTryUpstreamWithAllKeysMarksKeyFailedAfterRepeatedShortEmptyResponse(t *
 	defer cleanup()
 
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"glm-5.1"}`))
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"glm-5.1"}`)))
 
 	cfg := cfgManager.GetConfig()
 	upstream := &cfg.Upstream[0]
@@ -1359,13 +1349,13 @@ func TestTryUpstreamWithAllKeysMarksKeyFailedAfterRepeatedShortEmptyResponse(t *
 		func(upstream *config.UpstreamConfig, failedKeys map[string]bool) (string, error) {
 			return cfgManager.GetNextAPIKey(upstream, failedKeys, "Messages")
 		},
-		func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
-			return http.NewRequestWithContext(c.Request.Context(), http.MethodPost, upstreamCopy.BaseURL, strings.NewReader(`{}`))
+		func(c fiber.Ctx, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
+			return http.NewRequestWithContext(httpbridge.Request(c).Context(), http.MethodPost, upstreamCopy.BaseURL, strings.NewReader(`{}`))
 		},
 		func(apiKey string) {},
 		func(url string) { urlFailures++ },
 		nil,
-		func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
+		func(c fiber.Ctx, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 			handleCalls++
 			return nil, ErrEmptyNonStreamResponse
 		},
@@ -1406,7 +1396,6 @@ func TestTryUpstreamWithAllKeysMarksKeyFailedAfterRepeatedShortEmptyResponse(t *
 }
 
 func TestTryUpstreamWithAllKeysRetriesAfterResponseHeaderTimeout(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	attemptedKeys := make(chan string, 2)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1434,8 +1423,8 @@ func TestTryUpstreamWithAllKeysRetriesAfterResponseHeaderTimeout(t *testing.T) {
 	defer cleanup()
 
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"glm-5.2"}`))
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"glm-5.2"}`)))
 
 	cfg := cfgManager.GetConfig()
 	upstream := &cfg.Upstream[0]
@@ -1465,8 +1454,8 @@ func TestTryUpstreamWithAllKeysRetriesAfterResponseHeaderTimeout(t *testing.T) {
 			}
 			return "", errors.New("no available key")
 		},
-		func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
-			req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, upstreamCopy.BaseURL, strings.NewReader(`{}`))
+		func(c fiber.Ctx, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
+			req, err := http.NewRequestWithContext(httpbridge.Request(c).Context(), http.MethodPost, upstreamCopy.BaseURL, strings.NewReader(`{}`))
 			if err == nil {
 				req.Header.Set("Authorization", "Bearer "+apiKey)
 			}
@@ -1475,7 +1464,7 @@ func TestTryUpstreamWithAllKeysRetriesAfterResponseHeaderTimeout(t *testing.T) {
 		func(string) {},
 		func(string) { urlFailures++ },
 		func(string) { urlSuccesses++ },
-		func(_ *gin.Context, resp *http.Response, _ *config.UpstreamConfig, _ string, _ []byte) (*types.Usage, error) {
+		func(_ fiber.Ctx, resp *http.Response, _ *config.UpstreamConfig, _ string, _ []byte) (*types.Usage, error) {
 			_ = resp.Body.Close()
 			return nil, nil
 		},
@@ -1512,7 +1501,6 @@ func TestTryUpstreamWithAllKeysRetriesAfterResponseHeaderTimeout(t *testing.T) {
 }
 
 func TestTryUpstreamWithAllKeysStopsOnClientCancellation(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	attemptedKeys := make(chan string, 2)
 	requestStarted := make(chan struct{}, 1)
@@ -1537,8 +1525,8 @@ func TestTryUpstreamWithAllKeysStopsOnClientCancellation(t *testing.T) {
 
 	requestContext, cancel := context.WithCancel(context.Background())
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"glm-5.2"}`)).WithContext(requestContext)
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"glm-5.2"}`)).WithContext(requestContext))
 	go func() {
 		<-requestStarted
 		cancel()
@@ -1570,8 +1558,8 @@ func TestTryUpstreamWithAllKeysStopsOnClientCancellation(t *testing.T) {
 			}
 			return "", errors.New("no available key")
 		},
-		func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
-			req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, upstreamCopy.BaseURL, strings.NewReader(`{}`))
+		func(c fiber.Ctx, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
+			req, err := http.NewRequestWithContext(httpbridge.Request(c).Context(), http.MethodPost, upstreamCopy.BaseURL, strings.NewReader(`{}`))
 			if err == nil {
 				req.Header.Set("Authorization", "Bearer "+apiKey)
 			}
@@ -1580,7 +1568,7 @@ func TestTryUpstreamWithAllKeysStopsOnClientCancellation(t *testing.T) {
 		func(string) {},
 		func(string) { urlFailures++ },
 		nil,
-		func(_ *gin.Context, resp *http.Response, _ *config.UpstreamConfig, _ string, _ []byte) (*types.Usage, error) {
+		func(_ fiber.Ctx, resp *http.Response, _ *config.UpstreamConfig, _ string, _ []byte) (*types.Usage, error) {
 			_ = resp.Body.Close()
 			return nil, nil
 		},
@@ -1717,8 +1705,8 @@ func runAccountRateLimitFailover(
 	t.Cleanup(func() { ratelimit.SetUpstreamSignalCallback(originalSignalCallback) })
 
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"test-model"}`))
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"test-model"}`)))
 	cfg := cfgManager.GetConfig()
 	runtimeUpstream := &cfg.Upstream[0]
 	handled, successKey, _, failoverErr, _, lastErr := TryUpstreamWithAllKeys(
@@ -1737,8 +1725,8 @@ func runAccountRateLimitFailover(
 		func(upstream *config.UpstreamConfig, failedKeys map[string]bool) (string, error) {
 			return cfgManager.GetNextAPIKey(upstream, failedKeys, "Messages")
 		},
-		func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
-			req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, upstreamCopy.BaseURL, strings.NewReader(`{}`))
+		func(c fiber.Ctx, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
+			req, err := http.NewRequestWithContext(httpbridge.Request(c).Context(), http.MethodPost, upstreamCopy.BaseURL, strings.NewReader(`{}`))
 			if err == nil {
 				req.Header.Set("X-Test-Key", apiKey)
 			}
@@ -1747,7 +1735,7 @@ func runAccountRateLimitFailover(
 		func(string) {},
 		nil,
 		nil,
-		func(_ *gin.Context, resp *http.Response, _ *config.UpstreamConfig, _ string, _ []byte) (*types.Usage, error) {
+		func(_ fiber.Ctx, resp *http.Response, _ *config.UpstreamConfig, _ string, _ []byte) (*types.Usage, error) {
 			_ = resp.Body.Close()
 			return nil, nil
 		},
@@ -1903,7 +1891,6 @@ func TestTryUpstreamWithAllKeys_AccountRateLimitWithoutScopeFallsBackToChannel(t
 // TestTryUpstreamWithAllKeys_NilPolicy_UnchangedBehavior 验证 nil policy 时
 // TryUpstreamWithAllKeys 行为与不传 policy 时完全一致。
 func TestTryUpstreamWithAllKeys_NilPolicy_UnchangedBehavior(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -1921,8 +1908,8 @@ func TestTryUpstreamWithAllKeys_NilPolicy_UnchangedBehavior(t *testing.T) {
 	defer cleanup()
 
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"test-model"}`))
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"test-model"}`)))
 
 	cfg := cfgManager.GetConfig()
 	upstream := &cfg.Upstream[0]
@@ -1943,13 +1930,13 @@ func TestTryUpstreamWithAllKeys_NilPolicy_UnchangedBehavior(t *testing.T) {
 		func(upstream *config.UpstreamConfig, failedKeys map[string]bool) (string, error) {
 			return cfgManager.GetNextAPIKey(upstream, failedKeys, "Messages")
 		},
-		func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
-			return http.NewRequestWithContext(c.Request.Context(), http.MethodPost, upstreamCopy.BaseURL, strings.NewReader(`{}`))
+		func(c fiber.Ctx, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
+			return http.NewRequestWithContext(httpbridge.Request(c).Context(), http.MethodPost, upstreamCopy.BaseURL, strings.NewReader(`{}`))
 		},
 		func(apiKey string) {},
 		nil,
 		nil,
-		func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
+		func(c fiber.Ctx, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 			_ = resp.Body.Close()
 			return nil, nil
 		},
@@ -1978,7 +1965,6 @@ func TestTryUpstreamWithAllKeys_NilPolicy_UnchangedBehavior(t *testing.T) {
 // TestTryUpstreamWithAllKeys_ShadowPolicy_PreservesOrder 验证 shadow 模式 policy
 // 不改变 URL 和 key 的遍历顺序（shadow 只计算 + 记录，不影响真实排序）。
 func TestTryUpstreamWithAllKeys_ShadowPolicy_PreservesOrder(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -1996,8 +1982,8 @@ func TestTryUpstreamWithAllKeys_ShadowPolicy_PreservesOrder(t *testing.T) {
 	defer cleanup()
 
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"test-model"}`))
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"test-model"}`)))
 
 	cfg := cfgManager.GetConfig()
 	upstream := &cfg.Upstream[0]
@@ -2028,13 +2014,13 @@ func TestTryUpstreamWithAllKeys_ShadowPolicy_PreservesOrder(t *testing.T) {
 		func(upstream *config.UpstreamConfig, failedKeys map[string]bool) (string, error) {
 			return cfgManager.GetNextAPIKey(upstream, failedKeys, "Messages")
 		},
-		func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
-			return http.NewRequestWithContext(c.Request.Context(), http.MethodPost, upstreamCopy.BaseURL, strings.NewReader(`{}`))
+		func(c fiber.Ctx, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
+			return http.NewRequestWithContext(httpbridge.Request(c).Context(), http.MethodPost, upstreamCopy.BaseURL, strings.NewReader(`{}`))
 		},
 		func(apiKey string) {},
 		nil,
 		nil,
-		func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
+		func(c fiber.Ctx, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 			_ = resp.Body.Close()
 			return nil, nil
 		},
@@ -2060,9 +2046,9 @@ func TestTryUpstreamWithAllKeys_ShadowPolicy_PreservesOrder(t *testing.T) {
 }
 
 func TestSelectAttemptAPIKeyFilteredUsesBindingIdentity(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
+	c, _ := httpbridge.TestContext(w)
 	upstream := &config.UpstreamConfig{
 		Name:       "binding-test",
 		ChannelUID: "ch-binding",
@@ -2116,7 +2102,6 @@ func TestSelectAttemptAPIKeyFilteredUsesBindingIdentity(t *testing.T) {
 // TestTryUpstreamWithAllKeys_PanicPolicy_DoesNotBreakRequest 验证 policy 函数 panic 时
 // TryUpstreamWithAllKeys 不中断请求，正常完成（fail-open）。
 func TestTryUpstreamWithAllKeys_PanicPolicy_DoesNotBreakRequest(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -2134,8 +2119,8 @@ func TestTryUpstreamWithAllKeys_PanicPolicy_DoesNotBreakRequest(t *testing.T) {
 	defer cleanup()
 
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"test-model"}`))
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"test-model"}`)))
 
 	cfg := cfgManager.GetConfig()
 	upstream := &cfg.Upstream[0]
@@ -2174,13 +2159,13 @@ func TestTryUpstreamWithAllKeys_PanicPolicy_DoesNotBreakRequest(t *testing.T) {
 		func(upstream *config.UpstreamConfig, failedKeys map[string]bool) (string, error) {
 			return cfgManager.GetNextAPIKey(upstream, failedKeys, "Messages")
 		},
-		func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
-			return http.NewRequestWithContext(c.Request.Context(), http.MethodPost, upstreamCopy.BaseURL, strings.NewReader(`{}`))
+		func(c fiber.Ctx, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
+			return http.NewRequestWithContext(httpbridge.Request(c).Context(), http.MethodPost, upstreamCopy.BaseURL, strings.NewReader(`{}`))
 		},
 		func(apiKey string) {},
 		nil,
 		nil,
-		func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
+		func(c fiber.Ctx, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 			_ = resp.Body.Close()
 			return nil, nil
 		},
@@ -2211,7 +2196,7 @@ func TestTryUpstreamWithAllKeys_PanicPolicy_DoesNotBreakRequest(t *testing.T) {
 // 过滤全灭时回退原列表（暴露真实上游信号）；输入本身为空不放行；局部过滤语义不变。
 func TestCallPolicyFilterKeyBindings_FailOpenOnAllFiltered(t *testing.T) {
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
+	c, _ := httpbridge.TestContext(w)
 
 	allFiltered := &autopilot.EndpointAttemptPolicy{
 		FilterKeyBindings: func(channelUID, baseURL string, apiKeys []string) []string {
@@ -2244,9 +2229,9 @@ func TestCallPolicyFilterKeyBindings_FailOpenOnAllFiltered(t *testing.T) {
 // 五元组调度 pin：pin key 在 policy 过滤集内时应提到首次尝试位；
 // pin key 失败进入 failedKeys 后自然轮转后续 key（兜底语义）。
 func TestSelectAttemptAPIKeyFilteredPinsScheduledKey(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
+	c, _ := httpbridge.TestContext(w)
 	upstream := &config.UpstreamConfig{
 		Name:       "pin-test",
 		ChannelUID: "ch-pin",

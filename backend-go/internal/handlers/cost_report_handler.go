@@ -6,8 +6,9 @@ import (
 	"sort"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/metrics"
-	"github.com/gin-gonic/gin"
 )
 
 // CostReportDeps 成本报表 handler 的依赖
@@ -50,30 +51,30 @@ type costReportRow struct {
 // groupBy 默认 "user"（按 proxyKeyMask）；duration 默认 7d；type 默认 messages。
 // ListCostUSD 为官方定价，EffectiveCostUSD 为应用 EffectiveCostMultiplier 后的实际成本。
 // 当 multiplier 未配置时两者相同。
-func GetCostReport(deps *CostReportDeps) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		groupBy := c.DefaultQuery("groupBy", "user")
+func GetCostReport(deps *CostReportDeps) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		groupBy := httpbridge.Query(c, "groupBy", "user")
 		if groupBy != "user" && groupBy != "model" && groupBy != "key" {
 			groupBy = "user"
 		}
-		apiType := c.DefaultQuery("type", "messages")
+		apiType := httpbridge.Query(c, "type", "messages")
 		mgr, ok := deps.MetricsManagers[apiType]
 		if !ok || mgr == nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "不支持的 apiType: " + apiType})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "不支持的 apiType: " + apiType})
+			return nil
 		}
 		store := mgr.GetPersistenceStore()
 		if store == nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "成本报表需要启用 SQLite 持久化存储"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "成本报表需要启用 SQLite 持久化存储"})
+			return nil
 		}
-		duration := parseCostReportDuration(c.DefaultQuery("duration", "7d"))
+		duration := parseCostReportDuration(httpbridge.Query(c, "duration", "7d"))
 		since := time.Now().Add(-duration)
 		rows, err := store.QueryCostReport(apiType, since, groupBy)
 		if err != nil {
 			log.Printf("[CostReport-Query] 查询失败: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "查询成本报表失败"})
-			return
+			httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": "查询成本报表失败"})
+			return nil
 		}
 		result := make([]costReportRow, 0, len(rows))
 		for _, row := range rows {
@@ -124,8 +125,9 @@ func GetCostReport(deps *CostReportDeps) gin.HandlerFunc {
 			}
 			result = append(result, cr)
 		}
-		c.JSON(http.StatusOK, gin.H{"groupBy": groupBy, "apiType": apiType,
-			"duration": c.DefaultQuery("duration", "7d"), "rows": result})
+		httpbridge.JSON(c, http.StatusOK, fiber.Map{"groupBy": groupBy, "apiType": apiType,
+			"duration": httpbridge.Query(c, "duration", "7d"), "rows": result})
+		return nil
 	}
 }
 

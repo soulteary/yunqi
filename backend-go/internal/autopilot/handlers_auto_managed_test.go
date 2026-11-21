@@ -14,14 +14,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/errutil"
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
-func setupAutoManagedRouter(deps *AutoManagedDeps) *gin.Engine {
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
+func setupAutoManagedRouter(deps *AutoManagedDeps) *fiber.App {
+
+	r := httpbridge.NewApp()
 	// 直接在根引擎注册路由，模拟 apiGroup 注册
 	RegisterAutoManagedRoutes(r.Group("/api"), deps)
 	return r
@@ -46,7 +47,7 @@ func TestListAccountsMasksCredentials(t *testing.T) {
 	router := setupAutoManagedRouter(&AutoManagedDeps{CfgManager: cfgManager, SkipChannelKeyVerify: true})
 	req := httptest.NewRequest(http.MethodGet, "/api/accounts", nil)
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("GET /api/accounts status=%d body=%s", w.Code, w.Body.String())
 	}
@@ -102,7 +103,7 @@ func TestListAccountsIncludesActiveEndpointModelAvailability(t *testing.T) {
 	runner := NewAutoDiscoveryRunner(store, nil)
 	router := setupAutoManagedRouter(&AutoManagedDeps{CfgManager: cfgManager, Runner: runner})
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/accounts", nil))
+	httpbridge.Handler(router).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/accounts", nil))
 	if w.Code != http.StatusOK {
 		t.Fatalf("GET /api/accounts status=%d body=%s", w.Code, w.Body.String())
 	}
@@ -187,7 +188,7 @@ func TestListAccountsIncludesCustomAutoManagedProtocolAvailability(t *testing.T)
 		Runner:     NewAutoDiscoveryRunner(store, nil),
 	})
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/accounts", nil))
+	httpbridge.Handler(router).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/accounts", nil))
 	if w.Code != http.StatusOK {
 		t.Fatalf("GET /api/accounts status=%d body=%s", w.Code, w.Body.String())
 	}
@@ -343,7 +344,7 @@ func TestPatchAccountCredentialsRemovesByUID(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPatch, "/api/accounts/acct_test/credentials", bytes.NewBufferString(`{"removeCredentialUids":["cred_b"]}`))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("PATCH credentials status=%d body=%s", w.Code, w.Body.String())
 	}
@@ -660,7 +661,7 @@ func TestCustomAutoAddResponseIncludesActualRoute(t *testing.T) {
 	))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
@@ -727,7 +728,7 @@ func TestCustomAutoAddPersistsProxyURL(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/chat/channels/auto-add", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
@@ -775,7 +776,7 @@ func TestCustomAutoAddAppendsKeyToEquivalentExistingBaseURL(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/api/messages/channels/auto-add", bytes.NewBufferString(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
-		router.ServeHTTP(w, req)
+		httpbridge.Handler(router).ServeHTTP(w, req)
 		if w.Code != http.StatusOK {
 			t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 		}
@@ -888,7 +889,7 @@ func TestCustomAutoAddAppendsKeyAndMissingRouteToManagedAccount(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/messages/channels/auto-add", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
@@ -941,7 +942,7 @@ func TestCustomAutoAddCreatesAllDetectedRoutesWithProtocolModels(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/responses/channels/auto-add", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
@@ -1247,7 +1248,7 @@ func TestUpdateAccountIgnoresBaseURLsForProviderManagedAccount(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPut, "/api/accounts/acct_provider", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("PUT /api/accounts status=%d body=%s", w.Code, w.Body.String())
 	}
@@ -1289,12 +1290,12 @@ func TestUpdateManagedAccountKeyVerifyDegradation(t *testing.T) {
 		t.Cleanup(func() { _ = manager.Close() })
 		return manager
 	}
-	putAccount := func(t *testing.T, router *gin.Engine, body string) *httptest.ResponseRecorder {
+	putAccount := func(t *testing.T, router *fiber.App, body string) *httptest.ResponseRecorder {
 		t.Helper()
 		req := httptest.NewRequest(http.MethodPut, "/api/accounts/acct_custom", bytes.NewBufferString(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
-		router.ServeHTTP(w, req)
+		httpbridge.Handler(router).ServeHTTP(w, req)
 		return w
 	}
 
@@ -1458,7 +1459,7 @@ func TestListManagedAccountsDoesNotExposeVolcengineSecret(t *testing.T) {
 	defer errutil.IgnoreDeferred(manager.Close)
 	router := setupAutoManagedRouter(&AutoManagedDeps{CfgManager: manager, SkipChannelKeyVerify: true})
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/accounts", nil))
+	httpbridge.Handler(router).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/accounts", nil))
 	if w.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
@@ -1518,7 +1519,7 @@ func TestKimiConsoleTokenLifecycleDoesNotExposeToken(t *testing.T) {
 	)
 	put.Header.Set("Content-Type", "application/json")
 	putRecorder := httptest.NewRecorder()
-	router.ServeHTTP(putRecorder, put)
+	httpbridge.Handler(router).ServeHTTP(putRecorder, put)
 	if putRecorder.Code != http.StatusOK {
 		t.Fatalf("绑定 Kimi 令牌失败: status=%d body=%s", putRecorder.Code, putRecorder.Body.String())
 	}
@@ -1538,7 +1539,7 @@ func TestKimiConsoleTokenLifecycleDoesNotExposeToken(t *testing.T) {
 	}
 
 	listRecorder := httptest.NewRecorder()
-	router.ServeHTTP(listRecorder, httptest.NewRequest(http.MethodGet, "/api/accounts", nil))
+	httpbridge.Handler(router).ServeHTTP(listRecorder, httptest.NewRequest(http.MethodGet, "/api/accounts", nil))
 	if listRecorder.Code != http.StatusOK || strings.Contains(listRecorder.Body.String(), "web-session-secret") || strings.Contains(listRecorder.Body.String(), "accessToken") {
 		t.Fatalf("账号列表响应异常或泄露令牌: status=%d body=%s", listRecorder.Code, listRecorder.Body.String())
 	}
@@ -1547,7 +1548,7 @@ func TestKimiConsoleTokenLifecycleDoesNotExposeToken(t *testing.T) {
 	}
 
 	refreshRecorder := httptest.NewRecorder()
-	router.ServeHTTP(refreshRecorder, httptest.NewRequest(
+	httpbridge.Handler(router).ServeHTTP(refreshRecorder, httptest.NewRequest(
 		http.MethodPost,
 		"/api/accounts/acct_kimi/credentials/cred_kimi/kimi-console-token/refresh",
 		nil,
@@ -1560,7 +1561,7 @@ func TestKimiConsoleTokenLifecycleDoesNotExposeToken(t *testing.T) {
 	}
 
 	deleteRecorder := httptest.NewRecorder()
-	router.ServeHTTP(deleteRecorder, httptest.NewRequest(
+	httpbridge.Handler(router).ServeHTTP(deleteRecorder, httptest.NewRequest(
 		http.MethodDelete,
 		"/api/accounts/acct_kimi/credentials/cred_kimi/kimi-console-token",
 		nil,
@@ -1629,7 +1630,7 @@ func TestKimiConsoleTokenPersistsAcrossReloadForCredentialUIDOnlyManagedRoute(t 
 	)
 	put.Header.Set("Content-Type", "application/json")
 	putRecorder := httptest.NewRecorder()
-	router.ServeHTTP(putRecorder, put)
+	httpbridge.Handler(router).ServeHTTP(putRecorder, put)
 	if putRecorder.Code != http.StatusOK {
 		t.Fatalf("绑定 Kimi 令牌失败: status=%d body=%s", putRecorder.Code, putRecorder.Body.String())
 	}
@@ -1657,7 +1658,7 @@ func TestKimiConsoleTokenPersistsAcrossReloadForCredentialUIDOnlyManagedRoute(t 
 
 	reloadedRouter := setupAutoManagedRouter(&AutoManagedDeps{CfgManager: reloadedManager})
 	listRecorder := httptest.NewRecorder()
-	reloadedRouter.ServeHTTP(listRecorder, httptest.NewRequest(http.MethodGet, "/api/accounts", nil))
+	httpbridge.Handler(reloadedRouter).ServeHTTP(listRecorder, httptest.NewRequest(http.MethodGet, "/api/accounts", nil))
 	if listRecorder.Code != http.StatusOK {
 		t.Fatalf("reload 后账号列表失败: status=%d body=%s", listRecorder.Code, listRecorder.Body.String())
 	}
@@ -1710,7 +1711,7 @@ func TestSetVolcengineAccessKeyDetectsPlanBeforePersisting(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPut, "/api/accounts/acct_volc/credentials/cred_volc/volcengine-access-key", bytes.NewBufferString(`{"accessKeyId":"AKID","secretAccessKey":"SECRET"}`))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"plan":"agent_plan"`) {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
@@ -1764,7 +1765,7 @@ func TestSetMiMoConsoleCookieRequiresConfirmationBeforeAdoptingKey(t *testing.T)
 		req := httptest.NewRequest(http.MethodPut, "/api/accounts/acct_mimo/credentials/cred_mimo/mimo-console-cookie", bytes.NewBufferString(payload))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
-		router.ServeHTTP(w, req)
+		httpbridge.Handler(router).ServeHTTP(w, req)
 		return w
 	}
 	w := request(body)
@@ -1784,7 +1785,7 @@ func TestSetMiMoConsoleCookieRequiresConfirmationBeforeAdoptingKey(t *testing.T)
 		t.Fatalf("确认后未采用 Cookie Key: %+v", credential)
 	}
 	list := httptest.NewRecorder()
-	router.ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/api/accounts", nil))
+	httpbridge.Handler(router).ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/api/accounts", nil))
 	if strings.Contains(list.Body.String(), "api-platform_serviceToken") || strings.Contains(list.Body.String(), cookieKey) {
 		t.Fatalf("账号列表泄漏 Cookie 或原始 Key: %s", list.Body.String())
 	}
@@ -1833,7 +1834,7 @@ func TestCompshareConsoleCookieBindingDoesNotExposeSecrets(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPut, "/api/accounts/acct_compshare/credentials/cred_compshare/compshare-console-cookie", bytes.NewBufferString(`{"cookie":"`+testCompshareCookie+`"}`))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"displayName":"Pro 增强版"`) {
 		t.Fatalf("绑定失败: status=%d body=%s", w.Code, w.Body.String())
 	}
@@ -1843,7 +1844,7 @@ func TestCompshareConsoleCookieBindingDoesNotExposeSecrets(t *testing.T) {
 	}
 
 	list := httptest.NewRecorder()
-	router.ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/api/accounts", nil))
+	httpbridge.Handler(router).ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/api/accounts", nil))
 	response := list.Body.String()
 	for _, secret := range []string{"U_JWT_TOKEN", "test-session", "test_user@console.compshare.cn", "org-test", currentKey, "cppkg-test"} {
 		if strings.Contains(response, secret) {
@@ -1877,7 +1878,7 @@ func TestProviderAutoAddReusesExistingAccount(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/messages/channels/auto-add", bytes.NewBufferString(`{"providerId":"mimo","apiKeys":["sk-existing"]}`))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("追加已有 provider key status=%d body=%s", w.Code, w.Body.String())
 	}
@@ -2013,8 +2014,7 @@ func TestAutoAddHandler_InvalidKind(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/unknown/channels/auto-add", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	// 静态路由注册后，无效 kind 直接返回 404（路由不存在）
 	if w.Code != http.StatusNotFound {
@@ -2031,8 +2031,7 @@ func TestAutoDiscoverHandler_InvalidKind(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/unknown/channels/0/auto-discover", nil)
 	w := httptest.NewRecorder()
-
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	// 静态路由注册后，无效 kind 直接返回 404（路由不存在）
 	if w.Code != http.StatusNotFound {
@@ -2072,7 +2071,7 @@ func TestAutoDiscoverHandler_TriggersLogicalSiblings(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/messages/channels/0/auto-discover", nil)
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("auto-discover status=%d body=%s", w.Code, w.Body.String())
 	}
@@ -2113,8 +2112,7 @@ func TestAutoStatusHandler_InvalidKind(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/unknown/channels/0/auto-status", nil)
 	w := httptest.NewRecorder()
-
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	// 静态路由注册后，无效 kind 直接返回 404（路由不存在）
 	if w.Code != http.StatusNotFound {

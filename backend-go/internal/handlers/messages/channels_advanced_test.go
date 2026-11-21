@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/soulteary/yunqi/internal/config"
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 func TestGetUpstreams_IncludesAdvancedOptionFields(t *testing.T) {
@@ -20,13 +20,12 @@ func TestGetUpstreams_IncludesAdvancedOptionFields(t *testing.T) {
 		FastMode:      true,
 	}})
 
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
-	r.GET("/messages/channels", GetUpstreams(cm))
+	r := httpbridge.NewApp()
+	r.Get("/messages/channels", GetUpstreams(cm))
 
 	req := httptest.NewRequest(http.MethodGet, "/messages/channels", nil)
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", w.Code)
@@ -60,13 +59,12 @@ func TestGetUpstreams_IncludesNormalizeMetadataUserIdField(t *testing.T) {
 		NormalizeMetadataUserID: &enabled,
 	}})
 
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
-	r.GET("/messages/channels", GetUpstreams(cm))
+	r := httpbridge.NewApp()
+	r.Get("/messages/channels", GetUpstreams(cm))
 
 	req := httptest.NewRequest(http.MethodGet, "/messages/channels", nil)
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", w.Code)
@@ -96,13 +94,12 @@ func TestGetUpstreams_IncludesStripBillingHeaderField(t *testing.T) {
 		StripBillingHeader: &enabled,
 	}})
 
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
-	r.GET("/messages/channels", GetUpstreams(cm))
+	r := httpbridge.NewApp()
+	r.Get("/messages/channels", GetUpstreams(cm))
 
 	req := httptest.NewRequest(http.MethodGet, "/messages/channels", nil)
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", w.Code)
@@ -133,13 +130,12 @@ func TestGetUpstreams_IncludesStripEmptyTextBlocksField(t *testing.T) {
 	channel.SetCompatSeed(config.TraitStripEmptyTextBlocks, true)
 	cm := setupTestConfigManager(t, []config.UpstreamConfig{channel})
 
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
-	r.GET("/messages/channels", GetUpstreams(cm))
+	r := httpbridge.NewApp()
+	r.Get("/messages/channels", GetUpstreams(cm))
 
 	req := httptest.NewRequest(http.MethodGet, "/messages/channels", nil)
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", w.Code)
@@ -168,13 +164,12 @@ func TestGetUpstreams_IncludesNormalizeSystemRoleToTopLevelField(t *testing.T) {
 		NormalizeSystemRoleToTopLevel: true,
 	}})
 
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
-	r.GET("/messages/channels", GetUpstreams(cm))
+	r := httpbridge.NewApp()
+	r.Get("/messages/channels", GetUpstreams(cm))
 
 	req := httptest.NewRequest(http.MethodGet, "/messages/channels", nil)
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", w.Code)
@@ -209,13 +204,12 @@ func TestGetUpstreams_IncludesStatusAndDisabledApiKeys(t *testing.T) {
 		}},
 	}})
 
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
-	r.GET("/messages/channels", GetUpstreams(cm))
+	r := httpbridge.NewApp()
+	r.Get("/messages/channels", GetUpstreams(cm))
 
 	req := httptest.NewRequest(http.MethodGet, "/messages/channels", nil)
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", w.Code)
@@ -251,13 +245,12 @@ func TestPingChannel_WithoutBaseURLReturnsError(t *testing.T) {
 		ServiceType: "claude",
 	}})
 
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
-	r.GET("/messages/ping/:id", PingChannel(cm))
+	r := httpbridge.NewApp()
+	r.Get("/messages/ping/:id", PingChannel(cm))
 
 	req := httptest.NewRequest(http.MethodGet, "/messages/ping/0", nil)
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200, body=%s", w.Code, w.Body.String())
@@ -278,13 +271,12 @@ func TestPingAllChannels_WithoutBaseURLMarksChannelError(t *testing.T) {
 		ServiceType: "claude",
 	}})
 
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
-	r.GET("/messages/ping", PingAllChannels(cm))
+	r := httpbridge.NewApp()
+	r.Get("/messages/ping", PingAllChannels(cm))
 
 	req := httptest.NewRequest(http.MethodGet, "/messages/ping", nil)
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200, body=%s", w.Code, w.Body.String())

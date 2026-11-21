@@ -3,16 +3,17 @@ package common
 import (
 	"testing"
 
+	"github.com/gofiber/fiber/v3"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/racing"
-	"github.com/gin-gonic/gin"
 )
 
 // 竞速标记诚实性：无对手分支的独占交付不得带 won/角色标记，
 // 避免「竞速获胜」徽章与「竞速放大」筛选在非竞速请求上误报。
 
-func newRacingMarkingContext(gate *racing.Gate, role string, branchID int) *gin.Context {
-	gin.SetMode(gin.TestMode)
+func newRacingMarkingContext(gate *racing.Gate, role string, branchID int) fiber.Ctx {
+
 	c, _ := newBranchTestContext()
 	if gate != nil {
 		setBranchContext(c, gate, role, branchID)
@@ -28,7 +29,7 @@ func TestRacingClaimClientCommit_SkipsWonMarkWithoutRival(t *testing.T) {
 	if !RacingClaimClientCommit(c) {
 		t.Fatalf("无对手分支时 claim 应放行")
 	}
-	if _, ok := c.Get(racingOutcomeKey); ok {
+	if _, ok := httpbridge.Value(c, racingOutcomeKey); ok {
 		t.Fatalf("无对手分支时不得补记 won 标记")
 	}
 }
@@ -42,7 +43,7 @@ func TestRacingClaimClientCommit_MarksWonWithRival(t *testing.T) {
 	if !RacingClaimClientCommit(c) {
 		t.Fatalf("有对手分支时 claim 应放行")
 	}
-	if v, ok := c.Get(racingOutcomeKey); !ok || v != metrics.RacingStatusWon {
+	if v, ok := httpbridge.Value(c, racingOutcomeKey); !ok || v != metrics.RacingStatusWon {
 		t.Fatalf("有对手分支时应补记 won 标记: got=%v ok=%v", v, ok)
 	}
 }
@@ -76,7 +77,7 @@ func TestCompleteChannelLogWithRacingOutcome_ClearsRoleWhenNoRival(t *testing.T)
 	gate := racing.NewGate()
 	gate.RegisterCancel(0, func() {})
 	c := newRacingMarkingContext(nil, "", 0)
-	c.Set(racing.ContextKeyGate, gate)
+	httpbridge.SetValue(c, racing.ContextKeyGate, gate)
 
 	CompleteChannelLogWithRacingOutcome(store, key, requestID, c)
 
@@ -121,7 +122,7 @@ func TestCompleteChannelLogWithRacingOutcome_KeepsRoleWhenRacedButLost(t *testin
 	gate.RegisterCancel(0, func() {})
 	gate.RegisterCancel(1, func() {})
 	c := newRacingMarkingContext(nil, "", 0)
-	c.Set(racing.ContextKeyGate, gate)
+	httpbridge.SetValue(c, racing.ContextKeyGate, gate)
 
 	CompleteChannelLogWithRacingOutcome(store, key, requestID, c)
 

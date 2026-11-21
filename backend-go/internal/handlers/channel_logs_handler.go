@@ -3,10 +3,11 @@ package handlers
 import (
 	"strconv"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/scheduler"
-	"github.com/gin-gonic/gin"
 )
 
 // GetChannelLogs 获取渠道请求日志
@@ -17,22 +18,22 @@ func GetChannelLogs(
 	cfgManager *config.ConfigManager,
 	kind scheduler.ChannelKind,
 	metricsManager *metrics.MetricsManager,
-) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		idStr := c.Param("id")
+) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		idStr := httpbridge.Param(c, "id")
 		channelIndex, err := strconv.Atoi(idStr)
 		if err != nil {
-			c.JSON(400, gin.H{"error": "Invalid channel ID"})
-			return
+			httpbridge.JSON(c, 400, fiber.Map{"error": "Invalid channel ID"})
+			return nil
 		}
 
 		upstream := getUpstreamByKindAndIndex(cfgManager, kind, channelIndex)
 		if upstream == nil {
-			c.JSON(200, gin.H{
+			httpbridge.JSON(c, 200, fiber.Map{
 				"channelIndex": channelIndex,
 				"logs":         make([]*metrics.ChannelLog, 0),
 			})
-			return
+			return nil
 		}
 
 		normalizedServiceType := scheduler.NormalizedMetricsServiceType(kind, upstream.ServiceType)
@@ -57,7 +58,7 @@ func GetChannelLogs(
 			logs = make([]*metrics.ChannelLog, 0)
 		}
 
-		body := gin.H{
+		body := fiber.Map{
 			"channelIndex": channelIndex,
 			"channelName":  upstream.Name,
 			"logs":         logs,
@@ -70,8 +71,8 @@ func GetChannelLogs(
 				body["breakerEvidence"] = evidence
 			}
 		}
-
-		c.JSON(200, body)
+		httpbridge.JSON(c, 200, body)
+		return nil
 	}
 }
 

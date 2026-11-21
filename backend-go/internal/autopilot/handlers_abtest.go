@@ -5,8 +5,9 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 // ─── A/B 测试 API 路由注册 ─────────────────────────────────────────────────────────
@@ -21,9 +22,9 @@ type ABTestDeps struct {
 // RegisterABTestRoutes 注册 A/B 测试 API 路由。
 // GET  /api/autopilot/ab-test-results  —— 结果统计 + 最近记录
 // POST /api/autopilot/ab-test/emergency-stop —— 紧急停止（等价 Enabled=false）
-func RegisterABTestRoutes(group *gin.RouterGroup, deps *ABTestDeps) {
-	group.GET("/autopilot/ab-test-results", handleABTestResults(deps))
-	group.POST("/autopilot/ab-test/emergency-stop", handleABTestEmergencyStop(deps))
+func RegisterABTestRoutes(group fiber.Router, deps *ABTestDeps) {
+	group.Get("/autopilot/ab-test-results", handleABTestResults(deps))
+	group.Post("/autopilot/ab-test/emergency-stop", handleABTestEmergencyStop(deps))
 }
 
 // ─── 响应类型 ──────────────────────────────────────────────────────────────────────
@@ -46,8 +47,8 @@ type ABTestResultsResponse struct {
 
 // handleABTestResults GET /api/autopilot/ab-test-results
 // 返回 A/B 测试结果统计、最近记录和预算信息。
-func handleABTestResults(deps *ABTestDeps) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handleABTestResults(deps *ABTestDeps) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		// killSwitch 检查：config 字段 OR 环境变量
 		envKillSwitch := false
 		if envVal := os.Getenv("AUTOPILOT_KILL_SWITCH"); isTruthyEnv(envVal) {
@@ -61,11 +62,11 @@ func handleABTestResults(deps *ABTestDeps) gin.HandlerFunc {
 		killSwitchActive := configKillSwitch || envKillSwitch
 
 		if deps.Sampler == nil || deps.Store == nil {
-			c.JSON(http.StatusOK, ABTestResultsResponse{
+			httpbridge.JSON(c, http.StatusOK, ABTestResultsResponse{
 				Enabled:          false,
 				KillSwitchActive: killSwitchActive,
 			})
-			return
+			return nil
 		}
 
 		cfg := deps.Sampler.config()
@@ -86,8 +87,8 @@ func handleABTestResults(deps *ABTestDeps) gin.HandlerFunc {
 			RecentRecords:        recentRecords,
 			TotalShadowCostUSD:   stats.TotalShadowCostUSD,
 		}
-
-		c.JSON(http.StatusOK, resp)
+		httpbridge.JSON(c, http.StatusOK, resp)
+		return nil
 	}
 }
 
@@ -98,12 +99,12 @@ type ABTestEmergencyStopRequest struct {
 
 // handleABTestEmergencyStop POST /api/autopilot/ab-test/emergency-stop
 // 紧急停止 A/B 测试（通过 ConfigManager 将 Enabled 设为 false 并持久化）。
-func handleABTestEmergencyStop(deps *ABTestDeps) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handleABTestEmergencyStop(deps *ABTestDeps) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		// 解析可选 reason
 		var req ABTestEmergencyStopRequest
 		// 忽略绑定错误，reason 是可选字段
-		_ = c.ShouldBindJSON(&req)
+		_ = httpbridge.BindJSON(c, &req)
 
 		reason := req.Reason
 		if reason == "" {
@@ -114,21 +115,21 @@ func handleABTestEmergencyStop(deps *ABTestDeps) gin.HandlerFunc {
 		if deps.CfgManager != nil {
 			if err := deps.CfgManager.SetABTestEnabled(false); err != nil {
 				log.Printf("[ABTest-EmergencyStop] 持久化关闭失败: %v", err)
-				c.JSON(http.StatusInternalServerError, gin.H{
+				httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{
 					"error": "持久化关闭 A/B 测试失败，请手动修改配置文件",
 				})
-				return
+				return nil
 			}
 		}
 
 		log.Printf("[ABTest-EmergencyStop] 紧急停止已触发并持久化: reason=%s", reason)
-
-		c.JSON(http.StatusOK, gin.H{
+		httpbridge.JSON(c, http.StatusOK, fiber.Map{
 			"ok":     true,
 			"action": "ab_test_emergency_stop",
 			"reason": reason,
 			"note":   "A/B 测试已紧急停止，配置已持久化。所有影子请求采样将立即停止。",
 		})
+		return nil
 	}
 }
 

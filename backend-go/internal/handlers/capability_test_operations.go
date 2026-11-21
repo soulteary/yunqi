@@ -8,44 +8,45 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/metrics"
-	"github.com/gin-gonic/gin"
 )
 
 // ============== 取消与重测 ==============
 
 // CancelCapabilityTestJob 取消正在进行的能力测试
-func CancelCapabilityTestJob(cfgManager *config.ConfigManager, channelKind string) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func CancelCapabilityTestJob(cfgManager *config.ConfigManager, channelKind string) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		id, err := parseCapabilityChannelID(c)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid channel ID"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "Invalid channel ID"})
+			return nil
 		}
 
-		jobID := c.Param("jobId")
+		jobID := httpbridge.Param(c, "jobId")
 		job, ok := capabilityJobs.get(jobID)
 		if !ok {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Capability test job not found"})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "Capability test job not found"})
+			return nil
 		}
 
 		channel, chErr := getCapabilityTestChannel(cfgManager, channelKind, id)
 		if chErr != nil {
 			if !capabilityJobMatchesChannel(job, nil, channelKind, id) {
-				c.JSON(http.StatusNotFound, gin.H{"error": "Capability test job not found"})
-				return
+				httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "Capability test job not found"})
+				return nil
 			}
 		} else if !capabilityJobMatchesChannel(job, channel, channelKind, id) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Capability test job not found"})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "Capability test job not found"})
+			return nil
 		}
 
 		// 只能取消正在运行或排队中的 job
 		if job.Status != CapabilityJobStatusRunning && job.Status != CapabilityJobStatusQueued {
-			c.JSON(http.StatusConflict, gin.H{"error": "Job is not running"})
-			return
+			httpbridge.JSON(c, http.StatusConflict, fiber.Map{"error": "Job is not running"})
+			return nil
 		}
 
 		// 调用 CancelFunc 取消 goroutine
@@ -86,51 +87,52 @@ func CancelCapabilityTestJob(cfgManager *config.ConfigManager, channelKind strin
 		})
 
 		log.Printf("[CapabilityTest-Cancel] 能力测试任务 %s 已取消", jobID)
-		c.JSON(http.StatusOK, gin.H{"status": "cancelled"})
+		httpbridge.JSON(c, http.StatusOK, fiber.Map{"status": "cancelled"})
+		return nil
 	}
 }
 
 // RetryCapabilityTestModel 重测单个模型
-func RetryCapabilityTestModel(cfgManager *config.ConfigManager, channelLogStore *metrics.ChannelLogStore, channelKind string) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func RetryCapabilityTestModel(cfgManager *config.ConfigManager, channelLogStore *metrics.ChannelLogStore, channelKind string) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		id, err := parseCapabilityChannelID(c)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid channel ID"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "Invalid channel ID"})
+			return nil
 		}
 
-		jobID := c.Param("jobId")
+		jobID := httpbridge.Param(c, "jobId")
 		job, ok := capabilityJobs.get(jobID)
 		if !ok {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Capability test job not found"})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "Capability test job not found"})
+			return nil
 		}
 
 		channel, chErr := getCapabilityTestChannel(cfgManager, channelKind, id)
 		if chErr != nil {
 			if !capabilityJobMatchesChannel(job, nil, channelKind, id) {
-				c.JSON(http.StatusNotFound, gin.H{"error": "Capability test job not found"})
-				return
+				httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "Capability test job not found"})
+				return nil
 			}
 		} else if !capabilityJobMatchesChannel(job, channel, channelKind, id) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Capability test job not found"})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "Capability test job not found"})
+			return nil
 		}
 
 		var req struct {
 			Protocol string `json:"protocol"`
 			Model    string `json:"model"`
 		}
-		if err := c.ShouldBindJSON(&req); err != nil || req.Protocol == "" || req.Model == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "protocol and model are required"})
-			return
+		if err := httpbridge.BindJSON(c, &req); err != nil || req.Protocol == "" || req.Model == "" {
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "protocol and model are required"})
+			return nil
 		}
 
 		// 仅允许在终态 job 上执行单模型重测，避免与主任务并发冲突导致状态抖动
 		if job.Lifecycle == CapabilityLifecyclePending || job.Lifecycle == CapabilityLifecycleActive ||
 			job.Status == CapabilityJobStatusQueued || job.Status == CapabilityJobStatusRunning {
-			c.JSON(http.StatusConflict, gin.H{"error": "Capability test job is still running"})
-			return
+			httpbridge.JSON(c, http.StatusConflict, fiber.Map{"error": "Capability test job is still running"})
+			return nil
 		}
 
 		// 检查模型是否存在于 job 中；若协议存在但模型不在（如快照新增的探测模型），
@@ -176,19 +178,19 @@ func RetryCapabilityTestModel(cfgManager *config.ConfigManager, channelLogStore 
 			modelRetryable = true
 		}
 		if !modelFound {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Model not found in job"})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "Model not found in job"})
+			return nil
 		}
 		if !modelRetryable {
-			c.JSON(http.StatusConflict, gin.H{"error": "Model is not retryable"})
-			return
+			httpbridge.JSON(c, http.StatusConflict, fiber.Map{"error": "Model is not retryable"})
+			return nil
 		}
 
 		// 获取渠道配置
 		channel, chErr = getCapabilityTestChannel(cfgManager, channelKind, id)
 		if chErr != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": chErr.Error()})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": chErr.Error()})
+			return nil
 		}
 
 		timeout := 30 * time.Second
@@ -277,8 +279,8 @@ func RetryCapabilityTestModel(cfgManager *config.ConfigManager, channelLogStore 
 			log.Printf("[CapabilityTest-Retry] 单模型重测完成: job=%s, protocol=%s, model=%s, success=%v",
 				jobID, req.Protocol, req.Model, modelResult.Success)
 		}()
-
-		c.JSON(http.StatusOK, gin.H{"status": "accepted"})
+		httpbridge.JSON(c, http.StatusOK, fiber.Map{"status": "accepted"})
+		return nil
 	}
 }
 

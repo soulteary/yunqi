@@ -7,9 +7,10 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/metrics"
-	"github.com/gin-gonic/gin"
 )
 
 // ============== 类型定义 ==============
@@ -72,12 +73,12 @@ type CapabilityTestResponse struct {
 
 // TestChannelCapability 渠道能力测试处理器
 // channelKind 决定从哪个配置获取渠道：messages/responses/gemini/chat
-func TestChannelCapability(cfgManager *config.ConfigManager, channelLogStore *metrics.ChannelLogStore, channelKind string) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		id, err := strconv.Atoi(c.Param("id"))
+func TestChannelCapability(cfgManager *config.ConfigManager, channelLogStore *metrics.ChannelLogStore, channelKind string) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		id, err := strconv.Atoi(httpbridge.Param(c, "id"))
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid channel ID"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "Invalid channel ID"})
+			return nil
 		}
 
 		channel, err := getCapabilityTestChannel(cfgManager, channelKind, id)
@@ -86,14 +87,14 @@ func TestChannelCapability(cfgManager *config.ConfigManager, channelLogStore *me
 			if err.Error() == "channel not found" {
 				statusCode = http.StatusNotFound
 			}
-			c.JSON(statusCode, gin.H{"error": err.Error()})
-			return
+			httpbridge.JSON(c, statusCode, fiber.Map{"error": err.Error()})
+			return nil
 		}
 
 		var req CapabilityTestRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
-			return
+		if err := httpbridge.BindJSON(c, &req); err != nil {
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "Invalid request body"})
+			return nil
 		}
 
 		timeout := 30 * time.Second
@@ -131,8 +132,8 @@ func TestChannelCapability(cfgManager *config.ConfigManager, channelLogStore *me
 			job.RunMode = CapabilityRunModeFresh
 			job.Error = &errMsg
 			capabilityJobs.create(job)
-			c.JSON(http.StatusOK, gin.H{"jobId": job.JobID, "resumed": false, "job": job})
-			return
+			httpbridge.JSON(c, http.StatusOK, fiber.Map{"jobId": job.JobID, "resumed": false, "job": job})
+			return nil
 		}
 
 		baseURL := ""
@@ -149,10 +150,10 @@ func TestChannelCapability(cfgManager *config.ConfigManager, channelLogStore *me
 		normalizedModels := normalizeCapabilityModels(req.Models)
 		// 渠道模型列表探测范围：以渠道认可的模型清单（上游 /models 或火山管控面）替代内置探测清单
 		if len(normalizedModels) == 0 && req.UseChannelModels {
-			resolved, err := resolveChannelProbeModels(c.Request.Context(), channel, channelKind, cfgManager)
+			resolved, err := resolveChannelProbeModels(httpbridge.Request(c).Context(), channel, channelKind, cfgManager)
 			if err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("解析渠道模型列表失败: %v", err)})
-				return
+				httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": fmt.Sprintf("解析渠道模型列表失败: %v", err)})
+				return nil
 			}
 			normalizedModels = normalizeCapabilityModels(resolved)
 		}
@@ -175,8 +176,8 @@ func TestChannelCapability(cfgManager *config.ConfigManager, channelLogStore *me
 			job.SummaryReason = "cache_hit"
 			job.IsResumed = false
 			capabilityJobs.create(job)
-			c.JSON(http.StatusOK, gin.H{"jobId": job.JobID, "resumed": false, "job": job})
-			return
+			httpbridge.JSON(c, http.StatusOK, fiber.Map{"jobId": job.JobID, "resumed": false, "job": job})
+			return nil
 		}
 
 		job, reused := capabilityJobs.getOrCreateByLookupKey(executionLookupKey, func() *CapabilityTestJob {
@@ -259,14 +260,13 @@ func TestChannelCapability(cfgManager *config.ConfigManager, channelLogStore *me
 				}
 			})
 			if !ok {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to resume cancelled job"})
-				return
+				httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": "Failed to resume cancelled job"})
+				return nil
 			}
 
 			go runCapabilityTestJob(job.JobID, channelKind, id, *channel, protocols, timeout, effectiveRPM, cacheKey, lookupKey, identityKey, dispatcherKey, previousResults, normalizedModels, cfgManager, channelLogStore)
-
-			c.JSON(http.StatusOK, gin.H{"jobId": updatedJob.JobID, "resumed": true, "job": updatedJob})
-			return
+			httpbridge.JSON(c, http.StatusOK, fiber.Map{"jobId": updatedJob.JobID, "resumed": true, "job": updatedJob})
+			return nil
 		}
 
 		// 复用正在运行的 job
@@ -275,8 +275,8 @@ func TestChannelCapability(cfgManager *config.ConfigManager, channelLogStore *me
 			job.RunMode = CapabilityRunModeReusedRunning
 			job.SummaryReason = "reused_running"
 			job.IsResumed = true
-			c.JSON(http.StatusOK, gin.H{"jobId": job.JobID, "resumed": true, "job": job})
-			return
+			httpbridge.JSON(c, http.StatusOK, fiber.Map{"jobId": job.JobID, "resumed": true, "job": job})
+			return nil
 		}
 
 		// 创建新 job
@@ -320,7 +320,7 @@ func TestChannelCapability(cfgManager *config.ConfigManager, channelLogStore *me
 		}
 
 		go runCapabilityTestJob(job.JobID, channelKind, id, *channel, protocols, timeout, effectiveRPM, cacheKey, lookupKey, identityKey, dispatcherKey, previousResults, normalizedModels, cfgManager, channelLogStore)
-
-		c.JSON(http.StatusOK, gin.H{"jobId": job.JobID, "resumed": false, "job": job})
+		httpbridge.JSON(c, http.StatusOK, fiber.Map{"jobId": job.JobID, "resumed": false, "job": job})
+		return nil
 	}
 }

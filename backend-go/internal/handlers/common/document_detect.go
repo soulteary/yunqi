@@ -3,18 +3,19 @@ package common
 import (
 	"strings"
 
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v3"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/tidwall/gjson"
 )
 
 const documentDetectedContextKey = "ccx_has_document_content"
 
 // HasDocumentContentCached 返回已缓存的文档内容检测结果，不触发请求体解析。
-func HasDocumentContentCached(c *gin.Context) bool {
+func HasDocumentContentCached(c fiber.Ctx) bool {
 	if c == nil {
 		return false
 	}
-	if cached, exists := c.Get(documentDetectedContextKey); exists {
+	if cached, exists := httpbridge.Value(c, documentDetectedContextKey); exists {
 		if detected, ok := cached.(bool); ok {
 			return detected
 		}
@@ -23,13 +24,13 @@ func HasDocumentContentCached(c *gin.Context) bool {
 }
 
 // HasDocumentContent 检测请求体是否包含文档附件（覆盖 Claude/Responses/Gemini 三种协议格式，
-// OpenAI Chat 无标准 document 块）。结果缓存在 gin.Context 中，failover 重试时不重复解析。
-func HasDocumentContent(c *gin.Context, bodyBytes []byte) bool {
-	if cached, exists := c.Get(documentDetectedContextKey); exists {
+// OpenAI Chat 无标准 document 块）。结果缓存在 fiber.Ctx 中，failover 重试时不重复解析。
+func HasDocumentContent(c fiber.Ctx, bodyBytes []byte) bool {
+	if cached, exists := httpbridge.Value(c, documentDetectedContextKey); exists {
 		return cached.(bool)
 	}
 	detected := detectDocumentInBody(bodyBytes)
-	c.Set(documentDetectedContextKey, detected)
+	httpbridge.SetValue(c, documentDetectedContextKey, detected)
 	return detected
 }
 

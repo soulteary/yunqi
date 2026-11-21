@@ -11,10 +11,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v3"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
-func (a *application) serve(r *gin.Engine) {
+func (a *application) serve(r *fiber.App) {
 	// 启动服务器
 	addr := listenAddressForEnv(a.envCfg)
 	endpoint := endpointForEnv(a.envCfg)
@@ -22,7 +23,7 @@ func (a *application) serve(r *gin.Engine) {
 	// 创建 HTTP 服务器
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           r,
+		Handler:           httpbridge.Handler(r),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       time.Duration(a.envCfg.ServerReadTimeout) * time.Millisecond, // 仅控制服务端读取入站请求，避免与上游请求超时耦合
 		IdleTimeout:       120 * time.Second,

@@ -8,12 +8,12 @@ import (
 	"testing"
 
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/types"
-	"github.com/gin-gonic/gin"
 )
 
 func TestResponsesProvider_BuildResponsesRequestFromClaude(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	provider := &ResponsesProvider{}
 	upstream := &config.UpstreamConfig{
 		ServiceType: "responses",
@@ -229,7 +229,7 @@ func TestResponsesProvider_BuildResponsesRequestFromClaude_ReasoningInputOmitsSt
 }
 
 func TestResponsesProvider_BuildResponsesRequestFromClaude_MapsPromptCacheAndUser(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	provider := &ResponsesProvider{}
 	upstream := &config.UpstreamConfig{ServiceType: "responses"}
 
@@ -245,9 +245,9 @@ func TestResponsesProvider_BuildResponsesRequestFromClaude_MapsPromptCacheAndUse
 	}`)
 
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
-	c.Request.Header.Set("X-Claude-Code-Session-Id", "sess_from_header")
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body)))
+	httpbridge.Request(c).Header.Set("X-Claude-Code-Session-Id", "sess_from_header")
 
 	result, err := provider.buildResponsesRequestFromClaude(c, body, upstream)
 	if err != nil {
@@ -272,7 +272,7 @@ func TestResponsesProvider_BuildResponsesRequestFromClaude_MapsPromptCacheAndUse
 }
 
 func TestResponsesProvider_BuildResponsesRequestFromClaude_UsesUnifiedSessionIDForPromptCacheOnly(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	provider := &ResponsesProvider{}
 	upstream := &config.UpstreamConfig{ServiceType: "responses"}
 	body := []byte(`{
@@ -281,9 +281,9 @@ func TestResponsesProvider_BuildResponsesRequestFromClaude_UsesUnifiedSessionIDF
 	}`)
 
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
-	c.Request.Header.Set("X-Client-Request-Id", "req_123")
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body)))
+	httpbridge.Request(c).Header.Set("X-Client-Request-Id", "req_123")
 
 	result, err := provider.buildResponsesRequestFromClaude(c, body, upstream)
 	if err != nil {

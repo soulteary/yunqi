@@ -5,17 +5,19 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
-func setupRouterWithCORS(envCfg *config.EnvConfig) *gin.Engine {
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
+func setupRouterWithCORS(envCfg *config.EnvConfig) *fiber.App {
+
+	r := httpbridge.NewApp()
 	r.Use(CORSMiddleware(envCfg))
 	r.Use(WebAuthMiddleware(envCfg, nil))
-	r.GET("/api/channels", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"ok": true})
+	r.Get("/api/channels", func(c fiber.Ctx) error {
+		httpbridge.JSON(c, http.StatusOK, fiber.Map{"ok": true})
+		return nil
 	})
 	return r
 }
@@ -34,8 +36,7 @@ func TestCORSMiddleware_PreflightBypassesAuthWhenCORSDisabled(t *testing.T) {
 	req.Header.Set("Access-Control-Request-Method", http.MethodGet)
 	req.Header.Set("Access-Control-Request-Headers", "x-api-key")
 	w := httptest.NewRecorder()
-
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusNoContent {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusNoContent)
@@ -61,8 +62,7 @@ func TestCORSMiddleware_ActualResponseIncludesHeadersWhenCORSDisabled(t *testing
 	req.Header.Set("Origin", "http://localhost:5173")
 	req.Header.Set("x-api-key", "test-key")
 	w := httptest.NewRecorder()
-
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)

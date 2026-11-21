@@ -12,7 +12,7 @@ import (
 // 熔断/Key 拉黑/自学习，仅完成渠道日志终态。
 var ErrRacingSuperseded = errors.New("racing superseded")
 
-// gin context keys（沿代码库 ccx.* 惯例；编排器在分支 context 上设置）。
+// Fiber context keys（沿代码库 ccx.* 惯例；编排器在分支 context 上设置）。
 const (
 	ContextKeyGate = "ccx.racing.gate" // *Gate
 	ContextKeyRole = "ccx.racing.role" // "primary" | "shadow"

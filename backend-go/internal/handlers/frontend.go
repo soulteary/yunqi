@@ -7,47 +7,61 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 // ServeFrontend 提供前端静态文件服务
-func ServeFrontend(r *gin.Engine, frontendFS embed.FS, envCfg *config.EnvConfig) {
+func ServeFrontend(r *fiber.App, frontendFS embed.FS, envCfg *config.EnvConfig) {
 	// 从嵌入的文件系统中提取 frontend/dist 子目录
 	distFS, err := fs.Sub(frontendFS, "frontend/dist")
 	if err != nil {
 		// 如果提取失败，返回错误页面
-		r.GET("/", func(c *gin.Context) {
-			c.Data(503, "text/html; charset=utf-8", []byte(getErrorPage()))
+		r.Get("/", func(c fiber.Ctx) error {
+			httpbridge.Data(c, 503, "text/html; charset=utf-8", []byte(getErrorPage()))
+			return nil
 		})
 		return
 	}
 
-	// 使用 Gin 的静态文件服务 - /assets 路由
-	r.StaticFS("/assets", http.FS(distFS))
+	// 使用 Fiber 的静态文件服务 - /assets 路由
+	assetHandler := func(c fiber.Ctx) error {
+		path := strings.TrimPrefix(c.Path(), "/")
+		data, err := fs.ReadFile(distFS, path)
+		if err != nil {
+			httpbridge.Status(c, http.StatusNotFound)
+			return nil
+		}
+		httpbridge.Data(c, 200, getContentType(path), data)
+		return nil
+	}
+	r.Get("/assets/*", assetHandler)
+	r.Head("/assets/*", assetHandler)
 
 	// 根路径返回 index.html
-	r.GET("/", func(c *gin.Context) {
+	r.Get("/", func(c fiber.Ctx) error {
 		indexContent, err := fs.ReadFile(distFS, "index.html")
 		if err != nil {
-			c.Data(503, "text/html; charset=utf-8", []byte(getErrorPage()))
-			return
+			httpbridge.Data(c, 503, "text/html; charset=utf-8", []byte(getErrorPage()))
+			return nil
 		}
-		c.Data(200, "text/html; charset=utf-8", injectRuntimeConfig(indexContent, envCfg))
+		httpbridge.Data(c, 200, "text/html; charset=utf-8", injectRuntimeConfig(indexContent, envCfg))
+		return nil
 	})
 
 	// NoRoute 处理器 - 智能SPA支持
-	r.NoRoute(func(c *gin.Context) {
-		path := c.Request.URL.Path
+	fallback := func(c fiber.Ctx) error {
+		path := httpbridge.Request(c).URL.Path
 
 		// API 路由优先处理 - 返回 JSON 格式的 404
 		if isAPIPath(path) {
-			c.JSON(http.StatusNotFound, gin.H{
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{
 				"error":   "API endpoint not found",
 				"path":    path,
 				"message": "请求的API端点不存在",
 			})
-			return
+			return nil
 		}
 
 		// 去掉开头的 /
@@ -60,18 +74,21 @@ func ServeFrontend(r *gin.Engine, frontendFS embed.FS, envCfg *config.EnvConfig)
 		if err == nil {
 			// 文件存在，根据扩展名设置正确的 Content-Type
 			contentType := getContentType(path)
-			c.Data(200, contentType, fileContent)
-			return
+			httpbridge.Data(c, 200, contentType, fileContent)
+			return nil
 		}
 
 		// 文件不存在，返回 index.html (SPA 路由支持)
 		indexContent, err := fs.ReadFile(distFS, "index.html")
 		if err != nil {
-			c.Data(503, "text/html; charset=utf-8", []byte(getErrorPage()))
-			return
+			httpbridge.Data(c, 503, "text/html; charset=utf-8", []byte(getErrorPage()))
+			return nil
 		}
-		c.Data(200, "text/html; charset=utf-8", injectRuntimeConfig(indexContent, envCfg))
-	})
+		httpbridge.Data(c, 200, "text/html; charset=utf-8", injectRuntimeConfig(indexContent, envCfg))
+		return nil
+	}
+	httpbridge.SetFallback(r, fallback)
+	r.Use(fallback)
 }
 
 func injectRuntimeConfig(indexContent []byte, envCfg *config.EnvConfig) []byte {

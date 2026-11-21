@@ -5,9 +5,12 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/soulteary/yunqi/internal/httpbridge"
 
 	"github.com/soulteary/yunqi/internal/autopilot"
 	"github.com/soulteary/yunqi/internal/config"
@@ -83,15 +86,15 @@ func TestRouteManifestCompatibility(t *testing.T) {
 		env         string
 		extraRoutes []string
 	}{
-		{"production-web", true, "production", []string{"GET /assets/*filepath", "HEAD /assets/*filepath"}},
+		{"production-web", true, "production", []string{"GET /assets/*", "HEAD /assets/*"}},
 		{"production-api", false, "production", nil},
-		{"development-web", true, "development", []string{"GET /assets/*filepath", "HEAD /assets/*filepath", "GET /admin/dev/info"}},
+		{"development-web", true, "development", []string{"GET /assets/*", "HEAD /assets/*", "GET /admin/dev/info"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a := newRouteTestApplication(t, tc.web, tc.env)
 			router := a.newRouter()
 			var got []string
-			for _, route := range router.Routes() {
+			for _, route := range router.GetRoutes(true) {
 				got = append(got, route.Method+" "+route.Path)
 			}
 			sort.Strings(got)
@@ -101,6 +104,9 @@ func TestRouteManifestCompatibility(t *testing.T) {
 			}
 			want := strings.Split(strings.TrimSpace(string(data)), "\n")
 			want = append(want, tc.extraRoutes...)
+			for i := range want {
+				want[i] = regexp.MustCompile(`\*(rest|modelAction|filepath)`).ReplaceAllString(want[i], "*")
+			}
 			sort.Strings(want)
 			if !reflect.DeepEqual(got, want) {
 				t.Fatalf("route surface changed\ngot (%d):\n%s\nwant (%d):\n%s", len(got), strings.Join(got, "\n"), len(want), strings.Join(want, "\n"))
@@ -156,7 +162,7 @@ func TestRouterAuthenticationAndFrontendCompatibility(t *testing.T) {
 				req.Header.Set("x-api-key", tc.key)
 			}
 			recorder := httptest.NewRecorder()
-			router.ServeHTTP(recorder, req)
+			httpbridge.Handler(router).ServeHTTP(recorder, req)
 			if recorder.Code != tc.status {
 				t.Fatalf("status=%d, want=%d; body=%s", recorder.Code, tc.status, recorder.Body.String())
 			}
@@ -174,7 +180,7 @@ func TestAPIOnlyManagementBoundary(t *testing.T) {
 		req := httptest.NewRequest("GET", path, nil)
 		req.Header.Set("x-api-key", "route-admin")
 		recorder := httptest.NewRecorder()
-		router.ServeHTTP(recorder, req)
+		httpbridge.Handler(router).ServeHTTP(recorder, req)
 		if recorder.Code != 404 {
 			t.Fatalf("%s status=%d, want=404", path, recorder.Code)
 		}

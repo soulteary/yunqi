@@ -14,9 +14,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/errutil"
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 func newNoWaitDiscoveryPacer() *discoveryProbePacer {
@@ -25,7 +26,7 @@ func newNoWaitDiscoveryPacer() *discoveryProbePacer {
 	return pacer
 }
 
-func channelDiscoveryForTest(cfgManager *config.ConfigManager, fetchers ChannelDiscoveryModelFetchers) gin.HandlerFunc {
+func channelDiscoveryForTest(cfgManager *config.ConfigManager, fetchers ChannelDiscoveryModelFetchers) fiber.Handler {
 	return channelDiscoveryWithPacerFactory(cfgManager, fetchers, newNoWaitDiscoveryPacer)
 }
 
@@ -408,7 +409,6 @@ func sameStringSet(got []string, want []string) bool {
 }
 
 func TestChannelDiscoveryHandlerDiscoversTransientResponsesChannel(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -428,8 +428,8 @@ func TestChannelDiscoveryHandlerDiscoversTransientResponsesChannel(t *testing.T)
 	}))
 	defer upstream.Close()
 
-	router := gin.New()
-	router.POST("/api/channel-discovery", channelDiscoveryForTest(nil, nil))
+	router := httpbridge.NewApp()
+	router.Post("/api/channel-discovery", channelDiscoveryForTest(nil, nil))
 
 	body := []byte(`{
 		"channelKind":"responses",
@@ -441,8 +441,7 @@ func TestChannelDiscoveryHandlerDiscoversTransientResponsesChannel(t *testing.T)
 	req := httptest.NewRequest(http.MethodPost, "/api/channel-discovery", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
-
-	router.ServeHTTP(recorder, req)
+	httpbridge.Handler(router).ServeHTTP(recorder, req)
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
@@ -471,7 +470,6 @@ func TestChannelDiscoveryHandlerDiscoversTransientResponsesChannel(t *testing.T)
 }
 
 func TestChannelDiscoveryAutoDetectsServiceTypeAndProbesEveryModel(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	models := []string{"actual-a", "actual-b", "actual-c", "actual-d", "actual-e", "actual-f", "actual-g"}
 	seenResponsesModels := make(map[string]bool, len(models))
@@ -497,8 +495,8 @@ func TestChannelDiscoveryAutoDetectsServiceTypeAndProbesEveryModel(t *testing.T)
 	}))
 	defer upstream.Close()
 
-	router := gin.New()
-	router.POST("/api/channel-discovery", channelDiscoveryForTest(nil, nil))
+	router := httpbridge.NewApp()
+	router.Post("/api/channel-discovery", channelDiscoveryForTest(nil, nil))
 	body := []byte(`{
 		"baseUrls":["` + upstream.URL + `"],
 		"apiKey":"sk-test"
@@ -506,7 +504,7 @@ func TestChannelDiscoveryAutoDetectsServiceTypeAndProbesEveryModel(t *testing.T)
 	req := httptest.NewRequest(http.MethodPost, "/api/channel-discovery", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, req)
+	httpbridge.Handler(router).ServeHTTP(recorder, req)
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
@@ -536,7 +534,6 @@ func TestChannelDiscoveryAutoDetectsServiceTypeAndProbesEveryModel(t *testing.T)
 }
 
 func TestChannelDiscoveryUsesInjectedModelsFetcher(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/anthropic/v1/models" {
@@ -562,8 +559,8 @@ func TestChannelDiscoveryUsesInjectedModelsFetcher(t *testing.T) {
 		},
 	}
 
-	router := gin.New()
-	router.POST("/api/channel-discovery", channelDiscoveryForTest(nil, fetchers))
+	router := httpbridge.NewApp()
+	router.Post("/api/channel-discovery", channelDiscoveryForTest(nil, fetchers))
 
 	body := []byte(`{
 		"channelKind":"messages",
@@ -574,8 +571,7 @@ func TestChannelDiscoveryUsesInjectedModelsFetcher(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/channel-discovery", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
-
-	router.ServeHTTP(recorder, req)
+	httpbridge.Handler(router).ServeHTTP(recorder, req)
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
@@ -638,7 +634,6 @@ func TestDiscoverAutoTransientModelsMergesGenericAndGeminiLists(t *testing.T) {
 }
 
 func TestChannelDiscoveryCompatUsesDiscoveredActualModel(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	var sawDefaultCompatModel bool
 	var sawActualCompatToolProbe bool
@@ -664,8 +659,8 @@ func TestChannelDiscoveryCompatUsesDiscoveredActualModel(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	router := gin.New()
-	router.POST("/api/channel-discovery", channelDiscoveryForTest(nil, nil))
+	router := httpbridge.NewApp()
+	router.Post("/api/channel-discovery", channelDiscoveryForTest(nil, nil))
 
 	body := []byte(`{
 		"channelKind":"responses",
@@ -677,8 +672,7 @@ func TestChannelDiscoveryCompatUsesDiscoveredActualModel(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/channel-discovery", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
-
-	router.ServeHTTP(recorder, req)
+	httpbridge.Handler(router).ServeHTTP(recorder, req)
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
@@ -692,7 +686,6 @@ func TestChannelDiscoveryCompatUsesDiscoveredActualModel(t *testing.T) {
 }
 
 func TestChannelDiscoveryReportsResponsesToolCallCapability(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	var sawToolProbe bool
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -717,8 +710,8 @@ func TestChannelDiscoveryReportsResponsesToolCallCapability(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	router := gin.New()
-	router.POST("/api/channel-discovery", channelDiscoveryForTest(nil, nil))
+	router := httpbridge.NewApp()
+	router.Post("/api/channel-discovery", channelDiscoveryForTest(nil, nil))
 
 	body := []byte(`{
 		"channelKind":"responses",
@@ -730,8 +723,7 @@ func TestChannelDiscoveryReportsResponsesToolCallCapability(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/channel-discovery", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
-
-	router.ServeHTTP(recorder, req)
+	httpbridge.Handler(router).ServeHTTP(recorder, req)
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
@@ -753,7 +745,6 @@ func TestChannelDiscoveryReportsResponsesToolCallCapability(t *testing.T) {
 }
 
 func TestChannelDiscoveryReportsVisionCapabilityAndFallback(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	var sawVisionProbeFallback bool
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -777,8 +768,8 @@ func TestChannelDiscoveryReportsVisionCapabilityAndFallback(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	router := gin.New()
-	router.POST("/api/channel-discovery", channelDiscoveryForTest(nil, nil))
+	router := httpbridge.NewApp()
+	router.Post("/api/channel-discovery", channelDiscoveryForTest(nil, nil))
 
 	body := []byte(`{
 		"channelKind":"messages",
@@ -790,8 +781,7 @@ func TestChannelDiscoveryReportsVisionCapabilityAndFallback(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/channel-discovery", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
-
-	router.ServeHTTP(recorder, req)
+	httpbridge.Handler(router).ServeHTTP(recorder, req)
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
@@ -810,7 +800,6 @@ func TestChannelDiscoveryReportsVisionCapabilityAndFallback(t *testing.T) {
 }
 
 func TestChannelDiscoveryReportsClaudeThinkingPassbackCapability(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	var sawToolProbe bool
 	var sawHistoricalThinkingProbe bool
@@ -848,8 +837,8 @@ func TestChannelDiscoveryReportsClaudeThinkingPassbackCapability(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	router := gin.New()
-	router.POST("/api/channel-discovery", channelDiscoveryForTest(nil, nil))
+	router := httpbridge.NewApp()
+	router.Post("/api/channel-discovery", channelDiscoveryForTest(nil, nil))
 
 	body := []byte(`{
 		"channelKind":"messages",
@@ -861,8 +850,7 @@ func TestChannelDiscoveryReportsClaudeThinkingPassbackCapability(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/channel-discovery", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
-
-	router.ServeHTTP(recorder, req)
+	httpbridge.Handler(router).ServeHTTP(recorder, req)
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())

@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/racing"
 	"github.com/soulteary/yunqi/internal/session"
 	"github.com/soulteary/yunqi/internal/types"
-	"github.com/gin-gonic/gin"
 )
 
 // fold 路径的竞速闸门回归测试：native responses 流经 responsesFoldHTTPEmitter
@@ -22,12 +22,12 @@ import (
 
 func newFoldRacingTestEmitter(t *testing.T, gate *racing.Gate, role string) (*responsesFoldHTTPEmitter, *httptest.ResponseRecorder) {
 	t.Helper()
-	gin.SetMode(gin.TestMode)
+
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","stream":true}`))
-	c.Set(racing.ContextKeyGate, gate)
-	c.Set(racing.ContextKeyRole, role)
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","stream":true}`)))
+	httpbridge.SetValue(c, racing.ContextKeyGate, gate)
+	httpbridge.SetValue(c, racing.ContextKeyRole, role)
 
 	resp := &http.Response{
 		StatusCode: http.StatusOK,
@@ -76,14 +76,14 @@ func TestFoldEmitterRacingWinnerBridgesBody(t *testing.T) {
 // 质量闸门：带工具请求 + 伪工具调用标记文本时，即使闸门空闲也不得 claim——
 // fold 出口同样受伪标记软校验约束（与转换器路径口径一致）。
 func TestFoldEmitterRacingQualityGateBlocksPseudoToolMarker(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
+	c, _ := httpbridge.TestContext(w)
 	requestBody := `{"model":"gpt-5","stream":true,"tools":[{"type":"function","name":"exec"}],"input":"hi"}`
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(requestBody))
-	c.Set("requestBodyBytes", []byte(requestBody))
-	c.Set(racing.ContextKeyGate, racing.NewGate())
-	c.Set(racing.ContextKeyRole, racing.RoleShadow)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(requestBody)))
+	httpbridge.SetValue(c, "requestBodyBytes", []byte(requestBody))
+	httpbridge.SetValue(c, racing.ContextKeyGate, racing.NewGate())
+	httpbridge.SetValue(c, racing.ContextKeyRole, racing.RoleShadow)
 
 	resp := &http.Response{
 		StatusCode: http.StatusOK,

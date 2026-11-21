@@ -7,11 +7,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/autopilot"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/racing"
 	"github.com/soulteary/yunqi/internal/scheduler"
-	"github.com/gin-gonic/gin"
 )
 
 // ── 竞速编排：首字明显慢时向跨渠道候选并行派影子请求，先交付者胜 ──
@@ -87,7 +88,7 @@ type RacingAttemptInput struct {
 
 // shouldArmRacing 竞速武装条件检查。false 时编排器退化为直接调用闭包。
 func shouldArmRacing(
-	c *gin.Context,
+	c fiber.Ctx,
 	hub *RacingHub,
 	cfgManager *config.ConfigManager,
 	kind scheduler.ChannelKind,
@@ -103,7 +104,7 @@ func shouldArmRacing(
 		return false
 	}
 	// 显式渠道 pin 是用户意图，不竞速
-	if c.GetHeader("X-Channel") != "" {
+	if httpbridge.GetHeader(c, "X-Channel") != "" {
 		return false
 	}
 	// 含图请求影子需整包重传图片，v1 不竞速
@@ -117,13 +118,13 @@ func shouldArmRacing(
 // resolveRequestCostPreference 解析请求生效价格偏好：
 // 请求头 X-Cost-Preference > 场景预设默认 > 全局配置 Mode。
 // 相比调度链省略 PerTaskClass 覆盖；竞速是辅助行为，轻微口径差可接受。
-func resolveRequestCostPreference(c *gin.Context, cfgManager *config.ConfigManager) string {
-	if v := strings.TrimSpace(c.GetHeader("X-Cost-Preference")); isValidRacingCostPreference(v) {
+func resolveRequestCostPreference(c fiber.Ctx, cfgManager *config.ConfigManager) string {
+	if v := strings.TrimSpace(httpbridge.GetHeader(c, "X-Cost-Preference")); isValidRacingCostPreference(v) {
 		return v
 	}
 	cfg := cfgManager.GetConfig()
 	autopilotCfg := cfg.AutopilotRouting
-	if preset, ok := autopilot.ResolveScenarioPreset(autopilotCfg.Scenario, c.GetHeader("X-Routing-Scenario")); ok && preset.CostPreference != "" {
+	if preset, ok := autopilot.ResolveScenarioPreset(autopilotCfg.Scenario, httpbridge.GetHeader(c, "X-Routing-Scenario")); ok && preset.CostPreference != "" {
 		return preset.CostPreference
 	}
 	if mode := autopilotCfg.CostPreference.GetEffectiveCostPreferenceMode(""); isValidRacingCostPreference(mode) {
@@ -147,21 +148,21 @@ var ErrRacingSuperseded = racing.ErrRacingSuperseded
 // RacingClaimClientCommit 竞速分支向客户端写出响应前的提交裁决（导出供各协议 handler 使用）。
 // 无竞速闸门时直接放行（零开销路径）；失败返回 false，调用方应立即以
 // ErrRacingSuperseded 返回，不得再向客户端写任何字节。
-func RacingClaimClientCommit(c *gin.Context) bool { return racingClaimClientCommit(c) }
+func RacingClaimClientCommit(c fiber.Ctx) bool { return racingClaimClientCommit(c) }
 
-// setBranchContext 在分支 gin context 上写入竞速闸门/角色/分支编号。
-func setBranchContext(c *gin.Context, gate *racing.Gate, role string, branchID int) {
-	c.Set(racing.ContextKeyGate, gate)
-	c.Set(racing.ContextKeyRole, role)
-	c.Set(racingBranchIDKey, branchID)
+// setBranchContext 在分支 Fiber context 上写入竞速闸门/角色/分支编号。
+func setBranchContext(c fiber.Ctx, gate *racing.Gate, role string, branchID int) {
+	httpbridge.SetValue(c, racing.ContextKeyGate, gate)
+	httpbridge.SetValue(c, racing.ContextKeyRole, role)
+	httpbridge.SetValue(c, racingBranchIDKey, branchID)
 }
 
-// gateFromContext 从 gin context 读取竞速闸门（未参与竞速返回 nil）。
-func gateFromContext(c *gin.Context) *racing.Gate {
+// gateFromContext 从 Fiber context 读取竞速闸门（未参与竞速返回 nil）。
+func gateFromContext(c fiber.Ctx) *racing.Gate {
 	if c == nil {
 		return nil
 	}
-	if v, ok := c.Get(racing.ContextKeyGate); ok {
+	if v, ok := httpbridge.Value(c, racing.ContextKeyGate); ok {
 		if gate, ok := v.(*racing.Gate); ok {
 			return gate
 		}
@@ -173,24 +174,24 @@ func gateFromContext(c *gin.Context) *racing.Gate {
 // 无竞速闸门时直接放行（零开销路径）；claim 成功即成为赢家并取消其余分支，
 // 分支 writer 同步 Commit 桥接到真实客户端 writer；失败 Discard 分支 writer，
 // 调用方应释放上游资源并以 racing.ErrRacingSuperseded 收尾。
-func racingClaimClientCommit(c *gin.Context) bool {
+func racingClaimClientCommit(c fiber.Ctx) bool {
 	gate := gateFromContext(c)
 	if gate == nil {
 		return true
 	}
 	branchID := 0
-	if v, ok := c.Get(racingBranchIDKey); ok {
+	if v, ok := httpbridge.Value(c, racingBranchIDKey); ok {
 		if id, ok := v.(int); ok {
 			branchID = id
 		}
 	}
 	if !gate.ClaimBy(branchID) {
-		if bw, ok := c.Writer.(*racingBranchWriter); ok {
+		if bw, ok := httpbridge.Writer(c).(*racingBranchWriter); ok {
 			bw.Discard()
 		}
 		return false
 	}
-	if bw, ok := c.Writer.(*racingBranchWriter); ok {
+	if bw, ok := httpbridge.Writer(c).(*racingBranchWriter); ok {
 		bw.Commit()
 	}
 	// 仅实际竞速（已有对手分支注册）才补记 won：无影子的独占交付不是竞速获胜。
@@ -204,7 +205,7 @@ func racingClaimClientCommit(c *gin.Context) bool {
 // 两种形态：显式败出错误（claim 失败返回），或"另一分支已 claim 且本分支未赢"
 // 的客户端侧取消（赢家取消败者导致的 context.Canceled 系错误）。
 // 真实上游错误（超时/500/拉黑）即便发生时另一分支已赢，也照常记账，不豁免。
-func isRacingSuperseded(c *gin.Context, err error) bool {
+func isRacingSuperseded(c fiber.Ctx, err error) bool {
 	if errors.Is(err, racing.ErrRacingSuperseded) {
 		return true
 	}
@@ -213,7 +214,7 @@ func isRacingSuperseded(c *gin.Context, err error) bool {
 		return false
 	}
 	branchID := -1
-	if v, ok := c.Get(racingBranchIDKey); ok {
+	if v, ok := httpbridge.Value(c, racingBranchIDKey); ok {
 		if id, ok := v.(int); ok {
 			branchID = id
 		}
@@ -226,7 +227,7 @@ func isRacingSuperseded(c *gin.Context, err error) bool {
 // "空流响应"并试图内部轮转——若此刻另一分支已 claim，一律按败出终止，
 // 防止被取消的影子继续轮转并在下一轮 SendRequest 以 context.Canceled 返回
 // Handled=true 被误判为赢家。
-func racingSupersededOrCanceledEmptyStream(c *gin.Context, err error) bool {
+func racingSupersededOrCanceledEmptyStream(c fiber.Ctx, err error) bool {
 	if isRacingSuperseded(c, err) {
 		return true
 	}
@@ -237,13 +238,13 @@ func racingSupersededOrCanceledEmptyStream(c *gin.Context, err error) bool {
 }
 
 // racingClaimedByOtherBranch 闸门已被其他分支 claim 且本分支未赢。
-func racingClaimedByOtherBranch(c *gin.Context) bool {
+func racingClaimedByOtherBranch(c fiber.Ctx) bool {
 	gate := gateFromContext(c)
 	if gate == nil || !gate.Claimed() {
 		return false
 	}
 	branchID := -1
-	if v, ok := c.Get(racingBranchIDKey); ok {
+	if v, ok := httpbridge.Value(c, racingBranchIDKey); ok {
 		if id, ok := v.(int); ok {
 			branchID = id
 		}
@@ -252,8 +253,8 @@ func racingClaimedByOtherBranch(c *gin.Context) bool {
 }
 
 // racingIsShadow 判断该分支是否为影子分支。
-func racingIsShadow(c *gin.Context) bool {
-	if v, ok := c.Get(racing.ContextKeyRole); ok {
+func racingIsShadow(c fiber.Ctx) bool {
+	if v, ok := httpbridge.Value(c, racing.ContextKeyRole); ok {
 		s, _ := v.(string)
 		return s == racing.RoleShadow
 	}
@@ -327,7 +328,7 @@ func findRacingChannelByUID(cfg *config.Config, channelUID string, kind schedule
 type racingShadowRun struct {
 	branchID  int
 	selection *scheduler.SelectionResult
-	ginCtx    *gin.Context
+	fiberCtx  fiber.Ctx
 	cancel    context.CancelFunc
 	done      chan MultiChannelAttemptResult
 	startedAt time.Time
@@ -345,7 +346,7 @@ type racingRuns struct {
 	// true 时影子候选受工具调用白名单渠道间排他约束。
 	needsToolWhitelist bool
 	// clientWriter 真实客户端 writer（主分支包装前的原值），影子分支 writer 的桥接目标。
-	clientWriter    gin.ResponseWriter
+	clientWriter    httpbridge.ResponseWriter
 	runs            []*racingShadowRun
 	results         map[int]MultiChannelAttemptResult
 	nextBranchID    int
@@ -388,7 +389,7 @@ func (r *racingRuns) toolWhitelistAllows(upstream *config.UpstreamConfig, model 
 // 武装后主分支与影子分支竞速，返回实际服务请求的 selection 与结果。
 // 结果的 AlsoFailedRoutes 由调用方并入 failedRoutes。
 func RunRacingAttempt(
-	c *gin.Context,
+	c fiber.Ctx,
 	trySelectedChannel TrySelectedChannelFunc,
 	in RacingAttemptInput,
 ) (*scheduler.SelectionResult, MultiChannelAttemptResult) {
@@ -397,7 +398,7 @@ func RunRacingAttempt(
 		return in.Selection, trySelectedChannel(c, in.Selection)
 	}
 	if in.Ctx == nil {
-		in.Ctx = c.Request.Context()
+		in.Ctx = httpbridge.Request(c).Context()
 	}
 
 	gate := racing.NewGate()
@@ -427,8 +428,8 @@ func RunRacingAttempt(
 	primaryCost := racingEffectiveCostMultiplier(in.Selection.Upstream, in.Selection.ExecutionKeyIdentity)
 	// 主分支同样经分支 writer 写出：真实客户端 writer 只被 claim 赢家触碰
 	// （影子分支见 startShadow），分支间不再共享响应头 map。
-	origWriter := c.Writer
-	c.Writer = newRacingBranchWriter(origWriter)
+	origWriter := httpbridge.Writer(c)
+	httpbridge.SetWriter(c, newRacingBranchWriter(origWriter))
 	runs := &racingRuns{
 		gate:               gate,
 		hub:                hub,
@@ -447,16 +448,16 @@ func RunRacingAttempt(
 		usedRouteKeys: map[scheduler.ChannelRouteKey]bool{in.Selection.Route.Key(): true},
 	}
 
-	clientCtx := c.Request.Context()
+	clientCtx := httpbridge.Request(c).Context()
 	primaryBranchCtx, primaryCancel := context.WithCancel(clientCtx)
 	gate.RegisterCancel(0, primaryCancel)
 
 	// 主分支上游请求换绑分支 context（providers 从 c.Request.Context() 取消信号）。
-	origRequest := c.Request
-	c.Request = origRequest.WithContext(primaryBranchCtx)
+	origRequest := httpbridge.Request(c)
+	httpbridge.SetRequest(c, origRequest.WithContext(primaryBranchCtx))
 	defer func() {
-		c.Request = origRequest
-		c.Writer = origWriter
+		httpbridge.SetRequest(c, origRequest)
+		httpbridge.SetWriter(c, origWriter)
 		primaryCancel()
 	}()
 
@@ -504,7 +505,7 @@ func RunRacingAttempt(
 		runs.waitAllAndRecordStreamSamples(family)
 		if win, winResult := runs.pickWinner(); win != nil {
 			notifyPrimarySuperseded(c, in, result)
-			copyBranchKeysBack(c, win.ginCtx)
+			copyBranchKeysBack(c, win.fiberCtx)
 			if !in.IsStream {
 				recordRacingNonStreamSample(family, win.startedAt)
 			}
@@ -518,7 +519,7 @@ func RunRacingAttempt(
 	if runs.hasAny() {
 		runs.waitAllAndRecordStreamSamples(family)
 		if win, winResult := runs.pickWinner(); win != nil {
-			copyBranchKeysBack(c, win.ginCtx)
+			copyBranchKeysBack(c, win.fiberCtx)
 			if !in.IsStream {
 				recordRacingNonStreamSample(family, win.startedAt)
 			}
@@ -536,7 +537,7 @@ func RunRacingAttempt(
 }
 
 // notifyPrimarySuperseded 主尝试被影子取代时补记其 trace 终态（防悬空）。
-func notifyPrimarySuperseded(c *gin.Context, in RacingAttemptInput, primaryResult MultiChannelAttemptResult) {
+func notifyPrimarySuperseded(c fiber.Ctx, in RacingAttemptInput, primaryResult MultiChannelAttemptResult) {
 	notifyRoutingOutcome(in.Selection, buildRoutingOutcome(
 		c, in.Selection, primaryResult, false, false,
 		in.RequestStartedAt, time.Since(in.RequestStartedAt),
@@ -544,7 +545,7 @@ func notifyPrimarySuperseded(c *gin.Context, in RacingAttemptInput, primaryResul
 }
 
 // spawnShadows 派出影子分支（阈值定时器触发；幂等）。
-func (r *racingRuns) spawnShadows(c *gin.Context, primaryCost float64) {
+func (r *racingRuns) spawnShadows(c fiber.Ctx, primaryCost float64) {
 	r.mu.Lock()
 	if r.spawned {
 		r.mu.Unlock()
@@ -576,7 +577,7 @@ func (r *racingRuns) spawnShadows(c *gin.Context, primaryCost float64) {
 }
 
 // startShadow 启动一条影子分支（调用方已占用信号量额度）。
-func (r *racingRuns) startShadow(c *gin.Context, sel *scheduler.SelectionResult) {
+func (r *racingRuns) startShadow(c fiber.Ctx, sel *scheduler.SelectionResult) {
 	r.mu.Lock()
 	branchID := r.nextBranchID
 	r.nextBranchID++
@@ -585,18 +586,19 @@ func (r *racingRuns) startShadow(c *gin.Context, sel *scheduler.SelectionResult)
 	shadowCtx, cancel := context.WithCancel(r.in.Ctx)
 	r.gate.RegisterCancel(branchID, cancel)
 
-	shadowC := c.Copy()
-	shadowC.Request = c.Request.WithContext(shadowCtx)
-	// gin 的 Copy() 不复制 Writer（副本 Writer 为 nil）。影子挂独立分支 writer：
-	// pre-commit 写私有缓冲，claim 赢家 Commit 时桥接到真实客户端 writer，
-	// 败者 Discard 后写出静默丢弃——真实 writer 全程只被赢家触碰。
-	shadowC.Writer = newRacingBranchWriter(r.clientWriter)
+	shadowC := httpbridge.Copy(c)
+	httpbridge.SetRequest(shadowC, httpbridge.Request(c).WithContext(shadowCtx))
+	httpbridge.
+		// gin 的 Copy() 不复制 Writer（副本 Writer 为 nil）。影子挂独立分支 writer：
+		// pre-commit 写私有缓冲，claim 赢家 Commit 时桥接到真实客户端 writer，
+		// 败者 Discard 后写出静默丢弃——真实 writer 全程只被赢家触碰。
+		SetWriter(shadowC, newRacingBranchWriter(r.clientWriter))
 	setBranchContext(shadowC, r.gate, racing.RoleShadow, branchID)
 
 	run := &racingShadowRun{
 		branchID:  branchID,
 		selection: sel,
-		ginCtx:    shadowC,
+		fiberCtx:  shadowC,
 		cancel:    cancel,
 		done:      make(chan MultiChannelAttemptResult, 1),
 		startedAt: time.Now(),
@@ -811,7 +813,7 @@ func (r *racingRuns) waitAllAndRecordStreamSamples(family racing.Family) {
 			r.failedRouteKeys = append(r.failedRouteKeys, run.selection.Route.Key())
 			r.mu.Unlock()
 		}
-		recordRacingStreamSample(run.ginCtx, family)
+		recordRacingStreamSample(run.fiberCtx, family)
 	}
 }
 
@@ -846,23 +848,18 @@ func (r *racingRuns) failedRouteList() []scheduler.ChannelRouteKey {
 	return append([]scheduler.ChannelRouteKey(nil), r.failedRouteKeys...)
 }
 
-// copyBranchKeysBack 影子赢家结算后把分支 gin keys 合并回主 context，
+// copyBranchKeysBack 影子赢家结算后把分支 request values 合并回主 context，
 // 保证 responseText/lastUserMessage 等后处理读到赢家数据。
-func copyBranchKeysBack(dst, src *gin.Context) {
+func copyBranchKeysBack(dst, src fiber.Ctx) error {
 	if dst == nil || src == nil {
-		return
+		return nil
 	}
-	for key, value := range src.Keys {
-		keyStr, ok := key.(string)
-		if !ok || strings.HasPrefix(keyStr, "ccx.racing.") {
-			continue
-		}
-		dst.Set(keyStr, value)
-	}
+	httpbridge.CopyValues(dst, src, "ccx.racing.")
+	return nil
 }
 
 // recordRacingStreamSample 流式样本：出过首字（首个有效内容）即记，无论胜负。
-func recordRacingStreamSample(c *gin.Context, family racing.Family) {
+func recordRacingStreamSample(c fiber.Ctx, family racing.Family) {
 	hub := getRacingHub()
 	if hub == nil || hub.Registry == nil {
 		return
@@ -886,15 +883,15 @@ func recordRacingNonStreamSample(family racing.Family, branchStartedAt time.Time
 // writeEchoMappingHeaders 写出/清除自动模型映射回显头。
 // 竞速场景分支响应头经分支 writer 隔离（racingBranchWriter），无并发写竞争，
 // 只有 claim 赢家的头会在 Commit 时并入真实客户端 writer。
-func writeEchoMappingHeaders(c *gin.Context, cfgManager *config.ConfigManager, appliedMappedModel, actualAttemptModel, model string) {
+func writeEchoMappingHeaders(c fiber.Ctx, cfgManager *config.ConfigManager, appliedMappedModel, actualAttemptModel, model string) {
 	echoMapping := appliedMappedModel != "" && cfgManager.GetAutopilotRouting().ModelMapping.EchoMappedModel
 	if echoMapping {
-		c.Header("X-CCX-Mapped-Model", actualAttemptModel)
-		c.Header("X-CCX-Original-Model", model)
-		c.Header("X-CCX-Mapping-Source", "auto_resolve")
+		httpbridge.Header(c, "X-CCX-Mapped-Model", actualAttemptModel)
+		httpbridge.Header(c, "X-CCX-Original-Model", model)
+		httpbridge.Header(c, "X-CCX-Mapping-Source", "auto_resolve")
 	} else {
-		c.Writer.Header().Del("X-CCX-Mapped-Model")
-		c.Writer.Header().Del("X-CCX-Original-Model")
-		c.Writer.Header().Del("X-CCX-Mapping-Source")
+		httpbridge.Writer(c).Header().Del("X-CCX-Mapped-Model")
+		httpbridge.Writer(c).Header().Del("X-CCX-Original-Model")
+		httpbridge.Writer(c).Header().Del("X-CCX-Mapping-Source")
 	}
 }
