@@ -151,12 +151,12 @@ func (p *ResponsesProvider) buildProviderRequestBody(c fiber.Ctx, requestPath st
 			return nil, nil, fmt.Errorf("透传模式下解析请求失败: %w", err)
 		}
 		hoistCodexAdditionalTools(c, reqMap)
-		normalizeResponsesInputForPassthrough(reqMap)
 		if upstream.IsCodexNativeToolPassthroughEnabled() {
-			convertCodexToolsForPassthrough(reqMap)
+			convertCodexToolsForNativeResponses(c, reqMap)
 		} else if upstream.IsCodexToolCompatEnabled() {
 			stripCodexClientOnlyTools(reqMap)
 		}
+		normalizeResponsesInputForPassthrough(reqMap)
 		if upstream.IsStripImageGenerationToolEnabled() {
 			stripImageGenerationFromTools(reqMap)
 		}
@@ -1501,6 +1501,71 @@ func convertCodexToolsForPassthrough(reqMap map[string]interface{}) {
 
 	ctx := converters.BuildCodexToolContextFromRaw(rawTools)
 	reqMap["tool_choice"] = converters.ConvertToolChoiceForCodex(reqMap["tool_choice"], ctx)
+}
+
+// Native Responses uses flat function declarations and choices, unlike Chat
+// Completions. Normalize history before the stateless call/output pairing pass.
+func convertCodexToolsForNativeResponses(c fiber.Ctx, reqMap map[string]interface{}) {
+	rawTools, _ := reqMap["tools"].([]interface{})
+	if len(rawTools) == 0 {
+		return
+	}
+	ctx := converters.BuildCodexToolContextFromRaw(rawTools)
+	convertCodexToolsForPassthrough(reqMap)
+	ordinary := make(map[string]map[string]interface{})
+	for _, rawTool := range rawTools {
+		tool, _ := rawTool.(map[string]interface{})
+		if toString(tool["type"]) != "function" {
+			continue
+		}
+		fn := tool
+		if nested, ok := tool["function"].(map[string]interface{}); ok {
+			fn = nested
+		}
+		ordinary[toString(fn["name"])] = fn
+	}
+	tools, _ := reqMap["tools"].([]interface{})
+	for i, rawTool := range tools {
+		tool, _ := rawTool.(map[string]interface{})
+		if fn, ok := tool["function"].(map[string]interface{}); ok {
+			if original, exists := ordinary[toString(fn["name"])]; exists {
+				fn = original
+			}
+			flat := make(map[string]interface{}, len(fn)+1)
+			for key, value := range fn {
+				flat[key] = value
+			}
+			flat["type"] = "function"
+			tools[i] = flat
+		}
+	}
+	if choice, ok := reqMap["tool_choice"].(map[string]interface{}); ok {
+		if fn, ok := choice["function"].(map[string]interface{}); ok {
+			reqMap["tool_choice"] = map[string]interface{}{"type": "function", "name": fn["name"]}
+		}
+	}
+	input, _ := reqMap["input"].([]interface{})
+	for _, rawItem := range input {
+		item, _ := rawItem.(map[string]interface{})
+		switch toString(item["type"]) {
+		case "custom_tool_call":
+			name, arguments := converters.BuildCustomToolCallHistoryArguments(ctx, toString(item["name"]), toString(item["input"]))
+			item["type"], item["name"], item["arguments"] = "function_call", name, arguments
+			delete(item, "input")
+		case "custom_tool_call_output":
+			item["type"] = "function_call_output"
+		case "function_call":
+			if name, ok := ctx.UpstreamNameForNamespaceCall(toString(item["namespace"]), toString(item["name"])); ok {
+				item["name"] = name
+				delete(item, "namespace")
+			}
+		}
+	}
+	// A hoisted request already carries the original custom-tool context.
+	if _, exists := httpbridge.Value(c, "codex_tool_context"); !exists {
+		httpbridge.SetValue(c, "codex_tool_context", ctx)
+	}
+	httpbridge.SetValue(c, "codex_native_tools_converted", true)
 }
 
 // hoistCodexAdditionalTools 收割 codex 0.153+ 放在 input[] 的 type=additional_tools
