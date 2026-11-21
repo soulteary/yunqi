@@ -13,9 +13,12 @@ import (
 const ContextKeyAdminPrincipal = "adminPrincipal"
 
 type AdminPrincipal struct {
-	ID          string   `json:"id"`
-	Role        string   `json:"role"`
-	ChannelUIDs []string `json:"channelUids,omitempty"`
+	Source             string   `json:"source,omitempty"`
+	SessionExpiresAt   int64    `json:"sessionExpiresAt,omitempty"`
+	SessionFingerprint string   `json:"sessionFingerprint,omitempty"`
+	ID                 string   `json:"id"`
+	Role               string   `json:"role"`
+	ChannelUIDs        []string `json:"channelUids,omitempty"`
 }
 
 func SetAdminPrincipal(c fiber.Ctx, principal AdminPrincipal) {
@@ -34,6 +37,9 @@ func CanAdminAction(c fiber.Ctx, action, resourceUID string) bool {
 	p := GetAdminPrincipal(c)
 	if p.ID == "" {
 		return false
+	}
+	if action == "access.session.revoke" {
+		return p.Source == "identity_proxy" && p.SessionFingerprint != ""
 	}
 	if action == "access.me" {
 		return true
@@ -93,6 +99,8 @@ func authenticateAdminPrincipal(c fiber.Ctx, env *config.EnvConfig, key string) 
 func authorizeManagementRoute(c fiber.Ctx) bool {
 	path, method := c.Path(), httpbridge.Request(c).Method
 	switch {
+	case method == http.MethodPost && path == "/api/access/session/revoke":
+		return AuthorizeAdminAction(c, "access.session.revoke", "")
 	case method == http.MethodGet && path == "/api/access/me":
 		return AuthorizeAdminAction(c, "access.me", "")
 	case method == http.MethodGet && path == "/api/access/channels":

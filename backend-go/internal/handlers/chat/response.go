@@ -195,6 +195,9 @@ func convertClaudeResponseToChat(claudeResp map[string]interface{}, model string
 				if t, ok := b["text"].(string); ok {
 					text += t
 				}
+				text += converters.ClaudeSearchSourceText(b)
+			case "web_search_tool_result", "search_result":
+				text += converters.ClaudeSearchSourceText(b)
 			case "tool_use":
 				// Claude tool_use → OpenAI tool_calls
 				toolID, _ := b["id"].(string)
