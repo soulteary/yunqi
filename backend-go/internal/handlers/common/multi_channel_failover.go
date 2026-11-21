@@ -252,6 +252,9 @@ func HandleMultiChannelFailoverWithSelectionFilter(
 			AttemptStartedAt: attemptStartedAt,
 			RequestStartedAt: requestStartedAt,
 		})
+		// Racing can replace the primary selection with the winning shadow.
+		upstream = selection.Upstream
+		channelIndex = selection.ChannelIndex
 		attemptDuration := time.Since(attemptStartedAt)
 		if result.Handled {
 			notifyRoutingOutcome(selection, buildRoutingOutcome(
