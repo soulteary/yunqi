@@ -33,7 +33,7 @@ Yunqi aggregates model capability, cost, and multi-source comparison data from s
 <table>
   <tr>
     <td align="center" width="60">
-      <a target="_blank" rel="noopener noreferrer nofollow" href="https://artificialanalysis.ai/"><img src="/sponsors/artificial-analysis.png" alt="Artificial Analysis Logo" style="max-width: 100%;padding-top: 6px;" width="50"></a>
+      <strong>AA</strong>
     </td>
     <td>
       Benchmark data on this page includes Artificial Analysis free API data. Attribution to <a href="https://artificialanalysis.ai/">artificialanalysis.ai</a> is required when using that data. Intelligence Index scores are currently interpreted against <strong>v4.1.1</strong>; Coding Index and Agentic Index are derived subsets of the same evaluation set and are not separately versioned.

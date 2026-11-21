@@ -27,18 +27,6 @@ Yunqi is a high-performance AI API proxy and protocol translation gateway for Cl
 - Responses session tracking for multi-turn workflows
 - Embedded frontend assets for simple binary deployment
 
-## Sponsor
-
-<table>
-<tr>
-<td width="180"><a href="https://www.byteplus.com/en/product/modelark?utm_campaign=hw&utm_content=hw&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=yunqi"><img src="docs/sponsors/byteplus.png" alt="BytePlus" width="150"></a></td>
-<td>Thanks to <a href="https://www.byteplus.com/en/product/modelark?utm_campaign=hw&utm_content=hw&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=yunqi">Dola Seed</a> for sponsoring this project! Dola Seed 2.0 is a <strong>full‑modal general large model</strong> independently developed by ByteDance for the global market. Built on a unified multimodal architecture, it supports joint understanding and generation of text, images, audio, and video. It natively enables agent collaboration, with strong reasoning, long‑task execution, tool integration, and coding capabilities. It is widely applicable to smart cockpits, personal assistants, education, customer support, marketing, retail, and other scenarios. It excels in multimodal perception, end‑to‑end complex task delivery, stable interaction, and data security, and is readily accessible and deployable via the ModelArk platform. Register via <a href="https://www.byteplus.com/en/product/modelark?utm_campaign=hw&utm_content=hw&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=yunqi">this link</a> to get 500,000 tokens of free inference quota per model.</td>
-</tr>
-<tr>
-<td width="180"><a href="https://www.compshare.cn/?ytag=GPU_YY_git_ccx"><img src="docs/sponsors/youyun-zhisuan.png" alt="Youyun Zhisuan" width="150"></a></td>
-<td>Thanks to <a href="https://www.compshare.cn/?ytag=GPU_YY_git_ccx">Youyun Zhisuan</a> for sponsoring this project! Youyun Zhisuan is UCloud's AI cloud platform, offering cost-effective domestic AI model Agent Plan packages by monthly subscription or pay-as-you-go, starting from 49 CNY/month. It also provides stable access to official overseas models, supports Claude Code, Codex, and API integrations, and offers enterprise-grade high concurrency, 24/7 technical support, and self-service invoicing. Users who register through <a href="https://www.compshare.cn/?ytag=GPU_YY_git_ccx">this link</a> can receive a free 5 CNY platform trial credit.</td>
-</tr>
-</table>
 
 ## Screenshots
 
@@ -230,22 +218,14 @@ make dev
 - [docs/service/README.md](docs/service/README.md) - non-Docker service startup
 - [RELEASE.md](docs/guide/release.md)
 
-## Community
 
-Join the QQ group for discussion: **642217364**
-
-<img src="docs/qrcode_1769645166806.png" width="300" alt="QQ Group QR Code">
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/chart?repos=BenedictKing/yunqi&type=date&legend=top-left&sealed_token=fSL3s-l1Dxr6NrYaxkzzCfeauAKUtRuCg2Npgs_c21isq1szm991sEuNF05_2DoNV0dYEw)](https://www.star-history.com/?repos=BenedictKing%2Fccx&type=date&legend=top-left)
 
 ## Acknowledgments
 
 <table>
   <tr>
     <td align="center" width="60">
-      <a target="_blank" rel="noopener noreferrer nofollow" href="https://artificialanalysis.ai/"><img src="docs/sponsors/artificial-analysis.png" alt="Artificial Analysis Logo" style="max-width: 100%;padding-top: 6px;" width="50"></a>
+      <strong>AA</strong>
     </td>
     <td>
       Benchmark data in this repository includes Artificial Analysis free API data. Attribution to <a href="https://artificialanalysis.ai/">artificialanalysis.ai</a> is required when using that data. Intelligence Index scores are currently interpreted against <strong>v4.1.1</strong>; Coding Index and Agentic Index are derived subsets of the same evaluation set and are not separately versioned.
@@ -257,14 +237,6 @@ Join the QQ group for discussion: **642217364**
     </td>
     <td>
       Yunqi benchmark visualizations and registry updates also use publicly available data from <a href="https://benchlm.ai/">BenchLM.ai</a>, <a href="https://deepswe.datacurve.ai/">DeepSWE</a>, and <a href="https://deng.codexradar.com/">CodexRadar</a>. Pricing and context metadata are additionally refreshed from <a href="https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json">LiteLLM model_prices_and_context_window.json</a>.
-    </td>
-  </tr>
-  <tr>
-    <td align="center" width="60">
-      <a target="_blank" rel="noopener noreferrer nofollow" href="https://signpath.org/"><img src="https://signpath.org/assets/favicon-50x50.png" alt="SignPath Logo" style="max-width: 100%;padding-top: 6px;" width="50"></a>
-    </td>
-    <td>
-      Free code signing on Windows provided by <a href="https://signpath.io/">SignPath.io</a>, certificate by <a href="https://signpath.org/">SignPath Foundation</a>
     </td>
   </tr>
 </table>
