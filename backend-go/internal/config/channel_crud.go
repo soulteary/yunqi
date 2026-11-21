@@ -412,10 +412,10 @@ func applyUpstreamUpdateFields(upstream *UpstreamConfig, updates UpstreamUpdate)
 		upstream.HistoricalAPIKeys = newHistoricalKeys
 
 		wasSuspended := upstream.Status == "suspended"
-		if applySingleKeyReplacementTransition(upstream, updates.APIKeys) {
+		if applyKeyReplacementTransition(upstream, updates.APIKeys) {
 			shouldResetMetrics = true
 			if wasSuspended {
-				log.Printf("[Config-Upstream] 渠道 %s 已从暂停状态自动激活（单 key 更换）", upstream.Name)
+				log.Printf("[Config-Upstream] 渠道 %s 已从暂停状态自动激活（可用 Key 已恢复）", upstream.Name)
 			}
 		}
 		upstream.APIKeys = deduplicateStrings(updates.APIKeys)
