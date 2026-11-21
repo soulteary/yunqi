@@ -3,6 +3,8 @@ package chat
 import (
 	"context"
 	"encoding/json"
+	"github.com/tidwall/gjson"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -619,5 +621,24 @@ func TestChatClaudeStructuredOutput(t *testing.T) {
 	}
 	if _, err := convertChatToClaudeRequest([]byte(`{"response_format":{"type":"json_object"}}`), "m", false); err == nil {
 		t.Fatal("unsupported format silently dropped")
+	}
+}
+
+func TestChatClaudeStructuredOutputWireOrder(t *testing.T) {
+	schema := `{"type":"object","properties":{"z":{"type":"string"},"a":{"type":"integer"}},"additionalProperties":false}`
+	body := []byte(`{"model":"m","messages":[],"response_format":{"type":"json_schema","json_schema":{"name":"r","schema":` + schema + `}}}`)
+	c, _ := httpbridge.TestContext(httptest.NewRecorder())
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil))
+	upstream := &config.UpstreamConfig{ServiceType: "claude", BaseURL: "https://example.invalid"}
+	req, err := buildProviderRequest(c, upstream, upstream.BaseURL, "test", body, "m", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire, err := io.ReadAll(req.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := gjson.GetBytes(wire, "output_config.format.schema").Raw; got != schema {
+		t.Fatalf("schema order %s in %s", got, wire)
 	}
 }

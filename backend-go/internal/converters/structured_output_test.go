@@ -5,6 +5,7 @@ import (
 	"github.com/soulteary/yunqi/internal/session"
 	"github.com/soulteary/yunqi/internal/types"
 	"github.com/tidwall/gjson"
+	"strings"
 	"testing"
 )
 
@@ -49,5 +50,20 @@ func TestClaudeStructuredOutputRejectsUnsupported(t *testing.T) {
 		if _, err := ClaudeStructuredOutput([]byte(raw)); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func TestGeminiJSONObjectStructuredOutput(t *testing.T) {
+	req := &types.ResponsesRequest{Input:"hello", Text: json.RawMessage(`{"format":{"type":"json_object"}}`)}
+	converted, err := ResponsesToGeminiRequest(&session.Session{}, req, "m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if converted.GenerationConfig.ResponseMimeType != "application/json" || len(converted.GenerationConfig.ResponseJSONSchema) != 0 {
+		t.Fatalf("config %#v", converted.GenerationConfig)
+	}
+	req.Text = json.RawMessage(`{"format":{"type":"unsupported"}}`)
+	if _, err := ResponsesToGeminiRequest(&session.Session{}, req, "m"); err == nil || !strings.Contains(err.Error(), "Gemini") {
+		t.Fatalf("error %v", err)
 	}
 }

@@ -53,13 +53,15 @@ func ResponsesToGeminiRequest(sess *session.Session, req *types.ResponsesRequest
 	if err != nil {
 		return nil, err
 	}
-	format, err := ClaudeStructuredOutput(raw)
+	format, err := structuredOutputFormat(raw, "Gemini", true)
 	if err != nil {
 		return nil, err
 	}
 	if len(format) > 0 {
 		geminiReq.GenerationConfig.ResponseMimeType = "application/json"
-		geminiReq.GenerationConfig.ResponseJSONSchema = json.RawMessage(gjson.GetBytes(format, "schema").Raw)
+		if schema := gjson.GetBytes(format, "schema"); schema.IsObject() {
+			geminiReq.GenerationConfig.ResponseJSONSchema = json.RawMessage(schema.Raw)
+		}
 	}
 	if req.MaxTokens > 0 {
 		geminiReq.GenerationConfig.MaxOutputTokens = req.MaxTokens
