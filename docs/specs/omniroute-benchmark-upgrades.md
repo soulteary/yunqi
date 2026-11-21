@@ -127,7 +127,7 @@ OmniRoute 蓝本：`POST /api/omniroute/route/preview`（零上游请求确定�
 |---|---|---|
 | SmartRouter dry-run | `POST /api/smart-routing/diagnose`（`autopilot/handlers_dryrun.go`，兼容 `/route-dryrun`）已零上游请求 | `DryRunRequest` 需调用方**手工填** capability 布尔、`estTokens` 等特征，特征提取责任在调用方 |
 | 请求画像 | `handlers/common/autopilot_request_profile.go` 已有真实请求的特征提取 | 未与 dry-run 打通 |
-| 底层调度诊断 | `POST /api/{type}/channels/scheduler/diagnose`（main.go:1280 等） | 与 SmartRouter dry-run 两张面，入口分离 |
+| 底层调度诊断 | `POST /api/{type}/channels/scheduler/diagnose`（`routes_channels.go`） | 与 SmartRouter dry-run 两张面，入口分离 |
 | 决策原因 | trace stages（protocol_federation / smart_filter / model_circuit_filter…）事后可查 | 预演时无逐阶段淘汰解释 |
 
 ### 5.2 核心设计决策

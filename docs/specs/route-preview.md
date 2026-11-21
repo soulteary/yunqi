@@ -133,11 +133,11 @@
 | imageGenNeed | kind == images 时为 true |
 | embeddingNeed | kind == vectors 时为 true |
 
-### 3.3 main.go 接线
+### 3.3 路由装配
 
-在 `RegisterDryRunRoutes` 附近，新增一行：
+`backend-go/routes_autopilot.go` 在 SmartRouter 可用时注册预演端点：
 ```go
-autopilot.RegisterRoutePreviewRoutes(apiGroup, autopilotManager.SmartRouter(), channelScheduler)
+autopilot.RegisterRoutePreviewRoutes(apiGroup, a.autopilotManager.SmartRouter(), a.channelScheduler)
 ```
 
 ### 3.4 一致性对拍测试

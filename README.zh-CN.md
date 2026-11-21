@@ -4,7 +4,7 @@
 
 [English](README.md) | 简体中文
 
-[![GitHub release](https://img.shields.io/github/v/release/BenedictKing/yunqi)](https://github.com/soulteary/yunqi/releases/latest)
+[![GitHub release](https://img.shields.io/github/v/release/soulteary/yunqi)](https://github.com/soulteary/yunqi/releases/latest)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 
 Yunqi 是一个高性能的 AI API 代理与协议转换网关，支持 Claude、OpenAI Chat、OpenAI Images、OpenAI Embeddings、Codex Responses 与 Gemini。它提供统一入口、内置 Web 管理界面、渠道编排、故障转移、多密钥管理和模型路由能力。
@@ -74,10 +74,34 @@ Yunqi 对外提供一个统一后端入口：
 
 ## 快速开始
 
-### 方式一：直接运行二进制
+自动发布暂停期间，默认从源码构建。使用下载的二进制或镜像前，先检查[发布状态](docs/guide/release.md)及对应资源是否可用。
 
-1. 从 [Releases](https://github.com/soulteary/yunqi/releases/latest) 下载最新可执行文件。
-2. 在可执行文件同目录创建 `.env`：
+### 方式一：源码构建
+
+前置依赖：[Go 1.26+](https://go.dev/dl/)、[Bun](https://bun.sh)、Make（macOS 需先执行 `xcode-select --install`）。
+
+```bash
+git clone https://github.com/soulteary/yunqi
+cd yunqi
+cp backend-go/.env.example backend-go/.env
+make install
+```
+
+在 `backend-go/.env` 中设置自己的 `PROXY_ACCESS_KEY`，再执行 `make run`，访问其中配置的地址和端口。未设置独立 `ADMIN_ACCESS_KEY` 时，使用代理密钥登录管理界面。
+
+### 方式二：构建本地 Docker 镜像
+
+克隆仓库并替换 `docker-compose.yml` 中的示例代理密钥，然后执行：
+
+```bash
+docker compose up --build -d
+```
+
+仓库中的 Compose 文件会构建 `yunqi:local`，不依赖 GHCR 已发布镜像。
+
+### 已发布的二进制与镜像
+
+只有在 [Releases](https://github.com/soulteary/yunqi/releases) 或镜像仓库提供对应产物后，才使用以下方式。运行已发布的二进制时，在其同目录创建 `.env`：
 
 ```bash
 PROXY_ACCESS_KEY=your-proxy-access-key
@@ -86,13 +110,7 @@ ENABLE_WEB_UI=true
 APP_UI_LANGUAGE=zh-CN
 ```
 
-3. 启动后访问 `http://localhost:3688`
-
-Windows 下如果客户端运行在 cmd、PowerShell、WSL 或 Docker 中，且 `localhost` 无法访问 Yunqi，建议改用 Windows 主机的局域网 IPv4 地址，例如 `http://192.168.1.23:3000`。`BIND_HOST` 留空时，Yunqi 默认通过 `:PORT` 监听所有网卡地址；如需仅本机访问，设置 `BIND_HOST=127.0.0.1`。
-
-需要后台运行或开机自启动时，参考 [非 Docker 自启动](docs/service/README.md)。
-
-### 方式二：Docker
+启动后访问 `http://localhost:3688`。使用已发布镜像时，将 `RELEASE_TAG` 替换为实际存在的标签：
 
 ```bash
 docker run -d \
@@ -100,40 +118,11 @@ docker run -d \
   -p 3000:3000 \
   -e PROXY_ACCESS_KEY=your-proxy-access-key \
   -e APP_UI_LANGUAGE=zh-CN \
-  -v $(pwd)/.config:/app/.config \
-  ghcr.io/soulteary/yunqi:latest
+  -v "$(pwd)/.config:/app/.config" \
+  ghcr.io/soulteary/yunqi:RELEASE_TAG
 ```
 
-使用 Docker Compose 后台运行：
-
-```bash
-docker compose up -d
-```
-
-启用 Watchtower 自动更新：
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.watchtower.yml up -d
-```
-
-首次部署后如需立即拉取最新镜像：
-
-```bash
-docker compose pull yunqi
-docker compose up -d yunqi
-```
-
-### 方式三：源码构建
-
-前置依赖：[Go 1.26+](https://go.dev/dl/)、[Bun](https://bun.sh)、Make（macOS 需先执行 `xcode-select --install`）。
-
-```bash
-git clone https://github.com/soulteary/yunqi
-cd yunqi
-cp backend-go/.env.example backend-go/.env
-make install   # 安装所有依赖（前端 + Go 模块 + 开发工具）
-make run
-```
+Windows 下若客户端环境无法通过 `localhost` 访问服务，可改用 Windows 主机的 IPv4 地址和实际端口。`BIND_HOST` 留空时监听所有网卡；仅允许本机访问时设置 `BIND_HOST=127.0.0.1`。后台运行或开机自启动见[服务启动说明](docs/service/README.md)。
 
 常用命令：
 

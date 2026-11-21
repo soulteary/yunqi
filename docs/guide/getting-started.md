@@ -3,27 +3,41 @@
 
 ## 安装
 
-### Docker 部署（推荐）
+自动发布暂停期间，请从源码构建，或使用仓库中的本地 Docker 构建配置。下载产物是否可用，以[发布状态](release.md)和实际发布列表为准。
+
+先获取源码：
 
 ```bash
-docker run -d \
-  --name yunqi \
-  -p 3000:3000 \
-  -v ./.config:/app/.config \
-  -e PROXY_ACCESS_KEY=your-proxy-key \
-  ghcr.io/soulteary/yunqi:latest
+git clone https://github.com/soulteary/yunqi
+cd yunqi
 ```
 
-### 二进制部署
+### 构建本地 Docker 镜像
 
-从 [GitHub Releases](https://github.com/soulteary/yunqi/releases) 下载对应平台的二进制文件，然后运行：
+替换 `docker-compose.yml` 中的示例 `PROXY_ACCESS_KEY`，再启动一个新部署：
 
 ```bash
+docker compose up --build -d
+```
+
+该命令从仓库构建 `yunqi:local`，默认访问地址为 `http://localhost:3000`。
+
+### 从源码构建 Go 二进制
+
+准备好 Go 1.26+、Bun 和 Make 后，在仓库根目录执行：
+
+```bash
+(cd frontend && bun install)
+make build
 export PROXY_ACCESS_KEY=your-proxy-key
-./yunqi
+./dist/yunqi
 ```
 
-服务默认监听 `http://localhost:3000`。
+启动前替换示例密钥。未设置 `PORT` 时使用 3000 端口；未指定 CLI 路径选项时，持久化文件相对于启动目录保存。后台运行方法见[服务启动说明](../service/README.md)。
+
+### 使用已发布产物
+
+目标版本在 [GitHub Releases](https://github.com/soulteary/yunqi/releases) 提供二进制后，也可以直接下载。使用镜像仓库的产物前，先确认对应标签存在；源码构建不依赖这些产物。
 
 ## 基本概念
 
@@ -49,7 +63,7 @@ export PROXY_ACCESS_KEY=your-proxy-key
 
 ## 访问管理界面
 
-启动后访问 `http://localhost:3000`，使用 `ADMIN_ACCESS_KEY` 登录管理界面。
+启动后访问实际配置的地址（默认端口为 3000）。设置了 `ADMIN_ACCESS_KEY` 时使用管理密钥登录；未设置时使用 `PROXY_ACCESS_KEY`，与上面的安装示例一致。
 
 ![渠道管理界面](/images/guide/channel-list.png)
 
@@ -69,6 +83,4 @@ export PROXY_ACCESS_KEY=your-proxy-key
 
 前往 [客户端接入](/guide/clients/) 配置 Claude Code、Codex CLI / App 或 OpenCode；前往 [配置教程](/providers/) 了解如何配置各个 LLM 提供商。
 
-## Web console / Web 控制台
-
-启动服务后，在实际配置的地址和端口访问浏览器控制台。完成管理认证、添加并测试渠道后，通过「服务与接入」生成客户端配置。旧版桌面数据迁移见[迁移指南](./desktop/)。
+旧版桌面数据迁移见[迁移指南](./desktop/)。

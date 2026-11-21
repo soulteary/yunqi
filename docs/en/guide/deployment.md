@@ -2,10 +2,16 @@
 
 ## Docker Compose
 
+Run these steps from a cloned repository. While publishing is paused, build a local image; this configuration does not require GHCR. See [release status](release.md).
+
 ```yaml
 services:
   yunqi:
-    image: ghcr.io/soulteary/yunqi:latest
+    image: yunqi:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
     ports:
       - '3000:3000'
     volumes:

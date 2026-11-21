@@ -4,10 +4,10 @@
 
 English | [简体中文](README.zh-CN.md)
 
-[![GitHub release](https://img.shields.io/github/v/release/BenedictKing/yunqi)](https://github.com/soulteary/yunqi/releases/latest)
+[![GitHub release](https://img.shields.io/github/v/release/soulteary/yunqi)](https://github.com/soulteary/yunqi/releases/latest)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 
-Yunqi is a high-performance AI API proxy and protocol translation gateway for Claude, OpenAI Chat, OpenAI Images, OpenAI Embeddings, Codex Responses, and Gemini. It provides a unified entrypoint, built-in web administration, channel orchestration, failover, multi-key management, and model routing.
+Yunqi is an AI API proxy and protocol translation gateway for Claude, OpenAI Chat, OpenAI Images, OpenAI Embeddings, Codex Responses, and Gemini. It provides a unified entrypoint, built-in web administration, channel orchestration, failover, multi-key management, and model routing.
 
 > 本仓库发布资源尚未就绪时，请使用 `make build` 或 `docker compose up --build -d` 从源码构建。
 
@@ -74,10 +74,34 @@ See [ARCHITECTURE.md](docs/guide/architecture.md) for the detailed design.
 
 ## Quick Start
 
-### Option 1: Binary
+Start from source while automated publishing is paused. See [release status](docs/guide/release.md) before relying on a downloadable binary or a registry image.
 
-1. Download the latest binary from [Releases](https://github.com/soulteary/yunqi/releases/latest).
-2. Create a `.env` file next to the binary:
+### Option 1: Build From Source
+
+Prerequisites: [Go 1.26+](https://go.dev/dl/), [Bun](https://bun.sh), and Make (macOS: `xcode-select --install`).
+
+```bash
+git clone https://github.com/soulteary/yunqi
+cd yunqi
+cp backend-go/.env.example backend-go/.env
+make install
+```
+
+Set your own `PROXY_ACCESS_KEY` in `backend-go/.env`, then run `make run`. Open the address and port configured there. Use that proxy key to sign in unless you configured a separate `ADMIN_ACCESS_KEY`.
+
+### Option 2: Build a Local Docker Image
+
+Clone the repository, replace the sample proxy key in `docker-compose.yml`, then run:
+
+```bash
+docker compose up --build -d
+```
+
+The repository Compose file builds `yunqi:local`; it does not require a published GHCR image.
+
+### Published Binaries and Images
+
+Use these options only when the matching assets are available in [Releases](https://github.com/soulteary/yunqi/releases) or the container registry. For a published binary, create a `.env` file next to it:
 
 ```bash
 PROXY_ACCESS_KEY=your-proxy-access-key
@@ -86,13 +110,7 @@ ENABLE_WEB_UI=true
 APP_UI_LANGUAGE=en
 ```
 
-3. Run the binary and open `http://localhost:3688`
-
-On Windows, if the client runs from cmd, PowerShell, WSL, or Docker and `localhost` does not reach Yunqi, use the Windows host IPv4 address instead, for example `http://192.168.1.23:3000`. When `BIND_HOST` is empty, Yunqi listens on all interfaces by default through `:PORT`; set `BIND_HOST=127.0.0.1` for local-only access.
-
-For background startup without Docker, see [Service Startup](docs/service/README.md).
-
-### Option 2: Docker
+Run the binary and open `http://localhost:3688`. For a published image, replace `RELEASE_TAG` with a tag that exists:
 
 ```bash
 docker run -d \
@@ -100,40 +118,11 @@ docker run -d \
   -p 3000:3000 \
   -e PROXY_ACCESS_KEY=your-proxy-access-key \
   -e APP_UI_LANGUAGE=en \
-  -v $(pwd)/.config:/app/.config \
-  ghcr.io/soulteary/yunqi:latest
+  -v "$(pwd)/.config:/app/.config" \
+  ghcr.io/soulteary/yunqi:RELEASE_TAG
 ```
 
-Run in the background with Docker Compose:
-
-```bash
-docker compose up -d
-```
-
-Enable Watchtower auto-update:
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.watchtower.yml up -d
-```
-
-Pull the latest image immediately after setup if needed:
-
-```bash
-docker compose pull yunqi
-docker compose up -d yunqi
-```
-
-### Option 3: Build From Source
-
-Prerequisites: [Go 1.26+](https://go.dev/dl/), [Bun](https://bun.sh), and Make (macOS: `xcode-select --install`).
-
-```bash
-git clone https://github.com/soulteary/yunqi
-cd yunqi
-cp backend-go/.env.example backend-go/.env
-make install   # install all dependencies (frontend + Go modules + dev tools)
-make run
-```
+On Windows, if `localhost` is unreachable from your client environment, use the Windows host IPv4 address and the configured port. An empty `BIND_HOST` listens on all interfaces; set `BIND_HOST=127.0.0.1` for local-only access. For background startup without Docker, see [Service Startup](docs/service/README.md).
 
 Useful commands:
 

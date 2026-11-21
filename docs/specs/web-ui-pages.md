@@ -1,7 +1,7 @@
 # Web UI 页面层设计文档
 
 > 范围：页面/tab 层（View 层）。对话框层已在 [web-ui-dialogs.md](./web-ui-dialogs.md) 覆盖，此处不重复。
-> 技术栈：Vue 3 `<script setup>` + Vuetify 3（按需注册）+ Pinia + vue-router（HTML5 history）+ 自研 i18n（扁平 dotted-key JSON，`src/locales/{en,id,zh-CN}.json`）。
+> 技术栈：Vue 3 `<script setup>` + Vuetify 4（按需注册）+ Pinia + vue-router（HTML5 history）+ vue-i18n（应用封装读取扁平 dotted-key JSON，`src/locales/{en,id,zh-CN}.json`）。
 
 ## 目录
 
@@ -14,9 +14,8 @@
 - [6. CockpitView](#6-cockpitview-cockpit)
 - [7. AutopilotView](#7-autopilotview-autopilot)
 - [8. CostReportView](#8-costreportview-cost-report)
-- [9. 已知导航 / 信息架构问题汇总](#9-已知导航--信息架构问题汇总)
+- [9. 历史记录](#9-历史记录)
 
-<!-- 各章节逐节补充 -->
 
 ## 0. 全局架构总览
 
@@ -33,8 +32,9 @@
 | `/cockpit` | `CockpitView.vue` | — | 运营总览 |
 | `/autopilot` | `AutopilotView.vue` | `autopilot` | 智能路由 |
 | `/cost-report` | `CostReportView.vue` | `cost-report` | 成本报表 |
+| `/console` | `ConsoleView.vue` | — | 服务状态、诊断与客户端配置 |
 
-- 所有路由 `meta.requiresAuth:true`，但 `beforeEach` 守卫是空操作（`next()` 无条件放行）；真正的认证门在 `App.vue` 的认证 overlay/对话框。
+- 业务页面使用 `meta.requiresAuth:true` 作标注；没有空转 `beforeEach` 守卫。交互门控由 `App.vue` 的认证对话框承担，API 权限由后端认证中间件检查。
 - 无 404 / catch-all 路由；无嵌套子路由。
 
 ### 0.2 顶层布局（`App.vue`）与"路径黑名单"
@@ -42,16 +42,15 @@
 `App.vue` 的 `v-main` 内，三块全局 UI 通过同一个**路径黑名单**显式隐藏：
 
 ```
-黑名单 = ['/conversations', '/health', '/autopilot', '/cost-report', '/subscriptions', '/cockpit']
+黑名单 = ['/conversations', '/health', '/autopilot', '/cost-report', '/subscriptions', '/cockpit', '/console']
 ```
 
 | 全局区块 | 显示条件 | 出现路由 | 隐藏路由 |
 |---|---|---|---|
-| 全局统计可折叠卡片 `GlobalStatsChart` | `isAuthenticated && !黑名单` | channels/* | conversations、health、autopilot、cost-report、subscriptions、cockpit |
+| 全局统计可折叠卡片 `GlobalStatsChart` | `isAuthenticated && !黑名单` | channels/* | conversations、health、autopilot、cost-report、subscriptions、cockpit、console |
 | 三张统计卡片（总渠道/活动渠道/系统状态） | `!黑名单` | 同上 | 同上 |
 | 操作栏（添加渠道 / 刷新 / 熔断器 TB） | `!黑名单` | 同上 | 同上 |
 
-> 已在 2026-08-09 修复（commit `d876784d`）：`/subscriptions` 与 `/cockpit` 补进黑名单，两页不再显示渠道统计卡与"添加渠道"操作栏。
 
 ### 0.3 ASCII 全局布局
 
@@ -80,48 +79,45 @@
 
 ## 1. 顶部导航（两套）
 
-### 1.1 数据源 `apiTabOptions`（`useAppController.ts` L59–68）
+### 1.1 数据源 `apiTabOptions`（`composables/app/useAppNavigation.ts`）
 
-8 项，供**移动端下拉**使用（`translatedApiTabOptions` 实时翻译）：
+10 项，供**移动端下拉**使用（`translatedApiTabOptions` 实时翻译）：
 
 | value | i18n labelKey | route | icon |
 |---|---|---|---|
 | messages | `app.tabs.channels` | /channels/messages | mdi-server-network |
 | images | `app.tabs.images` | /channels/images | mdi-image-outline |
 | vectors | `app.tabs.vectors` | /channels/vectors | mdi-vector-point |
-| conversations | `app.tabs.conversations` | /conversations | mdi-view-dashboard-outline |
+| conversations | `app.tabs.conversations` | /conversations | mdi-radar |
 | health | `app.tabs.healthCenter` | /health | mdi-stethoscope |
 | subscriptions | `app.tabs.subscriptions` | /subscriptions | mdi-cash-multiple |
 | cockpit | `app.tabs.cockpitOverview` | /cockpit | mdi-view-dashboard-outline |
 | autopilot | `app.tabs.autopilot` | /autopilot | mdi-steering |
+| console | `app.tabs.console` | /console | mdi-console |
+| cost-report | `app.tabs.costReport` | /cost-report | mdi-finance |
 
 ### 1.2 桌面端平铺（`App.vue` L100–137，`display.width >= 1000`）
 
-9 个 `<router-link>` 平铺，`/` 分隔，顺序与移动端一致：
+10 个 `<router-link>` 平铺，`/` 分隔，顺序与移动端一致：
 
 ```
-渠道 / Images / Vectors / 驾驶舱 / 健康中心 / 订阅中心 / 总览 / Autopilot / 成本报表   API Proxy - Yunqi
+渠道 / Images / Vectors / 驾驶舱 / 健康中心 / 订阅中心 / 总览 / Autopilot / 服务与接入 / 成本报表   API Proxy - Yunqi
 ```
 
-i18n key 依次为 `app.tabs.{channels,images,vectors,conversations,healthCenter,subscriptions,cockpitOverview,autopilot,costReport}`。品牌文案 `API Proxy - Yunqi`（`d-none d-md-inline`）。
+i18n key 依次为 `app.tabs.{channels,images,vectors,conversations,healthCenter,subscriptions,cockpitOverview,autopilot,console,costReport}`。品牌文案 `API Proxy - Yunqi`（`d-none d-md-inline`）。
 
-> 已在 2026-08-09 修复（commit `d876784d`）：桌面导航末项"成本报表"改为 `t('app.tabs.costReport')`，不再硬编码中文。
 
-### 1.3 移动端下拉（`App.vue` L76–97，`display.width < 1000`）
+### 1.3 移动端下拉
 
-`v-menu` + activator 按钮（显示当前路由 label），列表项 = `translatedApiTabOptions`（8 项）。**不含 cost-report**。
-
-> **ego-browser 实测**（480px 宽度）：桌面平铺链接全部隐藏（`visibleDesktopLinks: []`），头部出现 activator 按钮（如 `CHANNELS`，显示当前路由 label）；点击展开下拉。**移动端无法进入 `/cost-report`**。
+宽度小于 1000px 时显示 `v-menu` 下拉，菜单项来自 `translatedApiTabOptions`，与桌面入口一致。当前有 10 项，包含 `/cost-report` 与 `/console`；按钮显示当前路由的翻译标签。
 
 ### 1.4 头部右侧操作（与页面无关，全局）
 
 版本徽章（<500px 隐藏；桌面 WebUI 隐藏）、语言切换（en/id/zh-CN）、新用户指引（mdi-help-circle）、暗色切换、注销（仅认证后）。
 
-### 1.5 导航层问题
+### 1.5 导航维护边界
 
-- **tab 清单漂移（P1）**：移动端 8 项 vs 桌面 9 项，**cost-report 仅桌面可达**；移动端无法进入 `/cost-report`。
-- **硬编码中文（P2）**：桌面导航"成本报表"未走 i18n（`app.tabs.costReport` key 在 en/zh-CN 两个 locale 均**缺失**）。
-- **图标重复（P3）**：conversations 与 cockpit 同用 `mdi-view-dashboard-outline`，移动端下拉辨识度低。
+移动菜单来自 `useAppNavigation` 的 `apiTabOptions`，桌面链接在 `App.vue` 中定义。两处均包含成本报表和服务控制台；新增入口时应同时更新并检查翻译、图标和激活状态。
 
 ## 2. ChannelsView（`/channels/:type`）
 
@@ -433,44 +429,6 @@ i18n key 依次为 `app.tabs.{channels,images,vectors,conversations,healthCenter
 └──────────────────────────────────────────────────────────────┘
 ```
 
-## 9. 已知导航 / 信息架构问题汇总
+## 9. 历史记录
 
-截至最近一次回填，§0–§8 中所有问题已随代码修复同步到正文，以下汇总表保留仅作历史索引。当前剩余可观测/体验类待办已在各专项文档中跟踪，不再重复。
-
-| # | 问题 | 位置 | 状态 |
-|---|---|---|---|
-| P1 | Tab 清单漂移：移动端 8 项 vs 桌面 9 项，cost-report 仅桌面可达 | `useAppController.apiTabOptions` | ✅ 已修复 |
-| P2 | 硬编码中文未国际化 | `App.vue`、`CostReportView.vue`、`locales/*` | ✅ 已修复 |
-| P3 | 导航 icon 重复：conversations 与 cockpit 同图标 | `apiTabOptions`、`App.vue` | ✅ 已修复 |
-| P4 | 全局统计卡/操作栏路径黑名单不对称 | `App.vue` L240/263/310 | ✅ 已修复 |
-| P5 | 健康数据轮询不一致 | `ChannelsView` vs `HealthCenterView` | ✅ 已修复 |
-| P6 | 确认体系分裂：SubscriptionsView 用原生 `window.confirm` | `SubscriptionsView.vue` | ✅ 已修复 |
-| P7 | 提示体系分裂：SubscriptionsView 自带本地 `v-snackbar` | `SubscriptionsView.vue` | ✅ 已修复 |
-| P8 | 路由守卫空转 | `router/index.ts` | ✅ 已修复 |
-| P9 | 空态覆盖不均 | `EmptyState.vue`、`HealthCenterView.vue`、`SubscriptionsView.vue`、`AutopilotView.vue`、`locales/*` | ✅ 已修复 |
-| P10 | i18n 命名重叠易混：conversations 与 cockpitOverview 曾同为"驾驶舱" | locale JSON | ✅ 已修复 |
-
-### 已修复记录
-
-- **P10（2026-08-09, commit c3b9d161）**：`/cockpit` 的 `app.tabs.cockpitOverview` 由"驾驶舱/Cockpit/Kokpit"改为"总览/Overview/Ikhtisar"，`/conversations` 的 `app.tabs.conversations` 保留"驾驶舱/Cockpit"，两个 tab 不再重名。
-- **P1 / P2 / P4（2026-08-09, commit d876784d）**：
-  - P1 移动端 cost-report 可达（`apiTabOptions` 补项 + `mdi-finance` 图标注册）。
-  - P2 成本报表国际化（`app.tabs.costReport` + 43 个 `costReport.*` key ×3 locale，`CostReportView` 与导航改用 `t()`）。
-  - P4 黑名单补 `/subscriptions` `/cockpit`。
-- **P5 / P9（2026-08-09，Phase B.3 及后续）**：ChannelsView 与 HealthCenterView 统一接入 `useEventStream` 事件驱动刷新；新增 `EmptyState` 补齐 Health/Subscriptions/Autopilot 三页 View 级空态。
-- **P6 / P7（2026-08-09）**：`SubscriptionsView` 删除改用 `dialogStore.confirm`；`success`/`error` emits 统一走 App 全局 toast，移除本地 `v-snackbar`。
-- **P8（2026-08-09）**：移除对所有路由一律 `next()` 的空转 `beforeEach`，鉴权由 `App.vue` 持久认证对话框承担。
-- **CapabilityTestDialog 接线（2026-08-09, commit d876784d）**：见 [web-ui-dialogs.md §16.1](./web-ui-dialogs.md)。
-
-### 关键文件路径清单
-
-- 路由：`frontend/src/router/index.ts`
-- 布局/导航/黑名单：`frontend/src/App.vue`
-- 控制器/tab 源：`frontend/src/composables/useAppController.ts`
-- store：`frontend/src/stores/{channel,auth,system,dialog,preferences}.ts`
-- Views：`frontend/src/views/{ChannelsView,ConversationsView,HealthCenterView,SubscriptionsView,CockpitView,AutopilotView,CostReportView}.vue`
-- 页面级区块组件：`frontend/src/components/{ChannelOrchestration,ConversationDashboard,ConversationCard,GlobalStatsChart,HealthCenterStats,HealthChannelTable,ProfileChangelogTimeline,AutopilotModePanel,AutopilotDiagnosePanel,AutopilotTraceStats,AutopilotTraceTable,SubscriptionPlanTable,NewApiSubscriptionForm}.vue`、`frontend/src/components/subscriptions/{SubscriptionProviderGrid,ExchangeRateManager}.vue`
-- locale：`frontend/src/locales/{en,id,zh-CN}.json`
-
-
-
+导航清单、图标、国际化、路由守卫及反馈组件的旧问题与修复提交见[历史记录](https://github.com/soulteary/yunqi/blob/main/archive/specs/web-ui-navigation-history.md)。本页描述现行界面；历史浏览器实测不作为当前移动端能力判断。
