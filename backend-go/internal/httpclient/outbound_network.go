@@ -222,7 +222,7 @@ func (p *OutboundPlan) transport(opts ClientOptions, proxied bool) (http.RoundTr
 			return nil, errors.New("unsupported proxy protocol")
 		}
 	}
-	guard := &metadataGuardTransport{base: t}
+	guard := &metadataGuardTransport{base: t, privateLookup: p.LookupIPAddr}
 	if proxied {
 		guard.lookup = p.LookupIPAddr
 	}
