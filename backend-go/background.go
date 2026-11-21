@@ -252,6 +252,10 @@ func (a *application) stopBackgroundTasks() {
 		log.Println("[NewApiSubscriptionSync-Shutdown] 周期性同步已停止")
 	}
 
+	if a.balanceProbeManager != nil {
+		a.balanceProbeManager.Stop()
+	}
+
 	// 关闭指标持久化存储
 	if a.metricsStore != nil {
 		if err := a.metricsStore.Close(); err != nil {

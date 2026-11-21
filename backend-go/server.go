@@ -20,10 +20,13 @@ func (a *application) serve(r *fiber.App) {
 	addr := listenAddressForEnv(a.envCfg)
 	endpoint := endpointForEnv(a.envCfg)
 
+	drain := newRequestDrain()
 	// 创建 HTTP 服务器
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           httpbridge.Handler(r),
+		Handler:           drain.wrap(httpbridge.Handler(r)),
+		ConnState:         drain.connState,
+		ConnContext:       drain.connContext,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       time.Duration(a.envCfg.ServerReadTimeout) * time.Millisecond, // 仅控制服务端读取入站请求，避免与上游请求超时耦合
 		IdleTimeout:       120 * time.Second,
@@ -103,6 +106,7 @@ func (a *application) serve(r *fiber.App) {
 
 		log.Println("[Server-Shutdown] 收到关闭信号，正在优雅关闭服务器...")
 
+		drain.begin()
 		// 创建超时上下文
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -113,6 +117,19 @@ func (a *application) serve(r *fiber.App) {
 			log.Println("[Server-Shutdown] 服务器已安全关闭")
 		}
 
+		// Shutdown excludes hijacked connections. Wait for all tracked handlers before
+		// closing queues/databases; after the grace period cancel remaining streams.
+		if err := drain.wait(ctx); err != nil {
+			drain.cancelRemaining()
+			_ = srv.Close()
+			finalCtx, finalCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer finalCancel()
+			if err := drain.wait(finalCtx); err != nil {
+				log.Printf("[Server-Shutdown] 未排空请求，跳过关闭仍可能写入的存储: %v", err)
+				close(shutdownDone)
+				return
+			}
+		}
 		a.stopBackgroundTasks()
 		close(shutdownDone)
 	}()
@@ -126,7 +143,7 @@ func (a *application) serve(r *fiber.App) {
 	select {
 	case <-shutdownDone:
 		// 正常关闭完成
-	case <-time.After(15 * time.Second):
+	case <-time.After(30 * time.Second):
 		log.Println("[Server-Shutdown] 警告: 等待关闭超时")
 	}
 }

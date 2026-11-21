@@ -35,6 +35,8 @@ type SQLiteStore struct {
 	// 控制
 	stopCh       chan struct{}
 	wg           sync.WaitGroup
+	closeOnce    sync.Once
+	closeErr     error
 	closed       bool           // 是否已关闭
 	flushMu      sync.Mutex     // 串行化 flush 与 delete 操作，避免并发竞态
 	asyncFlushWg sync.WaitGroup // 追踪 AddRecord 触发的异步 flush goroutine
@@ -724,12 +726,16 @@ func (s *SQLiteStore) AddRecord(record PersistentRecord) {
 	}
 	s.writeBuffer = append(s.writeBuffer, record)
 	shouldFlush := len(s.writeBuffer) >= s.batchSize
+	// Register flush work under bufferMu: Close must not Wait before Add.
+	startFlush := shouldFlush && s.flushing.CompareAndSwap(false, true)
+	if startFlush {
+		s.asyncFlushWg.Add(1)
+	}
 	s.bufferMu.Unlock()
 
 	// 使用原子标记确保同一时间只有一个 flush goroutine 被调度
 	// 避免高并发下产生大量 goroutine 排队等待 flushMu
-	if shouldFlush && s.flushing.CompareAndSwap(false, true) {
-		s.asyncFlushWg.Add(1)
+	if startFlush {
 		go func() {
 			defer s.asyncFlushWg.Done()
 			defer s.flushing.Store(false)
@@ -1157,19 +1163,29 @@ func (s *SQLiteStore) doCleanup() {
 
 // Close 关闭存储
 func (s *SQLiteStore) Close() error {
-	// 标记为已关闭，阻止新记录
-	s.bufferMu.Lock()
-	s.closed = true
-	s.bufferMu.Unlock()
-
-	// 停止后台循环（flushLoop 会在退出前执行最后一次 flush）
-	close(s.stopCh)
-	s.wg.Wait()
-
-	// 等待所有 AddRecord 触发的异步 flush goroutine 完成
-	s.asyncFlushWg.Wait()
-
-	return s.db.Close()
+	s.closeOnce.Do(func() {
+		s.bufferMu.Lock()
+		s.closed = true
+		s.bufferMu.Unlock()
+		close(s.stopCh)
+		s.wg.Wait()
+		s.asyncFlushWg.Wait()
+		// A failed background flush may have requeued records. Retry once and report
+		// failure instead of claiming shutdown persisted all acknowledged usage.
+		s.flushMu.Lock()
+		s.bufferMu.Lock()
+		pending := s.writeBuffer
+		s.writeBuffer = nil
+		s.bufferMu.Unlock()
+		if len(pending) > 0 {
+			s.closeErr = s.batchInsertRecords(pending)
+		}
+		s.flushMu.Unlock()
+		if err := s.db.Close(); err != nil && s.closeErr == nil {
+			s.closeErr = err
+		}
+	})
+	return s.closeErr
 }
 
 // GetRecordCount 获取记录总数（用于调试）
