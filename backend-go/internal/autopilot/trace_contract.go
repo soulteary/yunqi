@@ -450,6 +450,7 @@ func AdaptV1ToTraceDetailV2(trace *RoutingDecisionTrace) *TraceDetailV2 {
 	}
 	return &TraceDetailV2{
 		TraceUID:            trace.TraceUID,
+		OTLPTraceID:         trace.OTLPTraceID,
 		SchemaVersion:       1,
 		CreatedAt:           trace.CreatedAt,
 		ReleaseID:           "legacy",

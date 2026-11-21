@@ -485,10 +485,12 @@ func scanTraceRow(rows *sql.Rows) (*RoutingDecisionTrace, error) {
 	}
 
 	var metadata struct {
-		OTLPTraceID string `json:"otlpTraceId"`
+		OTLPTraceID   string `json:"otlpTraceId"`
+		SchemaVersion int    `json:"schemaVersion"`
 	}
 	_ = json.Unmarshal([]byte(detailsJSON), &metadata)
 	t.OTLPTraceID = metadata.OTLPTraceID
+	t.SchemaVersion = metadata.SchemaVersion
 	t.Match = matchInt != 0
 	t.FallbackUsed = fallbackInt != 0
 	t.OutcomeRecorded = outcomeRecordedInt != 0
