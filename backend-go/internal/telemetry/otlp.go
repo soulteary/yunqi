@@ -143,6 +143,19 @@ func (r *Registry) ConfigureTracing(ctx context.Context, cfg OTLPConfig, client 
 		bounded.Timeout = 2 * time.Second
 	}
 	bounded.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	// Protect collector authentication before SDK configuration can report errors.
+	for _, env := range []string{"OTEL_EXPORTER_OTLP_HEADERS", "OTEL_EXPORTER_OTLP_TRACES_HEADERS"} {
+		for _, part := range strings.Split(os.Getenv(env), ",") {
+			if _, value, ok := strings.Cut(part, "="); ok {
+				value = strings.TrimSpace(value)
+				values := []string{value}
+				if decoded, err := url.PathUnescape(value); err == nil {
+					values = append(values, decoded)
+				}
+				redaction.Add(values)
+			}
+		}
+	}
 	exporter, err := otlptracehttp.New(ctx, otlptracehttp.WithEndpointURL(cfg.Endpoint), otlptracehttp.WithEncoding(otlptracehttp.EncodingProtobuf), otlptracehttp.WithHTTPClient(&bounded), otlptracehttp.WithRetry(otlptracehttp.RetryConfig{Enabled: false}))
 	if err != nil {
 		return errors.New("cannot configure OTLP exporter")
