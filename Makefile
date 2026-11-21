@@ -62,14 +62,9 @@ build: embed-frontend
 container-verify:
 	@bash scripts/container-verify.sh
 
-FRONTEND_SENTINEL=backend-go/frontend/dist/.build-sentinel
-FRONTEND_SOURCES=$(shell find frontend/src frontend/public frontend/index.html frontend/vite.config.ts frontend/tsconfig.json frontend/tsconfig.app.json -type f 2>/dev/null)
-
-embed-frontend: $(FRONTEND_SENTINEL)
-
-$(FRONTEND_SENTINEL): $(FRONTEND_SOURCES)
+# 每次检查内容指纹，避免时间戳、删除文件或 shared 输入变化漏过缓存。
+embed-frontend:
 	@bash scripts/embed-frontend.sh
-	@touch $(FRONTEND_SENTINEL)
 
 clean:
 	@cd backend-go && $(MAKE) clean

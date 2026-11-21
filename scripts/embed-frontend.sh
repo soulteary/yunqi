@@ -34,6 +34,12 @@ compute_hash() {
     "$FRONTEND_DIR/tsconfig.json"
     "$FRONTEND_DIR/tsconfig.app.json"
     "$FRONTEND_DIR/bun.lock"
+    "$FRONTEND_DIR/package.json"
+    "$FRONTEND_DIR/.env"
+    "$FRONTEND_DIR/.env.local"
+    "$FRONTEND_DIR/.env.production"
+    "$FRONTEND_DIR/.env.production.local"
+    "$ROOT_DIR/shared"
   )
   local existing_paths=()
   local path
@@ -49,19 +55,22 @@ compute_hash() {
     return 1
   fi
 
-  find "${existing_paths[@]}" -type f \
-    | sort \
-    | while IFS= read -r path; do
-        "${HASH_CMD[@]}" "$path"
-      done \
-    | "${HASH_CMD[@]}" \
-    | cut -d' ' -f1
+  {
+    # Vite 将此环境值编入默认界面语言；只把它纳入指纹，不打印环境内容。
+    printf '%s\n' "APP_UI_LANGUAGE=${APP_UI_LANGUAGE+x}:${APP_UI_LANGUAGE-}"
+    find "${existing_paths[@]}" -type f \
+      | sort \
+      | while IFS= read -r path; do
+          "${HASH_CMD[@]}" "$path"
+        done
+  } | "${HASH_CMD[@]}" | cut -d' ' -f1
+
 }
 
 current_hash=$(compute_hash)
 
 # 检查缓存是否有效
-if [ -f "$HASH_FILE" ] && [ -d "$EMBED_DIR/assets" ]; then
+if [ -f "$HASH_FILE" ] && [ -f "$EMBED_DIR/index.html" ] && [ -d "$EMBED_DIR/assets" ]; then
   cached_hash=$(cat "$HASH_FILE" 2>/dev/null || echo "")
   if [ "$current_hash" = "$cached_hash" ]; then
     echo -e "${GREEN}✅ 前端未变更，跳过构建${NC}"
