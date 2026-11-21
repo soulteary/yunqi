@@ -32,7 +32,7 @@ func makeModelProfile(modelID string, family ModelFamily, tier QualityTier, ctxT
 	}
 }
 
-// newTestResolver 创建带预填充画像的 ModelResolver（无 cfgManager，跳过手动映射检查）。
+// newTestResolver 创建带预填充画像的 ModelResolver（无 cfgManager，使用默认路由策略）。
 func newTestResolver(t *testing.T, profiles []ModelProfile) *ModelResolver {
 	t.Helper()
 	return NewModelResolver(newTestModelProfileStore(profiles), nil)

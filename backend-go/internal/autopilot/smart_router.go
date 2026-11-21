@@ -1879,8 +1879,8 @@ func (r *SmartRouter) resolveChannelModels(
 		}
 	}
 
-	// ── 显式/白名单渠道：从 ModelMapping 值 + 请求模型 redirect 目标出发，
-	// 逐个过 ExplainModelSupport 应用 SupportedModels 增删。
+	// ── 非 AutoManaged 渠道：只枚举请求模型，经 ExplainModelSupport
+	// 应用 SupportedModels 白名单；ModelMapping 和手动 redirect 已退役。
 	seen := make(map[string]bool)
 	resolutions := make([]channelModelResolution, 0, 2)
 	addResolution := func(actualModel, source, reason string) {
