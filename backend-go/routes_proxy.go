@@ -13,6 +13,9 @@ import (
 )
 
 func (a *application) registerProxyRoutes(r *fiber.App) {
+	quote := autopilot.CallerQuoteHandler(a.cfgManager, a.channelScheduler)
+	r.Post("/v1/quote", quote)
+	r.Post("/:routePrefix/v1/quote", quote)
 	// 代理端点 - Messages API
 	messagesHandler := messages.Handler(a.envCfg, a.cfgManager, a.channelScheduler)
 	r.Post("/v1/messages", messagesHandler)

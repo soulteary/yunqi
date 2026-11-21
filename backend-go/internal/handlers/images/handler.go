@@ -753,7 +753,8 @@ func passthroughStreamingResponseWithLog(c fiber.Ctx, resp *http.Response, envCf
 		return err
 	}
 
-	progress := common.NewStreamProgressLogger("Images", startTime, envCfg.ShouldLog("info"), common.RequestLogTag(c))
+	progress := common.NewStreamProgressLogger("Images", startTime, envCfg.ShouldLog("info"), common.RequestLogTag(c)).WithMetricsContext(httpbridge.Request(c).Context())
+	defer progress.FinishMetricsFallback()
 
 	// 回放缓冲的首个 chunk
 	if len(bufferedBytes) > 0 {

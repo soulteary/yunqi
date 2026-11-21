@@ -34,25 +34,33 @@ type ClaudeMessage struct {
 // CacheControl Anthropic 缓存控制
 // 用于 Claude API 请求，会序列化到 JSON（仅在发送给 Anthropic 时有效）
 type CacheControl struct {
+	TTL  string `json:"ttl,omitempty"`
 	Type string `json:"type,omitempty"` // "ephemeral"
 }
 
 // ClaudeContent Claude 内容块
 type ClaudeContent struct {
-	Type         string        `json:"type"` // text, tool_use, tool_result
-	Text         string        `json:"text,omitempty"`
-	Thinking     string        `json:"thinking,omitempty"`
-	Signature    string        `json:"signature,omitempty"`
-	ID           string        `json:"id,omitempty"`
-	Name         string        `json:"name,omitempty"`
-	Input        interface{}   `json:"input,omitempty"`
-	Content      interface{}   `json:"content,omitempty"` // tool_result 的内容字段
-	ToolUseID    string        `json:"tool_use_id,omitempty"`
-	CacheControl *CacheControl `json:"cache_control,omitempty"`
+	Citations        interface{}   `json:"citations,omitempty"`
+	Source           interface{}   `json:"source,omitempty"`
+	Title            string        `json:"title,omitempty"`
+	URL              string        `json:"url,omitempty"`
+	EncryptedContent string        `json:"encrypted_content,omitempty"`
+	PageAge          string        `json:"page_age,omitempty"`
+	Type             string        `json:"type"` // text, tool_use, tool_result
+	Text             string        `json:"text,omitempty"`
+	Thinking         string        `json:"thinking,omitempty"`
+	Signature        string        `json:"signature,omitempty"`
+	ID               string        `json:"id,omitempty"`
+	Name             string        `json:"name,omitempty"`
+	Input            interface{}   `json:"input,omitempty"`
+	Content          interface{}   `json:"content,omitempty"` // tool_result 的内容字段
+	ToolUseID        string        `json:"tool_use_id,omitempty"`
+	CacheControl     *CacheControl `json:"cache_control,omitempty"`
 }
 
 // ClaudeTool Claude 工具定义
 type ClaudeTool struct {
+	Type         string        `json:"type,omitempty"`
 	Name         string        `json:"name"`
 	Description  string        `json:"description,omitempty"`
 	InputSchema  interface{}   `json:"input_schema"`

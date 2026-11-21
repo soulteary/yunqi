@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/soulteary/yunqi/internal/redaction"
 	"net/http"
 	"strings"
 	"time"
@@ -466,7 +467,8 @@ func handleStreamSuccess(
 	promptTokensTotal := 0
 	completedEventSent := false
 	eventsSentCount := 0
-	progress := common.NewStreamProgressLogger("Responses", startTime, envCfg.ShouldLog("info"), common.RequestLogTag(c))
+	progress := common.NewStreamProgressLogger("Responses", startTime, envCfg.ShouldLog("info"), common.RequestLogTag(c)).WithMetricsContext(httpbridge.Request(c).Context())
+	defer progress.FinishMetricsFallback()
 
 	// 收集流式 output items（含 reasoning 的 encrypted_content）用于 session 回写
 	outputCollector := newStreamOutputCollector()
@@ -601,7 +603,7 @@ func handleStreamSuccess(
 
 			// 转发给客户端
 			if !clientGone {
-				_, err := httpbridge.Writer(c).Write([]byte(eventToSend))
+				_, err := httpbridge.Writer(c).Write([]byte(redaction.SSEErrorEvent(eventToSend)))
 				if err != nil {
 					clientGone = true
 					if !isClientDisconnectError(err) {
@@ -845,7 +847,7 @@ streamEnd:
 					eventToSend = normalizeCompletedEventUsageToOpenAISemantics(eventToSend)
 				}
 			}
-			if _, err := httpbridge.Writer(c).Write([]byte(eventToSend)); err == nil && flusher != nil {
+			if _, err := httpbridge.Writer(c).Write([]byte(redaction.SSEErrorEvent(eventToSend))); err == nil && flusher != nil {
 				flusher.Flush()
 			}
 		}

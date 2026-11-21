@@ -198,6 +198,10 @@ func responsesItemToClaudeMessage(item types.ResponsesItem) (*types.ClaudeMessag
 		}, nil
 
 	case "message":
+		if blocks := responsesClaudeTextBlocks(item.Content); len(blocks) > 0 {
+			role, _ := resolveResponsesTextItem(item)
+			return &types.ClaudeMessage{Role: role, Content: blocks}, nil
+		}
 		// 新格式：嵌套结构（type=message, role=user/assistant, content=[]ContentBlock）
 		role, contentText := resolveResponsesTextItem(item)
 		if contentText == "" {
@@ -320,6 +324,8 @@ func ClaudeResponseToResponses(claudeResp map[string]interface{}, sessionID stri
 
 	// 转换 output
 	output := []types.ResponsesItem{}
+	sourceFallback := false
+	hostedQueries := map[string]interface{}{}
 	for _, c := range content {
 		contentBlock, ok := c.(map[string]interface{})
 		if !ok {
@@ -339,10 +345,40 @@ func ClaudeResponseToResponses(claudeResp map[string]interface{}, sessionID stri
 			}
 		case "text":
 			text, _ := contentBlock["text"].(string)
+			if sources := ClaudeSearchSourceText(contentBlock); sources != "" {
+				text += sources
+				sourceFallback = true
+			}
 			output = append(output, types.ResponsesItem{
 				Type:    "text",
 				Content: text,
 			})
+		case "server_tool_use":
+			if contentBlock["name"] == "web_search" {
+				id, _ := contentBlock["id"].(string)
+				hostedQueries[id] = contentBlock["input"]
+			}
+		case "web_search_tool_result":
+			id, _ := contentBlock["tool_use_id"].(string)
+			action := map[string]interface{}{"type": "search"}
+			if input, ok := hostedQueries[id].(map[string]interface{}); ok {
+				action["query"] = input["query"]
+			}
+			item := types.ResponsesItem{ID: id, Type: "web_search_call", Status: "completed", Action: action}
+			if code, failed := ClaudeHostedSearchError(contentBlock); failed {
+				item.Status = "failed"
+				item.Error = map[string]interface{}{"code": code, "source": "upstream"}
+			}
+			output = append(output, item)
+			if text := ClaudeSearchSourceText(contentBlock); text != "" {
+				output = append(output, types.ResponsesItem{Type: "text", Content: text})
+				sourceFallback = true
+			}
+		case "search_result":
+			if text := ClaudeSearchSourceText(contentBlock); text != "" {
+				output = append(output, types.ResponsesItem{Type: "text", Content: text})
+				sourceFallback = true
+			}
 		case "tool_use":
 			id, _ := contentBlock["id"].(string)
 			name, _ := contentBlock["name"].(string)
@@ -374,7 +410,12 @@ func ClaudeResponseToResponses(claudeResp map[string]interface{}, sessionID stri
 	// 生成 response ID
 	responseID := generateResponseID()
 
+	var metadata map[string]string
+	if sourceFallback {
+		metadata = map[string]string{"yunqi_conversion_diagnostics": "hosted_search_sources_preserved_as_text"}
+	}
 	return &types.ResponsesResponse{
+		Metadata:   metadata,
 		ID:         responseID,
 		Model:      model,
 		Output:     output,
@@ -1391,4 +1432,38 @@ func ExtractUsageMetrics(usageRaw interface{}) types.ResponsesUsage {
 
 	// 3. 默认 OpenAI 格式
 	return parseResponsesUsage(usageRaw)
+}
+
+func responsesClaudeTextBlocks(content interface{}) []types.ClaudeContent {
+	raw, err := json.Marshal(content)
+	if err != nil {
+		return nil
+	}
+	var parts []map[string]interface{}
+	if json.Unmarshal(raw, &parts) != nil {
+		return nil
+	}
+	var blocks []types.ClaudeContent
+	for _, part := range parts {
+		kind, _ := part["type"].(string)
+		if kind != "text" && kind != "input_text" && kind != "output_text" {
+			continue
+		}
+		text, _ := part["text"].(string)
+		if text == "" {
+			continue
+		}
+		block := types.ClaudeContent{Type: "text", Text: text}
+		if value, ok := part["cache_control"]; ok {
+			raw, err := json.Marshal(value)
+			if err == nil {
+				var control types.CacheControl
+				if json.Unmarshal(raw, &control) == nil {
+					block.CacheControl = &control
+				}
+			}
+		}
+		blocks = append(blocks, block)
+	}
+	return blocks
 }

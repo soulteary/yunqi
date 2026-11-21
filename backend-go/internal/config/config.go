@@ -19,6 +19,9 @@ import (
 
 // UpstreamConfig 上游配置
 type UpstreamConfig struct {
+	// ResponsesClaudePrefixCache opts into one automatic multi-turn prefix breakpoint.
+	// Disabled by default; only Claude wire, and cache writes may incur provider charges.
+	ResponsesClaudePrefixCache bool `json:"responsesClaudePrefixCache,omitempty"`
 	// AccountUID 自动托管账号的稳定身份。一个 provider 账号下的多协议渠道共享该值。
 	AccountUID string `json:"accountUid,omitempty"`
 	// ChannelUID 渠道稳定身份标识，创建后不因渠道重排、改名、API Key 变更而改变。
@@ -1298,92 +1301,94 @@ func (u *UpstreamConfig) GetEffectiveResponseHeaderTimeoutMs(fallbackMs int) int
 
 // UpstreamUpdate 用于部分更新 UpstreamConfig
 type UpstreamUpdate struct {
-	Name                     *string                            `json:"name"`
-	CopilotProtocol          *string                            `json:"copilotProtocol"`
-	ServiceType              *string                            `json:"serviceType"`
-	AuthHeader               *string                            `json:"authHeader"`
-	BaseURL                  *string                            `json:"baseUrl"`
-	BaseURLs                 []string                           `json:"baseUrls"`
-	APIKeys                  []string                           `json:"apiKeys"`
-	APIKeyConfigs            []APIKeyConfig                     `json:"apiKeyConfigs"`
-	Remark                   *string                            `json:"remark"`
-	Description              *string                            `json:"description"`
-	Website                  *string                            `json:"website"`
-	InsecureSkipVerify       *bool                              `json:"insecureSkipVerify"`
-	ModelCapabilities        map[string]UpstreamModelCapability `json:"modelCapabilities"`
-	EmbeddingCapabilities    map[string]EmbeddingCapability     `json:"embeddingCapabilities"`
-	DefaultCapability        *UpstreamModelCapability           `json:"defaultCapability"`
-	AllowUnknownContext      *bool                              `json:"allowUnknownContext"`
-	ReasoningParamStyle      *string                            `json:"reasoningParamStyle"`
-	TextVerbosity            *string                            `json:"textVerbosity"`
-	FastMode                 *bool                              `json:"fastMode"`
-	CodexToolCompat          *bool                              `json:"codexToolCompat"`
-	ResponsesReasoningFold   *bool                              `json:"responsesReasoningFold"`
-	StripCodexClientTools    *bool                              `json:"stripCodexClientTools"`
-	ConvertImageURLToB64JSON *bool                              `json:"convertImageUrlToB64Json"`
+	// NullFields is populated by the JSON decoder; never accepted directly from clients.
+	NullFields               []string                           `json:"-"`
+	Name                     *string                            `json:"name,omitzero"`
+	CopilotProtocol          *string                            `json:"copilotProtocol,omitzero"`
+	ServiceType              *string                            `json:"serviceType,omitzero"`
+	AuthHeader               *string                            `json:"authHeader,omitzero"`
+	BaseURL                  *string                            `json:"baseUrl,omitzero"`
+	BaseURLs                 []string                           `json:"baseUrls,omitzero"`
+	APIKeys                  []string                           `json:"apiKeys,omitzero"`
+	APIKeyConfigs            []APIKeyConfig                     `json:"apiKeyConfigs,omitzero"`
+	Remark                   *string                            `json:"remark,omitzero"`
+	Description              *string                            `json:"description,omitzero"`
+	Website                  *string                            `json:"website,omitzero"`
+	InsecureSkipVerify       *bool                              `json:"insecureSkipVerify,omitzero"`
+	ModelCapabilities        map[string]UpstreamModelCapability `json:"modelCapabilities,omitzero"`
+	EmbeddingCapabilities    map[string]EmbeddingCapability     `json:"embeddingCapabilities,omitzero"`
+	DefaultCapability        *UpstreamModelCapability           `json:"defaultCapability,omitzero"`
+	AllowUnknownContext      *bool                              `json:"allowUnknownContext,omitzero"`
+	ReasoningParamStyle      *string                            `json:"reasoningParamStyle,omitzero"`
+	TextVerbosity            *string                            `json:"textVerbosity,omitzero"`
+	FastMode                 *bool                              `json:"fastMode,omitzero"`
+	CodexToolCompat          *bool                              `json:"codexToolCompat,omitzero"`
+	ResponsesReasoningFold   *bool                              `json:"responsesReasoningFold,omitzero"`
+	StripCodexClientTools    *bool                              `json:"stripCodexClientTools,omitzero"`
+	ConvertImageURLToB64JSON *bool                              `json:"convertImageUrlToB64Json,omitzero"`
 	// 渠道级竞速参与配置（nil=继承全局）
-	Racing *ChannelRacingConfig `json:"racing"`
+	Racing *ChannelRacingConfig `json:"racing,omitzero"`
 	// 渠道级上游余额探测配置（nil=不修改）
-	BalanceCheck *ChannelBalanceCheckConfig `json:"balanceCheck"`
+	BalanceCheck *ChannelBalanceCheckConfig `json:"balanceCheck,omitzero"`
 	// 多渠道调度相关字段
-	Priority                *int       `json:"priority"`
-	Status                  *string    `json:"status"`
-	PromotionUntil          *time.Time `json:"promotionUntil"`
-	LowQuality              *bool      `json:"lowQuality"`
-	AutoBlacklistBalance    *bool      `json:"autoBlacklistBalance"`
-	NormalizeMetadataUserID *bool      `json:"normalizeMetadataUserId"`
-	StripBillingHeader      *bool      `json:"stripBillingHeader"`
+	Priority                *int       `json:"priority,omitzero"`
+	Status                  *string    `json:"status,omitzero"`
+	PromotionUntil          *time.Time `json:"promotionUntil,omitzero"`
+	LowQuality              *bool      `json:"lowQuality,omitzero"`
+	AutoBlacklistBalance    *bool      `json:"autoBlacklistBalance,omitzero"`
+	NormalizeMetadataUserID *bool      `json:"normalizeMetadataUserId,omitzero"`
+	StripBillingHeader      *bool      `json:"stripBillingHeader,omitzero"`
 	// Claude 协议 system 角色兼容
-	NormalizeSystemRoleToTopLevel *bool `json:"normalizeSystemRoleToTopLevel"`
+	NormalizeSystemRoleToTopLevel *bool `json:"normalizeSystemRoleToTopLevel,omitzero"`
 	// Gemini 特定配置
-	InjectDummyThoughtSignature *bool `json:"injectDummyThoughtSignature"`
-	StripThoughtSignature       *bool `json:"stripThoughtSignature"`
+	InjectDummyThoughtSignature *bool `json:"injectDummyThoughtSignature,omitzero"`
+	StripThoughtSignature       *bool `json:"stripThoughtSignature,omitzero"`
 	// 自定义请求头
-	CustomHeaders map[string]string `json:"customHeaders"`
+	CustomHeaders map[string]string `json:"customHeaders,omitzero"`
 	// 渠道级代理
-	ProxyURL *string `json:"proxyUrl"`
+	ProxyURL *string `json:"proxyUrl,omitzero"`
 	// ProxyPreferDirect 直连优先（nil=不修改）；仅在配置了代理时有意义
-	ProxyPreferDirect *bool                `json:"proxyPreferDirect"`
-	OutboundNetwork   OutboundNetworkPatch `json:"outboundNetwork,omitempty"`
+	ProxyPreferDirect *bool                `json:"proxyPreferDirect,omitzero"`
+	OutboundNetwork   OutboundNetworkPatch `json:"outboundNetwork,omitzero"`
 	// 客户端伪装学习标记（由发现流程回写；nil=不修改）
-	LearnedClientFingerprint *bool `json:"learnedClientFingerprint"`
+	LearnedClientFingerprint *bool `json:"learnedClientFingerprint,omitzero"`
 	// 渠道级请求超时
-	RequestTimeoutMs        *int `json:"requestTimeoutMs"`
-	ResponseHeaderTimeoutMs *int `json:"responseHeaderTimeoutMs"`
+	RequestTimeoutMs        *int `json:"requestTimeoutMs,omitzero"`
+	ResponseHeaderTimeoutMs *int `json:"responseHeaderTimeoutMs,omitzero"`
 	// 流式健康检测渠道覆盖（0=继承全局，-1=禁用，正数=覆盖全局）
-	StreamFirstContentTimeoutMs *int `json:"streamFirstContentTimeoutMs"`
-	StreamInactivityTimeoutMs   *int `json:"streamInactivityTimeoutMs"`
-	StreamToolCallIdleTimeoutMs *int `json:"streamToolCallIdleTimeoutMs"`
+	StreamFirstContentTimeoutMs *int `json:"streamFirstContentTimeoutMs,omitzero"`
+	StreamInactivityTimeoutMs   *int `json:"streamInactivityTimeoutMs,omitzero"`
+	StreamToolCallIdleTimeoutMs *int `json:"streamToolCallIdleTimeoutMs,omitzero"`
 	// 模型白名单
-	SupportedModels []string `json:"supportedModels"` // 支持的模型白名单（空=全部）；支持精确匹配，以及 prefix* / *suffix / *contains* 形式的包含与排除规则（排除用 ! 前缀）
+	SupportedModels []string `json:"supportedModels,omitzero"` // 支持的模型白名单（空=全部）；支持精确匹配，以及 prefix* / *suffix / *contains* 形式的包含与排除规则（排除用 ! 前缀）
 	// 路由前缀
-	RoutePrefix *string `json:"routePrefix"` // 路由前缀（如 "kimi"）
+	RoutePrefix *string `json:"routePrefix,omitzero"` // 路由前缀（如 "kimi"）
 	// 主动限速配置（渠道级，默认 0=不限）
-	RateLimitRPM             *int  `json:"rateLimitRpm"`
-	RateLimitWindowMinutes   *int  `json:"rateLimitWindowMinutes"`
-	RateLimitBurst           *int  `json:"rateLimitBurst"`
-	RateLimitMaxConcurrent   *int  `json:"rateLimitMaxConcurrent"`
-	RateLimitAutoFromHeaders *bool `json:"rateLimitAutoFromHeaders"`
+	RateLimitRPM             *int  `json:"rateLimitRpm,omitzero"`
+	RateLimitWindowMinutes   *int  `json:"rateLimitWindowMinutes,omitzero"`
+	RateLimitBurst           *int  `json:"rateLimitBurst,omitzero"`
+	RateLimitMaxConcurrent   *int  `json:"rateLimitMaxConcurrent,omitzero"`
+	RateLimitAutoFromHeaders *bool `json:"rateLimitAutoFromHeaders,omitzero"`
 
 	// 渠道级计费覆盖（nil=不修改）
-	CostMultiplier         *float64 `json:"costMultiplier"`         // 充值倍率（EffectiveCost = ListCost × 倍率）
-	ChannelPaymentCurrency *string  `json:"channelPaymentCurrency"` // 充值币种
-	ChannelPaymentAmount   *float64 `json:"channelPaymentAmount"`   // 充值金额
-	ChannelCreditCurrency  *string  `json:"channelCreditCurrency"`  // 渠道计价币种
-	ChannelCreditAmount    *float64 `json:"channelCreditAmount"`    // 渠道到账金额
+	CostMultiplier         *float64 `json:"costMultiplier,omitzero"`         // 充值倍率（EffectiveCost = ListCost × 倍率）
+	ChannelPaymentCurrency *string  `json:"channelPaymentCurrency,omitzero"` // 充值币种
+	ChannelPaymentAmount   *float64 `json:"channelPaymentAmount,omitzero"`   // 充值金额
+	ChannelCreditCurrency  *string  `json:"channelCreditCurrency,omitzero"`  // 渠道计价币种
+	ChannelCreditAmount    *float64 `json:"channelCreditAmount,omitzero"`    // 渠道到账金额
 	// 渠道级分组倍率上限（nil=不修改；0=清除即不启用闸门）
-	MaxGroupMultiplier *float64 `json:"maxGroupMultiplier"` // 最高分组倍率上限
+	MaxGroupMultiplier *float64 `json:"maxGroupMultiplier,omitzero"` // 最高分组倍率上限
 
 	// Vision 能力配置
-	NoVision *bool `json:"noVision"`
+	NoVision *bool `json:"noVision,omitzero"`
 	// 历史图片轮次限制（0=不限制，2-10=限制轮次）
-	HistoricalImageTurnLimit *int `json:"historicalImageTurnLimit"`
+	HistoricalImageTurnLimit *int `json:"historicalImageTurnLimit,omitzero"`
 	// 自动托管字段
-	AutoManaged     *bool      `json:"autoManaged"`
-	AutoManagedAt   *time.Time `json:"autoManagedAt"`
-	AutoManagedKind *string    `json:"autoManagedKind"`
+	AutoManaged     *bool      `json:"autoManaged,omitzero"`
+	AutoManagedAt   *time.Time `json:"autoManagedAt,omitzero"`
+	AutoManagedKind *string    `json:"autoManagedKind,omitzero"`
 	// 用户自定义标签（nil=不修改，空切片=清空标签）
-	Tags []string `json:"tags"`
+	Tags []string `json:"tags,omitzero"`
 	// SkipAPIKeyConfigMerge 为 true 时 APIKeyConfigs 直接归一化替换、不做表单合并
 	// （mergeAPIKeyConfig 的托管身份/倍率回填），供 Key 倍率端点等「精确写」语义使用。
 	// JSON 不暴露：只允许服务端内部构造。
@@ -1406,10 +1411,13 @@ type CircuitBreakerConfig struct {
 }
 
 type Config struct {
-	CodexAutoReview CodexAutoReviewMapping `json:"codexAutoReview,omitempty"`
-	ManagedAccounts []ManagedAccountConfig `json:"managedAccounts,omitempty"`
-	Upstream        []UpstreamConfig       `json:"upstream,omitempty"`
-	CurrentUpstream int                    `json:"currentUpstream,omitempty"` // 已废弃：旧格式兼容用
+	IdentityProxy    *IdentityProxyConfig   `json:"identityProxy,omitempty"`
+	AdminCredentials []AdminCredential      `json:"adminCredentials,omitempty"`
+	EntryKeys        []EntryKey             `json:"entryKeys,omitempty"`
+	CodexAutoReview  CodexAutoReviewMapping `json:"codexAutoReview,omitempty"`
+	ManagedAccounts  []ManagedAccountConfig `json:"managedAccounts,omitempty"`
+	Upstream         []UpstreamConfig       `json:"upstream,omitempty"`
+	CurrentUpstream  int                    `json:"currentUpstream,omitempty"` // 已废弃：旧格式兼容用
 
 	// Responses 接口专用配置（独立于 /v1/messages）
 	ResponsesUpstream        []UpstreamConfig `json:"responsesUpstream,omitempty"`
@@ -1531,6 +1539,18 @@ func (cm *ConfigManager) GetConfig() Config {
 
 	// 深拷贝整个 Config 结构体
 	cloned := cm.config
+	if cm.config.IdentityProxy != nil {
+		value := cloneIdentityProxy(*cm.config.IdentityProxy)
+		cloned.IdentityProxy = &value
+	}
+	cloned.AdminCredentials = make([]AdminCredential, len(cm.config.AdminCredentials))
+	for i, key := range cm.config.AdminCredentials {
+		cloned.AdminCredentials[i] = cloneAdminCredential(key)
+	}
+	cloned.EntryKeys = make([]EntryKey, len(cm.config.EntryKeys))
+	for i, key := range cm.config.EntryKeys {
+		cloned.EntryKeys[i] = cloneEntryKey(key)
+	}
 	if cm.config.ManagedAccounts != nil {
 		cloned.ManagedAccounts = make([]ManagedAccountConfig, len(cm.config.ManagedAccounts))
 		for i, account := range cm.config.ManagedAccounts {

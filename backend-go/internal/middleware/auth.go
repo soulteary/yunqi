@@ -27,6 +27,7 @@ func WebAuthMiddleware(envCfg *config.EnvConfig, cfgManager *config.ConfigManage
 		// 数据面与健康检查允许一个渠道前缀；代理处理器仍负责验证代理密钥。
 		// 必须先精确识别端点，避免 /api 或 /admin 前缀被误当成管理请求。
 		if isDataPlaneRequest(httpbridge.Request(c).Method, path) {
+			StripIdentityProxyHeaders(c)
 			return c.Next()
 		}
 
@@ -58,7 +59,12 @@ func WebAuthMiddleware(envCfg *config.EnvConfig, cfgManager *config.ConfigManage
 			clientIP := httpbridge.ClientIP(c)
 			timestamp := time.Now().Format(time.RFC3339)
 
-			if !envCfg.IsValidAdminAccessKey(providedKey) {
+			authenticated := envCfg.IsValidAdminAccessKey(providedKey)
+			if !authenticated && providedKey == "" {
+				authenticated = authenticateTrustedIdentity(c, envCfg)
+			}
+			StripIdentityProxyHeaders(c)
+			if !authenticated {
 				// 认证失败 - 记录详细日志
 				reason := "密钥无效"
 				if providedKey == "" {
@@ -71,6 +77,13 @@ func WebAuthMiddleware(envCfg *config.EnvConfig, cfgManager *config.ConfigManage
 					"message": "Invalid or missing access key",
 				})
 				httpbridge.Abort(c)
+				return nil
+			}
+
+			if providedKey != "" {
+				authenticateAdminPrincipal(c, envCfg, providedKey)
+			}
+			if !authorizeManagementRoute(c) {
 				return nil
 			}
 
@@ -113,7 +126,7 @@ func isDataPlaneEndpoint(method, path string) bool {
 		}
 	case http.MethodPost:
 		switch path {
-		case "/v1/messages", "/v1/messages/count_tokens", "/v1/responses", "/v1/responses/compact",
+		case "/v1/quote", "/v1/messages", "/v1/messages/count_tokens", "/v1/responses", "/v1/responses/compact",
 			"/v1/chat/completions", "/v1/images/generations", "/v1/images/edits",
 			"/v1/images/variations", "/v1/embeddings":
 			return true
@@ -228,8 +241,15 @@ func AuthenticateProxy(c fiber.Ctx, envCfg *config.EnvConfig) error {
 	if id := envCfg.ProxyPrincipalIDs[providedKey]; id != "" {
 		principalID = "principal:" + id
 	}
+	managedID, allowed := setEntryPolicy(c, envCfg, providedKey)
+	if !allowed {
+		return nil
+	}
+	if managedID != "" {
+		principalID = managedID
+	}
 	httpbridge.SetValue(c, ContextKeyPrincipalID, principalID)
-	if mask := envCfg.ProxyKeyMaskForRequest(providedKey); mask != "" {
+	if mask := envCfg.ProxyKeyMaskForRequest(providedKey); mask != "" && managedID == "" {
 		httpbridge.SetValue(c, ContextKeyProxyKeyMask, mask)
 	}
 	return nil

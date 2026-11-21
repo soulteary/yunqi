@@ -2,9 +2,11 @@ package types
 
 import "encoding/json"
 
-// ============================================================================
+// =====================================================================}
+
 // Gemini API 常量
-// ============================================================================
+// =====================================================================}
+
 
 // DummyThoughtSignature 用于跳过 Gemini thought_signature 验证
 // 参考: https://ai.google.dev/gemini-api/docs/thought-signatures
@@ -14,9 +16,11 @@ const DummyThoughtSignature = "skip_thought_signature_validator"
 // 用于 stripThoughtSignature 函数标记需要移除的字段
 const StripThoughtSignatureMarker = "__STRIP_THOUGHT_SIGNATURE__"
 
-// ============================================================================
+// =====================================================================}
+
 // Gemini API 请求结构
-// ============================================================================
+// =====================================================================}
+
 
 // GeminiRequest Gemini API 请求
 type GeminiRequest struct {
@@ -185,6 +189,9 @@ func (fd *GeminiFunctionDeclaration) UnmarshalJSON(data []byte) error {
 // - exclusiveMinimum / exclusiveMaximum：Gemini 不支持（boolean 形式和 number 形式均移除）
 // - const：转换为 enum: [const]
 func SanitizeGeminiToolSchema(v interface{}) interface{} {
+	if GeminiSchemaRequiresJSONSchema(v) {
+		return normalizeGeminiJSONSchema(v, false)
+	}
 	return sanitizeGeminiSchemaNode(v, false)
 }
 
@@ -271,9 +278,11 @@ type GeminiSafetySetting struct {
 	Threshold string `json:"threshold"`
 }
 
-// ============================================================================
+// =====================================================================}
+
 // Gemini API 响应结构
-// ============================================================================
+// =====================================================================}
+
 
 // GeminiResponse Gemini API 响应
 type GeminiResponse struct {
@@ -312,9 +321,11 @@ type GeminiUsageMetadata struct {
 	ThoughtsTokenCount      int `json:"thoughtsTokenCount,omitempty"` // 推理 tokens
 }
 
-// ============================================================================
+// =====================================================================}
+
 // Gemini 流式响应结构
-// ============================================================================
+// =====================================================================}
+
 
 // GeminiStreamChunk Gemini 流式响应块
 type GeminiStreamChunk struct {
@@ -322,9 +333,11 @@ type GeminiStreamChunk struct {
 	UsageMetadata *GeminiUsageMetadata `json:"usageMetadata,omitempty"`
 }
 
-// ============================================================================
+// =====================================================================}
+
 // Gemini 错误响应结构
-// ============================================================================
+// =====================================================================}
+
 
 // GeminiError Gemini 错误响应
 type GeminiError struct {
@@ -343,4 +356,77 @@ type GeminiErrorDetail struct {
 type GeminiFunctionResponsePart struct {
 	InlineData *GeminiInlineData `json:"inlineData,omitempty"`
 	FileData   *GeminiFileData   `json:"fileData,omitempty"`
+}
+
+// GeminiSchemaRequiresJSONSchema detects JSON Schema constructs the legacy
+// OpenAPI parameters field cannot express without losing union/null semantics.
+func GeminiSchemaRequiresJSONSchema(v interface{}) bool {
+	switch node := v.(type) {
+	case map[string]interface{}:
+		for key, value := range node {
+			if key == "anyOf" || key == "oneOf" || key == "$ref" {
+				return true
+			}
+			if key == "type" {
+				if value == "null" {
+					return true
+				}
+				if _, ok := value.([]interface{}); ok {
+					return true
+				}
+				if _, ok := value.([]string); ok {
+					return true
+				}
+			}
+			if GeminiSchemaRequiresJSONSchema(value) {
+				return true
+			}
+		}
+	case []interface{}:
+		for _, value := range node {
+			if GeminiSchemaRequiresJSONSchema(value) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func normalizeGeminiJSONSchema(v interface{}, properties bool) interface{} {
+	switch node := v.(type) {
+	case map[string]interface{}:
+		out := make(map[string]interface{}, len(node))
+		for key, value := range node {
+			if !properties && key == "required" && value == nil {
+				continue
+			}
+			out[key] = normalizeGeminiJSONSchema(value, !properties && key == "properties")
+		}
+		return out
+	case []interface{}:
+		out := make([]interface{}, 0, len(node))
+		for _, value := range node {
+			out = append(out, normalizeGeminiJSONSchema(value, false))
+		}
+		return out
+	default:
+		return v
+	}
+}
+
+// MarshalJSON selects the native JSON Schema field for union/null schemas.
+// Simple schemas retain the existing parameters wire shape for compatibility.
+func (fd GeminiFunctionDeclaration) MarshalJSON() ([]byte, error) {
+	out := map[string]interface{}{"name": fd.Name}
+	if fd.Description != "" {
+		out["description"] = fd.Description
+	}
+	if fd.Parameters != nil {
+		key := "parameters"
+		if GeminiSchemaRequiresJSONSchema(fd.Parameters) {
+			key = "parametersJsonSchema"
+		}
+		out[key] = fd.Parameters
+	}
+	return json.Marshal(out)
 }

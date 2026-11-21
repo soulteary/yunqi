@@ -103,6 +103,9 @@ func responsesToolsToClaude(tools []map[string]interface{}) []map[string]interfa
 			"name":         name,
 			"input_schema": parameters,
 		}
+		if control, present := tool["cache_control"]; present {
+			claudeTool["cache_control"] = control
+		}
 		if description != "" {
 			claudeTool["description"] = description
 		}

@@ -53,15 +53,15 @@ describe('buildManagedChannelPatch', () => {
       channelPaymentCurrency: '  ',
       channelPaymentAmount: 0,
       proxyUrl: '',
-      customHeaders: undefined,
+      customHeaders: null,
     })
     expect(patch).toEqual({
       costMultiplier: 0,
-      maxGroupMultiplier: 0,
+      maxGroupMultiplier: null,
       channelPaymentCurrency: '',
       channelPaymentAmount: 0,
       proxyUrl: '',
-      customHeaders: {},
+      customHeaders: null,
     })
   })
 
@@ -90,13 +90,14 @@ describe('listDroppedManagedChannelFields', () => {
     expect(dropped).toEqual([])
   })
 
-  it('未承载字段变化时报丢弃（debug 兜底信号）', () => {
+  it('可变设置统一由单卡patch承载', () => {
     const dropped = listDroppedManagedChannelFields(baseChannel, {
       ...baseChannel,
       fastMode: true,
       tags: ['a', 'b'],
     })
-    expect(dropped).toEqual(['fastMode', 'tags'])
+    expect(dropped).toEqual([])
+    expect(buildManagedChannelPatch(baseChannel, { ...baseChannel, fastMode: true, tags: ['a', 'b'] })).toEqual({ fastMode: true, tags: ['a', 'b'] })
   })
 
   it('数字与数字字符串宽松相等不误报', () => {
@@ -151,4 +152,45 @@ describe('buildStagedKeyMultiplierConfigs', () => {
     expect(buildStagedKeyMultiplierConfigs(null, { apiKeyConfigs: [{ key: 'k' }] })).toBeNull()
     expect(buildStagedKeyMultiplierConfigs(original, {})).toBeNull()
   })
+})
+
+it('every omitted managed setting preserves the server value', () => {
+  expect(buildManagedChannelPatch(baseChannel, { name: 'renamed' })).toEqual({})
+  expect(buildManagedChannelPatch(baseChannel, { costMultiplier: undefined, customHeaders: undefined })).toEqual({})
+})
+
+it('keeps null, false, zero and empty containers distinct', () => {
+  const before = { ...baseChannel, autoBlacklistBalance: false, requestTimeoutMs: 1000, tags: ['a'], fastMode: true }
+  expect(buildManagedChannelPatch(before, { autoBlacklistBalance: null, requestTimeoutMs: 0, tags: [], fastMode: false }))
+    .toEqual({ autoBlacklistBalance: null, requestTimeoutMs: 0, tags: [], fastMode: false })
+})
+
+it('provider protocol defaults remain managed, generic accounts allow overrides', () => {
+  const original = { ...baseChannel, providerId: 'provider', autoManagedKind: 'provider' }
+  expect(buildManagedChannelPatch(original as Channel, { ...original, fastMode: true, tags: [] })).toEqual({ tags: [] })
+  expect(listDroppedManagedChannelFields(original as Channel, { ...original, fastMode: true })).toEqual(['fastMode'])
+  const generic = { ...original, autoManagedKind: 'generic' }
+  expect(buildManagedChannelPatch(generic as Channel, { ...generic, fastMode: true })).toEqual({ fastMode: true })
+})
+
+it.each([
+  ['proxyPreferDirect', true],
+  ['customHeaders', { authorization: 'local-test' }],
+  ['costMultiplier', 2],
+  ['maxGroupMultiplier', 3],
+])('preserves explicit null reset for %s', (field, value) => {
+  const original = { ...baseChannel, [field]: value } as Channel
+  expect(buildManagedChannelPatch(original, { [field]: null })).toEqual({ [field]: null })
+  expect(buildManagedChannelPatch({ ...original, [field]: null } as Channel, { [field]: null })).toEqual({})
+})
+
+it.each([
+  ['proxyPreferDirect', false],
+  ['customHeaders', {}],
+  ['costMultiplier', 0],
+  ['maxGroupMultiplier', 0],
+])('distinguishes null from concrete reset value for %s', (field, value) => {
+  const original = { ...baseChannel, [field]: null } as Channel
+  expect(buildManagedChannelPatch(original, { [field]: value })).toEqual({ [field]: value })
+  expect(buildManagedChannelPatch({ ...original, [field]: value } as Channel, { [field]: null })).toEqual({ [field]: null })
 })

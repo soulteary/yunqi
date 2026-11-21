@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/soulteary/yunqi/internal/redaction"
 	"io"
 	"net"
 	"net/http"
@@ -217,9 +218,15 @@ func transportHandler(app *fiber.App) http.Handler {
 			if fc.Response.StatusCode() != 200 || rw.status == 200 {
 				rw.WriteHeader(fc.Response.StatusCode())
 			}
+			body := fc.Response.Body()
+			if rw.status >= 400 || diagnosticOutput(r.URL.Path) {
+				body = redaction.JSON(body)
+				fc.Response.Header.Del("Content-Length")
+				rw.Header().Del("Content-Length")
+			}
 			rw.WriteHeaderNow()
 			if r.Method != http.MethodHead {
-				_, _ = rw.Write(fc.Response.Body())
+				_, _ = rw.Write(body)
 			}
 		}
 	})
@@ -283,10 +290,24 @@ func JSON(c fiber.Ctx, code int, value any) {
 	}
 	Writer(c).WriteHeader(code)
 	body := append([]byte(nil), c.Response().Body()...)
+	if code >= 400 || diagnosticOutput(Request(c).URL.Path) {
+		body = redaction.JSON(body)
+		Writer(c).Header().Del("Content-Length")
+		c.Response().Header.Del("Content-Length")
+	}
 	c.Response().ResetBody()
 	_, _ = Writer(c).Write(body)
 }
 func Data(c fiber.Ctx, code int, contentType string, body []byte) {
+	if code >= 400 || diagnosticOutput(Request(c).URL.Path) {
+		if strings.Contains(contentType, "json") {
+			body = redaction.JSON(body)
+		} else {
+			body = []byte(redaction.String(string(body)))
+		}
+		Writer(c).Header().Del("Content-Length")
+		c.Response().Header.Del("Content-Length")
+	}
 	Header(c, "Content-Type", contentType)
 	Status(c, code)
 	_, _ = Writer(c).Write(body)
@@ -446,6 +467,7 @@ type responseWriter struct {
 	request      *http.Request
 	header       *fasthttp.ResponseHeader
 	hijacked     bool
+	observeWrite func() func()
 }
 
 func (w *responseWriter) WriteHeader(code int) {
@@ -467,7 +489,17 @@ func (w *responseWriter) WriteHeaderNow() {
 	w.size = 0
 	w.ResponseWriter.WriteHeader(w.status)
 }
+func SetWriteObserver(c fiber.Ctx, observe func() func()) {
+	if w, ok := Writer(c).(interface{ ObserveWrites(func() func()) }); ok {
+		w.ObserveWrites(observe)
+	}
+}
+func (w *responseWriter) ObserveWrites(observe func() func()) { w.observeWrite = observe }
 func (w *responseWriter) Write(p []byte) (int, error) {
+	if w.observeWrite != nil {
+		end := w.observeWrite()
+		defer end()
+	}
 	w.WriteHeaderNow()
 	n, e := w.ResponseWriter.Write(p)
 	w.size += n
@@ -478,6 +510,10 @@ func (w *responseWriter) Status() int                       { return w.status }
 func (w *responseWriter) Size() int                         { return w.size }
 func (w *responseWriter) Written() bool                     { return w.size >= 0 }
 func (w *responseWriter) Flush() {
+	if w.observeWrite != nil {
+		end := w.observeWrite()
+		defer end()
+	}
 	w.WriteHeaderNow()
 	_ = http.NewResponseController(w.ResponseWriter).Flush()
 }
@@ -548,4 +584,17 @@ func fallback(c fiber.Ctx) error {
 	}
 	Text(c, http.StatusNotFound, "404 page not found")
 	return nil
+}
+
+func diagnosticOutput(path string) bool {
+	if !strings.HasPrefix(path, "/api/") {
+		return false
+	}
+	for _, part := range strings.Split(strings.ToLower(path), "/") {
+		switch part {
+		case "logs", "request-logs", "request-history", "reports", "changelog", "traces", "trace", "diagnose", "diagnostics", "debug", "route-preview", "route-dryrun":
+			return true
+		}
+	}
+	return false
 }

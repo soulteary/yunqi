@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/soulteary/yunqi/internal/redaction"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
@@ -85,8 +86,8 @@ func Setup(cfg *Config) error {
 		rawFileLog = log.New(io.Discard, "", flags)
 		// 控制台通道根据 Console 开关
 		if cfg.Console {
-			consoleLog = log.New(os.Stdout, "", flags)
-			log.SetOutput(os.Stdout)
+			consoleLog = log.New(redaction.Writer(os.Stdout), "", flags)
+			log.SetOutput(redaction.Writer(os.Stdout))
 		} else {
 			consoleLog = log.New(io.Discard, "", flags)
 			log.SetOutput(io.Discard)
@@ -116,16 +117,16 @@ func Setup(cfg *Config) error {
 
 	// log.Printf 写入 stdout + 文件（普通日志，如初始化、调度信息等）
 	if cfg.Console {
-		log.SetOutput(io.MultiWriter(os.Stdout, lumberLogger))
+		log.SetOutput(redaction.Writer(io.MultiWriter(os.Stdout, lumberLogger)))
 	} else {
-		log.SetOutput(lumberLogger)
+		log.SetOutput(redaction.Writer(lumberLogger))
 	}
 	// rawFileLog 始终仅写文件（原始 JSON），用于双通道输出
-	rawFileLog = log.New(lumberLogger, "", flags)
+	rawFileLog = log.New(redaction.Writer(lumberLogger), "", flags)
 	// consoleLog 始终仅写控制台（精简格式），用于请求/响应日志的控制台通道
 	// 避免精简格式重复写入文件
 	if cfg.Console {
-		consoleLog = log.New(os.Stdout, "", flags)
+		consoleLog = log.New(redaction.Writer(os.Stdout), "", flags)
 	} else {
 		// 无控制台模式下，consoleLog 回退到 rawFileLog（仅文件）
 		consoleLog = rawFileLog

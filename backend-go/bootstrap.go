@@ -15,6 +15,7 @@ import (
 	"github.com/soulteary/yunqi/internal/eventbus"
 	"github.com/soulteary/yunqi/internal/handlers"
 	"github.com/soulteary/yunqi/internal/healthcheck"
+	"github.com/soulteary/yunqi/internal/httpclient"
 	"github.com/soulteary/yunqi/internal/logger"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/presetstore"
@@ -22,11 +23,13 @@ import (
 	"github.com/soulteary/yunqi/internal/ratelimit"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/session"
+	"github.com/soulteary/yunqi/internal/telemetry"
 	"github.com/soulteary/yunqi/internal/thinkingcache"
 	"github.com/soulteary/yunqi/internal/warmup"
 )
 
 type application struct {
+	monitoring    *telemetry.Registry
 	envCfg        *config.EnvConfig
 	paths         runtimePaths
 	cfgManager    *config.ConfigManager
@@ -67,6 +70,9 @@ func runService(cliOpts cliOptions) {
 		log.Println("没有找到 .env 文件，使用环境变量或默认值")
 	}
 
+	// Cover default HTTP clients before any configuration sync or probe starts.
+	httpclient.InstallDefaultOutboundPolicy()
+
 	// 设置版本信息到 handlers 包
 	handlers.SetVersionInfo(Version, BuildTime, GitCommit)
 
@@ -96,6 +102,8 @@ func runService(cliOpts cliOptions) {
 		log.Fatalf("初始化日志系统失败: %v", err)
 	}
 
+	// Candidate keys must be observed before initial parsing/validation can log.
+	initializeCredentialRedaction(envCfg)
 	cfgManager, err := config.NewConfigManager(paths.ConfigPath, paths.BackupDir)
 	if err != nil {
 		log.Fatalf("初始化配置管理器失败: %v", err)

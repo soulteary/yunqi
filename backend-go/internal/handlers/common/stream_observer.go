@@ -1,6 +1,8 @@
 package common
 
 import (
+	"context"
+	"github.com/soulteary/yunqi/internal/telemetry"
 	"sync"
 	"time"
 
@@ -13,7 +15,8 @@ const streamTimeoutObservationKey = "streamTimeoutObservation"
 
 // StreamTimeoutObserver 记录单次流式请求的真实空闲间隔，用于后续数据化校准超时参数。
 type StreamTimeoutObserver struct {
-	mu sync.Mutex
+	timingContext context.Context
+	mu            sync.Mutex
 
 	store      *metrics.ChannelLogStore
 	metricsKey string
@@ -43,10 +46,11 @@ func StartStreamTimeoutObservation(c fiber.Ctx, store *metrics.ChannelLogStore, 
 		startedAt = time.Now()
 	}
 	httpbridge.SetValue(c, streamTimeoutObservationKey, &StreamTimeoutObserver{
-		store:      store,
-		metricsKey: metricsKey,
-		requestID:  requestID,
-		startedAt:  startedAt,
+		timingContext: httpbridge.Request(c).Context(),
+		store:         store,
+		metricsKey:    metricsKey,
+		requestID:     requestID,
+		startedAt:     startedAt,
 	})
 }
 
@@ -146,6 +150,7 @@ func (o *StreamTimeoutObserver) markFirstContentLocked(now time.Time) {
 	}
 	if o.firstContentAt.IsZero() {
 		o.firstContentAt = now
+		telemetry.MarkFirstContent(o.timingContext)
 		o.lastStreamActivityAt = now
 		return
 	}
@@ -157,9 +162,10 @@ func (o *StreamTimeoutObserver) markStreamActivityLocked(now time.Time) {
 		now = time.Now()
 	}
 	if o.firstContentAt.IsZero() {
-		o.markFirstContentLocked(now)
 		return
 	}
+	// Transport activity (metadata, comments, heartbeats) must not end TTFT.
+	// Only MarkFirstContent or a deliverable tool call establishes that clock.
 	if !o.lastStreamActivityAt.IsZero() {
 		o.maxStreamIdleMs = maxInt64(o.maxStreamIdleMs, now.Sub(o.lastStreamActivityAt).Milliseconds())
 	}
@@ -170,7 +176,7 @@ func (o *StreamTimeoutObserver) markToolCallActivityLocked(now time.Time) {
 	if now.IsZero() {
 		now = time.Now()
 	}
-	o.markStreamActivityLocked(now)
+	o.markFirstContentLocked(now)
 	if !o.lastToolCallActivityAt.IsZero() {
 		o.maxToolCallIdleMs = maxInt64(o.maxToolCallIdleMs, now.Sub(o.lastToolCallActivityAt).Milliseconds())
 	}
