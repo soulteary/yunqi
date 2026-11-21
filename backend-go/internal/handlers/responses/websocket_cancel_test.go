@@ -111,3 +111,91 @@ data: {"type":"response.completed","response":{"id":"resp_2","status":"completed
 		})
 	}
 }
+
+func TestWebSocketCancelBeforeWorkerStarts(t *testing.T) {
+	var active webSocketActiveTurn
+	if active.interrupt("") {
+		t.Fatal("idle cancel affected future turn")
+	}
+	active.reserve()
+	if active.interrupt("old") {
+		t.Fatal("old ID cancelled unstarted turn")
+	}
+	if !active.interrupt("") {
+		t.Fatal("unstarted create was not cancelled")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	active.start(cancel)
+	if ctx.Err() == nil {
+		t.Fatal("worker started with live context after queued cancel")
+	}
+	active.finish()
+	active.reserve()
+	next, nextCancel := context.WithCancel(context.Background())
+	defer nextCancel()
+	active.start(nextCancel)
+	if next.Err() != nil {
+		t.Fatal("queued cancellation leaked into next turn")
+	}
+}
+
+func TestWebSocketImmediateCancelDoesNotLeaveUpstreamRunning(t *testing.T) {
+	var inFlight atomic.Int32
+	upstreamStopped := make(chan struct{}, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if strings.Contains(string(body), "blocked") {
+			inFlight.Add(1)
+			defer inFlight.Add(-1)
+			<-r.Context().Done()
+			upstreamStopped <- struct{}{}
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"ready\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"ready\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n")
+	}))
+	defer upstream.Close()
+	router := newResponsesWebSocketTestRouter(t, config.UpstreamConfig{BaseURL: upstream.URL, APIKeys: []string{"test"}, ServiceType: "responses", Status: "active"})
+	proxy := httptest.NewServer(httpbridge.Handler(router))
+	defer proxy.Close()
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(proxy.URL, "http")+"/v1/responses", http.Header{"x-api-key": []string{"secret-key"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if err := conn.WriteJSON(map[string]interface{}{"type": "response.create", "model": "m", "input": "blocked"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.WriteJSON(map[string]interface{}{"type": "response.cancel"}); err != nil {
+		t.Fatal(err)
+	}
+	readWebSocketJSONUntilType(t, conn, "response.cancelled")
+	if inFlight.Load() != 0 {
+		select {
+		case <-upstreamStopped:
+		case <-time.After(3 * time.Second):
+			t.Fatal("upstream still running after cancellation ack")
+		}
+	}
+	if err := conn.WriteJSON(map[string]interface{}{"type": "response.create", "model": "m", "input": "ready"}); err != nil {
+		t.Fatal(err)
+	}
+	readWebSocketJSONUntilType(t, conn, "response.completed")
+}
+
+func TestWebSocketWarmupReservationDoesNotLeak(t *testing.T) {
+	var active webSocketActiveTurn
+	active.reserve()
+	active.discardReservation()
+	if active.interrupt("") {
+		t.Fatal("warmup left a pending inference")
+	}
+	active.reserve()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	active.start(cancel)
+	if ctx.Err() != nil {
+		t.Fatal("idle cancellation leaked into next turn")
+	}
+}

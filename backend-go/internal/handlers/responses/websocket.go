@@ -163,6 +163,7 @@ func serveResponsesWebSocketBridgeLoop(
 	// even an upstream that has not sent headers or content yet.
 	ctx, cancel := context.WithCancel(httpbridge.Request(c).Context())
 	var active webSocketActiveTurn
+	active.reserve() // first response.create was accepted by the handshake reader
 	messages := make(chan webSocketClientMessage, 1)
 	readerDone := make(chan struct{})
 	go func() {
@@ -182,6 +183,14 @@ func serveResponsesWebSocketBridgeLoop(
 					if active.interrupt(control.ResponseID) {
 						continue
 					}
+				}
+			}
+			if kind == websocket.TextMessage {
+				var event struct {
+					Type string `json:"type"`
+				}
+				if json.Unmarshal(body, &event) == nil && event.Type == "response.create" {
+					active.reserve()
 				}
 			}
 			select {
@@ -232,6 +241,7 @@ func serveResponsesWebSocketBridgeLoop(
 			continue
 		}
 		if warmup {
+			active.discardReservation()
 			if err := writeWebSocketWarmupResponse(conn); err != nil {
 				return
 			}
@@ -287,6 +297,7 @@ func serveResponseCreateOverWebSocketWithControl(ctx context.Context, parent fib
 	if err != nil {
 		return nil, err
 	}
+	req.RemoteAddr = httpbridge.Request(parent).RemoteAddr
 	copyWebSocketRequestHeaders(httpbridge.Request(parent).Header, req.Header)
 	req.Header.Set("Content-Type", "application/json")
 	req.ContentLength = int64(len(requestBody))
@@ -580,10 +591,12 @@ func isWebSocketClosed(err error) bool {
 // webSocketActiveTurn has no connection writes: the reader may only cancel the
 // current worker. All data frames remain serialized through that worker.
 type webSocketActiveTurn struct {
-	mu          sync.Mutex
-	cancel      context.CancelFunc
-	responseID  string
-	interrupted bool
+	mu                sync.Mutex
+	cancel            context.CancelFunc
+	responseID        string
+	interrupted       bool
+	queued            int
+	queuedInterrupted bool
 }
 
 func (a *webSocketActiveTurn) start(cancel context.CancelFunc) {
@@ -591,7 +604,14 @@ func (a *webSocketActiveTurn) start(cancel context.CancelFunc) {
 	defer a.mu.Unlock()
 	a.cancel = cancel
 	a.responseID = ""
-	a.interrupted = false
+	a.interrupted = a.queued > 0 && a.queuedInterrupted
+	if a.queued > 0 {
+		a.queued--
+	}
+	a.queuedInterrupted = false
+	if a.interrupted {
+		cancel()
+	}
 }
 func (a *webSocketActiveTurn) finish() { a.mu.Lock(); defer a.mu.Unlock(); a.cancel = nil }
 func (a *webSocketActiveTurn) observe(data string) {
@@ -615,6 +635,10 @@ func (a *webSocketActiveTurn) observe(data string) {
 func (a *webSocketActiveTurn) interrupt(id string) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.cancel == nil && id == "" && a.queued > 0 {
+		a.queuedInterrupted = true
+		return true
+	}
 	if a.cancel == nil || (id != "" && id != a.responseID) {
 		return false
 	}
@@ -626,4 +650,15 @@ func (a *webSocketActiveTurn) result() (string, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.responseID, a.interrupted
+}
+
+func (a *webSocketActiveTurn) reserve() { a.mu.Lock(); defer a.mu.Unlock(); a.queued++ }
+
+func (a *webSocketActiveTurn) discardReservation() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.queued > 0 {
+		a.queued--
+	}
+	a.queuedInterrupted = false
 }
