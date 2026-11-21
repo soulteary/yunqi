@@ -50,6 +50,23 @@ func (c *OpenAIChatConverter) ToProviderRequest(sess *session.Session, req *type
 	if req.StreamOptions != nil {
 		openaiReq["stream_options"] = req.StreamOptions
 	}
+	// Chat streams omit their authoritative usage unless it is requested. Keep
+	// explicit client options, while defaulting converted Responses streams to
+	// receive the usage-only final chunk (including prompt-cache accounting).
+	if req.Stream {
+		if options, ok := req.StreamOptions.(map[string]interface{}); ok {
+			copy := make(map[string]interface{}, len(options)+1)
+			for key, value := range options {
+				copy[key] = value
+			}
+			if _, explicit := copy["include_usage"]; !explicit {
+				copy["include_usage"] = true
+			}
+			openaiReq["stream_options"] = copy
+		} else if req.StreamOptions == nil {
+			openaiReq["stream_options"] = map[string]interface{}{"include_usage": true}
+		}
+	}
 
 	// Tools conversion with Codex custom tool support.
 	codexEnabled := false
