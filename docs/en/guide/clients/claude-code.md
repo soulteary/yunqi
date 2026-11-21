@@ -1,6 +1,5 @@
 # Connect Claude Code to Yunqi
 
-If you are using **Yunqi Desktop**, you can apply local Yunqi settings from [Agent configuration](/en/guide/desktop/#agent-configuration) first, then return here for protocol details.
 
 Claude Code uses the Anthropic Messages protocol. When connecting it to Yunqi, use the Yunqi **Messages** endpoint.
 

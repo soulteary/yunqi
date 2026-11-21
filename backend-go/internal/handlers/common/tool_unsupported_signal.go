@@ -6,11 +6,12 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v3"
 	"github.com/tidwall/gjson"
 
 	"github.com/soulteary/yunqi/internal/autopilot"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 // 工具调用能力负信号识别与学习（docs/specs/tool-call-capability.md §4.3/§4.4）。
@@ -137,7 +138,7 @@ func ForcedToolChoiceInBody(body []byte) bool {
 //
 // 学习条件：请求强制 tool_choice + 上游 2xx 完成 + 全程零工具调用块。
 // kind 为该次尝试的执行协议（executionKind），与 upstream 一起构成稳定路由身份。
-func MaybeLearnForcedToolChoiceMiss(c *gin.Context, upstream *config.UpstreamConfig, apiKey, model string, attemptBody []byte, sawToolCall bool, kind string) {
+func MaybeLearnForcedToolChoiceMiss(c fiber.Ctx, upstream *config.UpstreamConfig, apiKey, model string, attemptBody []byte, sawToolCall bool, kind string) {
 	if c == nil || upstream == nil || model == "" {
 		return
 	}
@@ -169,7 +170,7 @@ func MaybeLearnForcedToolChoiceMiss(c *gin.Context, upstream *config.UpstreamCon
 // 带工具请求的候选只从验证组合产生。
 // kind 为该次尝试的执行协议（executionKind）；与 upstream 一起构成稳定路由身份
 // （逻辑渠道×协议，物理 UID 重铸后学习不失效）。
-func MaybeLearnVerifiedToolCalls(c *gin.Context, upstream *config.UpstreamConfig, apiKey, model string, attemptBody []byte, sawToolCall bool, kind string) {
+func MaybeLearnVerifiedToolCalls(c fiber.Ctx, upstream *config.UpstreamConfig, apiKey, model string, attemptBody []byte, sawToolCall bool, kind string) {
 	if c == nil || upstream == nil || model == "" {
 		return
 	}
@@ -196,7 +197,7 @@ func MaybeLearnVerifiedToolCalls(c *gin.Context, upstream *config.UpstreamConfig
 // MaybeForgetVerifiedToolCallsOnUnsupported 处理明确的工具能力拒绝。
 // 空流、超时、断流和无效响应只说明本次请求不可用，不能证明渠道没有工具能力，
 // 因此不会撤销 verified；只有上游 400/422 明确点名工具能力不支持时才调用此函数。
-func MaybeForgetVerifiedToolCallsOnUnsupported(c *gin.Context, upstream *config.UpstreamConfig, apiKey, model string, attemptBody []byte, kind, evidence string) {
+func MaybeForgetVerifiedToolCallsOnUnsupported(c fiber.Ctx, upstream *config.UpstreamConfig, apiKey, model string, attemptBody []byte, kind, evidence string) {
 	if c == nil || upstream == nil || model == "" {
 		return
 	}
@@ -237,7 +238,7 @@ func MaybeForgetVerifiedToolCallsOnUnsupported(c *gin.Context, upstream *config.
 // （ChannelCompatCache.VerifiedToolCallPseudoMissed），窗口自动收敛。
 //
 // kind 为该次尝试的执行协议（executionKind），与 MaybeLearnVerifiedToolCalls 同路由身份。
-func MaybeCountPseudoToolCallMiss(c *gin.Context, upstream *config.UpstreamConfig, apiKey, model string, attemptBody []byte, sawToolCall, sawPseudoMarker bool, streamErr error, kind string) {
+func MaybeCountPseudoToolCallMiss(c fiber.Ctx, upstream *config.UpstreamConfig, apiKey, model string, attemptBody []byte, sawToolCall, sawPseudoMarker bool, streamErr error, kind string) {
 	if c == nil || upstream == nil || model == "" {
 		return
 	}
@@ -252,7 +253,7 @@ func MaybeCountPseudoToolCallMiss(c *gin.Context, upstream *config.UpstreamConfi
 
 // countVerifiedToolCallPseudoMiss RecordVerifiedToolCallPseudoMiss 的公共收尾：
 // 路由身份归一 + 计数 + 日志。origin 标注证据来源（成功路径/竞速让出）。
-func countVerifiedToolCallPseudoMiss(c *gin.Context, upstream *config.UpstreamConfig, apiKey, model, kind, origin string) {
+func countVerifiedToolCallPseudoMiss(c fiber.Ctx, upstream *config.UpstreamConfig, apiKey, model, kind, origin string) {
 	routeIdentity := config.ToolRouteIdentity(upstream, kind)
 	if routeIdentity == "" {
 		return
@@ -283,21 +284,21 @@ type toolCallLearningIdentity struct {
 	kind     string
 }
 
-// setToolCallLearningIdentity 在每次渠道尝试执行前把学习身份写入 gin context。
+// setToolCallLearningIdentity 在每次渠道尝试执行前把学习身份写入 Fiber context。
 // 竞速分支持有独立 context 副本（startShadow 的 c.Copy 之后各自设置），互不串扰；
 // 成功路径的学习调用在尝试收尾处直接使用词法作用域变量，不读此值。
-func setToolCallLearningIdentity(c *gin.Context, upstream *config.UpstreamConfig, apiKey, model, kind string) {
+func setToolCallLearningIdentity(c fiber.Ctx, upstream *config.UpstreamConfig, apiKey, model, kind string) {
 	if c == nil || upstream == nil {
 		return
 	}
-	c.Set(toolCallLearningContextKey, toolCallLearningIdentity{upstream: upstream, apiKey: apiKey, model: model, kind: kind})
+	httpbridge.SetValue(c, toolCallLearningContextKey, toolCallLearningIdentity{upstream: upstream, apiKey: apiKey, model: model, kind: kind})
 }
 
-func toolCallLearningIdentityFromContext(c *gin.Context) (toolCallLearningIdentity, bool) {
+func toolCallLearningIdentityFromContext(c fiber.Ctx) (toolCallLearningIdentity, bool) {
 	if c == nil {
 		return toolCallLearningIdentity{}, false
 	}
-	v, ok := c.Get(toolCallLearningContextKey)
+	v, ok := httpbridge.Value(c, toolCallLearningContextKey)
 	if !ok {
 		return toolCallLearningIdentity{}, false
 	}
@@ -318,14 +319,15 @@ func toolCallLearningIdentityFromContext(c *gin.Context) (toolCallLearningIdenti
 // MaybeLearnForcedToolChoiceMiss 覆盖，竞速让出不双算）。首包时刻无法预知后续
 // 是否出现真实 function_call，接受这一理论误计——真实成功经正向学习即时清零
 // 重建（MaybeLearnVerifiedToolCalls）。
-func notePseudoToolCallYield(c *gin.Context) {
+func notePseudoToolCallYield(c fiber.Ctx) error {
 	id, ok := toolCallLearningIdentityFromContext(c)
 	if !ok {
-		return
+		return nil
 	}
 	body := GetEffectiveRequestBody(c, nil)
 	if !BodyHasTools(body) || ForcedToolChoiceInBody(body) {
-		return
+		return nil
 	}
 	countVerifiedToolCallPseudoMiss(c, id.upstream, id.apiKey, id.model, id.kind, "竞速让出")
+	return nil
 }

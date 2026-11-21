@@ -5,9 +5,11 @@ import (
 	"bytes"
 	"encoding/json"
 
+	"github.com/soulteary/yunqi/internal/httpbridge"
+
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/utils"
-	"github.com/gin-gonic/gin"
 )
 
 // isImageContentType 判断 content block 是否为图片类型
@@ -139,7 +141,7 @@ func StripHistoricalImages(bodyBytes []byte, turnLimit int) ([]byte, bool) {
 }
 
 // StripHistoricalImagesWithContext 替换历史轮次中的图片为文本占位符（带日志上下文）。
-func StripHistoricalImagesWithContext(c *gin.Context, bodyBytes []byte, turnLimit int, enableLog bool, apiType string) ([]byte, bool) {
+func StripHistoricalImagesWithContext(c fiber.Ctx, bodyBytes []byte, turnLimit int, enableLog bool, apiType string) ([]byte, bool) {
 	if turnLimit <= 0 || len(bodyBytes) == 0 {
 		return bodyBytes, false
 	}
@@ -158,7 +160,7 @@ func StripHistoricalImagesWithContext(c *gin.Context, bodyBytes []byte, turnLimi
 	finalBody := &bodyBytes
 	defer func() {
 		if c != nil {
-			c.Set(visionDetectedContextKey, detectImageInBody(*finalBody))
+			httpbridge.SetValue(c, visionDetectedContextKey, detectImageInBody(*finalBody))
 		}
 	}()
 

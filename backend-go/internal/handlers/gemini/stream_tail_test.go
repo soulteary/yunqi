@@ -8,13 +8,12 @@ import (
 	"time"
 
 	"github.com/soulteary/yunqi/internal/handlers/common"
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 // Gemini 直通以未终结的 data 行收尾时（单换行或完全没有换行）必须补齐空行，
 // 否则严格 SSE 解析器不会派发最后一帧（finish / usage / [DONE]）。
 func TestStreamGeminiToGeminiTerminatesUnfinishedTail(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	dataLine := `data: {"candidates":[{"content":{"parts":[{"text":"hi"}]}}]}`
 	properlyTerminated := dataLine + "\n\n"
@@ -44,7 +43,7 @@ func TestStreamGeminiToGeminiTerminatesUnfinishedTail(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
-			c, _ := gin.CreateTestContext(w)
+			c, _ := httpbridge.TestContext(w)
 
 			chunkChan := make(chan []byte, 1)
 			errChan := make(chan error, 1)

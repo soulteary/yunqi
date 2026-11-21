@@ -7,10 +7,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/handlers/common"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/types"
-	"github.com/gin-gonic/gin"
 )
 
 // feedRepetitionText 喂无限重复扫描器（开关关闭时跳过）。返回是否命中。
@@ -83,7 +84,7 @@ func claudeDeltaRepetitionText(line string) (string, bool) {
 
 // writeChatStreamAbortError 写出 chat 流式错误收尾（error chunk + [DONE]），
 // 用于 post-commit 阶段中止流（无限重复检测命中时），避免客户端裸断连。
-func writeChatStreamAbortError(c *gin.Context, flusher http.Flusher) {
+func writeChatStreamAbortError(c fiber.Ctx, flusher http.Flusher) {
 	errChunk := map[string]interface{}{
 		"error": map[string]interface{}{
 			"message": "stream aborted: model stuck in repetition loop",
@@ -92,15 +93,15 @@ func writeChatStreamAbortError(c *gin.Context, flusher http.Flusher) {
 		},
 	}
 	chunkBytes, _ := json.Marshal(errChunk)
-	_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", string(chunkBytes))
-	_, _ = fmt.Fprintf(c.Writer, "data: [DONE]\n\n")
+	_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(chunkBytes))
+	_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: [DONE]\n\n")
 	if flusher != nil {
 		flusher.Flush()
 	}
 }
 
 // chatAbortRepetitionLoop 无限重复命中后的统一中止：写 chat 错误收尾并返回哨兵。
-func chatAbortRepetitionLoop(c *gin.Context, flusher http.Flusher, progress *common.StreamProgressLogger, scanner *common.RepetitionLoopScanner) error {
+func chatAbortRepetitionLoop(c fiber.Ctx, flusher http.Flusher, progress *common.StreamProgressLogger, scanner *common.RepetitionLoopScanner) error {
 	common.MarkStreamRepetitionLoop(c)
 	common.RequestLogf(c, "[Chat-Stream-RepetitionLoop] 检测到模型无限重复输出（%s），中止当前流（Header 已发送，不换渠道；由调度层强制熔断该渠道模型）", scanner.Detail())
 	writeChatStreamAbortError(c, flusher)
@@ -123,7 +124,7 @@ func chatStreamHasDataActivity(lines []string) bool {
 
 // streamPassthrough 直接透传 SSE 流（用于 OpenAI 兼容上游）
 func streamPassthrough(
-	c *gin.Context,
+	c fiber.Ctx,
 	resp *http.Response,
 	flusher http.Flusher,
 	logBuffer *common.LimitedLogBuffer,
@@ -205,7 +206,7 @@ func streamPassthrough(
 					}
 				}
 			}
-			_, _ = c.Writer.Write(chunk)
+			_, _ = httpbridge.Writer(c).Write(chunk)
 			if flusher != nil {
 				flusher.Flush()
 			}
@@ -231,7 +232,7 @@ func streamPassthrough(
 //   - 已经以空行收尾，或从未写过内容 → 不补
 //
 // 对已经终结的事件再补空行是 no-op，不会引入重复内容。
-func flushCompletePassthroughRemainder(c *gin.Context, flusher http.Flusher, remainder string, writtenTail string) {
+func flushCompletePassthroughRemainder(c fiber.Ctx, flusher http.Flusher, remainder string, writtenTail string) {
 	if writtenTail == "" {
 		// 从未写入任何内容：没有需要终结的事件
 		return
@@ -254,7 +255,7 @@ func flushCompletePassthroughRemainder(c *gin.Context, flusher http.Flusher, rem
 		terminator = "\n"
 	}
 
-	_, _ = fmt.Fprint(c.Writer, terminator)
+	_, _ = fmt.Fprint(httpbridge.Writer(c), terminator)
 	if flusher != nil {
 		flusher.Flush()
 	}
@@ -281,7 +282,7 @@ func readChunkWithTimeout(resp *http.Response, buf []byte, timeout time.Duration
 
 // streamClaudeToChat Claude 流式响应转换为 OpenAI Chat 格式
 func streamClaudeToChat(
-	c *gin.Context,
+	c fiber.Ctx,
 	resp *http.Response,
 	flusher http.Flusher,
 	model string,
@@ -353,7 +354,7 @@ func streamClaudeToChat(
 	}
 
 	if !doneSent {
-		_, _ = fmt.Fprintf(c.Writer, "data: [DONE]\n\n")
+		_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: [DONE]\n\n")
 		if flusher != nil {
 			flusher.Flush()
 		}
@@ -369,7 +370,7 @@ func streamClaudeToChat(
 // 处理的 Responses 事件: response.output_text.delta, response.output_item.added,
 // response.function_call_arguments.delta, response.completed 等。
 func streamResponsesToChat(
-	c *gin.Context,
+	c fiber.Ctx,
 	resp *http.Response,
 	flusher http.Flusher,
 	model string,
@@ -596,7 +597,7 @@ func streamResponsesToChat(
 					}
 					writeChatSSEChunk(c, flusher, finalChunk)
 					// 发送 [DONE]
-					_, _ = fmt.Fprintf(c.Writer, "data: [DONE]\n\n")
+					_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: [DONE]\n\n")
 					if flusher != nil {
 						flusher.Flush()
 					}
@@ -614,7 +615,7 @@ func streamResponsesToChat(
 	}
 
 	if !doneSent {
-		_, _ = fmt.Fprintf(c.Writer, "data: [DONE]\n\n")
+		_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: [DONE]\n\n")
 		if flusher != nil {
 			flusher.Flush()
 		}
@@ -625,21 +626,21 @@ func streamResponsesToChat(
 }
 
 // writeChatSSEChunk 将 Chat chunk 写为 SSE 格式并 flush。
-func writeChatSSEChunk(c *gin.Context, flusher http.Flusher, chunk map[string]interface{}) {
+func writeChatSSEChunk(c fiber.Ctx, flusher http.Flusher, chunk map[string]interface{}) {
 	chunkBytes, _ := json.Marshal(chunk)
-	_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", string(chunkBytes))
+	_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(chunkBytes))
 	if flusher != nil {
 		flusher.Flush()
 	}
 }
 
-func processClaudeChatStreamLine(c *gin.Context, flusher http.Flusher, model string, line string, totalUsage **types.Usage, doneSent *bool) {
+func processClaudeChatStreamLine(c fiber.Ctx, flusher http.Flusher, model string, line string, totalUsage **types.Usage, doneSent *bool) {
 	if !strings.HasPrefix(line, "data: ") {
 		return
 	}
 	jsonData := strings.TrimPrefix(line, "data: ")
 	if jsonData == "[DONE]" {
-		_, _ = fmt.Fprintf(c.Writer, "data: [DONE]\n\n")
+		_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: [DONE]\n\n")
 		if flusher != nil {
 			flusher.Flush()
 		}
@@ -680,7 +681,7 @@ func processClaudeChatStreamLine(c *gin.Context, flusher http.Flusher, model str
 				}},
 			}
 			chunkBytes, _ := json.Marshal(chatChunk)
-			_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", string(chunkBytes))
+			_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(chunkBytes))
 			if flusher != nil {
 				flusher.Flush()
 			}
@@ -700,7 +701,7 @@ func processClaudeChatStreamLine(c *gin.Context, flusher http.Flusher, model str
 				}},
 			}
 			chunkBytes, _ := json.Marshal(chatChunk)
-			_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", string(chunkBytes))
+			_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(chunkBytes))
 			if flusher != nil {
 				flusher.Flush()
 			}
@@ -728,7 +729,7 @@ func processClaudeChatStreamLine(c *gin.Context, flusher http.Flusher, model str
 			}
 		}
 		chunkBytes, _ := json.Marshal(stopChunk)
-		_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", string(chunkBytes))
+		_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(chunkBytes))
 		if flusher != nil {
 			flusher.Flush()
 		}
@@ -743,9 +744,9 @@ func processClaudeChatStreamLine(c *gin.Context, flusher http.Flusher, model str
 }
 
 // chatErrorResponse 返回 OpenAI 格式的错误响应
-func chatErrorResponse(c *gin.Context, statusCode int, message string, code string) {
-	c.JSON(statusCode, gin.H{
-		"error": gin.H{
+func chatErrorResponse(c fiber.Ctx, statusCode int, message string, code string) {
+	httpbridge.JSON(c, statusCode, fiber.Map{
+		"error": fiber.Map{
 			"message": message,
 			"type":    "server_error",
 			"code":    code,
@@ -754,9 +755,9 @@ func chatErrorResponse(c *gin.Context, statusCode int, message string, code stri
 }
 
 // handleAllChannelsFailed 处理所有渠道失败的情况
-func handleAllChannelsFailed(c *gin.Context, failoverErr *common.FailoverError, lastError error) {
+func handleAllChannelsFailed(c fiber.Ctx, failoverErr *common.FailoverError, lastError error) {
 	if failoverErr != nil {
-		c.Data(failoverErr.Status, "application/json", failoverErr.Body)
+		httpbridge.Data(c, failoverErr.Status, "application/json", failoverErr.Body)
 		return
 	}
 
@@ -769,9 +770,9 @@ func handleAllChannelsFailed(c *gin.Context, failoverErr *common.FailoverError, 
 }
 
 // handleAllKeysFailed 处理所有 Key 失败的情况
-func handleAllKeysFailed(c *gin.Context, failoverErr *common.FailoverError, lastError error) {
+func handleAllKeysFailed(c fiber.Ctx, failoverErr *common.FailoverError, lastError error) {
 	if failoverErr != nil {
-		c.Data(failoverErr.Status, "application/json", failoverErr.Body)
+		httpbridge.Data(c, failoverErr.Status, "application/json", failoverErr.Body)
 		return
 	}
 

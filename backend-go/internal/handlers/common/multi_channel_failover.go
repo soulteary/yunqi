@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/autopilot"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/types"
-	"github.com/gin-gonic/gin"
 )
 
 // MultiChannelAttemptResult 描述一次"选中渠道"的尝试结果（用于多渠道 failover 外壳复用）。
@@ -29,8 +30,8 @@ type MultiChannelAttemptResult struct {
 }
 
 // TrySelectedChannelFunc 尝试一次选中的渠道，返回该渠道的尝试结果。
-// c 是本次尝试的分支 gin context：主分支为主请求 context，竞速影子分支为其副本。
-type TrySelectedChannelFunc func(c *gin.Context, selection *scheduler.SelectionResult) MultiChannelAttemptResult
+// c 是本次尝试的分支 Fiber context：主分支为主请求 context，竞速影子分支为其副本。
+type TrySelectedChannelFunc func(c fiber.Ctx, selection *scheduler.SelectionResult) MultiChannelAttemptResult
 
 // OnMultiChannelHandledFunc 在请求被"处理完成"时回调（成功或非 failover 错误都会触发）。
 type OnMultiChannelHandledFunc func(selection *scheduler.SelectionResult, result MultiChannelAttemptResult)
@@ -44,12 +45,12 @@ type pendingRoutingAttempt struct {
 }
 
 // HandleAllFailedFunc 处理"所有渠道都失败"的返回逻辑（不同入口可能有不同错误格式）。
-type HandleAllFailedFunc func(c *gin.Context, failoverErr *FailoverError, lastError error)
+type HandleAllFailedFunc func(c fiber.Ctx, failoverErr *FailoverError, lastError error)
 
 // HandleMultiChannelFailover 处理多渠道 failover 外壳逻辑（选渠道 + 聚合错误 + Trace 亲和）。
 // 具体"渠道内 Key/BaseURL 轮转"由 trySelectedChannel 实现（通常调用 TryUpstreamWithAllKeys）。
 func HandleMultiChannelFailover(
-	c *gin.Context,
+	c fiber.Ctx,
 	envCfg *config.EnvConfig,
 	channelScheduler *scheduler.ChannelScheduler,
 	kind scheduler.ChannelKind,
@@ -68,7 +69,7 @@ func HandleMultiChannelFailover(
 // HandleMultiChannelFailoverWithContextRequirement 处理带上下文需求的多渠道 failover。
 // agentRole 用于角色感知 override 查找与 trace affinity 隔离（"" | "main" | "subagent"）。
 func HandleMultiChannelFailoverWithContextRequirement(
-	c *gin.Context,
+	c fiber.Ctx,
 	envCfg *config.EnvConfig,
 	channelScheduler *scheduler.ChannelScheduler,
 	kind scheduler.ChannelKind,
@@ -101,7 +102,7 @@ func HandleMultiChannelFailoverWithContextRequirement(
 }
 
 func HandleMultiChannelFailoverWithSelectionFilter(
-	c *gin.Context,
+	c fiber.Ctx,
 	envCfg *config.EnvConfig,
 	channelScheduler *scheduler.ChannelScheduler,
 	kind scheduler.ChannelKind,
@@ -120,7 +121,7 @@ func HandleMultiChannelFailoverWithSelectionFilter(
 		return
 	}
 	if handleAllFailed == nil {
-		handleAllFailed = func(c *gin.Context, failoverErr *FailoverError, lastError error) {
+		handleAllFailed = func(c fiber.Ctx, failoverErr *FailoverError, lastError error) {
 			HandleAllChannelsFailed(c, failoverErr, lastError, apiType)
 		}
 	}
@@ -128,7 +129,7 @@ func HandleMultiChannelFailoverWithSelectionFilter(
 
 	// 生成服务端逻辑请求关联 ID（贯穿所有渠道尝试和 trace）
 	correlationID := autopilot.GenerateRequestCorrelationID()
-	c.Set("ccx.request_correlation_id", correlationID)
+	httpbridge.SetValue(c, "ccx.request_correlation_id", correlationID)
 
 	// 该外壳是 route-aware 调用方：失败集合只按物理路由记录，避免不同 kind
 	// 的相同 index 相互污染。旧 SelectChannel/SelectionOptions 调用方仍可显式传 FailedChannels。
@@ -146,7 +147,7 @@ func HandleMultiChannelFailoverWithSelectionFilter(
 	// separate from failedRoutes makes Phase 4 able to replace it with a deduplicated
 	// cross-kind candidate count without changing the attempt loop contract.
 	maxChannelAttempts := channelScheduler.GetActiveChannelCount(kind)
-	if (kind == scheduler.ChannelKindMessages || kind == scheduler.ChannelKindResponses) && c.Param("routePrefix") == "" && c.GetHeader("X-Channel") == "" {
+	if (kind == scheduler.ChannelKindMessages || kind == scheduler.ChannelKindResponses) && httpbridge.Param(c, "routePrefix") == "" && httpbridge.GetHeader(c, "X-Channel") == "" {
 		maxChannelAttempts = channelScheduler.GetFederatedCandidateCount(kind)
 	}
 	var pendingOutcome *pendingRoutingAttempt
@@ -154,7 +155,7 @@ func HandleMultiChannelFailoverWithSelectionFilter(
 	for channelAttempt := 0; channelAttempt < maxChannelAttempts; channelAttempt++ {
 		// 检查客户端是否已断开连接
 		select {
-		case <-c.Request.Context().Done():
+		case <-httpbridge.Request(c).Context().Done():
 			if pendingOutcome != nil {
 				pendingOutcome.result.LastError = context.Canceled
 				notifyRoutingOutcome(pendingOutcome.selection, buildRoutingOutcome(
@@ -175,14 +176,14 @@ func HandleMultiChannelFailoverWithSelectionFilter(
 			FailedRoutes:       failedRoutes,
 			Kind:               kind,
 			Model:              model,
-			RoutePrefix:        c.Param("routePrefix"),
-			ChannelName:        c.GetHeader("X-Channel"),
+			RoutePrefix:        httpbridge.Param(c, "routePrefix"),
+			ChannelName:        httpbridge.GetHeader(c, "X-Channel"),
 			ContextRequirement: contextRequirement,
 			HasImageContent:    hasImageContent,
 			AgentRole:          agentRole,
 			CandidateFilter:    candidateFilter,
 		}
-		selection, err := channelScheduler.SelectChannelWithOptions(c.Request.Context(), selectionOpts)
+		selection, err := channelScheduler.SelectChannelWithOptions(httpbridge.Request(c).Context(), selectionOpts)
 		if err != nil {
 			// 上下文溢出的跨协议重定向已前移到调度器内部（容量错误分支注入
 			// OverflowRedirect 候选），外壳不再二次改写模型。
@@ -205,9 +206,9 @@ func HandleMultiChannelFailoverWithSelectionFilter(
 		upstream := selection.Upstream
 		channelIndex := selection.ChannelIndex
 
-		// 将 Autopilot trace UID 写入 gin context，供 ChannelLog 关联
+		// 将 Autopilot trace UID 写入 Fiber context，供 ChannelLog 关联
 		if selection.AutopilotTraceUID != "" {
-			c.Set("ccx.autopilot_trace_uid", selection.AutopilotTraceUID)
+			httpbridge.SetValue(c, "ccx.autopilot_trace_uid", selection.AutopilotTraceUID)
 			notifySchedulerDecision(selection)
 		}
 
@@ -228,7 +229,7 @@ func HandleMultiChannelFailoverWithSelectionFilter(
 		// 启用后主分支与影子分支竞速，返回实际服务请求的 selection 与结果。
 		reasoningNeed := false
 		reasoningEffort := ""
-		if profile, ok := autopilot.RequestProfileFromContext(c.Request.Context()); ok {
+		if profile, ok := autopilot.RequestProfileFromContext(httpbridge.Request(c).Context()); ok {
 			reasoningNeed = profile.ReasoningNeed
 			if profile.ClientEffortExplicit {
 				reasoningEffort = string(profile.ClientEffort)
@@ -236,7 +237,7 @@ func HandleMultiChannelFailoverWithSelectionFilter(
 		}
 		var result MultiChannelAttemptResult
 		selection, result = RunRacingAttempt(c, trySelectedChannel, RacingAttemptInput{
-			Ctx:              c.Request.Context(),
+			Ctx:              httpbridge.Request(c).Context(),
 			EnvCfg:           envCfg,
 			CfgManager:       channelScheduler.GetConfigManager(),
 			Scheduler:        channelScheduler,
@@ -257,11 +258,11 @@ func HandleMultiChannelFailoverWithSelectionFilter(
 				c, selection, result, true, channelAttempt > 0,
 				requestStartedAt, time.Since(requestStartedAt),
 			))
-			lastUserMsg, _ := c.Get("lastUserMessage")
+			lastUserMsg, _ := httpbridge.Value(c, "lastUserMessage")
 			lastUserMsgStr, _ := lastUserMsg.(string)
-			lastUserMsgs, _ := c.Get("lastUserMessages")
+			lastUserMsgs, _ := httpbridge.Value(c, "lastUserMessages")
 			lastUserMessages, _ := lastUserMsgs.([]string)
-			userMsgCount, _ := c.Get("userMessageCount")
+			userMsgCount, _ := httpbridge.Value(c, "userMessageCount")
 			userMsgCountInt, _ := userMsgCount.(int)
 
 			// 只有真正成功的普通请求才设置 Trace 亲和并追踪对话；title 请求没有用户消息，不污染卡片状态。
@@ -279,7 +280,7 @@ func HandleMultiChannelFailoverWithSelectionFilter(
 				if upstream != nil {
 					channelName = upstream.Name
 				}
-				channelScheduler.TrackConversationWithMessages(kind, userID, model, channelIndex, channelName, "", lastUserMsgStr, lastUserMessages, userMsgCountInt, agentRole, AgentContextFromGin(c))
+				channelScheduler.TrackConversationWithMessages(kind, userID, model, channelIndex, channelName, "", lastUserMsgStr, lastUserMessages, userMsgCountInt, agentRole, AgentContextFromFiber(c))
 				if envCfg.ShouldLog("debug") {
 					RequestLogf(c, "[%s-Conversation-Debug] 已追踪对话: kind=%s, user=%s, model=%s, channel=%d, userMessages=%d, hasFallbackTitle=%t",
 						apiType, kind, scheduler.MaskUserIDForLog(userID), model, channelIndex, userMsgCountInt, lastUserMsgStr != "")

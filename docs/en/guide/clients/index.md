@@ -1,6 +1,5 @@
 # Client Setup Overview
 
-If you are using **Yunqi Desktop**, start with the [Yunqi Desktop setup guide](/en/guide/desktop/) for installation, key setup, service startup, agent configuration, and channel setup, then return here for client-specific details.
 
 Yunqi client setup docs are organized by client. Choose the client you use, then follow the matching page.
 

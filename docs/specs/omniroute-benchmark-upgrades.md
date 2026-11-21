@@ -1,5 +1,6 @@
 # 对标 OmniRoute 网关增强规划 设计文档
 
+> 历史设计记录：文中的桌面实现与 Agent Config 描述仅反映迁移前状态。当前产品只维护 `frontend/` Web 控制台；桌面外壳、原生文件配置与 MSIX 已移除。
 > 范围：与 OmniRoute（本地快照 `/Users/petaflops/works/unsorted/OmniRoute`，v3.8.51）全面对比后沉淀的增强方向——Tier-1 四项详细设计（配额真相分级调度、请求侧工具输出压缩、guardrails 最小集、路由预演升级）、Tier-2 backlog、不跟进决策记录。
 > 状态：**部分实现**（2026-09-01 定稿；§2 配额分级调度 + §3 请求侧压缩 + §4 Guardrails 最小集 + §5 路由预演已落地，各拆独立 spec：[guardrails.md](./guardrails.md)、[request-compression.md](./request-compression.md)、[quota-truth-scheduling.md](./quota-truth-scheduling.md)、[route-preview.md](./route-preview.md)；其余项规划中）。各项落地后应拆出独立 spec 并回填状态。
 > 锚点约定：Yunqi 锚点为仓库相对路径；OmniRoute 锚点均为上述快照仓库内相对路径。

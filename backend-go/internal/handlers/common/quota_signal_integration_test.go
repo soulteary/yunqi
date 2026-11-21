@@ -7,13 +7,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/quota"
 	"github.com/soulteary/yunqi/internal/ratelimit"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/types"
 	"github.com/soulteary/yunqi/internal/warmup"
-	"github.com/gin-gonic/gin"
 )
 
 // runQuotaSignalFailover 在真实转发链路上执行一次请求，上游返回带配额响应头的 200，
@@ -53,8 +54,8 @@ func runQuotaSignalFailover(t *testing.T, setQuotaHeaders func(w http.ResponseWr
 	t.Cleanup(func() { ratelimit.SetUpstreamSignalCallback(original) })
 
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"test-model"}`))
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"test-model"}`)))
 	cfg := cfgManager.GetConfig()
 	runtimeUpstream := &cfg.Upstream[0]
 	handled, successKey, _, failoverErr, _, lastErr := TryUpstreamWithAllKeys(
@@ -73,8 +74,8 @@ func runQuotaSignalFailover(t *testing.T, setQuotaHeaders func(w http.ResponseWr
 		func(upstream *config.UpstreamConfig, failedKeys map[string]bool) (string, error) {
 			return cfgManager.GetNextAPIKey(upstream, failedKeys, "Messages")
 		},
-		func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
-			req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, upstreamCopy.BaseURL, strings.NewReader(`{}`))
+		func(c fiber.Ctx, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
+			req, err := http.NewRequestWithContext(httpbridge.Request(c).Context(), http.MethodPost, upstreamCopy.BaseURL, strings.NewReader(`{}`))
 			if err == nil {
 				req.Header.Set("X-Test-Key", apiKey)
 			}
@@ -83,7 +84,7 @@ func runQuotaSignalFailover(t *testing.T, setQuotaHeaders func(w http.ResponseWr
 		func(string) {},
 		nil,
 		nil,
-		func(_ *gin.Context, resp *http.Response, _ *config.UpstreamConfig, _ string, _ []byte) (*types.Usage, error) {
+		func(_ fiber.Ctx, resp *http.Response, _ *config.UpstreamConfig, _ string, _ []byte) (*types.Usage, error) {
 			_ = resp.Body.Close()
 			return nil, nil
 		},

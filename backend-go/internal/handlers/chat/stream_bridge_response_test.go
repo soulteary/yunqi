@@ -10,13 +10,12 @@ import (
 
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/handlers/common"
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 // 流式桥接响应侧端到端：非流式客户端请求 + 上游返回 SSE（仅接受流式渠道的
 // 兼容改写），handleSuccess 应合成 chat.completion JSON 并携带 usage 交付客户端。
 func TestHandleSuccessSynthesizesStreamBridgeResponse(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	sse := "data: {\"id\":\"chatcmpl-b1\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"gpt-5\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"你好\"},\"finish_reason\":null}]}\n" +
 		"data: {\"id\":\"chatcmpl-b1\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n" +
@@ -24,8 +23,8 @@ func TestHandleSuccessSynthesizesStreamBridgeResponse(t *testing.T) {
 		"data: [DONE]\n"
 
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5","stream":false}`))
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5","stream":false}`)))
 
 	resp := &http.Response{
 		StatusCode: http.StatusOK,
@@ -60,11 +59,10 @@ func TestHandleSuccessSynthesizesStreamBridgeResponse(t *testing.T) {
 
 // 上游返回 JSON 的常规非流式路径不受流式桥接影响（Content-Type 判定不误伤）。
 func TestHandleSuccessNormalNonStreamUnchanged(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5","stream":false}`))
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5","stream":false}`)))
 
 	resp := &http.Response{
 		StatusCode: http.StatusOK,

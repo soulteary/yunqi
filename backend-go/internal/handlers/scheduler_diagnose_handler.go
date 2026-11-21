@@ -4,9 +4,10 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/autopilot"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/scheduler"
-	"github.com/gin-gonic/gin"
 )
 
 type schedulerDiagnoseRequest struct {
@@ -30,17 +31,17 @@ type schedulerDiagnoseContextRequirement struct {
 }
 
 // DiagnoseSchedulerSelection 返回一次不发送上游请求的渠道选择诊断。
-func DiagnoseSchedulerSelection(sch *scheduler.ChannelScheduler, kind scheduler.ChannelKind) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func DiagnoseSchedulerSelection(sch *scheduler.ChannelScheduler, kind scheduler.ChannelKind) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		if sch == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "scheduler unavailable"})
-			return
+			httpbridge.JSON(c, http.StatusServiceUnavailable, fiber.Map{"error": "scheduler unavailable"})
+			return nil
 		}
 
 		var req schedulerDiagnoseRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
-			return
+		if err := httpbridge.BindJSON(c, &req); err != nil {
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "invalid request body"})
+			return nil
 		}
 
 		failedChannels := make(map[int]bool, len(req.FailedChannels))
@@ -53,10 +54,7 @@ func DiagnoseSchedulerSelection(sch *scheduler.ChannelScheduler, kind scheduler.
 		model := strings.TrimSpace(req.Model)
 		agentRole := strings.TrimSpace(req.AgentRole)
 		contextRequirement := diagnoseContextRequirement(req.ContextRequirement)
-		selectionContext := autopilot.ContextWithRequestProfile(
-			c.Request.Context(),
-			buildSchedulerDiagnoseRequestProfile(kind, model, agentRole, req.HasImageContent, contextRequirement),
-		)
+		selectionContext := autopilot.ContextWithRequestProfile(httpbridge.Request(c).Context(), buildSchedulerDiagnoseRequestProfile(kind, model, agentRole, req.HasImageContent, contextRequirement))
 
 		result, err := sch.SelectChannelWithOptions(selectionContext, scheduler.SelectionOptions{
 			UserID:             strings.TrimSpace(req.UserID),
@@ -71,7 +69,7 @@ func DiagnoseSchedulerSelection(sch *scheduler.ChannelScheduler, kind scheduler.
 			DryRun:             true,
 		})
 		if err != nil {
-			resp := gin.H{
+			resp := fiber.Map{
 				"ok":    false,
 				"kind":  kind,
 				"error": err.Error(),
@@ -80,23 +78,24 @@ func DiagnoseSchedulerSelection(sch *scheduler.ChannelScheduler, kind scheduler.
 				resp["summary"] = scheduler.FormatSelectionTraceSummary(trace, 8)
 				resp["trace"] = trace
 			}
-			c.JSON(http.StatusOK, resp)
-			return
+			httpbridge.JSON(c, http.StatusOK, resp)
+			return nil
 		}
 
 		trace := result.Trace
-		c.JSON(http.StatusOK, gin.H{
+		httpbridge.JSON(c, http.StatusOK, fiber.Map{
 			"ok":      true,
 			"kind":    kind,
 			"reason":  result.Reason,
 			"summary": scheduler.FormatSelectionTraceSummary(trace, 8),
 			"trace":   trace,
-			"selected": gin.H{
+			"selected": fiber.Map{
 				"channelIndex": result.ChannelIndex,
 				"channelName":  selectedChannelName(result),
 				"serviceType":  selectedServiceType(result),
 			},
 		})
+		return nil
 	}
 }
 

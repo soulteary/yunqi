@@ -7,13 +7,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/converters"
 	"github.com/soulteary/yunqi/internal/errutil"
 	"github.com/soulteary/yunqi/internal/handlers/common"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/types"
 	"github.com/soulteary/yunqi/internal/utils"
-	"github.com/gin-gonic/gin"
 )
 
 // normalizeResponseUpstreamType 将 copilot 归一化为 responses，以便复用 Responses 协议的响应转换分支。
@@ -25,7 +26,7 @@ func normalizeResponseUpstreamType(t string) string {
 }
 
 func handleSuccess(
-	c *gin.Context,
+	c fiber.Ctx,
 	resp *http.Response,
 	upstreamType string,
 	envCfg *config.EnvConfig,
@@ -76,10 +77,10 @@ func handleSuccess(
 		openaiResp := convertClaudeResponseToChat(claudeResp, model)
 		respBytes, err := json.Marshal(openaiResp)
 		if err != nil {
-			c.Data(resp.StatusCode, "application/json", bodyBytes)
+			httpbridge.Data(c, resp.StatusCode, "application/json", bodyBytes)
 			return nil, nil
 		}
-		c.Data(resp.StatusCode, "application/json", respBytes)
+		httpbridge.Data(c, resp.StatusCode, "application/json", respBytes)
 
 		// 提取 usage
 		var usage *types.Usage
@@ -105,7 +106,7 @@ func handleSuccess(
 		if !common.RacingClaimClientCommit(c) {
 			return nil, common.ErrRacingSuperseded
 		}
-		c.Data(resp.StatusCode, "application/json", chatRespBytes)
+		httpbridge.Data(c, resp.StatusCode, "application/json", chatRespBytes)
 		// 提取 usage（Responses 格式：input_tokens / output_tokens）
 		var usage *types.Usage
 		var respMap map[string]interface{}
@@ -147,8 +148,8 @@ func handleSuccess(
 		if !common.RacingClaimClientCommit(c) {
 			return nil, common.ErrRacingSuperseded
 		}
-		utils.ForwardResponseHeaders(resp.Header, c.Writer)
-		c.Data(resp.StatusCode, "application/json", bodyBytes)
+		utils.ForwardResponseHeaders(resp.Header, httpbridge.Writer(c))
+		httpbridge.Data(c, resp.StatusCode, "application/json", bodyBytes)
 		if u, ok := respMap["usage"].(map[string]interface{}); ok {
 			promptTokens, _ := u["prompt_tokens"].(float64)
 			completionTokens, _ := u["completion_tokens"].(float64)

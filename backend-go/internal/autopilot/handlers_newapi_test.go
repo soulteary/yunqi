@@ -10,16 +10,17 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 // ── 测试辅助 ──
 
-func setupNewApiRouter(t *testing.T, deps *NewApiRouteDeps) *gin.Engine {
+func setupNewApiRouter(t *testing.T, deps *NewApiRouteDeps) *fiber.App {
 	t.Helper()
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
+
+	r := httpbridge.NewApp()
 	RegisterNewApiSubscriptionRoutes(r.Group("/api"), deps)
 	return r
 }
@@ -107,7 +108,7 @@ func TestHandleNewApiVerify_Success(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/subscriptions/newapi/verify", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("期望 200, got %d, body=%s", w.Code, w.Body.String())
@@ -154,7 +155,7 @@ func TestHandleNewApiVerify_ReportsGroupFetchError(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/subscriptions/newapi/verify", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("期望 200, got %d, body=%s", w.Code, w.Body.String())
@@ -185,7 +186,7 @@ func TestHandleNewApiVerify_InvalidToken(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/subscriptions/newapi/verify", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadGateway {
 		t.Fatalf("期望 502, got %d, body=%s", w.Code, w.Body.String())
@@ -199,7 +200,7 @@ func TestHandleNewApiVerify_MissingFields(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/subscriptions/newapi/verify", bytes.NewReader([]byte(`{}`)))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("期望 400, got %d, body=%s", w.Code, w.Body.String())
@@ -231,7 +232,7 @@ func TestHandleNewApiProvision_FullFlow_CreateNewKey(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/subscriptions/newapi/provision", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusCreated {
 		t.Fatalf("期望 201, got %d, body=%s", w.Code, w.Body.String())
@@ -348,7 +349,7 @@ func TestHandleNewApiProvision_UnprefixedKey_GetsSkPrefix(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/subscriptions/newapi/provision", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusCreated {
 		t.Fatalf("期望 201, got %d, body=%s", w.Code, w.Body.String())
@@ -405,7 +406,7 @@ func TestHandleNewApiProvision_MergesIntoExistingChannel(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/subscriptions/newapi/provision", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusCreated {
 		t.Fatalf("期望 201, got %d, body=%s", w.Code, w.Body.String())
@@ -493,7 +494,7 @@ func TestHandleNewApiProvision_MergeDeduplicatesKeys(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/subscriptions/newapi/provision", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusCreated {
 		t.Fatalf("期望 201, got %d, body=%s", w.Code, w.Body.String())
@@ -549,7 +550,7 @@ func TestHandleNewApiProvision_MergePrefersActiveChannel(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/subscriptions/newapi/provision", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusCreated {
 		t.Fatalf("期望 201, got %d, body=%s", w.Code, w.Body.String())
@@ -646,7 +647,7 @@ func TestHandleNewApiProvision_AutoCreatesOnlyEligibleGroupKeys(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/subscriptions/newapi/provision", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusCreated {
 		t.Fatalf("期望 201, got %d, body=%s", w.Code, w.Body.String())
@@ -747,7 +748,7 @@ func TestHandleNewApiProvision_SecondGroupFailureRollsBackCreatedKey(t *testing.
 	req := httptest.NewRequest(http.MethodPost, "/api/subscriptions/newapi/provision", bytes.NewReader(requestBody))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadGateway {
 		t.Fatalf("期望 502, got %d, body=%s", w.Code, w.Body.String())
@@ -797,7 +798,7 @@ func TestHandleNewApiProvision_RejectsGroupAboveMultiplierLimit(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/subscriptions/newapi/provision", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("期望 422, got %d, body=%s", w.Code, w.Body.String())
@@ -841,7 +842,7 @@ func TestHandleNewApiProvision_GroupLookupFailureBlocksProvision(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/subscriptions/newapi/provision", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadGateway {
 		t.Fatalf("期望 502, got %d, body=%s", w.Code, w.Body.String())
@@ -870,7 +871,7 @@ func TestHandleNewApiProvision_ReuseExistingKey_Succeeds(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/subscriptions/newapi/provision", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusCreated {
 		t.Fatalf("期望 201, got %d, body=%s", w.Code, w.Body.String())
@@ -916,7 +917,7 @@ func TestHandleNewApiProvision_ExistingKeyInDifferentGroupSuffixesNewKey(t *test
 	req := httptest.NewRequest(http.MethodPost, "/api/subscriptions/newapi/provision", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusCreated {
 		t.Fatalf("期望 201, got %d, body=%s", w.Code, w.Body.String())
@@ -949,7 +950,7 @@ func TestHandleNewApiProvision_ReuseExistingKey_MaskedKey_ReturnsConflict(t *tes
 	req := httptest.NewRequest(http.MethodPost, "/api/subscriptions/newapi/provision", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusConflict {
 		t.Fatalf("期望 409, got %d, body=%s", w.Code, w.Body.String())
@@ -987,7 +988,7 @@ func TestHandleNewApiProvision_DuplicateSubscriptionUID_Rejected(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/subscriptions/newapi/provision", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusConflict {
 		t.Fatalf("期望 409, got %d, body=%s", w.Code, w.Body.String())
@@ -1012,7 +1013,7 @@ func TestHandleNewApiProvision_InvalidChannelKind(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/subscriptions/newapi/provision", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("期望 400, got %d, body=%s", w.Code, w.Body.String())
@@ -1034,7 +1035,7 @@ func TestHandleNewApiProvision_MissingCfgManager(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/subscriptions/newapi/provision", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("期望 500, got %d, body=%s", w.Code, w.Body.String())
@@ -1050,13 +1051,13 @@ func bytesContains(haystack, needle []byte) bool {
 
 // provisionNewApiChannel 是 AccountUID 测试的便捷封装：对一个 mock 站点完成一次 provision，
 // 失败时直接 t.Fatal。
-func provisionNewApiChannel(t *testing.T, router *gin.Engine, reqBody NewApiProvisionRequest) NewApiProvisionResponse {
+func provisionNewApiChannel(t *testing.T, router *fiber.App, reqBody NewApiProvisionRequest) NewApiProvisionResponse {
 	t.Helper()
 	body, _ := json.Marshal(reqBody)
 	req := httptest.NewRequest(http.MethodPost, "/api/subscriptions/newapi/provision", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("provision 期望 201, got %d, body=%s", w.Code, w.Body.String())
 	}

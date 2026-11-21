@@ -11,7 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v3"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -27,22 +28,22 @@ import (
 // 合成粒度是「上游协议」而非「客户端协议」：合成结果喂给既有协议转换器，
 // 避免为每个 入口×执行 组合单独实现合成器。
 
-// UpstreamStreamBridgeContextKey gin context 键：本次 attempt 已按流式桥接改写。
+// UpstreamStreamBridgeContextKey Fiber context 键：本次 attempt 已按流式桥接改写。
 // 供 chat 入口的 buildProviderRequest 覆盖 isStream 参数（该路径从参数而非 body
 // 派生上游 stream 字段）。每次 attempt 开始时复位，避免污染无改写的后续 attempt。
 const UpstreamStreamBridgeContextKey = "upstreamStreamBridge"
 
 // SetUpstreamStreamBridge 标记本次 attempt 已做流式桥接请求改写。
-func SetUpstreamStreamBridge(c *gin.Context, enabled bool) {
-	c.Set(UpstreamStreamBridgeContextKey, enabled)
+func SetUpstreamStreamBridge(c fiber.Ctx, enabled bool) {
+	httpbridge.SetValue(c, UpstreamStreamBridgeContextKey, enabled)
 }
 
 // UpstreamStreamBridgeRequested 读取流式桥接改写标记。
-func UpstreamStreamBridgeRequested(c *gin.Context) bool {
+func UpstreamStreamBridgeRequested(c fiber.Ctx) bool {
 	if c == nil {
 		return false
 	}
-	enabled, ok := c.Get(UpstreamStreamBridgeContextKey)
+	enabled, ok := httpbridge.Value(c, UpstreamStreamBridgeContextKey)
 	return ok && enabled == true
 }
 
@@ -100,7 +101,7 @@ func IsEventStreamResponse(resp *http.Response, body []byte) bool {
 // 上游实际返回 SSE 时（仅接受流式渠道的流式桥接改写），把 SSE 合成为该上游协议的
 // 非流式响应体后返回；合成失败返回错误，调用方按可 failover 错误处理。
 // upstreamType 为上游 ServiceType（openai/claude/responses/gemini/copilot）。
-func ReadUpstreamNonStreamBody(c *gin.Context, resp *http.Response, upstreamType string) ([]byte, error) {
+func ReadUpstreamNonStreamBody(c fiber.Ctx, resp *http.Response, upstreamType string) ([]byte, error) {
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err

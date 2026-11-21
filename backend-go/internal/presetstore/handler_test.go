@@ -6,13 +6,14 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v3"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
-func newTestRouter() *gin.Engine {
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
-	r.GET("/api/presets", Handler(Default()))
+func newTestRouter() *fiber.App {
+
+	r := httpbridge.NewApp()
+	r.Get("/api/presets", Handler(Default()))
 	return r
 }
 
@@ -22,7 +23,7 @@ func TestHandler_ReturnsBundleWithETag(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/presets", nil)
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("状态码 = %d，期望 200", w.Code)
@@ -48,13 +49,13 @@ func TestHandler_NotModifiedOnMatchingETag(t *testing.T) {
 	r := newTestRouter()
 
 	w1 := httptest.NewRecorder()
-	r.ServeHTTP(w1, httptest.NewRequest(http.MethodGet, "/api/presets", nil))
+	httpbridge.Handler(r).ServeHTTP(w1, httptest.NewRequest(http.MethodGet, "/api/presets", nil))
 	etag := w1.Header().Get("ETag")
 
 	w2 := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/presets", nil)
 	req.Header.Set("If-None-Match", etag)
-	r.ServeHTTP(w2, req)
+	httpbridge.Handler(r).ServeHTTP(w2, req)
 
 	if w2.Code != http.StatusNotModified {
 		t.Fatalf("状态码 = %d，期望 304", w2.Code)

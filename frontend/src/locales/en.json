@@ -1,4 +1,5 @@
 {
+  "app.tabs.console": "Service & setup",
   "app.auth.verifyingTitle": "Verifying access",
   "app.auth.verifyingBody": "Authenticating with the saved access key...",
   "app.auth.inputLabel": "Admin access key",

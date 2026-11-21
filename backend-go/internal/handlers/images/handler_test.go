@@ -15,7 +15,7 @@ import (
 
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/errutil"
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 func newImagesTestConfigManager(t *testing.T) *config.ConfigManager {
@@ -49,10 +49,10 @@ func captureImagesLogs(t *testing.T) *bytes.Buffer {
 }
 
 func TestBuildProviderRequest_URLVariants(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"model":"image-default","prompt":"hello"}`))
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"model":"image-default","prompt":"hello"}`)))
 
 	upstream := &config.UpstreamConfig{ServiceType: "openai"}
 	req, err := buildProviderRequest(c, upstream, "https://api.openai.com", "sk-test", []byte(`{"model":"image-default","prompt":"hello"}`), "image-default")
@@ -81,11 +81,11 @@ func TestBuildProviderRequest_URLVariants(t *testing.T) {
 }
 
 func TestBuildProviderRequest_RejectsUnsupportedServiceType(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	logBuf := captureImagesLogs(t)
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"model":"image-default","prompt":"hello"}`))
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"model":"image-default","prompt":"hello"}`)))
 
 	upstream := &config.UpstreamConfig{ServiceType: "gemini"}
 	_, err := buildProviderRequest(c, upstream, "https://api.openai.com", "sk-test", []byte(`{"model":"image-default","prompt":"hello"}`), "image-default")
@@ -108,7 +108,7 @@ func TestBuildProviderRequest_RejectsUnsupportedServiceType(t *testing.T) {
 }
 
 func TestAddUpstream_RejectsUnsupportedServiceType(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	cfgFile := t.TempDir() + "/config.json"
 	if err := os.WriteFile(cfgFile, []byte(`{"upstream":[],"imagesUpstream":[]}`), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
@@ -119,14 +119,14 @@ func TestAddUpstream_RejectsUnsupportedServiceType(t *testing.T) {
 	}
 	defer errutil.IgnoreDeferred(cfgManager.Close)
 
-	r := gin.New()
-	r.POST("/api/images/channels", AddUpstream(cfgManager))
+	r := httpbridge.NewApp()
+	r.Post("/api/images/channels", AddUpstream(cfgManager))
 
 	body := strings.NewReader(`{"name":"images-gemini","serviceType":"gemini","baseUrl":"https://example.com","apiKeys":["test-key"]}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/images/channels", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d, body=%s", w.Code, w.Body.String())
@@ -137,7 +137,7 @@ func TestAddUpstream_RejectsUnsupportedServiceType(t *testing.T) {
 }
 
 func TestHandler_MissingModel(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	cfgFile := t.TempDir() + "/config.json"
 	if err := os.WriteFile(cfgFile, []byte(`{"upstream":[]}`), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
@@ -152,9 +152,9 @@ func TestHandler_MissingModel(t *testing.T) {
 	envCfg.ProxyAccessKey = "test-key"
 
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"prompt":"hello"}`))
-	c.Request.Header.Set("Authorization", "Bearer test-key")
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"prompt":"hello"}`)))
+	httpbridge.Request(c).Header.Set("Authorization", "Bearer test-key")
 	Handler(envCfg, cfgManager, nil)(c)
 
 	if w.Code != http.StatusBadRequest {
@@ -163,16 +163,16 @@ func TestHandler_MissingModel(t *testing.T) {
 }
 
 func TestHandler_MissingPrompt(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	cfgManager := newImagesTestConfigManager(t)
 	defer errutil.IgnoreDeferred(cfgManager.Close)
 
 	envCfg := newImagesTestEnvConfig()
 
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"model":"gpt-image-1"}`))
-	c.Request.Header.Set("Authorization", "Bearer test-key")
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"model":"gpt-image-1"}`)))
+	httpbridge.Request(c).Header.Set("Authorization", "Bearer test-key")
 	Handler(envCfg, cfgManager, nil)(c)
 
 	if w.Code != http.StatusBadRequest {
@@ -181,7 +181,7 @@ func TestHandler_MissingPrompt(t *testing.T) {
 }
 
 func TestHandler_InvalidMultipartEditsReturnsBadRequest(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	cfgManager := newImagesTestConfigManager(t)
 	defer errutil.IgnoreDeferred(cfgManager.Close)
 
@@ -189,10 +189,10 @@ func TestHandler_InvalidMultipartEditsReturnsBadRequest(t *testing.T) {
 	logBuf := captureImagesLogs(t)
 
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/edits", strings.NewReader("broken"))
-	c.Request.Header.Set("Authorization", "Bearer test-key")
-	c.Request.Header.Set("Content-Type", "multipart/form-data")
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/images/edits", strings.NewReader("broken")))
+	httpbridge.Request(c).Header.Set("Authorization", "Bearer test-key")
+	httpbridge.Request(c).Header.Set("Content-Type", "multipart/form-data")
 	Handler(envCfg, cfgManager, nil)(c)
 
 	if w.Code != http.StatusBadRequest {

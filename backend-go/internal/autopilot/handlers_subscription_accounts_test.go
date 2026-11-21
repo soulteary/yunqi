@@ -8,13 +8,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v3"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
-func setupSubscriptionAccountRouter(t *testing.T, deps *NewApiRouteDeps) *gin.Engine {
+func setupSubscriptionAccountRouter(t *testing.T, deps *NewApiRouteDeps) *fiber.App {
 	t.Helper()
-	gin.SetMode(gin.TestMode)
-	router := gin.New()
+
+	router := httpbridge.NewApp()
 	RegisterSubscriptionAccountRoutes(router.Group("/api"), deps)
 	return router
 }
@@ -47,7 +48,7 @@ func TestHandleUpdateNewApiCredentials_SuccessAndMasked(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPatch, "/api/subscriptions/sub-main/newapi-credentials", bytes.NewReader(payload))
 	request.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, request)
+	httpbridge.Handler(router).ServeHTTP(recorder, request)
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("状态码=%d body=%s", recorder.Code, recorder.Body.String())
@@ -101,7 +102,7 @@ func TestHandleUpdateNewApiCredentials_InvalidTokenDoesNotPersist(t *testing.T) 
 	request := httptest.NewRequest(http.MethodPatch, "/api/subscriptions/sub-invalid/newapi-credentials", bytes.NewReader(payload))
 	request.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, request)
+	httpbridge.Handler(router).ServeHTTP(recorder, request)
 
 	if recorder.Code != http.StatusBadGateway {
 		t.Fatalf("状态码=%d body=%s", recorder.Code, recorder.Body.String())
@@ -136,7 +137,7 @@ func TestHandleDeletePrimaryAccount_ClearsCredentialKeepsSubscription(t *testing
 	router := setupSubscriptionAccountRouter(t, &NewApiRouteDeps{Store: store})
 	request := httptest.NewRequest(http.MethodDelete, "/api/subscriptions/sub-del/accounts/primary", nil)
 	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, request)
+	httpbridge.Handler(router).ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("状态码=%d body=%s", recorder.Code, recorder.Body.String())
 	}
@@ -155,7 +156,7 @@ func TestHandleDeletePrimaryAccount_ClearsCredentialKeepsSubscription(t *testing
 	// 再次删除：已无主账号 → 409
 	request2 := httptest.NewRequest(http.MethodDelete, "/api/subscriptions/sub-del/accounts/primary", nil)
 	recorder2 := httptest.NewRecorder()
-	router.ServeHTTP(recorder2, request2)
+	httpbridge.Handler(router).ServeHTTP(recorder2, request2)
 	if recorder2.Code != http.StatusConflict {
 		t.Fatalf("重复删除状态码=%d 期望=409", recorder2.Code)
 	}
@@ -187,7 +188,7 @@ func TestHandleAddSubscriptionAccount_PromotesToPrimaryWhenAbsent(t *testing.T) 
 	request := httptest.NewRequest(http.MethodPost, "/api/subscriptions/sub-promote/accounts", bytes.NewReader(payload))
 	request.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, request)
+	httpbridge.Handler(router).ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusCreated {
 		t.Fatalf("状态码=%d body=%s", recorder.Code, recorder.Body.String())
 	}
@@ -253,7 +254,7 @@ func TestHandleUpdateSubscriptionAccountCredentials_SuccessAndMasked(t *testing.
 	request := httptest.NewRequest(http.MethodPatch, "/api/subscriptions/sub-acc/accounts/acct_sub_1/credentials", bytes.NewReader(payload))
 	request.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, request)
+	httpbridge.Handler(router).ServeHTTP(recorder, request)
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("状态码=%d body=%s", recorder.Code, recorder.Body.String())
@@ -294,7 +295,7 @@ func TestHandleUpdateSubscriptionAccountCredentials_SuccessAndMasked(t *testing.
 	request2 := httptest.NewRequest(http.MethodPatch, "/api/subscriptions/sub-acc/accounts/acct_sub_1/credentials", bytes.NewReader(payload2))
 	request2.Header.Set("Content-Type", "application/json")
 	recorder2 := httptest.NewRecorder()
-	router.ServeHTTP(recorder2, request2)
+	httpbridge.Handler(router).ServeHTTP(recorder2, request2)
 	if recorder2.Code != http.StatusOK {
 		t.Fatalf("二次更新状态码=%d body=%s", recorder2.Code, recorder2.Body.String())
 	}
@@ -323,7 +324,7 @@ func TestHandleUpdateSubscriptionAccountCredentials_InvalidTokenDoesNotPersist(t
 	request := httptest.NewRequest(http.MethodPatch, "/api/subscriptions/sub-acc/accounts/acct_sub_1/credentials", bytes.NewReader(payload))
 	request.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, request)
+	httpbridge.Handler(router).ServeHTTP(recorder, request)
 
 	if recorder.Code != http.StatusBadGateway {
 		t.Fatalf("状态码=%d body=%s", recorder.Code, recorder.Body.String())
@@ -358,7 +359,7 @@ func TestHandleUpdateSubscriptionAccountCredentials_ValidatesInput(t *testing.T)
 		request := httptest.NewRequest(http.MethodPatch, tc.target, strings.NewReader(tc.body))
 		request.Header.Set("Content-Type", "application/json")
 		recorder := httptest.NewRecorder()
-		router.ServeHTTP(recorder, request)
+		httpbridge.Handler(router).ServeHTTP(recorder, request)
 		if recorder.Code != tc.code {
 			t.Fatalf("%s: 状态码=%d 期望=%d body=%s", tc.name, recorder.Code, tc.code, recorder.Body.String())
 		}

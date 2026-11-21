@@ -11,14 +11,13 @@ import (
 	"time"
 
 	"github.com/soulteary/yunqi/internal/config"
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 // TestAutopilotSimulation_EndToEnd 端到端模拟测试：验证 SmartRouter、ManualIntent、Trace 等核心功能。
 func TestAutopilotSimulation_EndToEnd(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	// 1. 准备测试环境
 	store := newTestProfileStore(t)
@@ -40,7 +39,7 @@ func TestAutopilotSimulation_EndToEnd(t *testing.T) {
 
 	// 3. 测试 SmartRouter dry-run 路由决策
 	t.Run("SmartRouter_DryRun_Supervisor优先质量", func(t *testing.T) {
-		router := gin.New()
+		router := httpbridge.NewApp()
 		RegisterDryRunRoutes(router, smartRouter)
 
 		reqBody := DryRunRequest{
@@ -55,8 +54,7 @@ func TestAutopilotSimulation_EndToEnd(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/smart-routing/diagnose", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
-
-		router.ServeHTTP(w, req)
+		httpbridge.Handler(router).ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code, "dry-run 应返回 200")
 
@@ -80,7 +78,7 @@ func TestAutopilotSimulation_EndToEnd(t *testing.T) {
 	})
 
 	t.Run("SmartRouter_DryRun_Worker优先成本", func(t *testing.T) {
-		router := gin.New()
+		router := httpbridge.NewApp()
 		RegisterDryRunRoutes(router, smartRouter)
 
 		reqBody := DryRunRequest{
@@ -93,8 +91,7 @@ func TestAutopilotSimulation_EndToEnd(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/route-dryrun", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
-
-		router.ServeHTTP(w, req)
+		httpbridge.Handler(router).ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
 
@@ -161,7 +158,7 @@ func TestAutopilotSimulation_EndToEnd(t *testing.T) {
 			require.NoError(t, tieCfgManager.AddUpstream(ch))
 		}
 
-		router := gin.New()
+		router := httpbridge.NewApp()
 		RegisterDryRunRoutes(router, tieSmartRouter)
 
 		reqBody := DryRunRequest{
@@ -174,7 +171,7 @@ func TestAutopilotSimulation_EndToEnd(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/route-dryrun", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
-		router.ServeHTTP(w, req)
+		httpbridge.Handler(router).ServeHTTP(w, req)
 
 		require.Equal(t, http.StatusOK, w.Code)
 		var resp DryRunResponse
@@ -192,7 +189,7 @@ func TestAutopilotSimulation_EndToEnd(t *testing.T) {
 
 	// 4. 测试 ManualRoutingIntent 创建和查询
 	t.Run("ManualIntent_Create_And_List", func(t *testing.T) {
-		router := gin.New()
+		router := httpbridge.NewApp()
 		RegisterManualIntentRoutes(router, intentStore)
 
 		// 创建 model_trial intent（用 CreateIntentRequest，不是 ManualRoutingIntent）
@@ -212,8 +209,7 @@ func TestAutopilotSimulation_EndToEnd(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/manual-intents", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
-
-		router.ServeHTTP(w, req)
+		httpbridge.Handler(router).ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusCreated, w.Code, "创建 intent 应返回 201")
 
@@ -246,13 +242,13 @@ func TestAutopilotSimulation_EndToEnd(t *testing.T) {
 			traceStore.Record(trace)
 		}
 
-		router := gin.New()
+		router := httpbridge.NewApp()
 		RegisterTraceRoutes(router, traceStore)
 
 		// 查询统计
 		req := httptest.NewRequest(http.MethodGet, "/traces/stats", nil)
 		w := httptest.NewRecorder()
-		router.ServeHTTP(w, req)
+		httpbridge.Handler(router).ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
 
@@ -268,7 +264,7 @@ func TestAutopilotSimulation_EndToEnd(t *testing.T) {
 		deps := &RoutingConfigDeps{
 			CfgManager: cfgManager,
 		}
-		router := gin.New()
+		router := httpbridge.NewApp()
 		apiGroup := router.Group("/")
 		RegisterRoutingConfigRoutes(apiGroup, deps)
 
@@ -281,15 +277,14 @@ func TestAutopilotSimulation_EndToEnd(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPut, "/smart-routing/config", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
-
-		router.ServeHTTP(w, req)
+		httpbridge.Handler(router).ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code, "更新配置应返回 200")
 
 		// 查询确认
 		getReq := httptest.NewRequest(http.MethodGet, "/smart-routing/config", nil)
 		getW := httptest.NewRecorder()
-		router.ServeHTTP(getW, getReq)
+		httpbridge.Handler(router).ServeHTTP(getW, getReq)
 
 		assert.Equal(t, http.StatusOK, getW.Code)
 

@@ -4,9 +4,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/gin-gonic/gin"
-
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 // ── SeverityTagScanner 跨增量检测 ──
@@ -45,8 +44,7 @@ func TestMaybeLearnSeverityClassOutcome(t *testing.T) {
 	restore := config.SwapSharedChannelCompatCacheForTest(config.NewChannelCompatCache())
 	defer restore()
 
-	gin.SetMode(gin.TestMode)
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c, _ := httpbridge.TestContext(httptest.NewRecorder())
 	upstream := &config.UpstreamConfig{ChannelUID: "ch_test", Name: "test-channel"}
 	shapeBody := []byte(`{"model":"m1","max_tokens":64,"stop_sequences":["</severity>"],"messages":[]}`)
 	normalBody := []byte(`{"model":"m1","messages":[]}`)
@@ -90,7 +88,6 @@ func (*fakeStreamError) Error() string { return "stream aborted" }
 // ── 非流式扫描入口 ──
 
 func TestMarkNonStreamSeverityScan(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	// 出站体经 Go json.Marshal 重写后 stop_sequences 为转义形态（\u003c/severity\u003e）
 	shapeReqEscaped := []byte(`{"model":"m1","max_tokens":64,"stop_sequences":["\u003c/severity\u003e"],"messages":[]}`)
@@ -110,7 +107,7 @@ func TestMarkNonStreamSeverityScan(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c, _ := httpbridge.TestContext(httptest.NewRecorder())
 			MarkNonStreamSeverityScan(c, tt.req, tt.resp)
 			scanned, found := NonStreamSeverityOutcome(c)
 			if scanned != tt.wantScanned || found != tt.wantFound {
@@ -120,7 +117,7 @@ func TestMarkNonStreamSeverityScan(t *testing.T) {
 	}
 
 	// 未调用扫描入口（chat 等未接线路径）：保持未置位，挂载点据此跳过
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c, _ := httpbridge.TestContext(httptest.NewRecorder())
 	if scanned, found := NonStreamSeverityOutcome(c); scanned || found {
 		t.Fatal("未扫描不应置位")
 	}
@@ -129,7 +126,7 @@ func TestMarkNonStreamSeverityScan(t *testing.T) {
 		t.Fatal("nil context 应返回未扫描")
 	}
 	// failover 后同渠道重试：后一次扫描覆盖前一次结论
-	c2, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c2, _ := httpbridge.TestContext(httptest.NewRecorder())
 	MarkNonStreamSeverityScan(c2, shapeReqEscaped, []byte(`{"content":[{"type":"text","text":"罐头"}]}`))
 	MarkNonStreamSeverityScan(c2, shapeReqEscaped, []byte(`{"content":[{"type":"text","text":"<severity>2"}]}`))
 	if _, found := NonStreamSeverityOutcome(c2); !found {

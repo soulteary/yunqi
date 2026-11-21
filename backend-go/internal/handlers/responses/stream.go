@@ -9,14 +9,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/converters"
 	"github.com/soulteary/yunqi/internal/handlers/common"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/session"
 	"github.com/soulteary/yunqi/internal/thinkingcache"
 	"github.com/soulteary/yunqi/internal/types"
 	"github.com/soulteary/yunqi/internal/utils"
-	"github.com/gin-gonic/gin"
 )
 
 // responsesDeltaRepetitionText 从 Responses SSE data 行提取可判重复的增量文本
@@ -44,7 +45,7 @@ func responsesDeltaRepetitionText(line string) (string, bool) {
 }
 
 func handleStreamSuccess(
-	c *gin.Context,
+	c fiber.Ctx,
 	resp *http.Response,
 	upstreamType string,
 	envCfg *config.EnvConfig,
@@ -210,27 +211,21 @@ func handleStreamSuccess(
 			if needConvert {
 				switch upstreamType {
 				case "claude":
-					eventsToCheck = converters.ConvertClaudeMessagesToResponses(
-						c.Request.Context(),
-						originalReq.Model,
+					eventsToCheck = converters.ConvertClaudeMessagesToResponses(httpbridge.Request(c).Context(), originalReq.Model,
 						originalRequestJSON,
 						nil,
 						[]byte(line),
 						&converterState,
 					)
 				case "gemini":
-					eventsToCheck = converters.ConvertGeminiStreamToResponses(
-						c.Request.Context(),
-						originalReq.Model,
+					eventsToCheck = converters.ConvertGeminiStreamToResponses(httpbridge.Request(c).Context(), originalReq.Model,
 						originalRequestJSON,
 						nil,
 						[]byte(line),
 						&converterState,
 					)
 				default:
-					eventsToCheck = converters.ConvertOpenAIChatToResponses(
-						c.Request.Context(),
-						originalReq.Model,
+					eventsToCheck = converters.ConvertOpenAIChatToResponses(httpbridge.Request(c).Context(), originalReq.Model,
 						originalRequestJSON,
 						nil,
 						[]byte(line),
@@ -441,14 +436,13 @@ func handleStreamSuccess(
 		return nil, common.ErrRacingSuperseded
 	}
 
-	utils.ForwardResponseHeaders(resp.Header, c.Writer)
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-	c.Header("X-Accel-Buffering", "no")
-
-	c.Status(resp.StatusCode)
-	flusher, _ := c.Writer.(http.Flusher)
+	utils.ForwardResponseHeaders(resp.Header, httpbridge.Writer(c))
+	httpbridge.Header(c, "Content-Type", "text/event-stream")
+	httpbridge.Header(c, "Cache-Control", "no-cache")
+	httpbridge.Header(c, "Connection", "keep-alive")
+	httpbridge.Header(c, "X-Accel-Buffering", "no")
+	httpbridge.Status(c, resp.StatusCode)
+	flusher, _ := httpbridge.Writer(c).(http.Flusher)
 
 	// Token 统计状态
 	var outputTextBuffer bytes.Buffer
@@ -484,27 +478,21 @@ func handleStreamSuccess(
 			var events []string
 			switch upstreamType {
 			case "claude":
-				events = converters.ConvertClaudeMessagesToResponses(
-					c.Request.Context(),
-					originalReq.Model,
+				events = converters.ConvertClaudeMessagesToResponses(httpbridge.Request(c).Context(), originalReq.Model,
 					originalRequestJSON,
 					nil,
 					[]byte(line),
 					&converterState,
 				)
 			case "gemini":
-				events = converters.ConvertGeminiStreamToResponses(
-					c.Request.Context(),
-					originalReq.Model,
+				events = converters.ConvertGeminiStreamToResponses(httpbridge.Request(c).Context(), originalReq.Model,
 					originalRequestJSON,
 					nil,
 					[]byte(line),
 					&converterState,
 				)
 			default:
-				events = converters.ConvertOpenAIChatToResponses(
-					c.Request.Context(),
-					originalReq.Model,
+				events = converters.ConvertOpenAIChatToResponses(httpbridge.Request(c).Context(), originalReq.Model,
 					originalRequestJSON,
 					nil,
 					[]byte(line),
@@ -593,7 +581,7 @@ func handleStreamSuccess(
 
 			// 转发给客户端
 			if !clientGone {
-				_, err := c.Writer.Write([]byte(eventToSend))
+				_, err := httpbridge.Writer(c).Write([]byte(eventToSend))
 				if err != nil {
 					clientGone = true
 					if !isClientDisconnectError(err) {
@@ -714,7 +702,7 @@ func handleStreamSuccess(
 					// incomplete_details.reason 的终止信号而非裸断连（对齐 stall 分支）。
 					if !clientGone {
 						incompleteEvent := converters.SynthesizeResponsesIncomplete(eventsSentCount+1, outputCollector.responseID, "repetition_loop")
-						if _, err := c.Writer.Write([]byte(incompleteEvent)); err == nil && flusher != nil {
+						if _, err := httpbridge.Writer(c).Write([]byte(incompleteEvent)); err == nil && flusher != nil {
 							flusher.Flush()
 						}
 					}
@@ -759,7 +747,7 @@ func handleStreamSuccess(
 			// 终止信号，而非裸断连。对齐 Messages 协议在 post-commit stall 时的 BuildStreamErrorEvent 行为。
 			if !clientGone {
 				incompleteEvent := converters.SynthesizeResponsesIncomplete(eventsSentCount+1, outputCollector.responseID, "stream_stalled")
-				if _, err := c.Writer.Write([]byte(incompleteEvent)); err == nil && flusher != nil {
+				if _, err := httpbridge.Writer(c).Write([]byte(incompleteEvent)); err == nil && flusher != nil {
 					flusher.Flush()
 				}
 			}
@@ -771,7 +759,7 @@ func handleStreamSuccess(
 			return nil, common.ErrStreamPostCommitStalled
 		case <-keepaliveTicker.C:
 			if !clientGone {
-				_, err := c.Writer.Write([]byte(": keepalive\n\n"))
+				_, err := httpbridge.Writer(c).Write([]byte(": keepalive\n\n"))
 				if err != nil {
 					clientGone = true
 				} else if flusher != nil {
@@ -794,9 +782,7 @@ streamEnd:
 				fallbackEvents = converters.SynthesizeResponsesCompleted(originalRequestJSON, &converterState, upstreamType, eventsSentCount)
 			default:
 				// OpenAI 格式（包括 MiniMax）：发送合成 [DONE] 触发 converter 正常完成流程
-				fallbackEvents = converters.ConvertOpenAIChatToResponses(
-					c.Request.Context(),
-					originalReq.Model,
+				fallbackEvents = converters.ConvertOpenAIChatToResponses(httpbridge.Request(c).Context(), originalReq.Model,
 					originalRequestJSON,
 					nil,
 					[]byte("data: [DONE]"),
@@ -839,7 +825,7 @@ streamEnd:
 					eventToSend = normalizeCompletedEventUsageToOpenAISemantics(eventToSend)
 				}
 			}
-			if _, err := c.Writer.Write([]byte(eventToSend)); err == nil && flusher != nil {
+			if _, err := httpbridge.Writer(c).Write([]byte(eventToSend)); err == nil && flusher != nil {
 				flusher.Flush()
 			}
 		}

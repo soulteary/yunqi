@@ -6,18 +6,18 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/quota"
-	"github.com/gin-gonic/gin"
 )
 
 func TestGetQuotaChannels_NilManagerReturnsEmpty(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	router := gin.New()
-	router.GET("/api/quota/channels", GetQuotaChannels(nil))
+
+	router := httpbridge.NewApp()
+	router.Get("/api/quota/channels", GetQuotaChannels(nil))
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/quota/channels", nil)
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
@@ -34,19 +34,19 @@ func TestGetQuotaChannels_NilManagerReturnsEmpty(t *testing.T) {
 }
 
 func TestGetQuotaChannels_ReturnsDerivedView(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	qm := quota.NewManager()
 	headers := make(http.Header)
 	headers.Set("anthropic-ratelimit-input-tokens-limit", "10000")
 	headers.Set("anthropic-ratelimit-input-tokens-remaining", "9000")
 	qm.UpdateChannelResponseHeaders("ch_view", "ep_1", "anthropic", headers)
 
-	router := gin.New()
-	router.GET("/api/quota/channels", GetQuotaChannels(qm))
+	router := httpbridge.NewApp()
+	router.Get("/api/quota/channels", GetQuotaChannels(qm))
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/quota/channels", nil)
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())

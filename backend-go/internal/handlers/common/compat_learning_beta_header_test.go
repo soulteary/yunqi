@@ -6,12 +6,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/autopilot"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/types"
 	"github.com/soulteary/yunqi/internal/warmup"
-	"github.com/gin-gonic/gin"
 )
 
 // TestUnsupportedBetaHeaderLearnsAndRetries 用真实 TryUpstreamWithAllKeys 驱动一次完整
@@ -21,7 +22,7 @@ import (
 //  3. 同 Key 立即重试（successKey 不变）
 //  4. 重试时 provider 剥离被拒 token（通过自定义 buildRequest 捕获并断言 header）
 func TestUnsupportedBetaHeaderLearnsAndRetries(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	t.Cleanup(swapChannelCompatCacheForTest(config.NewChannelCompatCache()))
 
 	callCount := 0
@@ -52,11 +53,12 @@ func TestUnsupportedBetaHeaderLearnsAndRetries(t *testing.T) {
 	t.Cleanup(cleanup)
 
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
+	c, _ := httpbridge.TestContext(w)
 	reqBody := `{"model":"claude-opus-4-8","messages":[{"role":"user","content":"hi"}]}`
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(reqBody))
-	// 客户端携带 anthropic-beta header（含被拒 token 与无关 token）
-	c.Request.Header.Set("Anthropic-Beta", "context-1m-2025-08-07,prompt-caching-scope-2026-01-05")
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(reqBody)))
+	httpbridge.
+		// 客户端携带 anthropic-beta header（含被拒 token 与无关 token）
+		Request(c).Header.Set("Anthropic-Beta", "context-1m-2025-08-07,prompt-caching-scope-2026-01-05")
 
 	cfg := cfgManager.GetConfig()
 	upstream := &cfg.Upstream[0]
@@ -77,14 +79,14 @@ func TestUnsupportedBetaHeaderLearnsAndRetries(t *testing.T) {
 		func(upstream *config.UpstreamConfig, failedKeys map[string]bool) (string, error) {
 			return cfgManager.GetNextAPIKey(upstream, failedKeys, "Messages")
 		},
-		func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
+		func(c fiber.Ctx, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
 			// 模拟 ClaudeProvider 的 header 透传 + trait 注入剥离链路
-			req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, upstreamCopy.BaseURL, strings.NewReader(reqBody))
+			req, err := http.NewRequestWithContext(httpbridge.Request(c).Context(), http.MethodPost, upstreamCopy.BaseURL, strings.NewReader(reqBody))
 			if err != nil {
 				return nil, err
 			}
 			// 透传客户端 anthropic-beta
-			if clientBeta := c.Request.Header.Get("Anthropic-Beta"); clientBeta != "" {
+			if clientBeta := httpbridge.Request(c).Header.Get("Anthropic-Beta"); clientBeta != "" {
 				req.Header.Set("Anthropic-Beta", clientBeta)
 			}
 			// 模拟 provider 在 ConvertToProviderRequest 里的剥离动作
@@ -119,7 +121,7 @@ func TestUnsupportedBetaHeaderLearnsAndRetries(t *testing.T) {
 		func(apiKey string) {},
 		func(url string) {},
 		func(url string) {},
-		func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
+		func(c fiber.Ctx, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 			return nil, nil
 		},
 		"claude-opus-4-8",

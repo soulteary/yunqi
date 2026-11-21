@@ -4,10 +4,11 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/conversation"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/scheduler"
-	"github.com/gin-gonic/gin"
 )
 
 type ConversationHandlerDeps struct {
@@ -17,9 +18,9 @@ type ConversationHandlerDeps struct {
 	ConfigManager    *config.ConfigManager
 }
 
-func GetConversations(deps *ConversationHandlerDeps) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		kindFilter := c.Query("kind")
+func GetConversations(deps *ConversationHandlerDeps) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		kindFilter := httpbridge.Query(c, "kind")
 
 		conversations := deps.Tracker.GetActiveConversations(kindFilter)
 
@@ -36,7 +37,7 @@ func GetConversations(deps *ConversationHandlerDeps) gin.HandlerFunc {
 
 		overridesResponse := make(map[string]interface{})
 		for id, override := range overrides {
-			overridesResponse[id] = gin.H{
+			overridesResponse[id] = fiber.Map{
 				"sequence":         override.Sequence,
 				"hasMainSequence":  override.HasMainSequence,
 				"subagentSequence": override.SubagentSequence,
@@ -46,7 +47,7 @@ func GetConversations(deps *ConversationHandlerDeps) gin.HandlerFunc {
 			}
 		}
 
-		channelsByKind := gin.H{}
+		channelsByKind := fiber.Map{}
 		for _, kind := range []scheduler.ChannelKind{
 			scheduler.ChannelKindMessages,
 			scheduler.ChannelKindChat,
@@ -56,13 +57,13 @@ func GetConversations(deps *ConversationHandlerDeps) gin.HandlerFunc {
 		} {
 			channelsByKind[string(kind)] = deps.ChannelScheduler.GetConversationChannelsByKind(kind)
 		}
-
-		c.JSON(http.StatusOK, gin.H{
+		httpbridge.JSON(c, http.StatusOK, fiber.Map{
 			"conversations":  conversations,
 			"total":          len(conversations),
 			"overrides":      overridesResponse,
 			"channelsByKind": channelsByKind,
 		})
+		return nil
 	}
 }
 
@@ -73,24 +74,24 @@ type SetOverrideRequest struct {
 	Duration              *int                        `json:"duration,omitempty"`              // 秒；nil=系统默认；-1=永不恢复
 }
 
-func SetConversationOverride(deps *ConversationHandlerDeps) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		convID := c.Param("id")
+func SetConversationOverride(deps *ConversationHandlerDeps) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		convID := httpbridge.Param(c, "id")
 		if convID == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "conversation id is required"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "conversation id is required"})
+			return nil
 		}
 
 		var req SetOverrideRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request: " + err.Error()})
-			return
+		if err := httpbridge.BindJSON(c, &req); err != nil {
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "invalid request: " + err.Error()})
+			return nil
 		}
 
 		conv, ok := deps.Tracker.GetConversation(convID)
 		if !ok {
-			c.JSON(http.StatusNotFound, gin.H{"error": "conversation not found"})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "conversation not found"})
+			return nil
 		}
 
 		// 解析 duration：nil=系统默认，-1=永不恢复，>0=自定义秒数
@@ -104,71 +105,71 @@ func SetConversationOverride(deps *ConversationHandlerDeps) gin.HandlerFunc {
 		}
 
 		if len(req.Sequence) == 0 && len(req.SubagentSequence) == 0 && !req.ClearSubagentSequence {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "sequence or subagentSequence is required"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "sequence or subagentSequence is required"})
+			return nil
 		}
 
 		if len(req.Sequence) > 0 {
 			err := deps.OverrideManager.SetOverride(convID, conv.Kind, conv.RawUserID, req.Sequence, overrideDuration)
 			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				return
+				httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": err.Error()})
+				return nil
 			}
 		}
 
 		if len(req.SubagentSequence) > 0 {
 			if saErr := deps.OverrideManager.SetSubagentOverride(convID, conv.Kind, conv.RawUserID, req.SubagentSequence, req.Sequence, overrideDuration); saErr != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": saErr.Error()})
-				return
+				httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": saErr.Error()})
+				return nil
 			}
 		}
 
 		if req.ClearSubagentSequence {
 			deps.OverrideManager.ClearSubagentOverride(convID)
 		}
-
-		c.JSON(http.StatusOK, gin.H{
+		httpbridge.JSON(c, http.StatusOK, fiber.Map{
 			"message":               "override set successfully",
 			"conversationId":        convID,
 			"sequence":              req.Sequence,
 			"subagentSequence":      req.SubagentSequence,
 			"clearSubagentSequence": req.ClearSubagentSequence,
 		})
+		return nil
 	}
 }
 
-func RemoveConversationOverride(deps *ConversationHandlerDeps) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		convID := c.Param("id")
+func RemoveConversationOverride(deps *ConversationHandlerDeps) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		convID := httpbridge.Param(c, "id")
 		if convID == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "conversation id is required"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "conversation id is required"})
+			return nil
 		}
 
 		removed := deps.OverrideManager.RemoveOverride(convID)
 		if !removed {
-			c.JSON(http.StatusNotFound, gin.H{"error": "no override found for this conversation"})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "no override found for this conversation"})
+			return nil
 		}
-
-		c.JSON(http.StatusOK, gin.H{
+		httpbridge.JSON(c, http.StatusOK, fiber.Map{
 			"message":        "override removed",
 			"conversationId": convID,
 		})
+		return nil
 	}
 }
 
 // GetConversationSettings 获取驾驶舱设置
-func GetConversationSettings(deps *ConversationHandlerDeps) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func GetConversationSettings(deps *ConversationHandlerDeps) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		cfg := deps.ConfigManager.GetConfig()
 
 		// 获取有效的 override TTL（优先使用配置文件中的值，否则返回 0 表示使用环境变量默认值）
 		overrideTTLMinutes := cfg.OverrideTTLMinutes
-
-		c.JSON(http.StatusOK, gin.H{
+		httpbridge.JSON(c, http.StatusOK, fiber.Map{
 			"overrideTtlMinutes": overrideTTLMinutes,
 		})
+		return nil
 	}
 }
 
@@ -177,12 +178,12 @@ type UpdateConversationSettingsRequest struct {
 }
 
 // UpdateConversationSettings 更新驾驶舱设置
-func UpdateConversationSettings(deps *ConversationHandlerDeps) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func UpdateConversationSettings(deps *ConversationHandlerDeps) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		var req UpdateConversationSettingsRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request: " + err.Error()})
-			return
+		if err := httpbridge.BindJSON(c, &req); err != nil {
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "invalid request: " + err.Error()})
+			return nil
 		}
 
 		if req.OverrideTTLMinutes != nil {
@@ -190,8 +191,8 @@ func UpdateConversationSettings(deps *ConversationHandlerDeps) gin.HandlerFunc {
 
 			// 更新配置文件（内部会标准化为有效选项，不合适的值使用默认 30 分钟）
 			if err := deps.ConfigManager.SetOverrideTTLMinutes(ttl); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update config: " + err.Error()})
-				return
+				httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": "failed to update config: " + err.Error()})
+				return nil
 			}
 
 			// 获取标准化后的值
@@ -206,9 +207,9 @@ func UpdateConversationSettings(deps *ConversationHandlerDeps) gin.HandlerFunc {
 				deps.OverrideManager.SetDefaultTTL(time.Duration(normalizedTTL) * time.Minute)
 			}
 		}
-
-		c.JSON(http.StatusOK, gin.H{
+		httpbridge.JSON(c, http.StatusOK, fiber.Map{
 			"message": "settings updated successfully",
 		})
+		return nil
 	}
 }

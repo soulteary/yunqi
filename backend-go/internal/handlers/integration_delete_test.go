@@ -10,16 +10,15 @@ import (
 	"time"
 
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/session"
 	"github.com/soulteary/yunqi/internal/warmup"
-	"github.com/gin-gonic/gin"
 )
 
 // TestGetChannelLogs_AfterChannelDeletion 验证删除渠道后，logs API 对剩余渠道仍返回正确数据
 func TestGetChannelLogs_AfterChannelDeletion(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	// ch-a 和 ch-b 共享 baseURL，但使用不同的 key（不同 metricsKey 桶）
 	cfg := config.Config{
@@ -94,12 +93,12 @@ func TestGetChannelLogs_AfterChannelDeletion(t *testing.T) {
 	}
 
 	// 通过 API 查询 ch-b（index 现在是 0，因为 ch-a 被移除）
-	r := gin.New()
-	r.GET("/messages/channels/:id/logs", GetChannelLogs(logStore, cfgManager, scheduler.ChannelKindMessages, nil))
+	r := httpbridge.NewApp()
+	r.Get("/messages/channels/:id/logs", GetChannelLogs(logStore, cfgManager, scheduler.ChannelKindMessages, nil))
 
 	req := httptest.NewRequest(http.MethodGet, "/messages/channels/0/logs", nil)
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", w.Code)
@@ -121,7 +120,6 @@ func TestGetChannelLogs_AfterChannelDeletion(t *testing.T) {
 }
 
 func TestGetChannelLogs_FiltersSharedMetricsKeyByChannelIndex(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	cfg := config.Config{
 		ResponsesUpstream: []config.UpstreamConfig{
@@ -164,12 +162,12 @@ func TestGetChannelLogs_FiltersSharedMetricsKeyByChannelIndex(t *testing.T) {
 	logStore.Record(metricsKey, &metrics.ChannelLog{RequestID: "claude-log", ChannelIndex: 0, Model: "gpt-5.4", Timestamp: now.Add(-time.Second)})
 	logStore.Record(metricsKey, &metrics.ChannelLog{RequestID: "chat-log", ChannelIndex: 1, Model: "gpt-5.5", Timestamp: now})
 
-	r := gin.New()
-	r.GET("/responses/channels/:id/logs", GetChannelLogs(logStore, cfgManager, scheduler.ChannelKindResponses, nil))
+	r := httpbridge.NewApp()
+	r.Get("/responses/channels/:id/logs", GetChannelLogs(logStore, cfgManager, scheduler.ChannelKindResponses, nil))
 
 	req := httptest.NewRequest(http.MethodGet, "/responses/channels/0/logs", nil)
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", w.Code)
@@ -194,7 +192,7 @@ func TestGetChannelLogs_FiltersSharedMetricsKeyByChannelIndex(t *testing.T) {
 
 	req = httptest.NewRequest(http.MethodGet, "/responses/channels/1/logs", nil)
 	w = httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", w.Code)
@@ -214,7 +212,6 @@ func TestGetChannelLogs_FiltersSharedMetricsKeyByChannelIndex(t *testing.T) {
 }
 
 func TestGetChannelLogs_FiltersSharedMetricsKeyByChannelNameAfterDeletion(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	cfg := config.Config{
 		ResponsesUpstream: []config.UpstreamConfig{
@@ -258,12 +255,12 @@ func TestGetChannelLogs_FiltersSharedMetricsKeyByChannelNameAfterDeletion(t *tes
 	logStore.Record(metricsKey, &metrics.ChannelLog{RequestID: "remaining-a-old-index", ChannelIndex: 1, ChannelName: "RemainingA", Model: "gpt-5.5", Timestamp: now.Add(-time.Second)})
 	logStore.Record(metricsKey, &metrics.ChannelLog{RequestID: "remaining-b-old-index", ChannelIndex: 2, ChannelName: "RemainingB", Model: "gpt-5.6", Timestamp: now})
 
-	r := gin.New()
-	r.GET("/responses/channels/:id/logs", GetChannelLogs(logStore, cfgManager, scheduler.ChannelKindResponses, nil))
+	r := httpbridge.NewApp()
+	r.Get("/responses/channels/:id/logs", GetChannelLogs(logStore, cfgManager, scheduler.ChannelKindResponses, nil))
 
 	req := httptest.NewRequest(http.MethodGet, "/responses/channels/0/logs", nil)
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", w.Code)
@@ -284,7 +281,6 @@ func TestGetChannelLogs_FiltersSharedMetricsKeyByChannelNameAfterDeletion(t *tes
 }
 
 func TestGetChannelLogs_ExcludesDeletedChannelResidualAfterBecomingExclusive(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	// 删除前有两个渠道共享同一 metricsKey；删除其一后仅 Remaining 独占该桶，
 	// 但桶里仍残留已删除渠道的历史日志（带删除渠道名），必须按渠道名排除。
@@ -321,12 +317,12 @@ func TestGetChannelLogs_ExcludesDeletedChannelResidualAfterBecomingExclusive(t *
 	logStore.Record(metricsKey, &metrics.ChannelLog{RequestID: "deleted-residual", ChannelIndex: 1, ChannelName: "Deleted", Model: "gpt-5.4", Timestamp: now.Add(-time.Second)})
 	logStore.Record(metricsKey, &metrics.ChannelLog{RequestID: "remaining", ChannelIndex: 0, ChannelName: "Remaining", Model: "gpt-5.5", Timestamp: now})
 
-	r := gin.New()
-	r.GET("/responses/channels/:id/logs", GetChannelLogs(logStore, cfgManager, scheduler.ChannelKindResponses, nil))
+	r := httpbridge.NewApp()
+	r.Get("/responses/channels/:id/logs", GetChannelLogs(logStore, cfgManager, scheduler.ChannelKindResponses, nil))
 
 	req := httptest.NewRequest(http.MethodGet, "/responses/channels/0/logs", nil)
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", w.Code)
@@ -348,7 +344,6 @@ func TestGetChannelLogs_ExcludesDeletedChannelResidualAfterBecomingExclusive(t *
 
 // TestGetChannelDashboard_AfterChannelDeletion 验证 dashboard 在渠道删除后 metrics 索引一致性
 func TestGetChannelDashboard_AfterChannelDeletion(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	cfg := config.Config{
 		Upstream: []config.UpstreamConfig{
@@ -401,12 +396,12 @@ func TestGetChannelDashboard_AfterChannelDeletion(t *testing.T) {
 	sch.DeleteChannelMetrics(removed, scheduler.ChannelKindMessages)
 
 	// 请求 dashboard
-	r := gin.New()
-	r.GET("/messages/channels/dashboard", GetChannelDashboard(cfgManager, sch))
+	r := httpbridge.NewApp()
+	r.Get("/messages/channels/dashboard", GetChannelDashboard(cfgManager, sch))
 
 	req := httptest.NewRequest(http.MethodGet, "/messages/channels/dashboard?type=messages", nil)
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200, body = %s", w.Code, w.Body.String())

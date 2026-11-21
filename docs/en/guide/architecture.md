@@ -16,7 +16,12 @@ Yunqi 是一个单端口部署的 AI API 代理与协议转换网关：
 ```text
 yunqi/
 ├── backend-go/                 # Go 后端
-│   ├── main.go                # 路由与服务启动
+│   ├── main.go                # CLI 动作分派与进程入口
+│   ├── cli.go                 # 参数解析与运行时路径（兼容原路径规则）
+│   ├── bootstrap*.go          # 依赖装配、策略接线与配置热重载
+│   ├── background*.go         # 后台任务启动、恢复检查与关闭顺序
+│   ├── routes*.go             # 中间件、管理 / 代理 / 前端路由注册
+│   ├── server.go              # HTTP 服务、启动日志与信号关闭
 │   └── internal/
 │       ├── config/            # 配置与热重载
 │       ├── handlers/          # HTTP 处理器
@@ -234,3 +239,23 @@ Images 请求会在渠道日志中记录具体端点类型：
 - 开发流程：`development.md`
 - 环境变量：`environment.md`
 - 发布流程：`release.md`
+
+## 启动装配与兼容边界
+
+`runService` 是单一装配入口，按原有依赖顺序初始化配置、缓存、指标、Autopilot 和调度器，再启动后台任务、注册路由并监听 HTTP。`application` 仅在进程装配层保存这些显式依赖，不引入新的全局服务定位器。
+
+路由注册不再创建 discovery 或订阅同步 worker；这些依赖在接受请求前由后台任务装配完成。信号关闭仍先排空 HTTP 请求，再按原有顺序关闭后台依赖，最后由装配入口执行 thinking cache 和配置管理器的延迟清理。CLI 标志、版本注入、文件路径、JSON / SQLite 格式及代理 Handler 均保持兼容。
+
+`testdata/routes/` 保存本次拆分前从真实路由器采集的三种运行模式的路由清单；`routes_test.go` 核对清单，并验证管理 / 代理密钥隔离、SPA 回退、纯 API 模式及路由前缀。
+
+## Web API 服务边界
+
+Web 页面继续从 `frontend/src/services/api.ts` 导入 `api`、默认单例或 `ApiService`。该文件只组合业务模块；`services/api/client.ts` 集中处理请求头、动态认证、语言、响应解析及错误。六类协议渠道位于 `services/api/channels/`，稳定 UID / 逻辑渠道、能力测试、监控、健康、会话、订阅、账号、路由和成本分别拥有业务模块。
+
+DTO 位于 `services/types/`，原 `api-types.ts` 和 `console-types.ts` 作为兼容导出入口。业务实现直接导入所属 DTO，共享类型使用 `import type`，不通过门面回引业务模块。公共方法清单与请求契约测试用于确保拆分不改变路径、载荷、默认值、认证失效处理或页面调用方式。
+
+## Fiber routing and HTTP transport
+
+The backend uses Fiber v3.7.0 and requires Go 1.26 or later. Gin and its compression middleware dependencies have been removed; routes, authentication middleware and handlers use native Fiber types.
+
+`internal/httpbridge/` connects Fiber routing to the existing `net/http` transport. The server and TLS modules retain HTTP/HTTPS on the same port and graceful shutdown. Request bodies remain streaming, and client cancellation, HTTP/2, SSE flushing and WebSocket upgrades use the original request and response writer. The bridge also preserves JSON validation, concurrent request values, independent racing contexts and static route priority. Configuration and database formats remain unchanged.

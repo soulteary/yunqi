@@ -2,7 +2,7 @@
 
 Yunqi releases are signed using [Sigstore](https://www.sigstore.dev/) keyless signing on the checksums manifest. Verifying the signature proves that the release artifacts were built by the `BenedictKing/yunqi` GitHub Actions workflow and have not been tampered with.
 
-Windows GitHub installers are also Authenticode-signed through the SignPath Foundation. Sigstore verifies the Release manifest and CI origin; Authenticode lets Windows verify installer publisher and file integrity.
+Windows service binaries are also Authenticode-signed through the SignPath Foundation. Sigstore verifies the Release manifest and CI origin; Authenticode lets Windows verify installer publisher and file integrity.
 
 ## How It Works
 
@@ -45,14 +45,6 @@ Download from [GitHub Releases](https://github.com/soulteary/yunqi/releases):
 
 - `checksums.txt` — cross-platform SHA256 manifest
 - `checksums.txt.sigstore.json` — the Sigstore signature bundle
-
-For single-platform verification, use `checksums-{platform}.txt` and `checksums-{platform}.txt.sigstore.json`:
-
-| Platform | Manifest | Signature Bundle |
-|----------|----------|-----------------|
-| macOS | `checksums-macos.txt` | `checksums-macos.txt.sigstore.json` |
-| Windows | `checksums-windows.txt` | `checksums-windows.txt.sigstore.json` |
-| Linux | `checksums-linux.txt` | `checksums-linux.txt.sigstore.json` |
 
 ### 2. Verify the checksums manifest signature
 
@@ -97,16 +89,15 @@ shasum -a 256 yunqi-darwin-arm64
 
 ### 4. Verify Windows Authenticode signature
 
-You can verify SignPath code signing for Windows GitHub installers with PowerShell:
+You can verify SignPath code signing for Windows service binaries with PowerShell:
 
 ```powershell
-$version = "2.7.12"  # Replace with the target version without v
-$signature = Get-AuthenticodeSignature ".\Yunqi-Desktop-$version-windows-amd64-setup.exe"
+$signature = Get-AuthenticodeSignature ".\yunqi-windows-amd64.exe"
 $signature.Status
 $signature.SignerCertificate.Subject
 ```
 
-`Status` should be `Valid`. If it shows `NotSigned`, `UnknownError`, or unexpected certificate details, do not run the installer. Re-download it from the official Release and verify SHA256 again.
+`Status` should be `Valid`. If it shows `NotSigned`, `UnknownError`, or unexpected certificate details, do not run the binary. Re-download it from the official Release and verify SHA256 again.
 
 ## Common Verification Failures
 
@@ -124,11 +115,7 @@ $signature.SignerCertificate.Subject
 |------|----------|
 | `checksums.txt` | SHA256 hashes for all cross-platform artifacts (`sha256sum` format) |
 | `checksums.txt.sigstore.json` | Sigstore bundle: signature, OIDC certificate, Rekor transparency log entry |
-| `checksums-{platform}.txt` | Single-platform SHA256 manifest |
-| `checksums-{platform}.txt.sigstore.json` | Single-platform Sigstore bundle |
-| `{artifact}.sha256` | Individual artifact SHA256 (hex hash only, used by updater for automated verification) |
-| `Yunqi-Desktop-*-windows-*-setup.exe` | SignPath Authenticode-signed Windows GitHub installer |
-| `Yunqi-Desktop-*-windows-*-store.msix` | Windows Store/MSIX submission and validation package; public installs should prefer Microsoft Store |
+| `{artifact}.sha256` | Individual artifact SHA256 (hex hash only) |
 
 ## Learn More
 
@@ -136,3 +123,5 @@ $signature.SignerCertificate.Subject
 - [cosign Documentation](https://docs.sigstore.dev/cosign/)
 - [Rekor Transparency Log](https://docs.sigstore.dev/logging/overview/)
 - [SLSA Supply Chain Security](https://slsa.dev/)
+
+Current assets are `yunqi-{linux,darwin,windows}-{amd64,arm64}` (with `.exe` on Windows), their checksum sidecars and the consolidated signed manifest. Desktop installers and MSIX packages are no longer generated.

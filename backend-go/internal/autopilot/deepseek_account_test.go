@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/soulteary/yunqi/internal/httpbridge"
+
 	"github.com/soulteary/yunqi/internal/config"
 )
 
@@ -73,7 +75,7 @@ func TestHandleDeepSeekBalanceMasksCredentialsAndKeepsPartialErrors(t *testing.T
 	client.BaseURL = server.URL
 	router := setupAutoManagedRouter(&AutoManagedDeps{CfgManager: manager, DeepSeekClient: client})
 	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/accounts/acct_ds/deepseek-balance", nil))
+	httpbridge.Handler(router).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/accounts/acct_ds/deepseek-balance", nil))
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 	}

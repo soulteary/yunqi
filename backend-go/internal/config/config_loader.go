@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/soulteary/yunqi/internal/utils"
 	"github.com/fsnotify/fsnotify"
+	"github.com/soulteary/yunqi/internal/utils"
 )
 
 const (

@@ -9,16 +9,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/converters"
 	"github.com/soulteary/yunqi/internal/copilot"
 	"github.com/soulteary/yunqi/internal/errutil"
 	"github.com/soulteary/yunqi/internal/handlers/common"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/middleware"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/types"
 	"github.com/soulteary/yunqi/internal/utils"
-	"github.com/gin-gonic/gin"
 )
 
 // Handler Gemini API 代理处理器
@@ -27,12 +28,12 @@ func Handler(
 	envCfg *config.EnvConfig,
 	cfgManager *config.ConfigManager,
 	channelScheduler *scheduler.ChannelScheduler,
-) gin.HandlerFunc {
-	return gin.HandlerFunc(func(c *gin.Context) {
+) fiber.Handler {
+	return fiber.Handler(func(c fiber.Ctx) error {
 		// Gemini 代理端点统一使用代理访问密钥鉴权（x-api-key / Authorization: Bearer）
-		middleware.ProxyAuthMiddleware(envCfg)(c)
-		if c.IsAborted() {
-			return
+		middleware.AuthenticateProxy(c, envCfg)
+		if httpbridge.IsAborted(c) {
+			return nil
 		}
 
 		startTime := time.Now()
@@ -41,50 +42,50 @@ func Handler(
 		maxBodySize := envCfg.MaxRequestBodySize
 		bodyBytes, err := common.ReadRequestBody(c, maxBodySize)
 		if err != nil {
-			return
+			return nil
 		}
-		c.Set("requestBodyBytes", bodyBytes)
+		httpbridge.SetValue(c, "requestBodyBytes", bodyBytes)
 
 		// 解析 Gemini 请求
 		var geminiReq types.GeminiRequest
 		if len(bodyBytes) > 0 {
 			if err := json.Unmarshal(bodyBytes, &geminiReq); err != nil {
-				c.JSON(400, types.GeminiError{
+				httpbridge.JSON(c, 400, types.GeminiError{
 					Error: types.GeminiErrorDetail{
 						Code:    400,
 						Message: fmt.Sprintf("Invalid request body: %v", err),
 						Status:  "INVALID_ARGUMENT",
 					},
 				})
-				return
+				return nil
 			}
 		}
 
 		// 从 URL 路径提取模型名称
 		// 格式: /v1/models/{model}:generateContent 或 /v1/models/{model}:streamGenerateContent
-		// 使用 *modelAction 通配符捕获整个后缀，如 /gemini-pro:generateContent
-		modelAction := c.Param("modelAction")
-		// 移除前导斜杠（Gin 的 * 通配符会保留前导斜杠）
+		// 使用 * 通配符捕获整个后缀，如 /gemini-pro:generateContent
+		modelAction := httpbridge.Param(c, "modelAction")
+		// 移除前导斜杠（Fiber 的 * 通配符会保留前导斜杠）
 		modelAction = strings.TrimPrefix(modelAction, "/")
 		model := extractModelName(modelAction)
 		if model == "" {
-			c.JSON(400, types.GeminiError{
+			httpbridge.JSON(c, 400, types.GeminiError{
 				Error: types.GeminiErrorDetail{
 					Code:    400,
 					Message: "Model name is required in URL path",
 					Status:  "INVALID_ARGUMENT",
 				},
 			})
-			return
+			return nil
 		}
 
 		// 判断是否流式
-		isStream := strings.Contains(c.Request.URL.Path, "streamGenerateContent")
+		isStream := strings.Contains(httpbridge.Request(c).URL.Path, "streamGenerateContent")
 
 		// 提取统一会话标识用于 Trace 亲和性
 		userID := utils.ExtractUnifiedSessionID(c, bodyBytes)
 		agentCtx := utils.ExtractAgentContext(c, bodyBytes)
-		c.Set("agentContext", agentCtx)
+		httpbridge.SetValue(c, "agentContext", agentCtx)
 		common.SetRequestLogContextWithAgent(c, userID, countGeminiUserContents(geminiReq), agentCtx)
 
 		// 记录原始请求信息
@@ -99,6 +100,7 @@ func Handler(
 		} else {
 			handleSingleChannel(c, envCfg, cfgManager, channelScheduler, bodyBytes, &geminiReq, model, isStream, startTime)
 		}
+		return nil
 	})
 }
 
@@ -131,7 +133,7 @@ func countGeminiUserContents(req types.GeminiRequest) int {
 
 // handleMultiChannel 处理多渠道 Gemini 请求
 func handleMultiChannel(
-	c *gin.Context,
+	c fiber.Ctx,
 	envCfg *config.EnvConfig,
 	cfgManager *config.ConfigManager,
 	channelScheduler *scheduler.ChannelScheduler,
@@ -148,7 +150,7 @@ func handleMultiChannel(
 	common.ApplyAgentModelProfile(contextRequirement, model, cfg)
 	common.LogContextEstimate(c, "Gemini", contextRequirement)
 	agentRole := ""
-	if ac := common.AgentContextFromGin(c); ac != nil {
+	if ac := common.AgentContextFromFiber(c); ac != nil {
 		agentRole = ac.AgentRole
 	}
 	common.HandleMultiChannelFailoverWithContextRequirement(
@@ -162,7 +164,7 @@ func handleMultiChannel(
 		contextRequirement,
 		isStream,
 		agentRole,
-		func(c *gin.Context, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
+		func(c fiber.Ctx, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
 			upstream := selection.Upstream
 			channelIndex := selection.ChannelIndex
 
@@ -189,7 +191,7 @@ func handleMultiChannel(
 				func(upstream *config.UpstreamConfig, failedKeys map[string]bool) (string, error) {
 					return cfgManager.GetNextGeminiAPIKey(upstream, failedKeys)
 				},
-				func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
+				func(c fiber.Ctx, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
 					return buildProviderRequest(c, upstreamCopy, upstreamCopy.BaseURL, apiKey, bodyBytes, geminiReq, model, isStream)
 				},
 				func(apiKey string) {
@@ -201,7 +203,7 @@ func handleMultiChannel(
 				func(url string) {
 					channelScheduler.MarkURLSuccess(scheduler.ChannelKindGemini, channelIndex, url)
 				},
-				func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
+				func(c fiber.Ctx, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 					return handleSuccess(c, resp, upstreamCopy.ServiceType, envCfg, startTime, geminiReq, model, isStream, common.ResolveStreamPreflightTimeouts(upstreamCopy, metricsManager.GetCircuitBreakerConfig()))
 				},
 				model,
@@ -222,7 +224,7 @@ func handleMultiChannel(
 			}
 		},
 		nil,
-		func(ctx *gin.Context, failoverErr *common.FailoverError, lastError error) {
+		func(ctx fiber.Ctx, failoverErr *common.FailoverError, lastError error) {
 			handleAllChannelsFailed(ctx, failoverErr, lastError)
 		},
 	)
@@ -230,7 +232,7 @@ func handleMultiChannel(
 
 // handleSingleChannel 处理单渠道 Gemini 请求
 func handleSingleChannel(
-	c *gin.Context,
+	c fiber.Ctx,
 	envCfg *config.EnvConfig,
 	cfgManager *config.ConfigManager,
 	channelScheduler *scheduler.ChannelScheduler,
@@ -242,7 +244,7 @@ func handleSingleChannel(
 ) {
 	upstream, channelIndex, err := cfgManager.GetCurrentGeminiUpstreamWithIndex()
 	if err != nil {
-		c.JSON(503, types.GeminiError{
+		httpbridge.JSON(c, 503, types.GeminiError{
 			Error: types.GeminiErrorDetail{
 				Code:    503,
 				Message: "No Gemini upstream configured",
@@ -253,7 +255,7 @@ func handleSingleChannel(
 	}
 
 	if len(upstream.APIKeys) == 0 {
-		c.JSON(503, types.GeminiError{
+		httpbridge.JSON(c, 503, types.GeminiError{
 			Error: types.GeminiErrorDetail{
 				Code:    503,
 				Message: fmt.Sprintf("No API keys configured for upstream \"%s\"", upstream.Name),
@@ -268,7 +270,7 @@ func handleSingleChannel(
 	common.ApplyAgentModelProfile(contextRequirement, model, cfg)
 	common.LogContextEstimate(c, "Gemini", contextRequirement)
 	if err := channelScheduler.ValidateUpstreamContext(scheduler.ChannelKindGemini, model, upstream, contextRequirement); err != nil {
-		c.JSON(400, types.GeminiError{
+		httpbridge.JSON(c, 400, types.GeminiError{
 			Error: types.GeminiErrorDetail{
 				Code:    400,
 				Message: err.Error(),
@@ -298,7 +300,7 @@ func handleSingleChannel(
 		func(upstream *config.UpstreamConfig, failedKeys map[string]bool) (string, error) {
 			return cfgManager.GetNextGeminiAPIKey(upstream, failedKeys)
 		},
-		func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
+		func(c fiber.Ctx, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
 			return buildProviderRequest(c, upstreamCopy, upstreamCopy.BaseURL, apiKey, bodyBytes, geminiReq, model, isStream)
 		},
 		func(apiKey string) {
@@ -306,7 +308,7 @@ func handleSingleChannel(
 		},
 		nil,
 		nil,
-		func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
+		func(c fiber.Ctx, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 			return handleSuccess(c, resp, upstreamCopy.ServiceType, envCfg, startTime, geminiReq, model, isStream, common.ResolveStreamPreflightTimeouts(upstreamCopy, metricsManager.GetCircuitBreakerConfig()))
 		},
 		model,
@@ -406,7 +408,7 @@ func stripThoughtSignature(geminiReq *types.GeminiRequest) {
 
 // buildProviderRequest 构建上游请求
 func buildProviderRequest(
-	c *gin.Context,
+	c fiber.Ctx,
 	upstream *config.UpstreamConfig,
 	baseURL string,
 	apiKey string,
@@ -496,14 +498,14 @@ func buildProviderRequest(
 		}
 		// copilot 使用 token exchange 返回的动态端点，而非渠道静态 baseURL
 		if upstream.ServiceType == "copilot" {
-			copilotToken, copilotBaseURL, err := copilot.ResolveTokenWithProxy(c.Request.Context(), apiKey, upstream.ProxyURL)
+			copilotToken, copilotBaseURL, err := copilot.ResolveTokenWithProxy(httpbridge.Request(c).Context(), apiKey, upstream.ProxyURL)
 			if err != nil {
 				return nil, fmt.Errorf("copilot token 交换失败: %w", err)
 			}
 			if copilotBaseURL != "" {
 				url = strings.TrimRight(copilotBaseURL, "/") + "/responses"
 			}
-			req, err := http.NewRequestWithContext(c.Request.Context(), "POST", url, bytes.NewReader(requestBody))
+			req, err := http.NewRequestWithContext(httpbridge.Request(c).Context(), "POST", url, bytes.NewReader(requestBody))
 			if err != nil {
 				return nil, err
 			}
@@ -531,7 +533,7 @@ func buildProviderRequest(
 		}
 	}
 
-	req, err := http.NewRequestWithContext(c.Request.Context(), "POST", url, bytes.NewReader(requestBody))
+	req, err := http.NewRequestWithContext(httpbridge.Request(c).Context(), "POST", url, bytes.NewReader(requestBody))
 	if err != nil {
 		return nil, err
 	}
@@ -572,7 +574,7 @@ func buildProviderRequest(
 
 // handleSuccess 处理成功的响应
 func handleSuccess(
-	c *gin.Context,
+	c fiber.Ctx,
 	resp *http.Response,
 	upstreamType string,
 	envCfg *config.EnvConfig,
@@ -598,7 +600,7 @@ func handleSuccess(
 	// 后续按上游类型的转换与原生非流式路径完全一致。
 	bodyBytes, err := common.ReadUpstreamNonStreamBody(c, resp, upstreamType)
 	if err != nil {
-		c.JSON(500, types.GeminiError{
+		httpbridge.JSON(c, 500, types.GeminiError{
 			Error: types.GeminiErrorDetail{
 				Code:    500,
 				Message: "Failed to read response",
@@ -699,11 +701,10 @@ func handleSuccess(
 	// 返回 Gemini 格式响应
 	respBytes, err := json.Marshal(geminiResp)
 	if err != nil {
-		c.Data(resp.StatusCode, "application/json", bodyBytes)
+		httpbridge.Data(c, resp.StatusCode, "application/json", bodyBytes)
 		return nil, nil
 	}
-
-	c.Data(resp.StatusCode, "application/json", respBytes)
+	httpbridge.Data(c, resp.StatusCode, "application/json", respBytes)
 
 	// 提取 usage 统计
 	var usage *types.Usage
@@ -718,9 +719,9 @@ func handleSuccess(
 }
 
 // handleAllChannelsFailed 处理所有渠道失败的情况
-func handleAllChannelsFailed(c *gin.Context, failoverErr *common.FailoverError, lastError error) {
+func handleAllChannelsFailed(c fiber.Ctx, failoverErr *common.FailoverError, lastError error) {
 	if failoverErr != nil {
-		c.Data(failoverErr.Status, "application/json", failoverErr.Body)
+		httpbridge.Data(c, failoverErr.Status, "application/json", failoverErr.Body)
 		return
 	}
 
@@ -728,8 +729,7 @@ func handleAllChannelsFailed(c *gin.Context, failoverErr *common.FailoverError, 
 	if lastError != nil {
 		errMsg = lastError.Error()
 	}
-
-	c.JSON(503, types.GeminiError{
+	httpbridge.JSON(c, 503, types.GeminiError{
 		Error: types.GeminiErrorDetail{
 			Code:    503,
 			Message: errMsg,
@@ -739,9 +739,9 @@ func handleAllChannelsFailed(c *gin.Context, failoverErr *common.FailoverError, 
 }
 
 // handleAllKeysFailed 处理所有 Key 失败的情况
-func handleAllKeysFailed(c *gin.Context, failoverErr *common.FailoverError, lastError error) {
+func handleAllKeysFailed(c fiber.Ctx, failoverErr *common.FailoverError, lastError error) {
 	if failoverErr != nil {
-		c.Data(failoverErr.Status, "application/json", failoverErr.Body)
+		httpbridge.Data(c, failoverErr.Status, "application/json", failoverErr.Body)
 		return
 	}
 
@@ -749,8 +749,7 @@ func handleAllKeysFailed(c *gin.Context, failoverErr *common.FailoverError, last
 	if lastError != nil {
 		errMsg = lastError.Error()
 	}
-
-	c.JSON(503, types.GeminiError{
+	httpbridge.JSON(c, 503, types.GeminiError{
 		Error: types.GeminiErrorDetail{
 			Code:    503,
 			Message: errMsg,

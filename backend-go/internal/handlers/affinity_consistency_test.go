@@ -6,12 +6,11 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/utils"
-	"github.com/gin-gonic/gin"
 )
 
 func TestUnifiedSessionIDAffinityConsistencyAcrossAPIs(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	tests := []struct {
 		name     string
@@ -97,10 +96,10 @@ func TestUnifiedSessionIDAffinityConsistencyAcrossAPIs(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
-			c, _ := gin.CreateTestContext(w)
-			c.Request = httptest.NewRequest(http.MethodPost, tt.path, bytes.NewBufferString(tt.body))
+			c, _ := httpbridge.TestContext(w)
+			httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, tt.path, bytes.NewBufferString(tt.body)))
 			for k, v := range tt.headers {
-				c.Request.Header.Set(k, v)
+				httpbridge.Request(c).Header.Set(k, v)
 			}
 
 			got := utils.ExtractUnifiedSessionID(c, []byte(tt.body))
@@ -112,7 +111,6 @@ func TestUnifiedSessionIDAffinityConsistencyAcrossAPIs(t *testing.T) {
 }
 
 func TestUnifiedSessionIDBodyFallbackConsistencyAcrossAPIs(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	tests := []struct {
 		name     string
@@ -143,8 +141,8 @@ func TestUnifiedSessionIDBodyFallbackConsistencyAcrossAPIs(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
-			c, _ := gin.CreateTestContext(w)
-			c.Request = httptest.NewRequest(http.MethodPost, tt.path, bytes.NewBufferString(tt.body))
+			c, _ := httpbridge.TestContext(w)
+			httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, tt.path, bytes.NewBufferString(tt.body)))
 
 			got := utils.ExtractUnifiedSessionID(c, []byte(tt.body))
 			if got != tt.expected {

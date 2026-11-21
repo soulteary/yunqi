@@ -1,0 +1,40 @@
+name: Verify
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend-go/go.mod
+          cache-dependency-path: backend-go/go.sum
+      - name: Verify frontend
+        working-directory: frontend
+        run: |
+          bun install --frozen-lockfile
+          bun run test
+          bun run build
+      - name: Embed frontend
+        run: bash scripts/embed-frontend.sh
+      - name: Verify backend
+        working-directory: backend-go
+        run: |
+          go test ./...
+          go vet ./...
+          go build ./...
+      - name: Verify generated presets
+        run: |
+          node scripts/generate-channel-presets.mjs
+          git diff --exit-code -- frontend/src/generated
+      - name: Verify documentation
+        working-directory: docs
+        run: |
+          npm ci
+          npm run build

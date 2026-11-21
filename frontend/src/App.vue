@@ -131,6 +131,8 @@
             {{ t('app.tabs.autopilot') }}
           </router-link>
           <span class="api-type-text separator">/</span>
+          <router-link to="/console" class="api-type-text" :class="{ active: route.path === '/console' }">{{ t('app.tabs.console') }}</router-link>
+          <span class="api-type-text separator">/</span>
           <router-link to="/cost-report" class="api-type-text" :class="{ active: route.path === '/cost-report' }">
             {{ t('app.tabs.costReport') }}
           </router-link>
@@ -142,7 +144,7 @@
 
       <!-- 版本信息（< 500px 隐藏，避免在窄屏挤压右侧按钮） -->
       <div
-        v-if="!isDesktopWebUI && $vuetify.display.width >= 500 && systemStore.versionInfo.currentVersion"
+        v-if="$vuetify.display.width >= 500 && systemStore.versionInfo.currentVersion"
         class="version-badge"
         :class="{
           'version-clickable': systemStore.versionInfo.status === 'update-available' || systemStore.versionInfo.status === 'latest',
@@ -238,7 +240,7 @@
     <v-main>
       <v-container fluid class="pa-4 pa-md-6">
         <!-- 全局统计顶部可折叠卡片（根据当前 Tab 显示对应统计） -->
-        <v-card v-if="isAuthenticated && !['/conversations', '/health', '/autopilot', '/cost-report', '/subscriptions', '/cockpit'].includes(route.path)" class="mb-6 global-stats-panel">
+        <v-card v-if="isAuthenticated && !['/conversations', '/health', '/autopilot', '/cost-report', '/subscriptions', '/cockpit', '/console'].includes(route.path)" class="mb-6 global-stats-panel">
           <div
             class="global-stats-header d-flex align-center justify-space-between px-4 py-2"
             style="cursor: pointer;"
@@ -261,7 +263,7 @@
         </v-card>
 
         <!-- 统计卡片 - 玻璃拟态风格 -->
-        <v-row v-if="!['/conversations', '/health', '/autopilot', '/cost-report', '/subscriptions', '/cockpit'].includes(route.path)" class="mb-6 stat-cards-row">
+        <v-row v-if="!['/conversations', '/health', '/autopilot', '/cost-report', '/subscriptions', '/cockpit', '/console'].includes(route.path)" class="mb-6 stat-cards-row">
           <v-col cols="6" sm="4">
             <div class="stat-card stat-card-info">
               <div class="stat-card-icon">
@@ -308,7 +310,7 @@
         </v-row>
 
         <!-- 操作按钮区域 - 现代化设计 -->
-        <div v-if="!['/conversations', '/health', '/autopilot', '/cost-report', '/subscriptions', '/cockpit'].includes(route.path)" class="action-bar mb-6">
+        <div v-if="!['/conversations', '/health', '/autopilot', '/cost-report', '/subscriptions', '/cockpit', '/console'].includes(route.path)" class="action-bar mb-6">
           <div class="action-bar-left">
             <v-btn
               color="primary"
@@ -633,7 +635,7 @@
       </v-card>
     </v-dialog>
 
-    <!-- 通用确认对话框（替代 window.confirm，兼容 Wails 桌面 iframe） -->
+    <!-- 通用确认对话框（替代 window.confirm） -->
     <v-dialog v-model="dialogStore.showConfirmDialog" max-width="420" persistent>
       <v-card rounded="lg">
         <v-card-title class="d-flex align-center pt-4">
@@ -704,7 +706,6 @@ const {
   currentLanguageShortLabel,
   translatedApiTabOptions,
   editingChannelType,
-  isDesktopWebUI,
   activeTrafficTitle,
   systemStatusText,
   systemStatusDesc,

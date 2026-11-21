@@ -8,14 +8,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/handlers/common"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/types"
-	"github.com/gin-gonic/gin"
 )
 
 func handleStreamSuccess(
-	c *gin.Context,
+	c fiber.Ctx,
 	resp *http.Response,
 	upstreamType string,
 	envCfg *config.EnvConfig,
@@ -55,14 +56,15 @@ func handleStreamSuccess(
 	if !common.RacingClaimClientCommitForStream(c, string(preflight.buffered)) {
 		return nil, common.ErrRacingSuperseded
 	}
+	httpbridge.
 
-	// 设置 SSE 响应头
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-	c.Header("X-Accel-Buffering", "no")
+		// 设置 SSE 响应头
+		Header(c, "Content-Type", "text/event-stream")
+	httpbridge.Header(c, "Cache-Control", "no-cache")
+	httpbridge.Header(c, "Connection", "keep-alive")
+	httpbridge.Header(c, "X-Accel-Buffering", "no")
 
-	flusher, ok := c.Writer.(http.Flusher)
+	flusher, ok := httpbridge.Writer(c).(http.Flusher)
 	if !ok {
 		common.RequestLogf(c, "[Chat-Stream] 警告: ResponseWriter 不支持 Flusher")
 	}

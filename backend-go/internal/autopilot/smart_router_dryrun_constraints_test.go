@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/scheduler"
-	"github.com/gin-gonic/gin"
 )
 
 func TestBuildPlanMatchesAutoHardConstraintSemantics(t *testing.T) {
@@ -168,13 +168,13 @@ func TestBuildPlanExcludesInactiveOrCredentiallessChannels(t *testing.T) {
 }
 
 func TestDryRunUsesCanonicalRequestProfileBuilder(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	cfg := baseTestConfig()
 	cfg.AutopilotRouting = config.AutopilotRoutingConfig{RoutingMode: "shadow"}
 	cfgManager, cleanup := createTestConfigManager(t, cfg)
 	defer cleanup()
 
-	router := gin.New()
+	router := httpbridge.NewApp()
 	RegisterDryRunRoutes(router, NewSmartRouter(nil, nil, nil, cfgManager))
 	body, err := json.Marshal(DryRunRequest{
 		Model: "claude-sonnet-5", ChannelKind: "messages", Operation: "completion",
@@ -186,7 +186,7 @@ func TestDryRunUsesCanonicalRequestProfileBuilder(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/smart-routing/diagnose", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, req)
+	httpbridge.Handler(router).ServeHTTP(recorder, req)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}

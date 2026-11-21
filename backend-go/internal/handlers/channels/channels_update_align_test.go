@@ -11,8 +11,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 // UpdateRequest 是 v2 PUT /api/channels/:uid 的入口结构，该端点是渠道编辑保存的主通道
@@ -91,9 +92,8 @@ func TestUpdatePersistsBillingFields(t *testing.T) {
 		t.Fatal("渠道加载后应自动补齐 ChannelUID")
 	}
 
-	gin.SetMode(gin.TestMode)
 	h := &Handler{cm: cm}
-	r := gin.New()
+	r := httpbridge.NewApp()
 	RegisterRoutesForTest(r, h)
 
 	body := `{
@@ -109,7 +109,7 @@ func TestUpdatePersistsBillingFields(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPut, "/channels/"+uid, bytes.NewReader([]byte(body)))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("期望 200，实际 %d: %s", w.Code, w.Body.String())
 	}
@@ -151,6 +151,6 @@ func TestUpdatePersistsBillingFields(t *testing.T) {
 }
 
 // RegisterRoutesForTest 供测试注入 handler 实例（scheduler 为 nil 的最小路由）。
-func RegisterRoutesForTest(r *gin.Engine, h *Handler) {
-	r.PUT("/channels/:uid", h.Update)
+func RegisterRoutesForTest(r *fiber.App, h *Handler) {
+	r.Put("/channels/:uid", h.Update)
 }

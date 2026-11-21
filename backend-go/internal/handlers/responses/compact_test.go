@@ -8,16 +8,16 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/session"
-	"github.com/gin-gonic/gin"
 )
 
-func newCompactTestRouter(t *testing.T, upstreams []config.UpstreamConfig) (*gin.Engine, *scheduler.ChannelScheduler) {
+func newCompactTestRouter(t *testing.T, upstreams []config.UpstreamConfig) (*fiber.App, *scheduler.ChannelScheduler) {
 	t.Helper()
-	gin.SetMode(gin.TestMode)
 
 	cfgManager := setupResponsesTestConfigManager(t, upstreams)
 	messagesMetrics := metrics.NewMetricsManager()
@@ -52,18 +52,18 @@ func newCompactTestRouter(t *testing.T, upstreams []config.UpstreamConfig) (*gin
 		MaxRequestBodySize: 1024 * 1024,
 	}
 
-	r := gin.New()
-	r.POST("/v1/responses/compact", CompactHandler(envCfg, cfgManager, nil, sch))
+	r := httpbridge.NewApp()
+	r.Post("/v1/responses/compact", CompactHandler(envCfg, cfgManager, nil, sch))
 	return r, sch
 }
 
-func performCompactRequest(t *testing.T, router *gin.Engine, body string) *httptest.ResponseRecorder {
+func performCompactRequest(t *testing.T, router *fiber.App, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses/compact", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-api-key", "secret-key")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 	return w
 }
 

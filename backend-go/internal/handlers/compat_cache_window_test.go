@@ -9,21 +9,21 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 // ── compat-cache 窗口分区运维闭环测试（C1/E1）──
 
 type compatCacheTestEnv struct {
-	router *gin.Engine
+	router *fiber.App
 	cache  *config.ChannelCompatCache
 	path   string
 }
 
 func newCompatCacheTestEnv(t *testing.T, withPersistence bool) *compatCacheTestEnv {
 	t.Helper()
-	gin.SetMode(gin.TestMode)
 
 	var cache *config.ChannelCompatCache
 	path := ""
@@ -36,7 +36,7 @@ func newCompatCacheTestEnv(t *testing.T, withPersistence bool) *compatCacheTestE
 	restore := config.SwapSharedChannelCompatCacheForTest(cache)
 	t.Cleanup(restore)
 
-	router := gin.New()
+	router := httpbridge.NewApp()
 	RegisterCompatCacheRoutes(router)
 	return &compatCacheTestEnv{router: router, cache: cache, path: path}
 }
@@ -45,7 +45,7 @@ func (e *compatCacheTestEnv) get(t *testing.T) CompatCacheResponse {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, "/compat-cache", nil)
 	w := httptest.NewRecorder()
-	e.router.ServeHTTP(w, req)
+	httpbridge.Handler(e.router).ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("GET 状态码 = %d, body=%s", w.Code, w.Body.String())
 	}
@@ -60,7 +60,7 @@ func (e *compatCacheTestEnv) delete(t *testing.T, query string) ClearCompatCache
 	t.Helper()
 	req := httptest.NewRequest(http.MethodDelete, "/compat-cache"+query, nil)
 	w := httptest.NewRecorder()
-	e.router.ServeHTTP(w, req)
+	httpbridge.Handler(e.router).ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("DELETE %s 状态码 = %d, body=%s", query, w.Code, w.Body.String())
 	}

@@ -3,10 +3,10 @@ package common
 import (
 	"encoding/json"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/utils"
-	"github.com/gin-gonic/gin"
 )
 
 // BuildMessagesContextRequirement 估算 Messages 请求上下文需求。
@@ -68,7 +68,7 @@ func ApplyAgentModelProfile(requirement *scheduler.ContextRequirement, requestMo
 }
 
 // LogContextEstimate 记录本次原始请求的上下文估算，便于排查上下文路由过滤。
-func LogContextEstimate(c *gin.Context, apiType string, requirement *scheduler.ContextRequirement) {
+func LogContextEstimate(c fiber.Ctx, apiType string, requirement *scheduler.ContextRequirement) {
 	if c == nil || requirement == nil {
 		return
 	}

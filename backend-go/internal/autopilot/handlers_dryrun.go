@@ -3,18 +3,19 @@ package autopilot
 import (
 	"net/http"
 
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v3"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 // ── Dry-Run API（设计 §4.6 + §9）──
 
 // RegisterDryRunRoutes 注册 SmartRouter dry-run API 到给定路由组。
-func RegisterDryRunRoutes(router gin.IRouter, smartRouter *SmartRouter) {
+func RegisterDryRunRoutes(router fiber.Router, smartRouter *SmartRouter) {
 	handler := handleDryRunRoute(smartRouter)
 	// 设计文档标准路径；挂载到 /api group 后为 /api/smart-routing/diagnose。
-	router.POST("/smart-routing/diagnose", handler)
+	router.Post("/smart-routing/diagnose", handler)
 	// 兼容早期内部路径，避免已有调用方立即失效。
-	router.POST("/route-dryrun", handler)
+	router.Post("/route-dryrun", handler)
 }
 
 // DryRunRequest dry-run 请求体。
@@ -63,17 +64,17 @@ type DryRunResponse struct {
 
 // handleDryRunRoute POST /api/smart-routing/diagnose（兼容 /api/route-dryrun）。
 // 根据请求特征计算路由计划，返回候选分数明细，不发真实请求。
-func handleDryRunRoute(smartRouter *SmartRouter) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handleDryRunRoute(smartRouter *SmartRouter) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		var req DryRunRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "请求体格式错误: " + err.Error()})
-			return
+		if err := httpbridge.BindJSON(c, &req); err != nil {
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "请求体格式错误: " + err.Error()})
+			return nil
 		}
 
 		if smartRouter == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "SmartRouter 未初始化"})
-			return
+			httpbridge.JSON(c, http.StatusServiceUnavailable, fiber.Map{"error": "SmartRouter 未初始化"})
+			return nil
 		}
 
 		// 检查 kill switch
@@ -81,12 +82,12 @@ func handleDryRunRoute(smartRouter *SmartRouter) gin.HandlerFunc {
 		autopilotCfg := cfg.AutopilotRouting
 		mode := autopilotCfg.EffectiveRoutingMode()
 		if autopilotCfg.KillSwitch {
-			c.JSON(http.StatusOK, DryRunResponse{
+			httpbridge.JSON(c, http.StatusOK, DryRunResponse{
 				Plan:    nil,
 				Mode:    mode,
 				Message: "智能路由已关闭（mode=off 或 kill switch 已启用）",
 			})
-			return
+			return nil
 		}
 
 		// 与真实协议入口复用同一画像构建器，保证质量档、上下文默认值、
@@ -110,14 +111,15 @@ func handleDryRunRoute(smartRouter *SmartRouter) gin.HandlerFunc {
 			ContextNeed:   req.ContextNeed,
 			ScenarioCfg:   cfg.AutopilotRouting.Scenario,
 
-			RoutingScenarioHeader: c.GetHeader("X-Routing-Scenario"),
-			CostPreferenceHeader:  c.GetHeader("X-Cost-Preference"),
+			RoutingScenarioHeader: httpbridge.GetHeader(c, "X-Routing-Scenario"),
+			CostPreferenceHeader:  httpbridge.GetHeader(c, "X-Cost-Preference"),
 		})
 
 		plan := smartRouter.BuildPlan(&profile)
-		c.JSON(http.StatusOK, DryRunResponse{
+		httpbridge.JSON(c, http.StatusOK, DryRunResponse{
 			Plan: plan,
 			Mode: mode,
 		})
+		return nil
 	}
 }

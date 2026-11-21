@@ -8,13 +8,14 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/autopilot"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/providers"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/types"
 	"github.com/soulteary/yunqi/internal/warmup"
-	"github.com/gin-gonic/gin"
 )
 
 // 422 可达性回归：兼容性学习块曾被嵌套在 `resp.StatusCode == 400` 守卫内，
@@ -39,7 +40,7 @@ func TestCompatTraitFromErrorAcceptsUnprocessableEntity(t *testing.T) {
 }
 
 func TestUnprocessableEntityReachesCompatLearningViaRealFailover(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	t.Cleanup(swapChannelCompatCacheForTest(config.NewChannelCompatCache()))
 
 	callCount := 0
@@ -68,9 +69,9 @@ func TestUnprocessableEntityReachesCompatLearningViaRealFailover(t *testing.T) {
 	t.Cleanup(cleanup)
 
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
+	c, _ := httpbridge.TestContext(w)
 	reqBody := `{"model":"gpt-5","input":[{"type":"message","role":"developer","content":"dev"}]}`
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(reqBody))
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(reqBody)))
 
 	cfg := cfgManager.GetConfig()
 	upstream := &cfg.Upstream[0]
@@ -91,13 +92,13 @@ func TestUnprocessableEntityReachesCompatLearningViaRealFailover(t *testing.T) {
 		func(upstream *config.UpstreamConfig, failedKeys map[string]bool) (string, error) {
 			return cfgManager.GetNextAPIKey(upstream, failedKeys, "Responses")
 		},
-		func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
-			return http.NewRequestWithContext(c.Request.Context(), http.MethodPost, upstreamCopy.BaseURL, strings.NewReader(reqBody))
+		func(c fiber.Ctx, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
+			return http.NewRequestWithContext(httpbridge.Request(c).Context(), http.MethodPost, upstreamCopy.BaseURL, strings.NewReader(reqBody))
 		},
 		func(apiKey string) {},
 		func(url string) {},
 		func(url string) {},
-		func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
+		func(c fiber.Ctx, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 			return nil, nil
 		},
 		"gpt-5",
@@ -130,7 +131,7 @@ func TestUnprocessableEntityReachesCompatLearningViaRealFailover(t *testing.T) {
 }
 
 func TestKimiDeveloperRoleErrorRetriesWithLearnedChatRewrite(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	t.Cleanup(swapChannelCompatCacheForTest(config.NewChannelCompatCache()))
 
 	var (
@@ -184,9 +185,9 @@ func TestKimiDeveloperRoleErrorRetriesWithLearnedChatRewrite(t *testing.T) {
 	t.Cleanup(cleanup)
 
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
+	c, _ := httpbridge.TestContext(w)
 	reqBody := `{"model":"gpt-5.6-sol","input":[{"type":"message","role":"developer","content":[{"type":"input_text","text":"dev"}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}]}`
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(reqBody))
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(reqBody)))
 
 	cfg := cfgManager.GetConfig()
 	upstream := &cfg.Upstream[0]
@@ -208,14 +209,14 @@ func TestKimiDeveloperRoleErrorRetriesWithLearnedChatRewrite(t *testing.T) {
 		func(upstream *config.UpstreamConfig, failedKeys map[string]bool) (string, error) {
 			return cfgManager.GetNextAPIKey(upstream, failedKeys, "Responses")
 		},
-		func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
+		func(c fiber.Ctx, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
 			req, _, err := provider.ConvertToProviderRequest(c, upstreamCopy, apiKey)
 			return req, err
 		},
 		func(apiKey string) {},
 		func(url string) {},
 		func(url string) {},
-		func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
+		func(c fiber.Ctx, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 			_ = resp.Body.Close()
 			return nil, nil
 		},

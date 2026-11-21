@@ -8,12 +8,13 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/autopilot"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/types"
 	"github.com/soulteary/yunqi/internal/warmup"
-	"github.com/gin-gonic/gin"
 )
 
 // 回归：Kimi K2.6 在模型注册表里的公开输出上限是 262144（Moonshot 平台口径），
@@ -27,7 +28,7 @@ const arkMaxTokensErrorBody = `{"error":{"code":"InvalidParameter","message":"Th
 	`expected a value <= 32768, but got 64000 instead. Request id: 20260825183531XXXX"}}`
 
 func TestOutputLimitLearningRetriesWithClampedMaxTokens(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	t.Cleanup(swapChannelCompatCacheForTest(config.NewChannelCompatCache()))
 
 	var (
@@ -67,9 +68,9 @@ func TestOutputLimitLearningRetriesWithClampedMaxTokens(t *testing.T) {
 	t.Cleanup(cleanup)
 
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
+	c, _ := httpbridge.TestContext(w)
 	reqBody := `{"model":"kimi-k2.6","max_tokens":64000,"messages":[{"role":"user","content":"hi"}]}`
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(reqBody))
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(reqBody)))
 
 	cfg := cfgManager.GetConfig()
 	upstream := &cfg.Upstream[0]
@@ -90,14 +91,14 @@ func TestOutputLimitLearningRetriesWithClampedMaxTokens(t *testing.T) {
 		func(upstream *config.UpstreamConfig, failedKeys map[string]bool) (string, error) {
 			return cfgManager.GetNextAPIKey(upstream, failedKeys, "Messages")
 		},
-		func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
+		func(c fiber.Ctx, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
 			body := GetEffectiveRequestBody(c, []byte(reqBody))
-			return http.NewRequestWithContext(c.Request.Context(), http.MethodPost, upstreamCopy.BaseURL+"/v1/messages", strings.NewReader(string(body)))
+			return http.NewRequestWithContext(httpbridge.Request(c).Context(), http.MethodPost, upstreamCopy.BaseURL+"/v1/messages", strings.NewReader(string(body)))
 		},
 		func(apiKey string) {},
 		func(url string) {},
 		func(url string) {},
-		func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
+		func(c fiber.Ctx, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 			_ = resp.Body.Close()
 			return nil, nil
 		},
@@ -142,7 +143,7 @@ func TestOutputLimitLearningRetriesWithClampedMaxTokens(t *testing.T) {
 // 主动侧回归：已有学习记忆时，新请求应在发送前就被钳制，首轮直达上游成功，
 // 不再消耗一次 400 往返。
 func TestOutputLimitLearnedMemoryClampsBeforeSend(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	t.Cleanup(swapChannelCompatCacheForTest(config.NewChannelCompatCache()))
 
 	var (
@@ -181,9 +182,9 @@ func TestOutputLimitLearnedMemoryClampsBeforeSend(t *testing.T) {
 	}
 
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
+	c, _ := httpbridge.TestContext(w)
 	reqBody := `{"model":"kimi-k2.6","max_tokens":64000,"messages":[{"role":"user","content":"hi"}]}`
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(reqBody))
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(reqBody)))
 
 	cfg := cfgManager.GetConfig()
 	upstream := &cfg.Upstream[0]
@@ -204,14 +205,14 @@ func TestOutputLimitLearnedMemoryClampsBeforeSend(t *testing.T) {
 		func(upstream *config.UpstreamConfig, failedKeys map[string]bool) (string, error) {
 			return cfgManager.GetNextAPIKey(upstream, failedKeys, "Messages")
 		},
-		func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
+		func(c fiber.Ctx, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
 			body := GetEffectiveRequestBody(c, []byte(reqBody))
-			return http.NewRequestWithContext(c.Request.Context(), http.MethodPost, upstreamCopy.BaseURL+"/v1/messages", strings.NewReader(string(body)))
+			return http.NewRequestWithContext(httpbridge.Request(c).Context(), http.MethodPost, upstreamCopy.BaseURL+"/v1/messages", strings.NewReader(string(body)))
 		},
 		func(apiKey string) {},
 		func(url string) {},
 		func(url string) {},
-		func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
+		func(c fiber.Ctx, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 			_ = resp.Body.Close()
 			return nil, nil
 		},

@@ -143,7 +143,7 @@ cd backend-go && go test ./internal/config/...
 必要时再补：
 
 ```bash
-rg -n "<canonical-model>|<dated-suffix>" shared/model-registry backend-go/internal/config frontend/src/generated desktop/frontend/src/generated
+rg -n "<canonical-model>|<dated-suffix>" shared/model-registry backend-go/internal/config frontend/src/generated
 ```
 
 ## DeepSeek dated suffix 专项检查清单

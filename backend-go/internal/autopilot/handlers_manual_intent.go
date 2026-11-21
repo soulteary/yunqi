@@ -4,7 +4,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v3"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 // ── 请求/响应类型 ──
@@ -49,13 +50,13 @@ type IntentListResponse struct {
 
 // RegisterManualIntentRoutes 注册人工路由意图 API 到给定路由组。
 // 路由前缀由调用方控制（例如 router.Group("/manual-intents")）。
-func RegisterManualIntentRoutes(router gin.IRouter, store *ManualIntentStore) {
+func RegisterManualIntentRoutes(router fiber.Router, store *ManualIntentStore) {
 	group := router.Group("/manual-intents")
 	{
-		group.POST("", handleCreateIntent(store))
-		group.GET("", handleListIntents(store))
-		group.GET("/:uid", handleGetIntent(store))
-		group.DELETE("/:uid", handleDeleteIntent(store))
+		group.Post("", handleCreateIntent(store))
+		group.Get("", handleListIntents(store))
+		group.Get("/:uid", handleGetIntent(store))
+		group.Delete("/:uid", handleDeleteIntent(store))
 	}
 }
 
@@ -63,12 +64,12 @@ func RegisterManualIntentRoutes(router gin.IRouter, store *ManualIntentStore) {
 
 // handleCreateIntent POST /api/manual-intents
 // 创建一条人工路由意图。
-func handleCreateIntent(store *ManualIntentStore) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handleCreateIntent(store *ManualIntentStore) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		var req CreateIntentRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "请求体解析失败: " + err.Error()})
-			return
+		if err := httpbridge.BindJSON(c, &req); err != nil {
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "请求体解析失败: " + err.Error()})
+			return nil
 		}
 
 		// 解析 expiresAt
@@ -77,8 +78,8 @@ func handleCreateIntent(store *ManualIntentStore) gin.HandlerFunc {
 			var err error
 			expiresAt, err = time.Parse(time.RFC3339, req.ExpiresAt)
 			if err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "expiresAt 格式无效，需 RFC3339: " + err.Error()})
-				return
+				httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "expiresAt 格式无效，需 RFC3339: " + err.Error()})
+				return nil
 			}
 		} else if req.TTLMinutes > 0 {
 			expiresAt = time.Now().UTC().Add(time.Duration(req.TTLMinutes) * time.Minute)
@@ -111,23 +112,23 @@ func handleCreateIntent(store *ManualIntentStore) gin.HandlerFunc {
 
 		if err := store.Create(intent); err != nil {
 			if validationErr, ok := err.(*IntentValidationError); ok {
-				c.JSON(http.StatusBadRequest, gin.H{"error": validationErr.Error()})
-				return
+				httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": validationErr.Error()})
+				return nil
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "创建意图失败: " + err.Error()})
-			return
+			httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": "创建意图失败: " + err.Error()})
+			return nil
 		}
-
-		c.JSON(http.StatusCreated, intent)
+		httpbridge.JSON(c, http.StatusCreated, intent)
+		return nil
 	}
 }
 
 // handleListIntents GET /api/manual-intents
 // 查询参数：
 //   - all=true  返回全部意图（含 expired/exhausted/disabled），否则只返回 active
-func handleListIntents(store *ManualIntentStore) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		showAll := c.Query("all") == "true"
+func handleListIntents(store *ManualIntentStore) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		showAll := httpbridge.Query(c, "all") == "true"
 
 		var intents []*ManualRoutingIntent
 		if showAll {
@@ -135,51 +136,51 @@ func handleListIntents(store *ManualIntentStore) gin.HandlerFunc {
 		} else {
 			intents = store.ListActive()
 		}
-
-		c.JSON(http.StatusOK, IntentListResponse{
+		httpbridge.JSON(c, http.StatusOK, IntentListResponse{
 			Intents: intents,
 			Total:   len(intents),
 		})
+		return nil
 	}
 }
 
 // handleGetIntent GET /api/manual-intents/:uid
-func handleGetIntent(store *ManualIntentStore) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		uid := c.Param("uid")
+func handleGetIntent(store *ManualIntentStore) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		uid := httpbridge.Param(c, "uid")
 		if uid == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "uid 不能为空"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "uid 不能为空"})
+			return nil
 		}
 
 		intent := store.Get(uid)
 		if intent == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "意图不存在"})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "意图不存在"})
+			return nil
 		}
-
-		c.JSON(http.StatusOK, intent)
+		httpbridge.JSON(c, http.StatusOK, intent)
+		return nil
 	}
 }
 
 // handleDeleteIntent DELETE /api/manual-intents/:uid
-func handleDeleteIntent(store *ManualIntentStore) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		uid := c.Param("uid")
+func handleDeleteIntent(store *ManualIntentStore) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		uid := httpbridge.Param(c, "uid")
 		if uid == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "uid 不能为空"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "uid 不能为空"})
+			return nil
 		}
 
 		if err := store.Delete(uid); err != nil {
 			if err == ErrIntentNotFound {
-				c.JSON(http.StatusNotFound, gin.H{"error": "意图不存在"})
-				return
+				httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "意图不存在"})
+				return nil
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "删除失败: " + err.Error()})
-			return
+			httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": "删除失败: " + err.Error()})
+			return nil
 		}
-
-		c.JSON(http.StatusOK, gin.H{"message": "已删除", "intentUid": uid})
+		httpbridge.JSON(c, http.StatusOK, fiber.Map{"message": "已删除", "intentUid": uid})
+		return nil
 	}
 }

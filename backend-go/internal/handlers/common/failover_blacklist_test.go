@@ -3,9 +3,11 @@ package common
 import (
 	"testing"
 
-	"github.com/gin-gonic/gin"
 	"net/http"
 	"net/http/httptest"
+
+	"github.com/gofiber/fiber/v3"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 func TestIsInsufficientBalanceMessage_HighConfidenceVariants(t *testing.T) {
@@ -709,40 +711,44 @@ func TestNormalizeUpstreamErrorStatus(t *testing.T) {
 }
 
 func TestHandleAllFailedFuzzyMode_ModelNotFoundNormalizesTo404(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	modelNotFoundBody := []byte(`{"error":{"code":"model_not_found","message":"No available channel for model gpt-5.4 under group codex","type":"new_api_error"}}`)
 	quotaBody := []byte(`{"error":{"message":"quota exceeded"}}`)
 
 	tests := []struct {
 		name       string
-		handle     func(*gin.Context)
+		handle     func(fiber.Ctx) error
 		wantStatus int
 	}{
 		{
 			name: "all channels failed - model_not_found normalizes to 404",
-			handle: func(c *gin.Context) {
+			handle: func(c fiber.Ctx) error {
 				HandleAllChannelsFailed(c, &FailoverError{Status: http.StatusServiceUnavailable, Body: modelNotFoundBody}, nil, "Messages")
+				return nil
 			},
 			wantStatus: http.StatusNotFound,
 		},
 		{
 			name: "all keys failed - model_not_found normalizes to 404",
-			handle: func(c *gin.Context) {
+			handle: func(c fiber.Ctx) error {
 				HandleAllKeysFailed(c, &FailoverError{Status: http.StatusServiceUnavailable, Body: modelNotFoundBody}, nil, "Messages")
+				return nil
 			},
 			wantStatus: http.StatusNotFound,
 		},
 		{
 			name: "all channels failed - 429 quota stays generic 503 in fuzzy mode",
-			handle: func(c *gin.Context) {
+			handle: func(c fiber.Ctx) error {
 				HandleAllChannelsFailed(c, &FailoverError{Status: http.StatusTooManyRequests, Body: quotaBody}, nil, "Messages")
+				return nil
 			},
 			wantStatus: http.StatusServiceUnavailable,
 		},
 		{
 			name: "all keys failed - 429 quota stays generic 503 in fuzzy mode",
-			handle: func(c *gin.Context) {
+			handle: func(c fiber.Ctx) error {
 				HandleAllKeysFailed(c, &FailoverError{Status: http.StatusTooManyRequests, Body: quotaBody}, nil, "Messages")
+				return nil
 			},
 			wantStatus: http.StatusServiceUnavailable,
 		},
@@ -751,7 +757,7 @@ func TestHandleAllFailedFuzzyMode_ModelNotFoundNormalizesTo404(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			recorder := httptest.NewRecorder()
-			ctx, _ := gin.CreateTestContext(recorder)
+			ctx, _ := httpbridge.TestContext(recorder)
 
 			tt.handle(ctx)
 

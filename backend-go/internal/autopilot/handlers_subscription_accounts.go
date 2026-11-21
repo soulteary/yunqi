@@ -10,7 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v3"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 var errAccountMissing = errors.New("subscription account not found")
@@ -86,32 +87,32 @@ type NewApiAccountListResponse struct {
 
 // handleAddSubscriptionAccount 为已有 new-api 订阅添加新账号，并按订阅级倍率上限为其合格分组
 // 自动建代理 key 并入关联渠道，使多账号共同分担流量/额度。建 key 失败时回滚远端 key，不留下半成品账号。
-func handleAddSubscriptionAccount(deps *NewApiRouteDeps) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		uid := c.Param("uid")
+func handleAddSubscriptionAccount(deps *NewApiRouteDeps) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		uid := httpbridge.Param(c, "uid")
 		if uid == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "subscription uid 不能为空"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "subscription uid 不能为空"})
+			return nil
 		}
 
 		profile := deps.Store.Get(uid)
 		if profile == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("subscription_uid=%s 不存在", uid)})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": fmt.Sprintf("subscription_uid=%s 不存在", uid)})
+			return nil
 		}
 		if profile.Provider != "new_api" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "仅 new_api 类型订阅支持多账号"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "仅 new_api 类型订阅支持多账号"})
+			return nil
 		}
 
 		var req NewApiAccountCreateRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数无效: " + err.Error()})
-			return
+		if err := httpbridge.BindJSON(c, &req); err != nil {
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "请求参数无效: " + err.Error()})
+			return nil
 		}
 		if req.AccessToken == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "accessToken 必填"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "accessToken 必填"})
+			return nil
 		}
 
 		// 与主 provision 共用订阅 uid 锁：保证同一订阅的添加账号与 provision 串行。
@@ -127,7 +128,7 @@ func handleAddSubscriptionAccount(deps *NewApiRouteDeps) gin.HandlerFunc {
 
 		// 探测（校验/分组）与建 key 分开计时：建 key 预算随分组数伸缩，
 		// 避免慢速代理下共享小预算在流程中途到期（context deadline exceeded）。
-		probeCtx, probeCancel := context.WithTimeout(c.Request.Context(), newApiProbeTimeout)
+		probeCtx, probeCancel := context.WithTimeout(httpbridge.Request(c).Context(), newApiProbeTimeout)
 		defer probeCancel()
 
 		// 代理解析：请求显式携带优先，缺省继承渠道级代理通道（回退订阅级设置）
@@ -143,8 +144,8 @@ func handleAddSubscriptionAccount(deps *NewApiRouteDeps) gin.HandlerFunc {
 		adapter := NewApiAdapterForProxy(proxyURL, proxyPreferDirect)
 		self, derivedUserID, err := adapter.VerifyWithFallback(probeCtx, profile.BaseURL, req.AccessToken, req.UserID, req.AuthTokenMode)
 		if err != nil {
-			c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("账号验证失败: %v", err)})
-			return
+			httpbridge.JSON(c, http.StatusBadGateway, fiber.Map{"error": fmt.Sprintf("账号验证失败: %v", err)})
+			return nil
 		}
 
 		accountUID := fmt.Sprintf("acct_%d", time.Now().UnixNano())
@@ -154,8 +155,8 @@ func handleAddSubscriptionAccount(deps *NewApiRouteDeps) gin.HandlerFunc {
 		if deps.CfgManager != nil {
 			groups, gErr := adapter.FetchGroups(probeCtx, profile.BaseURL, req.AccessToken, derivedUserID, req.AuthTokenMode)
 			if gErr != nil {
-				c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("无法获取该账号分组倍率，已阻止建 key: %v", gErr)})
-				return
+				httpbridge.JSON(c, http.StatusBadGateway, fiber.Map{"error": fmt.Sprintf("无法获取该账号分组倍率，已阻止建 key: %v", gErr)})
+				return nil
 			}
 			// 建 key 阈值：请求显式携带优先，缺省用渠道级上限（真源），最后回退订阅接入初始值。
 			maxGroupMultiplier := req.MaxGroupMultiplier
@@ -167,15 +168,15 @@ func handleAddSubscriptionAccount(deps *NewApiRouteDeps) gin.HandlerFunc {
 			}
 			resolved, rErr := resolveNewApiProvisionGroups(groups, "", req.ProvisionAllEligibleGroups, maxGroupMultiplier)
 			if rErr != nil {
-				c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "分组倍率校验失败: " + rErr.Error()})
-				return
+				httpbridge.JSON(c, http.StatusUnprocessableEntity, fiber.Map{"error": "分组倍率校验失败: " + rErr.Error()})
+				return nil
 			}
 			provisionModels := req.ProvisionModels
 			if len(provisionModels) == 0 {
 				provisionModels = profile.ProvisionModels
 			}
 			// 建 key 阶段单独计时：预算随分组数伸缩（查重+创建+揭示，每个分组多次顺序往返）。
-			ctx, cancel := context.WithTimeout(c.Request.Context(), newApiProvisionTimeout(len(resolved)))
+			ctx, cancel := context.WithTimeout(httpbridge.Request(c).Context(), newApiProvisionTimeout(len(resolved)))
 			defer cancel()
 			provisionReq := NewApiProvisionRequest{
 				BaseURL:                    profile.BaseURL,
@@ -195,16 +196,16 @@ func handleAddSubscriptionAccount(deps *NewApiRouteDeps) gin.HandlerFunc {
 			if pErr != nil {
 				var conflict *newApiProvisionConflictError
 				if errors.As(pErr, &conflict) {
-					c.JSON(http.StatusConflict, gin.H{"error": "建 key 失败: " + conflict.Error()})
-					return
+					httpbridge.JSON(c, http.StatusConflict, fiber.Map{"error": "建 key 失败: " + conflict.Error()})
+					return nil
 				}
 				var keyConflict *NewApiProvisionKeyConflictError
 				if errors.As(pErr, &keyConflict) {
-					c.JSON(http.StatusConflict, gin.H{"error": "建 key 失败: " + keyConflict.Error()})
-					return
+					httpbridge.JSON(c, http.StatusConflict, fiber.Map{"error": "建 key 失败: " + keyConflict.Error()})
+					return nil
 				}
-				c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("建 key 失败: %v", pErr)})
-				return
+				httpbridge.JSON(c, http.StatusBadGateway, fiber.Map{"error": fmt.Sprintf("建 key 失败: %v", pErr)})
+				return nil
 			}
 			accountKeys = make([]NewApiProvisionedKey, 0, len(provisioned))
 			plaintextByToken := make(map[int64]string, len(provisioned))
@@ -229,8 +230,8 @@ func handleAddSubscriptionAccount(deps *NewApiRouteDeps) gin.HandlerFunc {
 			}
 			if err := deps.Store.AddAccount(uid, account); err != nil {
 				cleanupNewApiProvisionedKeys(ctx, adapter, provisionReq, derivedUserID, provisioned)
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				return
+				httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": err.Error()})
+				return nil
 			}
 
 			// 把账号 key 明文注入关联渠道。失败时删除账号并回收远端 key。
@@ -239,8 +240,8 @@ func handleAddSubscriptionAccount(deps *NewApiRouteDeps) gin.HandlerFunc {
 				if rErr := deps.SyncService.ReconcileAccountProvisioned(fresh, accountUID, groups, plaintextByToken); rErr != nil {
 					_ = deps.Store.RemoveAccount(uid, accountUID)
 					cleanupNewApiProvisionedKeys(ctx, adapter, provisionReq, derivedUserID, provisioned)
-					c.JSON(http.StatusConflict, gin.H{"error": "同步 key 到渠道失败: " + rErr.Error()})
-					return
+					httpbridge.JSON(c, http.StatusConflict, fiber.Map{"error": "同步 key 到渠道失败: " + rErr.Error()})
+					return nil
 				}
 			}
 
@@ -275,8 +276,8 @@ func handleAddSubscriptionAccount(deps *NewApiRouteDeps) gin.HandlerFunc {
 				}); pErr != nil {
 					_ = deps.Store.RemoveAccount(uid, accountUID)
 					cleanupNewApiProvisionedKeys(ctx, adapter, provisionReq, derivedUserID, provisioned)
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "提升主账号失败: " + pErr.Error()})
-					return
+					httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": "提升主账号失败: " + pErr.Error()})
+					return nil
 				}
 			}
 
@@ -290,8 +291,7 @@ func handleAddSubscriptionAccount(deps *NewApiRouteDeps) gin.HandlerFunc {
 					deps.Runner.TriggerDiscovery(chUID, &ch, deps.CfgManager)
 				}
 			}
-
-			c.JSON(http.StatusCreated, NewApiAccountItem{
+			httpbridge.JSON(c, http.StatusCreated, NewApiAccountItem{
 				AccountUID:        account.AccountUID,
 				UserID:            account.UserID,
 				AuthTokenMode:     account.AuthTokenMode,
@@ -305,7 +305,7 @@ func handleAddSubscriptionAccount(deps *NewApiRouteDeps) gin.HandlerFunc {
 				ProxyURL:          account.ProxyURL,
 				ProxyPreferDirect: account.ProxyPreferDirect,
 			})
-			return
+			return nil
 		}
 
 		// 无 CfgManager（仅 Store 注入，如部分测试）：退化为只登记账号不建 key。
@@ -321,10 +321,10 @@ func handleAddSubscriptionAccount(deps *NewApiRouteDeps) gin.HandlerFunc {
 			CreatedAt:     time.Now(),
 		}
 		if err := deps.Store.AddAccount(uid, account); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
+			httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": err.Error()})
+			return nil
 		}
-		c.JSON(http.StatusCreated, NewApiAccountItem{
+		httpbridge.JSON(c, http.StatusCreated, NewApiAccountItem{
 			AccountUID:        account.AccountUID,
 			UserID:            account.UserID,
 			AuthTokenMode:     account.AuthTokenMode,
@@ -337,22 +337,23 @@ func handleAddSubscriptionAccount(deps *NewApiRouteDeps) gin.HandlerFunc {
 			ProxyURL:          account.ProxyURL,
 			ProxyPreferDirect: account.ProxyPreferDirect,
 		})
+		return nil
 	}
 }
 
 // handleListSubscriptionAccounts 获取订阅下的账号列表（脱敏）。
-func handleListSubscriptionAccounts(deps *NewApiRouteDeps) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		uid := c.Param("uid")
+func handleListSubscriptionAccounts(deps *NewApiRouteDeps) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		uid := httpbridge.Param(c, "uid")
 		if uid == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "subscription uid 不能为空"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "subscription uid 不能为空"})
+			return nil
 		}
 
 		profile := deps.Store.Get(uid)
 		if profile == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("subscription_uid=%s 不存在", uid)})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": fmt.Sprintf("subscription_uid=%s 不存在", uid)})
+			return nil
 		}
 
 		items := make([]NewApiAccountItem, 0, len(profile.Accounts))
@@ -373,8 +374,8 @@ func handleListSubscriptionAccounts(deps *NewApiRouteDeps) gin.HandlerFunc {
 				ProxyPreferDirect: acc.ProxyPreferDirect,
 			})
 		}
-
-		c.JSON(http.StatusOK, NewApiAccountListResponse{Accounts: items})
+		httpbridge.JSON(c, http.StatusOK, NewApiAccountListResponse{Accounts: items})
+		return nil
 	}
 }
 
@@ -382,25 +383,25 @@ func handleListSubscriptionAccounts(deps *NewApiRouteDeps) gin.HandlerFunc {
 // 与用户信息、把主账号自动接入 key 从关联渠道剔除并 best-effort 回收远端 key。
 // 订阅本体（baseUrl/分组/计费/渠道关联）保留；此后添加账号会把新凭证提升为主账号，
 // 「删除 + 重新添加」即更换主凭证的完整路径。
-func handleDeletePrimaryAccount(deps *NewApiRouteDeps) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		uid := c.Param("uid")
+func handleDeletePrimaryAccount(deps *NewApiRouteDeps) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		uid := httpbridge.Param(c, "uid")
 		if uid == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "subscription uid 不能为空"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "subscription uid 不能为空"})
+			return nil
 		}
 		profile := deps.Store.Get(uid)
 		if profile == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("subscription_uid=%s 不存在", uid)})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": fmt.Sprintf("subscription_uid=%s 不存在", uid)})
+			return nil
 		}
 		if profile.Provider != "new_api" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "仅 new_api 类型订阅支持删除主账号"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "仅 new_api 类型订阅支持删除主账号"})
+			return nil
 		}
 		if strings.TrimSpace(profile.AccessToken) == "" {
-			c.JSON(http.StatusConflict, gin.H{"error": "订阅当前没有主账号"})
-			return
+			httpbridge.JSON(c, http.StatusConflict, fiber.Map{"error": "订阅当前没有主账号"})
+			return nil
 		}
 
 		// 1) 从关联渠道剔除主账号的 key（复用账号剔除：仅读取 ProvisionedKeys）。
@@ -413,7 +414,7 @@ func handleDeletePrimaryAccount(deps *NewApiRouteDeps) gin.HandlerFunc {
 
 		// 2) best-effort 回收远端 key（凭证仍有效时执行；失败仅记录日志，不阻断删除）。
 		if len(removedTokenIDs) > 0 {
-			ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
+			ctx, cancel := context.WithTimeout(httpbridge.Request(c).Context(), 15*time.Second)
 			defer cancel()
 			adapter := adapterForAccount(deps, profile, NewApiAccount{})
 			for tokenID := range removedTokenIDs {
@@ -433,29 +434,29 @@ func handleDeletePrimaryAccount(deps *NewApiRouteDeps) gin.HandlerFunc {
 			p.LastBalanceRefreshError = ""
 			return nil
 		}); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
+			httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": err.Error()})
+			return nil
 		}
-
-		c.JSON(http.StatusOK, gin.H{"success": true})
+		httpbridge.JSON(c, http.StatusOK, fiber.Map{"success": true})
+		return nil
 	}
 }
 
 // handleDeleteSubscriptionAccount 删除指定账号：先从关联渠道剔除该账号的 key，再 best-effort 回收远端 key，
 // 最后从订阅移除账号。渠道剔除失败不阻断删除，避免残留远端 key 阻塞账号移除。
-func handleDeleteSubscriptionAccount(deps *NewApiRouteDeps) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		uid := c.Param("uid")
-		accountUID := c.Param("accountUid")
+func handleDeleteSubscriptionAccount(deps *NewApiRouteDeps) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		uid := httpbridge.Param(c, "uid")
+		accountUID := httpbridge.Param(c, "accountUid")
 		if uid == "" || accountUID == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "subscription uid 和 account uid 不能为空"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "subscription uid 和 account uid 不能为空"})
+			return nil
 		}
 
 		profile := deps.Store.Get(uid)
 		if profile == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("subscription_uid=%s 不存在", uid)})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": fmt.Sprintf("subscription_uid=%s 不存在", uid)})
+			return nil
 		}
 		var account *NewApiAccount
 		for i := range profile.Accounts {
@@ -465,8 +466,8 @@ func handleDeleteSubscriptionAccount(deps *NewApiRouteDeps) gin.HandlerFunc {
 			}
 		}
 		if account == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("account_uid=%s 不存在", accountUID)})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": fmt.Sprintf("account_uid=%s 不存在", accountUID)})
+			return nil
 		}
 
 		// 1) 从关联渠道剔除该账号的 key（返回被移除的 tokenID，供远端回收）。
@@ -477,7 +478,7 @@ func handleDeleteSubscriptionAccount(deps *NewApiRouteDeps) gin.HandlerFunc {
 
 		// 2) best-effort 回收远端 key。失败仅记录日志，不阻断删除。
 		if len(removedTokenIDs) > 0 {
-			ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
+			ctx, cancel := context.WithTimeout(httpbridge.Request(c).Context(), 15*time.Second)
 			defer cancel()
 			adapter := adapterForAccount(deps, profile, *account)
 			for tokenID := range removedTokenIDs {
@@ -490,29 +491,29 @@ func handleDeleteSubscriptionAccount(deps *NewApiRouteDeps) gin.HandlerFunc {
 		// 3) 移除账号。
 		if err := deps.Store.RemoveAccount(uid, accountUID); err != nil {
 			if strings.Contains(err.Error(), "不存在") {
-				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-				return
+				httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": err.Error()})
+				return nil
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
+			httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": err.Error()})
+			return nil
 		}
-
-		c.JSON(http.StatusOK, gin.H{"success": true})
+		httpbridge.JSON(c, http.StatusOK, fiber.Map{"success": true})
+		return nil
 	}
 }
 
 // handleRefreshSubscriptionAccount 刷新单个账号余额。
-func handleRefreshSubscriptionAccount(deps *NewApiRouteDeps) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		uid, accountUID := c.Param("uid"), c.Param("accountUid")
+func handleRefreshSubscriptionAccount(deps *NewApiRouteDeps) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		uid, accountUID := httpbridge.Param(c, "uid"), httpbridge.Param(c, "accountUid")
 		if uid == "" || accountUID == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "subscription uid 和 account uid 不能为空"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "subscription uid 和 account uid 不能为空"})
+			return nil
 		}
 		profile := deps.Store.Get(uid)
 		if profile == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("subscription_uid=%s 不存在", uid)})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": fmt.Sprintf("subscription_uid=%s 不存在", uid)})
+			return nil
 		}
 		var account NewApiAccount
 		found := false
@@ -523,10 +524,10 @@ func handleRefreshSubscriptionAccount(deps *NewApiRouteDeps) gin.HandlerFunc {
 			}
 		}
 		if !found {
-			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("account_uid=%s 不存在", accountUID)})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": fmt.Sprintf("account_uid=%s 不存在", accountUID)})
+			return nil
 		}
-		ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
+		ctx, cancel := context.WithTimeout(httpbridge.Request(c).Context(), 15*time.Second)
 		defer cancel()
 		adapter := adapterForAccount(deps, profile, account)
 		balance, _, fetchErr := adapter.FetchBalance(ctx, profile.BaseURL, account.AccessToken, account.UserID, account.AuthTokenMode)
@@ -549,28 +550,29 @@ func handleRefreshSubscriptionAccount(deps *NewApiRouteDeps) gin.HandlerFunc {
 		})
 		if patchErr != nil {
 			if errors.Is(patchErr, errAccountMissing) || strings.Contains(patchErr.Error(), "不存在") {
-				c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("account_uid=%s 不存在", accountUID)})
-				return
+				httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": fmt.Sprintf("account_uid=%s 不存在", accountUID)})
+				return nil
 			}
 			if strings.Contains(patchErr.Error(), "version 冲突") {
-				c.JSON(http.StatusConflict, gin.H{"error": patchErr.Error()})
-				return
+				httpbridge.JSON(c, http.StatusConflict, fiber.Map{"error": patchErr.Error()})
+				return nil
 			}
 			if strings.Contains(patchErr.Error(), "subscription_uid") {
-				c.JSON(http.StatusNotFound, gin.H{"error": patchErr.Error()})
-				return
+				httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": patchErr.Error()})
+				return nil
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": patchErr.Error()})
-			return
+			httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": patchErr.Error()})
+			return nil
 		}
 		if fetchErr != nil {
-			c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("刷新余额失败: %v", fetchErr)})
-			return
+			httpbridge.JSON(c, http.StatusBadGateway, fiber.Map{"error": fmt.Sprintf("刷新余额失败: %v", fetchErr)})
+			return nil
 		}
 		if deps.SyncService != nil {
-			_, _ = deps.SyncService.SyncNow(c.Request.Context(), uid)
+			_, _ = deps.SyncService.SyncNow(httpbridge.Request(c).Context(), uid)
 		}
-		c.JSON(http.StatusOK, NewApiAccountItem{AccountUID: account.AccountUID, UserID: account.UserID, DisplayName: account.DisplayName, Balance: account.Balance, Status: account.Status, AccessTokenMasked: maskAccessToken(account.AccessToken), ProvisionedKeys: account.ProvisionedKeys, LastSyncError: account.LastSyncError, LastCheckedAt: account.LastCheckedAt, CreatedAt: account.CreatedAt, ProxyURL: account.ProxyURL, ProxyPreferDirect: account.ProxyPreferDirect})
+		httpbridge.JSON(c, http.StatusOK, NewApiAccountItem{AccountUID: account.AccountUID, UserID: account.UserID, DisplayName: account.DisplayName, Balance: account.Balance, Status: account.Status, AccessTokenMasked: maskAccessToken(account.AccessToken), ProvisionedKeys: account.ProvisionedKeys, LastSyncError: account.LastSyncError, LastCheckedAt: account.LastCheckedAt, CreatedAt: account.CreatedAt, ProxyURL: account.ProxyURL, ProxyPreferDirect: account.ProxyPreferDirect})
+		return nil
 	}
 }
 
@@ -585,17 +587,17 @@ type NewApiAccountCredentialsUpdateRequest struct {
 
 // handleUpdateSubscriptionAccountCredentials 更新子账号凭证，落库前先用新凭证组合
 // 调站点验证（对齐主账号 handleUpdateNewApiCredentials 语义），通过后回填余额。
-func handleUpdateSubscriptionAccountCredentials(deps *NewApiRouteDeps) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		uid, accountUID := c.Param("uid"), c.Param("accountUid")
+func handleUpdateSubscriptionAccountCredentials(deps *NewApiRouteDeps) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		uid, accountUID := httpbridge.Param(c, "uid"), httpbridge.Param(c, "accountUid")
 		if uid == "" || accountUID == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "subscription uid 和 account uid 不能为空"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "subscription uid 和 account uid 不能为空"})
+			return nil
 		}
 		profile := deps.Store.Get(uid)
 		if profile == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("subscription_uid=%s 不存在", uid)})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": fmt.Sprintf("subscription_uid=%s 不存在", uid)})
+			return nil
 		}
 		var account *NewApiAccount
 		for i := range profile.Accounts {
@@ -605,26 +607,26 @@ func handleUpdateSubscriptionAccountCredentials(deps *NewApiRouteDeps) gin.Handl
 			}
 		}
 		if account == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("account_uid=%s 不存在", accountUID)})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": fmt.Sprintf("account_uid=%s 不存在", accountUID)})
+			return nil
 		}
 
 		var req NewApiAccountCredentialsUpdateRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数无效: " + err.Error()})
-			return
+		if err := httpbridge.BindJSON(c, &req); err != nil {
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "请求参数无效: " + err.Error()})
+			return nil
 		}
 		if req.AccessToken == nil && req.UserID == nil && req.AuthTokenMode == nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "至少需要提交一个凭证字段"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "至少需要提交一个凭证字段"})
+			return nil
 		}
 
 		accessToken := account.AccessToken
 		if req.AccessToken != nil {
 			accessToken = strings.TrimSpace(*req.AccessToken)
 			if accessToken == "" {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "accessToken 不能为空"})
-				return
+				httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "accessToken 不能为空"})
+				return nil
 			}
 		}
 		userID := account.UserID
@@ -639,19 +641,19 @@ func handleUpdateSubscriptionAccountCredentials(deps *NewApiRouteDeps) gin.Handl
 			authTokenMode = NewApiAuthModeBearer
 		}
 		if authTokenMode != NewApiAuthModeBearer && authTokenMode != NewApiAuthModeRaw && authTokenMode != NewApiAuthModeRawAuth {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "authTokenMode 仅支持 bearer 或 raw"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "authTokenMode 仅支持 bearer 或 raw"})
+			return nil
 		}
 
 		merged := *account
 		merged.AccessToken, merged.UserID, merged.AuthTokenMode = accessToken, userID, authTokenMode
-		ctx, cancel := context.WithTimeout(c.Request.Context(), 20*time.Second)
+		ctx, cancel := context.WithTimeout(httpbridge.Request(c).Context(), 20*time.Second)
 		defer cancel()
 		adapter := adapterForAccount(deps, profile, merged)
 		self, derivedUserID, err := adapter.VerifyWithFallback(ctx, profile.BaseURL, accessToken, userID, authTokenMode)
 		if err != nil {
-			c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("账号验证失败: %v", err)})
-			return
+			httpbridge.JSON(c, http.StatusBadGateway, fiber.Map{"error": fmt.Sprintf("账号验证失败: %v", err)})
+			return nil
 		}
 
 		now := time.Now()
@@ -674,26 +676,26 @@ func handleUpdateSubscriptionAccountCredentials(deps *NewApiRouteDeps) gin.Handl
 		})
 		if patchErr != nil {
 			if errors.Is(patchErr, errAccountMissing) || strings.Contains(patchErr.Error(), "不存在") {
-				c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("account_uid=%s 不存在", accountUID)})
-				return
+				httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": fmt.Sprintf("account_uid=%s 不存在", accountUID)})
+				return nil
 			}
 			if strings.Contains(patchErr.Error(), "version 冲突") {
-				c.JSON(http.StatusConflict, gin.H{"error": patchErr.Error()})
-				return
+				httpbridge.JSON(c, http.StatusConflict, fiber.Map{"error": patchErr.Error()})
+				return nil
 			}
 			if strings.Contains(patchErr.Error(), "subscription_uid") {
-				c.JSON(http.StatusNotFound, gin.H{"error": patchErr.Error()})
-				return
+				httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": patchErr.Error()})
+				return nil
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": patchErr.Error()})
-			return
+			httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": patchErr.Error()})
+			return nil
 		}
 
 		// 凭证已通过校验；分组/倍率同步失败不回滚凭证，由账号快照 lastSyncError 展示。
 		if deps.SyncService != nil {
-			_, _ = deps.SyncService.SyncNow(c.Request.Context(), uid)
+			_, _ = deps.SyncService.SyncNow(httpbridge.Request(c).Context(), uid)
 		}
-		c.JSON(http.StatusOK, NewApiAccountItem{
+		httpbridge.JSON(c, http.StatusOK, NewApiAccountItem{
 			AccountUID:        updated.AccountUID,
 			UserID:            updated.UserID,
 			AuthTokenMode:     updated.AuthTokenMode,
@@ -708,44 +710,45 @@ func handleUpdateSubscriptionAccountCredentials(deps *NewApiRouteDeps) gin.Handl
 			ProxyURL:          updated.ProxyURL,
 			ProxyPreferDirect: updated.ProxyPreferDirect,
 		})
+		return nil
 	}
 }
 
 // handleUpdateNewApiCredentials 更新 new-api 主账号凭证，并在落库前验证新凭证组合。
-func handleUpdateNewApiCredentials(deps *NewApiRouteDeps) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		uid := strings.TrimSpace(c.Param("uid"))
+func handleUpdateNewApiCredentials(deps *NewApiRouteDeps) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		uid := strings.TrimSpace(httpbridge.Param(c, "uid"))
 		if uid == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "subscription uid 不能为空"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "subscription uid 不能为空"})
+			return nil
 		}
 
 		profile := deps.Store.Get(uid)
 		if profile == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("subscription_uid=%s 不存在", uid)})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": fmt.Sprintf("subscription_uid=%s 不存在", uid)})
+			return nil
 		}
 		if profile.Provider != "new_api" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "仅 new_api 类型订阅支持主账号凭证更新"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "仅 new_api 类型订阅支持主账号凭证更新"})
+			return nil
 		}
 
 		var req NewApiCredentialsUpdateRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数无效: " + err.Error()})
-			return
+		if err := httpbridge.BindJSON(c, &req); err != nil {
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "请求参数无效: " + err.Error()})
+			return nil
 		}
 		if req.AccessToken == nil && req.UserID == nil && req.AuthTokenMode == nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "至少需要提交一个凭证字段"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "至少需要提交一个凭证字段"})
+			return nil
 		}
 
 		accessToken := profile.AccessToken
 		if req.AccessToken != nil {
 			accessToken = strings.TrimSpace(*req.AccessToken)
 			if accessToken == "" {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "accessToken 不能为空"})
-				return
+				httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "accessToken 不能为空"})
+				return nil
 			}
 		}
 		userID := profile.UserID
@@ -760,11 +763,11 @@ func handleUpdateNewApiCredentials(deps *NewApiRouteDeps) gin.HandlerFunc {
 			authTokenMode = NewApiAuthModeBearer
 		}
 		if authTokenMode != NewApiAuthModeBearer && authTokenMode != NewApiAuthModeRaw && authTokenMode != NewApiAuthModeRawAuth {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "authTokenMode 仅支持 bearer 或 raw"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "authTokenMode 仅支持 bearer 或 raw"})
+			return nil
 		}
 
-		ctx, cancel := context.WithTimeout(c.Request.Context(), 20*time.Second)
+		ctx, cancel := context.WithTimeout(httpbridge.Request(c).Context(), 20*time.Second)
 		defer cancel()
 		// 代理按生效值验证：请求显式提交优先，否则沿用订阅现有设置
 		proxyURL := profile.ProxyURL
@@ -778,8 +781,8 @@ func handleUpdateNewApiCredentials(deps *NewApiRouteDeps) gin.HandlerFunc {
 		adapter := NewApiAdapterForProxy(proxyURL, proxyPreferDirect)
 		self, derivedUserID, err := adapter.VerifyWithFallback(ctx, profile.BaseURL, accessToken, userID, authTokenMode)
 		if err != nil {
-			c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("主账号验证失败: %v", err)})
-			return
+			httpbridge.JSON(c, http.StatusBadGateway, fiber.Map{"error": fmt.Sprintf("主账号验证失败: %v", err)})
+			return nil
 		}
 
 		now := time.Now()
@@ -800,35 +803,36 @@ func handleUpdateNewApiCredentials(deps *NewApiRouteDeps) gin.HandlerFunc {
 			return nil
 		}); err != nil {
 			if strings.Contains(err.Error(), "version 冲突") {
-				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
-				return
+				httpbridge.JSON(c, http.StatusConflict, fiber.Map{"error": err.Error()})
+				return nil
 			}
 			if strings.Contains(err.Error(), "subscription_uid") {
-				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-				return
+				httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": err.Error()})
+				return nil
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
+			httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": err.Error()})
+			return nil
 		}
 
 		// 凭证已通过校验；同步分组/模型与渠道倍率失败时保留凭证，并由订阅快照展示错误供重试。
 		if deps.SyncService != nil {
-			_, _ = deps.SyncService.SyncNow(c.Request.Context(), uid)
+			_, _ = deps.SyncService.SyncNow(httpbridge.Request(c).Context(), uid)
 		}
-		c.JSON(http.StatusOK, toSubscriptionItem(deps.Store.Get(uid)))
+		httpbridge.JSON(c, http.StatusOK, toSubscriptionItem(deps.Store.Get(uid)))
+		return nil
 	}
 }
 
-func RegisterSubscriptionAccountRoutes(router gin.IRouter, deps *NewApiRouteDeps) {
+func RegisterSubscriptionAccountRoutes(router fiber.Router, deps *NewApiRouteDeps) {
 	if deps == nil || deps.Store == nil {
 		return
 	}
-	router.PATCH("/subscriptions/:uid/newapi-credentials", handleUpdateNewApiCredentials(deps))
+	router.Patch("/subscriptions/:uid/newapi-credentials", handleUpdateNewApiCredentials(deps))
 	group := router.Group("/subscriptions/:uid/accounts")
-	group.POST("", handleAddSubscriptionAccount(deps))
-	group.GET("", handleListSubscriptionAccounts(deps))
-	group.DELETE("/primary", handleDeletePrimaryAccount(deps))
-	group.DELETE("/:accountUid", handleDeleteSubscriptionAccount(deps))
-	group.POST("/:accountUid/refresh", handleRefreshSubscriptionAccount(deps))
-	group.PATCH("/:accountUid/credentials", handleUpdateSubscriptionAccountCredentials(deps))
+	group.Post("", handleAddSubscriptionAccount(deps))
+	group.Get("", handleListSubscriptionAccounts(deps))
+	group.Delete("/primary", handleDeletePrimaryAccount(deps))
+	group.Delete("/:accountUid", handleDeleteSubscriptionAccount(deps))
+	group.Post("/:accountUid/refresh", handleRefreshSubscriptionAccount(deps))
+	group.Patch("/:accountUid/credentials", handleUpdateSubscriptionAccountCredentials(deps))
 }

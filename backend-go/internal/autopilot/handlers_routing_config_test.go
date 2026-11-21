@@ -7,13 +7,14 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
-func setupRoutingConfigRouter(deps *RoutingConfigDeps) *gin.Engine {
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
+func setupRoutingConfigRouter(deps *RoutingConfigDeps) *fiber.App {
+
+	r := httpbridge.NewApp()
 	group := r.Group("/api")
 	RegisterRoutingConfigRoutes(group, deps)
 	return r

@@ -8,12 +8,12 @@ import (
 	"testing"
 
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/types"
-	"github.com/gin-gonic/gin"
 )
 
 func TestGeminiEntry_RequestMatrix_AllFourUpstreams(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	geminiReq := &types.GeminiRequest{
 		Contents: []types.GeminiContent{{
 			Role:  "user",
@@ -37,8 +37,8 @@ func TestGeminiEntry_RequestMatrix_AllFourUpstreams(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
-			c, _ := gin.CreateTestContext(w)
-			c.Request = httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-2.0-flash:generateContent", nil).WithContext(context.Background())
+			c, _ := httpbridge.TestContext(w)
+			httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-2.0-flash:generateContent", nil).WithContext(context.Background()))
 
 			upstream := &config.UpstreamConfig{BaseURL: "https://api.example.com", ServiceType: tt.serviceType}
 			if tt.name == "gemini_hash_baseurl_openai" {

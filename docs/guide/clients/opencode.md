@@ -1,6 +1,5 @@
 # OpenCode 接入 Yunqi
 
-如果你正在使用 **Yunqi Desktop**，可先在 [Agent Config](/guide/desktop/#agent-配置) 中写入 OpenCode 配置，再回到本页确认 Chat 入口和 Base URL 规则。
 
 ## 工作方式
 
@@ -30,22 +29,9 @@ OpenCode  ->  Yunqi /v1/chat/completions  ->  Chat 渠道  ->  上游 Chat 兼�
 
 ## 二、配置 OpenCode
 
-### 使用 Yunqi Desktop 自动配置
+### Web 控制台配置向导
 
-在 **Agent Config → OpenCode** 中，默认选择 **Yunqi 本地网关**。Desktop 会维护：
-
-- `~/.config/opencode/opencode.jsonc`：写入 OpenAI 兼容自定义 provider，例如 `provider.yunqi.options.baseURL`
-- `~/.local/share/opencode/auth.json`：写入对应 provider 的 API Key，例如 `auth.yunqi.key`
-
-默认 Yunqi 模式写入的 Base URL 为：
-
-```text
-http://127.0.0.1:<当前 Yunqi 端口>/v1
-```
-
-OpenCode 使用模型时选择 `yunqi/<model>`，请求会通过 Chat 协议进入 Yunqi，再由 Yunqi Chat 渠道路由到已配置的国内上游。
-
-Agent Config 也提供直连选项，但只列出当前适合 OpenCode OpenAI Chat 协议的国内厂商，以及 OpenCode Zen / OpenCode Go。其它 provider 仍可按 OpenCode 官方方式手动添加。
+进入「服务与接入」选择 OpenCode，生成并下载配置，手动合并到本机配置文件。
 
 ### 手动配置
 

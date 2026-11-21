@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/soulteary/yunqi/internal/httpbridge"
+
 	"github.com/soulteary/yunqi/internal/config"
 )
 
@@ -62,7 +64,7 @@ func TestModelsHandler_FillsMaxOutputTokensFromBuiltinRegistry(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 			req.Header.Set("Authorization", "Bearer test-key")
 			w := httptest.NewRecorder()
-			router.ServeHTTP(w, req)
+			httpbridge.Handler(router).ServeHTTP(w, req)
 
 			if w.Code != http.StatusOK {
 				t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
@@ -115,7 +117,7 @@ func TestModelsHandler_MaxOutputTokensNotOverriddenByUpstream(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
@@ -206,7 +208,7 @@ func TestModelsHandler_BothContextWindowAndMaxOutputTokensFilled(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
@@ -255,7 +257,7 @@ func TestModelsHandler_MaxOutputTokensInJSONResponse(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
@@ -316,7 +318,7 @@ func TestModelsHandler_ConfiguredModelsFallbackIncludesMaxOutputTokens(t *testin
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())

@@ -13,8 +13,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 type CapabilityLifecycle string
@@ -729,41 +730,41 @@ func getCapabilityTestChannel(cfgManager *config.ConfigManager, channelKind stri
 	return &channel, nil
 }
 
-func GetCapabilityTestJobStatus(cfgManager *config.ConfigManager, channelKind string) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func GetCapabilityTestJobStatus(cfgManager *config.ConfigManager, channelKind string) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		id, err := parseCapabilityChannelID(c)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid channel ID"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "Invalid channel ID"})
+			return nil
 		}
 
-		jobID := c.Param("jobId")
+		jobID := httpbridge.Param(c, "jobId")
 		job, ok := capabilityJobs.get(jobID)
 		if !ok {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Capability test job not found"})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "Capability test job not found"})
+			return nil
 		}
 
 		channel, getErr := getCapabilityTestChannel(cfgManager, channelKind, id)
 		if getErr != nil {
 			if !capabilityJobMatchesChannel(job, nil, channelKind, id) {
-				c.JSON(http.StatusNotFound, gin.H{"error": "Capability test job not found"})
-				return
+				httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "Capability test job not found"})
+				return nil
 			}
-			c.JSON(http.StatusOK, job)
-			return
+			httpbridge.JSON(c, http.StatusOK, job)
+			return nil
 		}
 
 		if !capabilityJobMatchesChannel(job, channel, channelKind, id) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Capability test job not found"})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "Capability test job not found"})
+			return nil
 		}
 
 		job.ChannelID = id
 		job.ChannelName = channel.Name
 		job.SourceType = channel.ServiceType
-
-		c.JSON(http.StatusOK, job)
+		httpbridge.JSON(c, http.StatusOK, job)
+		return nil
 	}
 }
 
@@ -859,6 +860,6 @@ func deriveCapabilityProtocolStatus(lifecycle CapabilityLifecycle, outcome Capab
 	return CapabilityProtocolStatusFailed
 }
 
-func parseCapabilityChannelID(c *gin.Context) (int, error) {
-	return strconv.Atoi(c.Param("id"))
+func parseCapabilityChannelID(c fiber.Ctx) (int, error) {
+	return strconv.Atoi(httpbridge.Param(c, "id"))
 }

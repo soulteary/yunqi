@@ -8,10 +8,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/middleware"
 	"github.com/soulteary/yunqi/internal/scheduler"
-	"github.com/gin-gonic/gin"
 )
 
 // ── Route Preview 契约测试（implementation-gap-remediation-plan Phase C）──
@@ -19,7 +20,7 @@ import (
 // postRoutePreview 向给定 router 发起一次 route-preview 请求。
 // 注意 setupRoutePreviewTestRouter 挂载的路径无 /api 前缀（与生产 /api group
 // 挂载等价，仅前缀不同）；WebAuth 端到端测试自行构造带 /api 前缀的 router。
-func postRoutePreview(t *testing.T, router *gin.Engine, payload string, headers map[string]string) *httptest.ResponseRecorder {
+func postRoutePreview(t *testing.T, router *fiber.App, payload string, headers map[string]string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/autopilot/route-preview", bytes.NewReader([]byte(payload)))
 	req.Header.Set("Content-Type", "application/json")
@@ -27,7 +28,7 @@ func postRoutePreview(t *testing.T, router *gin.Engine, payload string, headers 
 		req.Header.Set(k, v)
 	}
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 	return w
 }
 
@@ -140,7 +141,7 @@ func TestRoutePreviewHandler_SchedulerUnavailableKeepsPlanWithReason(t *testing.
 }
 
 func TestRoutePreviewHandler_RequiresAdminAuth(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	cfg := baseTestConfig()
 	cfg.AutopilotRouting = config.AutopilotRoutingConfig{RoutingMode: "active"}
 	_, cfgManager, cleanup := createTestScheduler(t, cfg)
@@ -151,7 +152,7 @@ func TestRoutePreviewHandler_RequiresAdminAuth(t *testing.T) {
 	envCfg.AdminAccessKey = "test-admin-key"
 	envCfg.EnableWebUI = true
 
-	r := gin.New()
+	r := httpbridge.NewApp()
 	r.Use(middleware.WebAuthMiddleware(envCfg, cfgManager))
 	apiGroup := r.Group("/api")
 	RegisterRoutePreviewRoutes(apiGroup, smartRouter, nil)
@@ -164,7 +165,7 @@ func TestRoutePreviewHandler_RequiresAdminAuth(t *testing.T) {
 			req.Header.Set("X-Api-Key", key)
 		}
 		w := httptest.NewRecorder()
-		r.ServeHTTP(w, req)
+		httpbridge.Handler(r).ServeHTTP(w, req)
 		return w
 	}
 

@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gin-gonic/gin"
-
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 type exchangeRatesResponse struct {
@@ -32,17 +32,17 @@ type exchangeRatesUpdateResponse struct {
 	Version  uint64                       `json:"version"`
 }
 
-func RegisterCostRoutes(router gin.IRouter, cfgManager *config.ConfigManager) {
+func RegisterCostRoutes(router fiber.Router, cfgManager *config.ConfigManager) {
 	if router == nil || cfgManager == nil {
 		return
 	}
 	group := router.Group("/autopilot/cost")
-	group.GET("/exchange-rates", handleGetExchangeRates(cfgManager))
-	group.PUT("/exchange-rates", handlePutExchangeRates(cfgManager))
+	group.Get("/exchange-rates", handleGetExchangeRates(cfgManager))
+	group.Put("/exchange-rates", handlePutExchangeRates(cfgManager))
 }
 
-func handleGetExchangeRates(cfgManager *config.ConfigManager) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handleGetExchangeRates(cfgManager *config.ConfigManager) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		cfg := cfgManager.GetConfig()
 		cost := cfg.AutopilotRouting.CostOptimization
 		response := exchangeRatesResponse{
@@ -55,16 +55,17 @@ func handleGetExchangeRates(cfgManager *config.ConfigManager) gin.HandlerFunc {
 			snapshot := graph.Snapshot()
 			response.Snapshot = &snapshot
 		}
-		c.JSON(http.StatusOK, response)
+		httpbridge.JSON(c, http.StatusOK, response)
+		return nil
 	}
 }
 
-func handlePutExchangeRates(cfgManager *config.ConfigManager) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handlePutExchangeRates(cfgManager *config.ConfigManager) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		body, err := readExchangeRatesUpdateRequest(c)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
+			return nil
 		}
 		cfg := cfgManager.GetConfig()
 		current := cfg.AutopilotRouting.CostOptimization
@@ -72,33 +73,34 @@ func handlePutExchangeRates(cfgManager *config.ConfigManager) gin.HandlerFunc {
 		if expected != nil {
 			currentVersion := currentSnapshotVersion(current.ExchangeRateSnapshot)
 			if currentVersion != *expected {
-				c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("snapshot version 冲突: current=%d expected=%d", currentVersion, *expected)})
-				return
+				httpbridge.JSON(c, http.StatusConflict, fiber.Map{"error": fmt.Sprintf("snapshot version 冲突: current=%d expected=%d", currentVersion, *expected)})
+				return nil
 			}
 		}
 
 		normalized, snapshot, err := validateExchangeRates(body.Quotes, currentSnapshotVersion(current.ExchangeRateSnapshot), time.Now().UTC())
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
+			return nil
 		}
 
 		updated, err := cfgManager.ApplyExchangeRateUpdate(normalized, *snapshot, body.Quotes != nil && len(body.Quotes) == 0)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
+			httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": err.Error()})
+			return nil
 		}
-		c.JSON(http.StatusOK, exchangeRatesUpdateResponse{
+		httpbridge.JSON(c, http.StatusOK, exchangeRatesUpdateResponse{
 			Quotes:   updated.Quotes,
 			Snapshot: updated.Snapshot,
 			Source:   updated.Source,
 			Version:  updated.Snapshot.Version,
 		})
+		return nil
 	}
 }
 
-func readExchangeRatesUpdateRequest(c *gin.Context) (exchangeRatesUpdateRequest, error) {
-	data, err := c.GetRawData()
+func readExchangeRatesUpdateRequest(c fiber.Ctx) (exchangeRatesUpdateRequest, error) {
+	data, err := httpbridge.ReadBody(c)
 	if err != nil {
 		return exchangeRatesUpdateRequest{}, fmt.Errorf("读取请求体失败: %w", err)
 	}

@@ -54,7 +54,7 @@ type ChannelLog struct {
 	AgentConfidence string `json:"agentConfidence,omitempty"` // exact | heuristic
 	SessionID       string `json:"sessionId,omitempty"`       // 扁平化会话标识（用于驾驶舱关联）
 
-	// 代理 Key 掩码（用于成本报表按用户维度分组，由 ProxyAuthMiddleware 写入 gin context）
+	// 代理 Key 掩码（用于成本报表按用户维度分组，由 ProxyAuthMiddleware 写入 Fiber context）
 	ProxyKeyMask string `json:"proxyKeyMask,omitempty"`
 
 	// Trace 关联（§3.5）

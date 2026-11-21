@@ -9,13 +9,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/errutil"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/session"
 	"github.com/soulteary/yunqi/internal/warmup"
-	"github.com/gin-gonic/gin"
 )
 
 type fakePersistenceStore struct {
@@ -176,14 +177,13 @@ func TestFilterBucketsByURLsFillsEmptyBuckets(t *testing.T) {
 }
 
 func TestChannelMetricsHandlers_FallbackServiceTypeForLegacyConfig(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	tests := []struct {
 		name        string
 		serviceType string
 		baseURL     string
 		record      func(mm *metrics.MetricsManager, baseURL, apiKey, serviceType string)
-		register    func(r *gin.Engine, mm *metrics.MetricsManager, cfgManager *config.ConfigManager)
+		register    func(r *fiber.App, mm *metrics.MetricsManager, cfgManager *config.ConfigManager)
 		requestPath string
 		buildConfig func(baseURL string) config.Config
 		assertBody  func(t *testing.T, body []byte)
@@ -197,8 +197,8 @@ func TestChannelMetricsHandlers_FallbackServiceTypeForLegacyConfig(t *testing.T)
 					mm.RecordFailure(baseURL, apiKey, serviceType, "")
 				}
 			},
-			register: func(r *gin.Engine, mm *metrics.MetricsManager, cfgManager *config.ConfigManager) {
-				r.GET("/gemini/channels/metrics", GetGeminiChannelMetrics(mm, cfgManager))
+			register: func(r *fiber.App, mm *metrics.MetricsManager, cfgManager *config.ConfigManager) {
+				r.Get("/gemini/channels/metrics", GetGeminiChannelMetrics(mm, cfgManager))
 			},
 			requestPath: "/gemini/channels/metrics",
 			buildConfig: func(baseURL string) config.Config {
@@ -223,8 +223,8 @@ func TestChannelMetricsHandlers_FallbackServiceTypeForLegacyConfig(t *testing.T)
 					mm.RecordFailure(baseURL, apiKey, serviceType, "")
 				}
 			},
-			register: func(r *gin.Engine, mm *metrics.MetricsManager, cfgManager *config.ConfigManager) {
-				r.GET("/chat/channels/metrics", GetChatChannelMetrics(mm, cfgManager))
+			register: func(r *fiber.App, mm *metrics.MetricsManager, cfgManager *config.ConfigManager) {
+				r.Get("/chat/channels/metrics", GetChatChannelMetrics(mm, cfgManager))
 			},
 			requestPath: "/chat/channels/metrics",
 			buildConfig: func(baseURL string) config.Config {
@@ -247,8 +247,8 @@ func TestChannelMetricsHandlers_FallbackServiceTypeForLegacyConfig(t *testing.T)
 			record: func(mm *metrics.MetricsManager, baseURL, apiKey, serviceType string) {
 				mm.RecordSuccess(baseURL, apiKey, serviceType, "")
 			},
-			register: func(r *gin.Engine, mm *metrics.MetricsManager, cfgManager *config.ConfigManager) {
-				r.GET("/gemini/channels/metrics/history", GetGeminiChannelMetricsHistory(mm, cfgManager))
+			register: func(r *fiber.App, mm *metrics.MetricsManager, cfgManager *config.ConfigManager) {
+				r.Get("/gemini/channels/metrics/history", GetGeminiChannelMetricsHistory(mm, cfgManager))
 			},
 			requestPath: "/gemini/channels/metrics/history?duration=1h",
 			buildConfig: func(baseURL string) config.Config {
@@ -273,8 +273,8 @@ func TestChannelMetricsHandlers_FallbackServiceTypeForLegacyConfig(t *testing.T)
 			record: func(mm *metrics.MetricsManager, baseURL, apiKey, serviceType string) {
 				mm.RecordSuccess(baseURL, apiKey, serviceType, "")
 			},
-			register: func(r *gin.Engine, mm *metrics.MetricsManager, cfgManager *config.ConfigManager) {
-				r.GET("/chat/channels/:id/keys/metrics/history", GetChatChannelKeyMetricsHistory(mm, cfgManager))
+			register: func(r *fiber.App, mm *metrics.MetricsManager, cfgManager *config.ConfigManager) {
+				r.Get("/chat/channels/:id/keys/metrics/history", GetChatChannelKeyMetricsHistory(mm, cfgManager))
 			},
 			requestPath: "/chat/channels/0/keys/metrics/history?duration=1h",
 			buildConfig: func(baseURL string) config.Config {
@@ -316,12 +316,12 @@ func TestChannelMetricsHandlers_FallbackServiceTypeForLegacyConfig(t *testing.T)
 			defer metricsManager.Stop()
 			tt.record(metricsManager, tt.baseURL, "sk-test", tt.serviceType)
 
-			r := gin.New()
+			r := httpbridge.NewApp()
 			tt.register(r, metricsManager, cfgManager)
 
 			req := httptest.NewRequest(http.MethodGet, tt.requestPath, nil)
 			w := httptest.NewRecorder()
-			r.ServeHTTP(w, req)
+			httpbridge.Handler(r).ServeHTTP(w, req)
 
 			if w.Code != http.StatusOK {
 				t.Fatalf("status=%d, want=200, body=%s", w.Code, w.Body.String())
@@ -332,7 +332,7 @@ func TestChannelMetricsHandlers_FallbackServiceTypeForLegacyConfig(t *testing.T)
 }
 
 func TestResumeChannel_RestoresUnavailableKeys(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	paused := false
 	assertNoPausedKeys := func(t *testing.T, configs []config.APIKeyConfig) {
 		t.Helper()
@@ -346,15 +346,15 @@ func TestResumeChannel_RestoresUnavailableKeys(t *testing.T) {
 	tests := []struct {
 		name        string
 		path        string
-		register    func(r *gin.Engine, sch *scheduler.ChannelScheduler, cfgManager *config.ConfigManager)
+		register    func(r *fiber.App, sch *scheduler.ChannelScheduler, cfgManager *config.ConfigManager)
 		buildConfig func() config.Config
 		checkResult func(t *testing.T, sch *scheduler.ChannelScheduler, got config.Config)
 	}{
 		{
 			name: "messages",
 			path: "/messages/channels/0/resume",
-			register: func(r *gin.Engine, sch *scheduler.ChannelScheduler, cfgManager *config.ConfigManager) {
-				r.POST("/messages/channels/:id/resume", ResumeChannel(sch, cfgManager, false))
+			register: func(r *fiber.App, sch *scheduler.ChannelScheduler, cfgManager *config.ConfigManager) {
+				r.Post("/messages/channels/:id/resume", ResumeChannel(sch, cfgManager, false))
 			},
 			buildConfig: func() config.Config {
 				return config.Config{Upstream: []config.UpstreamConfig{{
@@ -402,8 +402,8 @@ func TestResumeChannel_RestoresUnavailableKeys(t *testing.T) {
 		{
 			name: "responses",
 			path: "/responses/channels/0/resume",
-			register: func(r *gin.Engine, sch *scheduler.ChannelScheduler, cfgManager *config.ConfigManager) {
-				r.POST("/responses/channels/:id/resume", ResumeChannel(sch, cfgManager, true))
+			register: func(r *fiber.App, sch *scheduler.ChannelScheduler, cfgManager *config.ConfigManager) {
+				r.Post("/responses/channels/:id/resume", ResumeChannel(sch, cfgManager, true))
 			},
 			buildConfig: func() config.Config {
 				return config.Config{ResponsesUpstream: []config.UpstreamConfig{{
@@ -451,8 +451,8 @@ func TestResumeChannel_RestoresUnavailableKeys(t *testing.T) {
 		{
 			name: "chat",
 			path: "/chat/channels/0/resume",
-			register: func(r *gin.Engine, sch *scheduler.ChannelScheduler, cfgManager *config.ConfigManager) {
-				r.POST("/chat/channels/:id/resume", ResumeChannelWithKind(sch, cfgManager, scheduler.ChannelKindChat))
+			register: func(r *fiber.App, sch *scheduler.ChannelScheduler, cfgManager *config.ConfigManager) {
+				r.Post("/chat/channels/:id/resume", ResumeChannelWithKind(sch, cfgManager, scheduler.ChannelKindChat))
 			},
 			buildConfig: func() config.Config {
 				return config.Config{ChatUpstream: []config.UpstreamConfig{{
@@ -500,8 +500,8 @@ func TestResumeChannel_RestoresUnavailableKeys(t *testing.T) {
 		{
 			name: "gemini",
 			path: "/gemini/channels/0/resume",
-			register: func(r *gin.Engine, sch *scheduler.ChannelScheduler, cfgManager *config.ConfigManager) {
-				r.POST("/gemini/channels/:id/resume", ResumeChannelWithKind(sch, cfgManager, scheduler.ChannelKindGemini))
+			register: func(r *fiber.App, sch *scheduler.ChannelScheduler, cfgManager *config.ConfigManager) {
+				r.Post("/gemini/channels/:id/resume", ResumeChannelWithKind(sch, cfgManager, scheduler.ChannelKindGemini))
 			},
 			buildConfig: func() config.Config {
 				return config.Config{GeminiUpstream: []config.UpstreamConfig{{
@@ -608,12 +608,12 @@ func TestResumeChannel_RestoresUnavailableKeys(t *testing.T) {
 				geminiMetrics.MoveKeyToHalfOpen(baseURL, "sk-active", serviceType)
 			}
 
-			r := gin.New()
+			r := httpbridge.NewApp()
 			tt.register(r, sch, cfgManager)
 
 			req := httptest.NewRequest(http.MethodPost, tt.path, nil)
 			w := httptest.NewRecorder()
-			r.ServeHTTP(w, req)
+			httpbridge.Handler(r).ServeHTTP(w, req)
 
 			if w.Code != http.StatusOK {
 				t.Fatalf("status=%d, want=200, body=%s", w.Code, w.Body.String())

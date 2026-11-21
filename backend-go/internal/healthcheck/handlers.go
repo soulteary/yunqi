@@ -4,9 +4,10 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/metrics"
-	"github.com/gin-gonic/gin"
 )
 
 // PolicyView 解析后保活策略的管理 API 视图（Duration 转分钟/毫秒便于前端展示）
@@ -64,41 +65,43 @@ func (m *Manager) ChannelHealth(channelType string, channelIndex int) *ChannelHe
 }
 
 // ChannelHealthHandler GET /api/{type}/channels/:id/health
-func (m *Manager) ChannelHealthHandler(channelType string) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		id, err := strconv.Atoi(c.Param("id"))
+func (m *Manager) ChannelHealthHandler(channelType string) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		id, err := strconv.Atoi(httpbridge.Param(c, "id"))
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid channel ID"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "Invalid channel ID"})
+			return nil
 		}
 		view := m.ChannelHealth(channelType, id)
 		if view == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Channel not found"})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "Channel not found"})
+			return nil
 		}
-		c.JSON(http.StatusOK, view)
+		httpbridge.JSON(c, http.StatusOK, view)
+		return nil
 	}
 }
 
 // TriggerChannelCheckHandler POST /api/{type}/channels/:id/health/check
 // 异步触发该渠道立即验证（202 返回，结果通过 GET health 查询）
-func (m *Manager) TriggerChannelCheckHandler(channelType string) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		id, err := strconv.Atoi(c.Param("id"))
+func (m *Manager) TriggerChannelCheckHandler(channelType string) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		id, err := strconv.Atoi(httpbridge.Param(c, "id"))
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid channel ID"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "Invalid channel ID"})
+			return nil
 		}
 		cfg := m.getConfig()
 		upstreams := UpstreamsFor(&cfg, channelType)
 		if id < 0 || id >= len(upstreams) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Channel not found"})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "Channel not found"})
+			return nil
 		}
 		accepted := m.TriggerChannelCheck(channelType, id)
-		c.JSON(http.StatusAccepted, gin.H{
+		httpbridge.JSON(c, http.StatusAccepted, fiber.Map{
 			"message": "保活验证已触发，请稍后通过 GET 查询结果",
 			"queued":  accepted,
 		})
+		return nil
 	}
 }

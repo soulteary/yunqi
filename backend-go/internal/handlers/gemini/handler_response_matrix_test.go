@@ -9,11 +9,12 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/session"
-	"github.com/gin-gonic/gin"
 )
 
 func setupGeminiTestConfigManager(t *testing.T, upstream []config.UpstreamConfig) *config.ConfigManager {
@@ -35,9 +36,9 @@ func setupGeminiTestConfigManager(t *testing.T, upstream []config.UpstreamConfig
 	return cm
 }
 
-func newGeminiTestRouter(t *testing.T, upstream config.UpstreamConfig) *gin.Engine {
+func newGeminiTestRouter(t *testing.T, upstream config.UpstreamConfig) *fiber.App {
 	t.Helper()
-	gin.SetMode(gin.TestMode)
+
 	cfgManager := setupGeminiTestConfigManager(t, []config.UpstreamConfig{upstream})
 	channelScheduler := scheduler.NewChannelScheduler(
 		cfgManager,
@@ -54,19 +55,19 @@ func newGeminiTestRouter(t *testing.T, upstream config.UpstreamConfig) *gin.Engi
 		MaxRequestBodySize: 1024 * 1024,
 	}
 
-	r := gin.New()
-	r.POST("/v1beta/models/*modelAction", Handler(envCfg, cfgManager, channelScheduler))
+	r := httpbridge.NewApp()
+	r.Post("/v1beta/models/*", Handler(envCfg, cfgManager, channelScheduler))
 	return r
 }
 
-func performGeminiHandlerRequest(t *testing.T, router *gin.Engine, model string, body string) *httptest.ResponseRecorder {
+func performGeminiHandlerRequest(t *testing.T, router *fiber.App, model string, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	url := "/v1beta/models/" + model + ":generateContent"
 	req := httptest.NewRequest(http.MethodPost, url, bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-api-key", "secret-key")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 	return w
 }
 

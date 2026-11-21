@@ -4,8 +4,9 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/quota"
-	"github.com/gin-gonic/gin"
 )
 
 // quotaChannelView 配额真相快照的对外视图：在 ChannelState 基础上补充
@@ -25,11 +26,11 @@ type quotaChannelView struct {
 // 计算派生值（每个渠道多 2 次加锁 + 一次惰性剪除），既拖长管理端点耗时，也会出现
 // 「status=unknown 但 saturated=true」这类跨瞬间矛盾的行。
 // 渠道删除后其配额状态由 DeleteChannelMetrics 调用 Manager.RemoveChannel 清理。
-func GetQuotaChannels(qm *quota.Manager) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func GetQuotaChannels(qm *quota.Manager) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		if qm == nil {
-			c.JSON(http.StatusOK, gin.H{"channels": []quotaChannelView{}})
-			return
+			httpbridge.JSON(c, http.StatusOK, fiber.Map{"channels": []quotaChannelView{}})
+			return nil
 		}
 		snapshots := qm.SnapshotAllWithStatus(time.Now().UnixMilli())
 		views := make([]quotaChannelView, 0, len(snapshots))
@@ -40,6 +41,7 @@ func GetQuotaChannels(qm *quota.Manager) gin.HandlerFunc {
 				Saturated:    snapshot.Saturated,
 			})
 		}
-		c.JSON(http.StatusOK, gin.H{"channels": views})
+		httpbridge.JSON(c, http.StatusOK, fiber.Map{"channels": views})
+		return nil
 	}
 }

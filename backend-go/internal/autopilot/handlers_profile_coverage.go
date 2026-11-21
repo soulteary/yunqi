@@ -3,7 +3,8 @@ package autopilot
 import (
 	"net/http"
 
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v3"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 // handlers_profile_coverage.go 注册模型画像覆盖率诊断的只读 API。
@@ -13,18 +14,19 @@ import (
 // 只读：本文件不包含任何写入/变更路径。
 
 // RegisterProfileCoverageRoutes 注册画像覆盖率诊断只读 API。
-func RegisterProfileCoverageRoutes(router gin.IRouter, mgr *Manager) {
+func RegisterProfileCoverageRoutes(router fiber.Router, mgr *Manager) {
 	group := router.Group("/health-center")
 	{
-		group.GET("/profile-coverage", handleProfileCoverage(mgr))
+		group.Get("/profile-coverage", handleProfileCoverage(mgr))
 	}
 }
 
 // handleProfileCoverage GET /api/health-center/profile-coverage
 // 返回每个渠道的画像覆盖率诊断：endpoint 是否有画像、画像来源、是否探测成功、是否声明思考等级控制。
-func handleProfileCoverage(mgr *Manager) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handleProfileCoverage(mgr *Manager) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		resp := computeProfileCoverage(mgr)
-		c.JSON(http.StatusOK, resp)
+		httpbridge.JSON(c, http.StatusOK, resp)
+		return nil
 	}
 }

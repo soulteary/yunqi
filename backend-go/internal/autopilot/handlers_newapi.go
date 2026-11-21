@@ -12,9 +12,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/presetstore"
-	"github.com/gin-gonic/gin"
 )
 
 // ─── new-api 订阅集成路由（§8.5.1）──────────────────────────────────────────
@@ -111,14 +112,14 @@ func StableAccountUID(subscriptionUID string) string {
 //
 //	POST /subscriptions/newapi/verify    —— 校验令牌 + 预览账户/分组/模型（不落库）
 //	POST /subscriptions/newapi/provision —— 完整流程：建 profile + 建 key + 建渠道 + 触发 Discovery
-func RegisterNewApiSubscriptionRoutes(router gin.IRouter, deps *NewApiRouteDeps) {
+func RegisterNewApiSubscriptionRoutes(router fiber.Router, deps *NewApiRouteDeps) {
 	if deps == nil || deps.Store == nil {
 		log.Printf("[NewApi-Routes] 依赖缺失，跳过注册")
 		return
 	}
 	group := router.Group("/subscriptions")
-	group.POST("/newapi/verify", handleNewApiVerify(deps))
-	group.POST("/newapi/provision", handleNewApiProvision(deps))
+	group.Post("/newapi/verify", handleNewApiVerify(deps))
+	group.Post("/newapi/provision", handleNewApiProvision(deps))
 }
 
 // ─── 请求/响应类型 ───
@@ -453,19 +454,19 @@ func newApiProvisionTimeout(groupCount int) time.Duration {
 }
 
 // handleNewApiVerify 校验 new-api 凭据 + 预览账户/分组/模型信息（不写入数据库）。
-func handleNewApiVerify(deps *NewApiRouteDeps) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handleNewApiVerify(deps *NewApiRouteDeps) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		var req NewApiVerifyRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数无效: " + err.Error()})
-			return
+		if err := httpbridge.BindJSON(c, &req); err != nil {
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "请求参数无效: " + err.Error()})
+			return nil
 		}
 		if req.AccessToken == "" || req.BaseURL == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "baseUrl 和 accessToken 必填"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "baseUrl 和 accessToken 必填"})
+			return nil
 		}
 
-		ctx, cancel := context.WithTimeout(c.Request.Context(), newApiProbeTimeout)
+		ctx, cancel := context.WithTimeout(httpbridge.Request(c).Context(), newApiProbeTimeout)
 		defer cancel()
 
 		adapter := NewApiAdapterForProxy(req.ProxyURL, req.ProxyPreferDirect)
@@ -473,8 +474,8 @@ func handleNewApiVerify(deps *NewApiRouteDeps) gin.HandlerFunc {
 		// 1) 校验 + 取用户信息（支持 New-API-User header 缺失回退）
 		self, derivedUserID, err := adapter.VerifyWithFallback(ctx, req.BaseURL, req.AccessToken, req.UserID, req.AuthTokenMode)
 		if err != nil {
-			c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("校验失败: %v", err)})
-			return
+			httpbridge.JSON(c, http.StatusBadGateway, fiber.Map{"error": fmt.Sprintf("校验失败: %v", err)})
+			return nil
 		}
 
 		// 2) 拉分组倍率（验证阶段不阻断，但把失败原因明确回传给界面）。
@@ -511,41 +512,42 @@ func handleNewApiVerify(deps *NewApiRouteDeps) gin.HandlerFunc {
 			SuggestedOriginTier: defaults.OriginTier,
 			AccessTokenMasked:   maskAccessToken(req.AccessToken),
 		}
-		c.JSON(http.StatusOK, resp)
+		httpbridge.JSON(c, http.StatusOK, resp)
+		return nil
 	}
 }
 
 // handleNewApiProvision 完整流程：建 profile + 建 key + 建渠道 + 触发 Discovery。
-func handleNewApiProvision(deps *NewApiRouteDeps) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handleNewApiProvision(deps *NewApiRouteDeps) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		if deps.CfgManager == nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "配置管理器未就绪，无法建渠道"})
-			return
+			httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": "配置管理器未就绪，无法建渠道"})
+			return nil
 		}
 
 		var req NewApiProvisionRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数无效: " + err.Error()})
-			return
+		if err := httpbridge.BindJSON(c, &req); err != nil {
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "请求参数无效: " + err.Error()})
+			return nil
 		}
 		if req.AccessToken == "" || req.BaseURL == "" || req.SubscriptionUID == "" || req.DisplayName == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "subscriptionUid、displayName、baseUrl、accessToken、channelKind 必填"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "subscriptionUid、displayName、baseUrl、accessToken、channelKind 必填"})
+			return nil
 		}
 		if !validChannelKinds[req.ChannelKind] {
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("不支持的渠道类型: %s", req.ChannelKind)})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": fmt.Sprintf("不支持的渠道类型: %s", req.ChannelKind)})
+			return nil
 		}
 
 		// 提前校验 subscriptionUid 唯一性，避免白白在 new-api 侧建 key 后才发现 profile 冲突。
 		// Store.Create 原子兜底二次校验，并发同 uid 在临界区串行化。
 		if deps.Store.Get(req.SubscriptionUID) != nil {
-			c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("subscriptionUid=%s 已存在", req.SubscriptionUID)})
-			return
+			httpbridge.JSON(c, http.StatusConflict, fiber.Map{"error": fmt.Sprintf("subscriptionUid=%s 已存在", req.SubscriptionUID)})
+			return nil
 		}
 		if req.ProvisionAllEligibleGroups && strings.TrimSpace(req.ProvisionKeyName) != "" {
-			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "自动接入全部合格分组时不支持 provisionKeyName"})
-			return
+			httpbridge.JSON(c, http.StatusUnprocessableEntity, fiber.Map{"error": "自动接入全部合格分组时不支持 provisionKeyName"})
+			return nil
 		}
 		// 同站点已有渠道时把 key 并入该渠道而非新建：多 new-api 订阅与纯 key 渠道应整合为同一渠道。
 		mergeIndex, mergeFound := findNewApiMergeTarget(deps.CfgManager.GetConfig(), req.ChannelKind, req.BaseURL)
@@ -557,15 +559,15 @@ func handleNewApiProvision(deps *NewApiRouteDeps) gin.HandlerFunc {
 		if !mergeFound {
 			for _, existing := range getChannelSlice(deps.CfgManager.GetConfig(), req.ChannelKind) {
 				if existing.Name == channelName {
-					c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("渠道名称 %q 已存在", channelName)})
-					return
+					httpbridge.JSON(c, http.StatusConflict, fiber.Map{"error": fmt.Sprintf("渠道名称 %q 已存在", channelName)})
+					return nil
 				}
 			}
 		}
 
 		// 探测（校验/分组/模型）与建 key 分开计时：建 key 预算随分组数伸缩，
 		// 避免慢速代理下共享小预算在流程中途到期（context deadline exceeded）。
-		probeCtx, probeCancel := context.WithTimeout(c.Request.Context(), newApiProbeTimeout)
+		probeCtx, probeCancel := context.WithTimeout(httpbridge.Request(c).Context(), newApiProbeTimeout)
 		defer probeCancel()
 
 		adapter := NewApiAdapterForProxy(req.ProxyURL, req.ProxyPreferDirect)
@@ -573,26 +575,26 @@ func handleNewApiProvision(deps *NewApiRouteDeps) gin.HandlerFunc {
 		// 1) 校验 + 拉用户信息（支持 New-API-User header 缺失回退）
 		self, derivedUserID, err := adapter.VerifyWithFallback(probeCtx, req.BaseURL, req.AccessToken, req.UserID, req.AuthTokenMode)
 		if err != nil {
-			c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("校验失败: %v", err)})
-			return
+			httpbridge.JSON(c, http.StatusBadGateway, fiber.Map{"error": fmt.Sprintf("校验失败: %v", err)})
+			return nil
 		}
 
 		// 2) 拉分组倍率并强制校验。分组未知时不能安全决定要创建或调用哪一把 Key。
 		groups, err := adapter.FetchGroups(probeCtx, req.BaseURL, req.AccessToken, derivedUserID, req.AuthTokenMode)
 		if err != nil {
-			c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("无法获取分组倍率，已阻止自动建 key: %v", err)})
-			return
+			httpbridge.JSON(c, http.StatusBadGateway, fiber.Map{"error": fmt.Sprintf("无法获取分组倍率，已阻止自动建 key: %v", err)})
+			return nil
 		}
 		resolvedGroups, err := resolveNewApiProvisionGroups(groups, req.ProvisionGroup, req.ProvisionAllEligibleGroups, req.MaxGroupMultiplier)
 		if err != nil {
-			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "分组倍率校验失败: " + err.Error()})
-			return
+			httpbridge.JSON(c, http.StatusUnprocessableEntity, fiber.Map{"error": "分组倍率校验失败: " + err.Error()})
+			return nil
 		}
 
 		// 模型清单只用于订阅画像和后续 Discovery，不影响分组安全闸门。
 		models, _ := adapter.FetchModels(probeCtx, req.BaseURL, req.AccessToken, derivedUserID, req.AuthTokenMode)
 
-		ctx, cancel := context.WithTimeout(c.Request.Context(), newApiProvisionTimeout(len(resolvedGroups)))
+		ctx, cancel := context.WithTimeout(httpbridge.Request(c).Context(), newApiProvisionTimeout(len(resolvedGroups)))
 		defer cancel()
 
 		// 3) 为全部合格分组分别建/复用代理 Key。一个 Key 固定绑定一个上游分组，
@@ -601,16 +603,16 @@ func handleNewApiProvision(deps *NewApiRouteDeps) gin.HandlerFunc {
 		if err != nil {
 			var conflict *newApiProvisionConflictError
 			if errors.As(err, &conflict) {
-				c.JSON(http.StatusConflict, gin.H{"error": "建 key 失败: " + conflict.Error()})
-				return
+				httpbridge.JSON(c, http.StatusConflict, fiber.Map{"error": "建 key 失败: " + conflict.Error()})
+				return nil
 			}
 			var keyConflict *NewApiProvisionKeyConflictError
 			if errors.As(err, &keyConflict) {
-				c.JSON(http.StatusConflict, gin.H{"error": "建 key 失败: " + keyConflict.Error()})
-				return
+				httpbridge.JSON(c, http.StatusConflict, fiber.Map{"error": "建 key 失败: " + keyConflict.Error()})
+				return nil
 			}
-			c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("建 key 失败: %v", err)})
-			return
+			httpbridge.JSON(c, http.StatusBadGateway, fiber.Map{"error": fmt.Sprintf("建 key 失败: %v", err)})
+			return nil
 		}
 
 		// 4)~7) 建 profile + 写入渠道 + 关联订阅 + 触发 Discovery：
@@ -618,7 +620,7 @@ func handleNewApiProvision(deps *NewApiRouteDeps) gin.HandlerFunc {
 		// 抢到锁后先校验 uid 唯一性，挡住锁外 fast-path 与 Create 之间的并发同 uid 窗口。
 		withNewAPIProvisionUIDLock(deps, req.SubscriptionUID, func() {
 			if deps.Store.Get(req.SubscriptionUID) != nil {
-				c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("subscriptionUid=%s 已存在", req.SubscriptionUID)})
+				httpbridge.JSON(c, http.StatusConflict, fiber.Map{"error": fmt.Sprintf("subscriptionUid=%s 已存在", req.SubscriptionUID)})
 				return
 			}
 			now := time.Now()
@@ -683,9 +685,9 @@ func handleNewApiProvision(deps *NewApiRouteDeps) gin.HandlerFunc {
 			if err := deps.Store.Create(profile); err != nil {
 				cleanupNewApiProvisionedKeys(ctx, adapter, req, derivedUserID, provisioned)
 				if strings.Contains(err.Error(), "已存在") {
-					c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+					httpbridge.JSON(c, http.StatusConflict, fiber.Map{"error": err.Error()})
 				} else {
-					c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+					httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": err.Error()})
 				}
 				return
 			}
@@ -699,7 +701,7 @@ func handleNewApiProvision(deps *NewApiRouteDeps) gin.HandlerFunc {
 				if mergeIndex >= len(channels) {
 					_ = deps.Store.Delete(req.SubscriptionUID)
 					cleanupNewApiProvisionedKeys(ctx, adapter, req, derivedUserID, provisioned)
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "合并目标渠道已失效"})
+					httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": "合并目标渠道已失效"})
 					return
 				}
 				target := channels[mergeIndex]
@@ -759,7 +761,7 @@ func handleNewApiProvision(deps *NewApiRouteDeps) gin.HandlerFunc {
 				if _, err = updateChannelForKind(deps.CfgManager, req.ChannelKind, mergeIndex, updates); err != nil {
 					_ = deps.Store.Delete(req.SubscriptionUID)
 					cleanupNewApiProvisionedKeys(ctx, adapter, req, derivedUserID, provisioned)
-					c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("合并进已有渠道失败: %v", err)})
+					httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": fmt.Sprintf("合并进已有渠道失败: %v", err)})
 					return
 				}
 				channelIndex = mergeIndex
@@ -807,7 +809,7 @@ func handleNewApiProvision(deps *NewApiRouteDeps) gin.HandlerFunc {
 					// 渠道建失败：回滚 profile（最佳努力删除）
 					_ = deps.Store.Delete(req.SubscriptionUID)
 					cleanupNewApiProvisionedKeys(ctx, adapter, req, derivedUserID, provisioned)
-					c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("建渠道失败: %v", err)})
+					httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": fmt.Sprintf("建渠道失败: %v", err)})
 					return
 				}
 
@@ -819,7 +821,7 @@ func handleNewApiProvision(deps *NewApiRouteDeps) gin.HandlerFunc {
 					}
 				}
 				if channelIndex < 0 {
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "渠道已建但无法定位"})
+					httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": "渠道已建但无法定位"})
 					return
 				}
 			}
@@ -854,7 +856,7 @@ func handleNewApiProvision(deps *NewApiRouteDeps) gin.HandlerFunc {
 
 			fresh := deps.Store.Get(req.SubscriptionUID)
 			if fresh == nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "订阅已建但无法回读"})
+				httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": "订阅已建但无法回读"})
 				return
 			}
 			if deps.SyncService != nil {
@@ -863,7 +865,7 @@ func handleNewApiProvision(deps *NewApiRouteDeps) gin.HandlerFunc {
 					plaintextByToken[int64(key.TokenID)] = key.Key
 				}
 				if err := deps.SyncService.ReconcileProvisioned(fresh, plaintextByToken); err != nil {
-					c.JSON(http.StatusConflict, gin.H{"error": "同步 key ownership 失败: " + err.Error()})
+					httpbridge.JSON(c, http.StatusConflict, fiber.Map{"error": "同步 key ownership 失败: " + err.Error()})
 					return
 				}
 				fresh = deps.Store.Get(req.SubscriptionUID)
@@ -872,7 +874,7 @@ func handleNewApiProvision(deps *NewApiRouteDeps) gin.HandlerFunc {
 			if !req.ProvisionAllEligibleGroups {
 				legacyProvisionedKey = primaryKey.Key
 			}
-			c.JSON(http.StatusCreated, NewApiProvisionResponse{
+			httpbridge.JSON(c, http.StatusCreated, NewApiProvisionResponse{
 				Subscription:       toSubscriptionItem(fresh),
 				ChannelUID:         channelUID,
 				ChannelIndex:       channelIndex,
@@ -886,5 +888,6 @@ func handleNewApiProvision(deps *NewApiRouteDeps) gin.HandlerFunc {
 				DiscoveryStarted:   discoveryStarted,
 			})
 		})
+		return nil
 	}
 }

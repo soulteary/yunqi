@@ -5,7 +5,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v3"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 // ─── 请求/响应类型 ──────────────────────────────────────────────────────────────
@@ -118,50 +119,50 @@ type SubscriptionsListResponse struct {
 // ─── 路由注册 ──────────────────────────────────────────────────────────────────
 
 // RegisterSubscriptionRoutes 注册订阅中心 CRUD + 渠道链接 API 到给定路由组。
-func RegisterSubscriptionRoutes(router gin.IRouter, store *SubscriptionStore, refreshWorker *SubscriptionRefreshWorker, syncServices ...*NewApiSubscriptionSyncService) {
+func RegisterSubscriptionRoutes(router fiber.Router, store *SubscriptionStore, refreshWorker *SubscriptionRefreshWorker, syncServices ...*NewApiSubscriptionSyncService) {
 	var syncService *NewApiSubscriptionSyncService
 	if len(syncServices) > 0 {
 		syncService = syncServices[0]
 	}
 	group := router.Group("/subscriptions")
 	{
-		group.GET("", handleListSubscriptions(store))
-		group.POST("", handleCreateSubscription(store))
-		group.GET("/:uid", handleGetSubscription(store))
-		group.PUT("/:uid", handleUpdateSubscription(store))
-		group.PATCH("/:uid/billing-terms", handlePatchBillingTerms(store))
-		group.DELETE("/:uid", handleDeleteSubscription(store))
-		group.POST("/:uid/link", handleLinkChannel(store))
-		group.POST("/:uid/unlink", handleUnlinkChannel(store))
-		group.POST("/:uid/refresh", handleRefreshSubscription(store, refreshWorker, syncService))
+		group.Get("", handleListSubscriptions(store))
+		group.Post("", handleCreateSubscription(store))
+		group.Get("/:uid", handleGetSubscription(store))
+		group.Put("/:uid", handleUpdateSubscription(store))
+		group.Patch("/:uid/billing-terms", handlePatchBillingTerms(store))
+		group.Delete("/:uid", handleDeleteSubscription(store))
+		group.Post("/:uid/link", handleLinkChannel(store))
+		group.Post("/:uid/unlink", handleUnlinkChannel(store))
+		group.Post("/:uid/refresh", handleRefreshSubscription(store, refreshWorker, syncService))
 	}
 }
 
 // ─── Handler 实现 ──────────────────────────────────────────────────────────────
 
 // handleListSubscriptions GET /api/subscriptions
-func handleListSubscriptions(store *SubscriptionStore) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handleListSubscriptions(store *SubscriptionStore) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		all := store.ListAll()
 		items := make([]SubscriptionItem, 0, len(all))
 		for _, p := range all {
 			items = append(items, toSubscriptionItem(p))
 		}
-
-		c.JSON(http.StatusOK, SubscriptionsListResponse{
+		httpbridge.JSON(c, http.StatusOK, SubscriptionsListResponse{
 			Subscriptions: items,
 			Total:         len(items),
 		})
+		return nil
 	}
 }
 
 // handleCreateSubscription POST /api/subscriptions
-func handleCreateSubscription(store *SubscriptionStore) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handleCreateSubscription(store *SubscriptionStore) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		var req SubscriptionCreateRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数无效: " + err.Error()})
-			return
+		if err := httpbridge.BindJSON(c, &req); err != nil {
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "请求参数无效: " + err.Error()})
+			return nil
 		}
 
 		profile := &SubscriptionProfile{
@@ -186,55 +187,55 @@ func handleCreateSubscription(store *SubscriptionStore) gin.HandlerFunc {
 
 		if err := store.Create(profile); err != nil {
 			if strings.Contains(err.Error(), "已存在") {
-				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+				httpbridge.JSON(c, http.StatusConflict, fiber.Map{"error": err.Error()})
 			} else {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": err.Error()})
 			}
-			return
+			return nil
 		}
-
-		c.JSON(http.StatusCreated, toSubscriptionItem(profile))
+		httpbridge.JSON(c, http.StatusCreated, toSubscriptionItem(profile))
+		return nil
 	}
 }
 
 // handleGetSubscription GET /api/subscriptions/:uid
-func handleGetSubscription(store *SubscriptionStore) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		uid := c.Param("uid")
+func handleGetSubscription(store *SubscriptionStore) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		uid := httpbridge.Param(c, "uid")
 		if uid == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "uid 不能为空"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "uid 不能为空"})
+			return nil
 		}
 
 		p := store.Get(uid)
 		if p == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "订阅不存在: " + uid})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "订阅不存在: " + uid})
+			return nil
 		}
-
-		c.JSON(http.StatusOK, toSubscriptionItem(p))
+		httpbridge.JSON(c, http.StatusOK, toSubscriptionItem(p))
+		return nil
 	}
 }
 
 // handleUpdateSubscription PUT /api/subscriptions/:uid
-func handleUpdateSubscription(store *SubscriptionStore) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		uid := c.Param("uid")
+func handleUpdateSubscription(store *SubscriptionStore) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		uid := httpbridge.Param(c, "uid")
 		if uid == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "uid 不能为空"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "uid 不能为空"})
+			return nil
 		}
 
 		existing := store.Get(uid)
 		if existing == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "订阅不存在: " + uid})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "订阅不存在: " + uid})
+			return nil
 		}
 
 		var req SubscriptionUpdateRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数无效: " + err.Error()})
-			return
+		if err := httpbridge.BindJSON(c, &req); err != nil {
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "请求参数无效: " + err.Error()})
+			return nil
 		}
 
 		err := store.Patch(uid, req.ExpectedVersion, func(profile *SubscriptionProfile) error {
@@ -282,154 +283,156 @@ func handleUpdateSubscription(store *SubscriptionStore) gin.HandlerFunc {
 		})
 		if err != nil {
 			if isSubscriptionVersionConflict(err) {
-				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
-				return
+				httpbridge.JSON(c, http.StatusConflict, fiber.Map{"error": err.Error()})
+				return nil
 			}
 			if isSubscriptionNotFound(err) {
-				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-				return
+				httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": err.Error()})
+				return nil
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
+			httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": err.Error()})
+			return nil
 		}
 		existing = store.Get(uid)
-
-		c.JSON(http.StatusOK, toSubscriptionItem(existing))
+		httpbridge.JSON(c, http.StatusOK, toSubscriptionItem(existing))
+		return nil
 	}
 }
 
 // handleDeleteSubscription DELETE /api/subscriptions/:uid
-func handleDeleteSubscription(store *SubscriptionStore) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		uid := c.Param("uid")
+func handleDeleteSubscription(store *SubscriptionStore) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		uid := httpbridge.Param(c, "uid")
 		if uid == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "uid 不能为空"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "uid 不能为空"})
+			return nil
 		}
 
 		if err := store.Delete(uid); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
+			httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": err.Error()})
+			return nil
 		}
-
-		c.Status(http.StatusNoContent)
+		httpbridge.Status(c, http.StatusNoContent)
+		return nil
 	}
 }
 
 // handleLinkChannel POST /api/subscriptions/:uid/link
-func handleLinkChannel(store *SubscriptionStore) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		uid := c.Param("uid")
+func handleLinkChannel(store *SubscriptionStore) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		uid := httpbridge.Param(c, "uid")
 		if uid == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "uid 不能为空"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "uid 不能为空"})
+			return nil
 		}
 
 		var req LinkRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数无效: " + err.Error()})
-			return
+		if err := httpbridge.BindJSON(c, &req); err != nil {
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "请求参数无效: " + err.Error()})
+			return nil
 		}
 
 		if err := store.LinkChannel(uid, req.ChannelUID); err != nil {
 			if strings.Contains(err.Error(), "不存在") {
-				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+				httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": err.Error()})
 			} else {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": err.Error()})
 			}
-			return
+			return nil
 		}
 
 		p := store.Get(uid)
-		c.JSON(http.StatusOK, toSubscriptionItem(p))
+		httpbridge.JSON(c, http.StatusOK, toSubscriptionItem(p))
+		return nil
 	}
 }
 
 // handleUnlinkChannel POST /api/subscriptions/:uid/unlink
-func handleUnlinkChannel(store *SubscriptionStore) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		uid := c.Param("uid")
+func handleUnlinkChannel(store *SubscriptionStore) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		uid := httpbridge.Param(c, "uid")
 		if uid == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "uid 不能为空"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "uid 不能为空"})
+			return nil
 		}
 
 		var req UnlinkRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数无效: " + err.Error()})
-			return
+		if err := httpbridge.BindJSON(c, &req); err != nil {
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "请求参数无效: " + err.Error()})
+			return nil
 		}
 
 		if err := store.UnlinkChannel(uid, req.ChannelUID); err != nil {
 			if strings.Contains(err.Error(), "不存在") {
-				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+				httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": err.Error()})
 			} else {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": err.Error()})
 			}
-			return
+			return nil
 		}
 
 		p := store.Get(uid)
-		c.JSON(http.StatusOK, toSubscriptionItem(p))
+		httpbridge.JSON(c, http.StatusOK, toSubscriptionItem(p))
+		return nil
 	}
 }
 
 // handleRefreshSubscription POST /api/subscriptions/:uid/refresh
 // 手动触发指定订阅的余额刷新（不消耗全局每日预算）。
 // 需要 BillingAPIKey 非空且 Provider 在白名单内。
-func handleRefreshSubscription(store *SubscriptionStore, refreshWorker *SubscriptionRefreshWorker, syncServices ...*NewApiSubscriptionSyncService) gin.HandlerFunc {
+func handleRefreshSubscription(store *SubscriptionStore, refreshWorker *SubscriptionRefreshWorker, syncServices ...*NewApiSubscriptionSyncService) fiber.Handler {
 	var syncService *NewApiSubscriptionSyncService
 	if len(syncServices) > 0 {
 		syncService = syncServices[0]
 	}
-	return func(c *gin.Context) {
-		uid := c.Param("uid")
+	return func(c fiber.Ctx) error {
+		uid := httpbridge.Param(c, "uid")
 		if uid == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "uid 不能为空"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "uid 不能为空"})
+			return nil
 		}
 
 		profile := store.Get(uid)
 		if profile == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "订阅不存在: " + uid})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "订阅不存在: " + uid})
+			return nil
 		}
 
 		if profile.Provider == "new_api" {
 			if syncService == nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "new-api 同步服务未就绪"})
-				return
+				httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": "new-api 同步服务未就绪"})
+				return nil
 			}
-			result, err := syncService.SyncNow(c.Request.Context(), uid)
+			result, err := syncService.SyncNow(httpbridge.Request(c).Context(), uid)
 			if err != nil {
-				c.JSON(http.StatusBadGateway, gin.H{"error": err.Error(), "refreshResult": result})
-				return
+				httpbridge.JSON(c, http.StatusBadGateway, fiber.Map{"error": err.Error(), "refreshResult": result})
+				return nil
 			}
-			c.JSON(http.StatusOK, gin.H{"subscription": toSubscriptionItem(store.Get(uid)), "refreshResult": result})
-			return
+			httpbridge.JSON(c, http.StatusOK, fiber.Map{"subscription": toSubscriptionItem(store.Get(uid)), "refreshResult": result})
+			return nil
 		}
 
 		if profile.BillingAPIKey == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "未配置 BillingAPIKey，无法刷新余额"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "未配置 BillingAPIKey，无法刷新余额"})
+			return nil
 		}
 
 		if !IsAutoRefreshSupported(profile.Provider) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("provider=%s 不支持自动余额刷新", profile.Provider)})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": fmt.Sprintf("provider=%s 不支持自动余额刷新", profile.Provider)})
+			return nil
 		}
 
 		// 使用 worker 的 fetcher 直接查询（不消耗预算）
 		if refreshWorker == nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "余额刷新服务未就绪"})
-			return
+			httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": "余额刷新服务未就绪"})
+			return nil
 		}
 
 		// 直接调用 worker 的内部方法——构造临时 fetch 并回写
 		profilePtr := store.Get(uid) // 重新获取最新副本
 		if profilePtr == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "订阅不存在: " + uid})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "订阅不存在: " + uid})
+			return nil
 		}
 		result := refreshWorker.fetchBalance(profilePtr)
 		refreshWorker.applyResult(result)
@@ -437,19 +440,19 @@ func handleRefreshSubscription(store *SubscriptionStore, refreshWorker *Subscrip
 		// 返回更新后的订阅
 		updated := store.Get(uid)
 		if updated == nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "刷新后无法读取订阅"})
-			return
+			httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": "刷新后无法读取订阅"})
+			return nil
 		}
-
-		c.JSON(http.StatusOK, gin.H{
+		httpbridge.JSON(c, http.StatusOK, fiber.Map{
 			"subscription": toSubscriptionItem(updated),
-			"refreshResult": gin.H{
+			"refreshResult": fiber.Map{
 				"success":      result.Success,
 				"balance":      result.Balance,
 				"currency":     result.Currency,
 				"errorMessage": result.ErrorMessage,
 			},
 		})
+		return nil
 	}
 }
 

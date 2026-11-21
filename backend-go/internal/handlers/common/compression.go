@@ -3,9 +3,10 @@ package common
 import (
 	"log"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/compression"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/scheduler"
-	"github.com/gin-gonic/gin"
 )
 
 const (
@@ -23,7 +24,7 @@ type CompressionContext struct {
 	FallbackReason   string
 }
 
-// compressionContextKey 是 gin context 中压缩上下文的 key。
+// compressionContextKey 是 Fiber context 中压缩上下文的 key。
 const compressionContextKey = "compressionContext"
 
 // ApplyRequestCompression 在转发主链中应用请求侧 tool_result 压缩。
@@ -32,7 +33,7 @@ const compressionContextKey = "compressionContext"
 // 只对 messages 类入口生效；images/vectors 入口不适用。
 // fail-open：任何异常（panic / 解析失败）均返回原文，不阻断请求。
 func ApplyRequestCompression(
-	c *gin.Context,
+	c fiber.Ctx,
 	bodyBytes []byte,
 	kind scheduler.ChannelKind,
 	scenarioKey string,
@@ -55,7 +56,7 @@ func ApplyRequestCompression(
 	}
 
 	// 解析压缩计划
-	headerCompression := c.GetHeader(CompressionHeader)
+	headerCompression := httpbridge.GetHeader(c, CompressionHeader)
 	plan := compression.ResolvePlan(headerCompression, scenarioKey, globalEnabled, channelEnabled)
 	if !plan.Enabled {
 		return bodyBytes
@@ -68,7 +69,7 @@ func ApplyRequestCompression(
 		return bodyBytes
 	}
 
-	// 写入 gin context 供日志/遥测使用
+	// 写入 Fiber context 供日志/遥测使用
 	if result.Compressed {
 		ctx := &CompressionContext{
 			OriginalTokens:   result.OriginalTokens,
@@ -77,25 +78,25 @@ func ApplyRequestCompression(
 			Compressed:       true,
 			Technique:        result.Technique,
 		}
-		c.Set(compressionContextKey, ctx)
+		httpbridge.SetValue(c, compressionContextKey, ctx)
 	} else if result.FallbackReason != "" {
 		ctx := &CompressionContext{
 			Compressed:     false,
 			FallbackReason: result.FallbackReason,
 			OriginalTokens: result.OriginalTokens,
 		}
-		c.Set(compressionContextKey, ctx)
+		httpbridge.SetValue(c, compressionContextKey, ctx)
 	}
 
 	return result.Body
 }
 
-// GetCompressionContext 从 gin context 读取压缩统计（用于日志、metrics、成本报表）。
-func GetCompressionContext(c *gin.Context) *CompressionContext {
+// GetCompressionContext 从 Fiber context 读取压缩统计（用于日志、metrics、成本报表）。
+func GetCompressionContext(c fiber.Ctx) *CompressionContext {
 	if c == nil {
 		return nil
 	}
-	if val, ok := c.Get(compressionContextKey); ok {
+	if val, ok := httpbridge.Value(c, compressionContextKey); ok {
 		if ctx, ok := val.(*CompressionContext); ok {
 			return ctx
 		}

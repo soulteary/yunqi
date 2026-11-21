@@ -9,12 +9,11 @@ import (
 	"testing"
 
 	"github.com/soulteary/yunqi/internal/config"
-	"github.com/gin-gonic/gin"
 )
 
 func TestOpenAIProvider_InjectsChannelLevelOptions(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	c := newGinContext(http.MethodPost, "/v1/messages", []byte(`{"model":"gpt-5.1-codex","messages":[{"role":"user","content":"hi"}]}`), context.Background())
+
+	c := newFiberContext(http.MethodPost, "/v1/messages", []byte(`{"model":"gpt-5.1-codex","messages":[{"role":"user","content":"hi"}]}`), context.Background())
 	upstream := &config.UpstreamConfig{
 		BaseURL:       "https://api.example.com",
 		ServiceType:   "openai",
@@ -49,8 +48,8 @@ func TestOpenAIProvider_InjectsChannelLevelOptions(t *testing.T) {
 }
 
 func TestResponsesProvider_PassthroughInjectsChannelLevelOptions(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	c := newGinContext(http.MethodPost, "/v1/responses", []byte(`{"model":"gpt-5","input":"hi"}`), context.Background())
+
+	c := newFiberContext(http.MethodPost, "/v1/responses", []byte(`{"model":"gpt-5","input":"hi"}`), context.Background())
 	upstream := &config.UpstreamConfig{
 		BaseURL:       "https://api.example.com",
 		ServiceType:   "responses",
@@ -98,8 +97,8 @@ func TestResponsesProvider_NormalizesDisabledReasoningByUpstreamProtocol(t *test
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gin.SetMode(gin.TestMode)
-			c := newGinContext(http.MethodPost, "/v1/responses", []byte(`{"model":"gpt-5","input":"hi","reasoning":{"effort":"off"}}`), context.Background())
+
+			c := newFiberContext(http.MethodPost, "/v1/responses", []byte(`{"model":"gpt-5","input":"hi","reasoning":{"effort":"off"}}`), context.Background())
 			upstream := &config.UpstreamConfig{BaseURL: "https://api.example.com", ServiceType: tt.serviceType}
 			req, _, err := (&ResponsesProvider{}).ConvertToProviderRequest(c, upstream, "sk-test")
 			if err != nil {
@@ -147,10 +146,10 @@ func TestResponsesProvider_PassthroughInjectsThinkingParamStyle(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gin.SetMode(gin.TestMode)
+
 			// 显式 ReasoningMapping 已退役：thinking style 依据客户端原始 reasoning.effort 转换。
 			bodyJSON := fmt.Sprintf(`{"model":"gpt-5","input":"hi","reasoning":{"effort":%q},"reasoning_effort":%q}`, tt.effort, tt.effort)
-			c := newGinContext(http.MethodPost, "/v1/responses", []byte(bodyJSON), context.Background())
+			c := newFiberContext(http.MethodPost, "/v1/responses", []byte(bodyJSON), context.Background())
 			upstream := &config.UpstreamConfig{
 				BaseURL:             "https://api.example.com",
 				ServiceType:         "responses",

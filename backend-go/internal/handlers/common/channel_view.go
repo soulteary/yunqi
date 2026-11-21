@@ -3,14 +3,14 @@ package common
 import (
 	"strings"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
-	"github.com/gin-gonic/gin"
 )
 
-func BuildChannelView(up config.UpstreamConfig, index int) gin.H {
+func BuildChannelView(up config.UpstreamConfig, index int) fiber.Map {
 	status := config.GetChannelStatus(&up)
 	priority := config.GetChannelPriority(&up, index)
-	view := gin.H{
+	view := fiber.Map{
 		"index":                         index,
 		"name":                          up.Name,
 		"accountUid":                    up.AccountUID,

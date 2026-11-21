@@ -4,15 +4,16 @@ import (
 	"log"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/metrics"
-	"github.com/gin-gonic/gin"
 )
 
 // GetGlobalStatsHistory 获取全局统计历史数据
 // GET /api/{messages|responses}/global/stats/history?duration={1h|6h|24h|today|7d|30d}
-func GetGlobalStatsHistory(metricsManager *metrics.MetricsManager) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		durationStr := c.DefaultQuery("duration", "24h")
+func GetGlobalStatsHistory(metricsManager *metrics.MetricsManager) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		durationStr := httpbridge.Query(c, "duration", "24h")
 		duration, err := parseExtendedDuration(durationStr)
 		if err != nil || duration < time.Minute {
 			duration = 6 * time.Hour // 回退到默认值
@@ -22,14 +23,14 @@ func GetGlobalStatsHistory(metricsManager *metrics.MetricsManager) gin.HandlerFu
 			duration = maxDuration
 		}
 
-		interval := selectIntervalForDuration(c.Query("interval"), duration)
+		interval := selectIntervalForDuration(httpbridge.Query(c, "interval"), duration)
 
 		// >24h 走 SQLite 聚合查询
 		if duration > 24*time.Hour {
 			store := metricsManager.GetPersistenceStore()
 			if store == nil {
-				c.JSON(400, gin.H{"error": "长时间范围查询需要启用 SQLite 持久化存储"})
-				return
+				httpbridge.JSON(c, 400, fiber.Map{"error": "长时间范围查询需要启用 SQLite 持久化存储"})
+				return nil
 			}
 			apiType := metricsManager.GetAPIType()
 			since := time.Now().Add(-duration)
@@ -38,14 +39,14 @@ func GetGlobalStatsHistory(metricsManager *metrics.MetricsManager) gin.HandlerFu
 			buckets, err := store.QueryAggregatedHistory(apiType, since, intervalSec, "", "")
 			if err != nil {
 				log.Printf("[GlobalStats-History] SQLite 查询失败: %v", err)
-				c.JSON(500, gin.H{"error": "查询历史数据失败"})
-				return
+				httpbridge.JSON(c, 500, fiber.Map{"error": "查询历史数据失败"})
+				return nil
 			}
 			modelBuckets, err := store.QueryModelAggregatedHistory(apiType, since, intervalSec, "", "")
 			if err != nil {
 				log.Printf("[GlobalStats-History] SQLite 模型聚合查询失败: %v", err)
-				c.JSON(500, gin.H{"error": "查询模型历史数据失败"})
-				return
+				httpbridge.JSON(c, 500, fiber.Map{"error": "查询模型历史数据失败"})
+				return nil
 			}
 
 			// 构建与内存查询兼容的响应格式
@@ -108,9 +109,8 @@ func GetGlobalStatsHistory(metricsManager *metrics.MetricsManager) gin.HandlerFu
 				DataPoints:      dataPoints,
 				ModelDataPoints: modelDataPoints,
 			}
-
-			c.JSON(200, result)
-			return
+			httpbridge.JSON(c, 200, result)
+			return nil
 		}
 
 		// <=24h 走内存
@@ -122,8 +122,8 @@ func GetGlobalStatsHistory(metricsManager *metrics.MetricsManager) gin.HandlerFu
 		case "thisyear":
 			result.Summary.Duration = "thisyear"
 		}
-
-		c.JSON(200, result)
+		httpbridge.JSON(c, 200, result)
+		return nil
 	}
 }
 

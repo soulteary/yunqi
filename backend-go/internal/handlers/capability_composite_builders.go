@@ -9,8 +9,8 @@ import (
 	"net/http/httptest"
 
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/providers"
-	"github.com/gin-gonic/gin"
 )
 
 // ============== 复合协议请求构造（复用现有 provider 转换链路） ==============
@@ -132,7 +132,7 @@ func firstCapabilityProbeChannel(channels []*config.UpstreamConfig) *config.Upst
 // buildCompositeRequestViaProvider 复用现有 provider 转换链路，将 fromProtocol 入口请求体
 // 经过 provider.ConvertToProviderRequest 转换为 toProtocol 上游请求。
 //
-// 实现原理：构造 gin.CreateTestContext + httptest.NewRequest 模拟 fromProtocol 入口请求，
+// 实现原理：构造 httpbridge.NewContext + httptest.NewRequest 模拟 fromProtocol 入口请求，
 // 调用 toProtocol 对应 provider 的 ConvertToProviderRequest 完成协议方向转换。
 //
 // 返回值：
@@ -154,11 +154,11 @@ func buildCompositeRequestViaProvider(
 	}
 
 	// 构造模拟入口请求：使用 from 协议的 body 和 path
-	gin.SetMode(gin.TestMode)
+
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, fromPath, bytes.NewReader(fromBody))
-	c.Request.Header.Set("Content-Type", "application/json")
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, fromPath, bytes.NewReader(fromBody)))
+	httpbridge.Request(c).Header.Set("Content-Type", "application/json")
 
 	// 通过 provider 转换：fromBody → toProtocol 上游请求
 	// 此过程会自动应用协议方向转换

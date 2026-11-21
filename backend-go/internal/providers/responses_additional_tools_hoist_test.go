@@ -5,9 +5,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/converters"
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 func additionalToolsHoistFixture() map[string]interface{} {
@@ -43,15 +44,15 @@ func additionalToolsHoistFixture() map[string]interface{} {
 	}
 }
 
-func hoistTestGinContext() *gin.Context {
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+func hoistTestFiberContext() fiber.Ctx {
+	c, _ := httpbridge.TestContext(httptest.NewRecorder())
 	return c
 }
 
 func TestHoistCodexAdditionalTools(t *testing.T) {
 	t.Run("收割提升为顶层扁平 tools 并置位上下文", func(t *testing.T) {
 		req := additionalToolsHoistFixture()
-		c := hoistTestGinContext()
+		c := hoistTestFiberContext()
 		hoistCodexAdditionalTools(c, req)
 
 		tools, ok := req["tools"].([]interface{})
@@ -83,10 +84,10 @@ func TestHoistCodexAdditionalTools(t *testing.T) {
 			}
 		}
 
-		if hoisted, _ := c.Get("codex_additional_tools_hoisted"); hoisted != true {
+		if hoisted, _ := httpbridge.Value(c, "codex_additional_tools_hoisted"); hoisted != true {
 			t.Fatalf("codex_additional_tools_hoisted 未置位")
 		}
-		ctxVal, ok := c.Get("codex_tool_context")
+		ctxVal, ok := httpbridge.Value(c, "codex_tool_context")
 		if !ok {
 			t.Fatalf("codex_tool_context 未设置")
 		}
@@ -126,7 +127,7 @@ func TestHoistCodexAdditionalTools(t *testing.T) {
 				"output":  "done",
 			},
 		)
-		c := hoistTestGinContext()
+		c := hoistTestFiberContext()
 		hoistCodexAdditionalTools(c, req)
 
 		input := req["input"].([]interface{})
@@ -172,14 +173,14 @@ func TestHoistCodexAdditionalTools(t *testing.T) {
 	t.Run("顶层 tools 非空时不触发", func(t *testing.T) {
 		req := additionalToolsHoistFixture()
 		req["tools"] = []interface{}{map[string]interface{}{"type": "function", "name": "existing"}}
-		c := hoistTestGinContext()
+		c := hoistTestFiberContext()
 		hoistCodexAdditionalTools(c, req)
 
 		tools := req["tools"].([]interface{})
 		if len(tools) != 1 || toString(tools[0].(map[string]interface{})["name"]) != "existing" {
 			t.Fatalf("顶层 tools 不应被改动: %v", tools)
 		}
-		if _, ok := c.Get("codex_additional_tools_hoisted"); ok {
+		if _, ok := httpbridge.Value(c, "codex_additional_tools_hoisted"); ok {
 			t.Fatalf("未收割时不应置位 hoisted")
 		}
 	})
@@ -191,12 +192,12 @@ func TestHoistCodexAdditionalTools(t *testing.T) {
 				map[string]interface{}{"type": "message", "role": "user"},
 			},
 		}
-		c := hoistTestGinContext()
+		c := hoistTestFiberContext()
 		hoistCodexAdditionalTools(c, req)
 		if _, ok := req["tools"]; ok {
 			t.Fatalf("无 additional_tools 不应生成 tools")
 		}
-		if _, ok := c.Get("codex_additional_tools_hoisted"); ok {
+		if _, ok := httpbridge.Value(c, "codex_additional_tools_hoisted"); ok {
 			t.Fatalf("不应置位 hoisted")
 		}
 	})
@@ -216,7 +217,7 @@ func TestHoistCodexAdditionalTools(t *testing.T) {
 				"output":  "ok",
 			},
 		)
-		c := hoistTestGinContext()
+		c := hoistTestFiberContext()
 		hoistCodexAdditionalTools(c, req)
 		normalizeResponsesInputForPassthrough(req)
 
@@ -242,7 +243,7 @@ func TestHoistCodexAdditionalTools(t *testing.T) {
 
 	t.Run("序列化后形状合法", func(t *testing.T) {
 		req := additionalToolsHoistFixture()
-		c := hoistTestGinContext()
+		c := hoistTestFiberContext()
 		hoistCodexAdditionalTools(c, req)
 		body, err := json.Marshal(req)
 		if err != nil {
@@ -283,7 +284,7 @@ func TestBuildProviderRequestBody_ChatHoistsAdditionalTools(t *testing.T) {
 		]
 	}`)
 
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c, _ := httpbridge.TestContext(httptest.NewRecorder())
 	reqBody, _, err := provider.buildProviderRequestBody(c, "/v1/responses", body, upstream)
 	if err != nil {
 		t.Fatalf("buildProviderRequestBody() err = %v", err)
@@ -332,7 +333,7 @@ func TestBuildProviderRequestBody_ChatHoistsAdditionalTools(t *testing.T) {
 	}
 
 	// 提升前原始形态经 codex_merged_raw_tools 保留（namespace/custom 语义）
-	merged, ok := c.Get("codex_merged_raw_tools")
+	merged, ok := httpbridge.Value(c, "codex_merged_raw_tools")
 	if !ok {
 		t.Fatalf("codex_merged_raw_tools 未设置")
 	}
@@ -342,7 +343,7 @@ func TestBuildProviderRequestBody_ChatHoistsAdditionalTools(t *testing.T) {
 	}
 
 	// 提升前 ctx 带 custom 代理语义
-	ctxVal, ok := c.Get("codex_tool_context")
+	ctxVal, ok := httpbridge.Value(c, "codex_tool_context")
 	if !ok {
 		t.Fatalf("codex_tool_context 未设置")
 	}
@@ -350,7 +351,7 @@ func TestBuildProviderRequestBody_ChatHoistsAdditionalTools(t *testing.T) {
 	if !ctx.IsCustomToolProxy("functions__exec") {
 		t.Fatalf("ctx 应注册 functions__exec custom 代理: %#v", ctx.CustomTools)
 	}
-	if hoisted, _ := c.Get("codex_additional_tools_hoisted"); hoisted != true {
+	if hoisted, _ := httpbridge.Value(c, "codex_additional_tools_hoisted"); hoisted != true {
 		t.Fatalf("codex_additional_tools_hoisted 未置位")
 	}
 }

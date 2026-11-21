@@ -5,7 +5,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v3"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 // ── 请求/响应类型 ──
@@ -73,41 +74,42 @@ type TaskTemplatesResponse struct {
 //	GET    /api/task-templates/:id       — 详情
 //	PUT    /api/task-templates/:id       — 更新
 //	DELETE /api/task-templates/:id       — 删除
-func RegisterTaskTemplateRoutes(router gin.IRouter, store *LocalTaskTemplateStore) {
+func RegisterTaskTemplateRoutes(router fiber.Router, store *LocalTaskTemplateStore) {
 	group := router.Group("/task-templates")
 	{
-		group.GET("", handleListTaskTemplates(store))
-		group.POST("", handleCreateTaskTemplate(store))
-		group.GET("/:id", handleGetTaskTemplate(store))
-		group.PUT("/:id", handleUpdateTaskTemplate(store))
-		group.DELETE("/:id", handleDeleteTaskTemplate(store))
+		group.Get("", handleListTaskTemplates(store))
+		group.Post("", handleCreateTaskTemplate(store))
+		group.Get("/:id", handleGetTaskTemplate(store))
+		group.Put("/:id", handleUpdateTaskTemplate(store))
+		group.Delete("/:id", handleDeleteTaskTemplate(store))
 	}
 }
 
 // PLACEHOLDER_HANDLERS
 
 // handleListTaskTemplates GET /api/task-templates
-func handleListTaskTemplates(store *LocalTaskTemplateStore) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handleListTaskTemplates(store *LocalTaskTemplateStore) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		templates := store.ListAll()
 		items := make([]TaskTemplateResponse, 0, len(templates))
 		for _, t := range templates {
 			items = append(items, toTaskTemplateResponse(t))
 		}
-		c.JSON(http.StatusOK, TaskTemplatesResponse{
+		httpbridge.JSON(c, http.StatusOK, TaskTemplatesResponse{
 			Templates: items,
 			Total:     len(items),
 		})
+		return nil
 	}
 }
 
 // handleCreateTaskTemplate POST /api/task-templates
-func handleCreateTaskTemplate(store *LocalTaskTemplateStore) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handleCreateTaskTemplate(store *LocalTaskTemplateStore) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		var req CreateTaskTemplateRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数无效: " + err.Error()})
-			return
+		if err := httpbridge.BindJSON(c, &req); err != nil {
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "请求参数无效: " + err.Error()})
+			return nil
 		}
 
 		enabled := true
@@ -128,60 +130,61 @@ func handleCreateTaskTemplate(store *LocalTaskTemplateStore) gin.HandlerFunc {
 		}
 
 		if err := t.Validate(); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "校验失败: " + err.Error()})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "校验失败: " + err.Error()})
+			return nil
 		}
 
 		if err := store.Upsert(t); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "创建失败: " + err.Error()})
-			return
+			httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": "创建失败: " + err.Error()})
+			return nil
 		}
 
 		log.Printf("[TaskTemplate-Create] 创建模板: id=%s name=%s", t.TemplateID, t.Name)
-		c.JSON(http.StatusCreated, toTaskTemplateResponse(t))
+		httpbridge.JSON(c, http.StatusCreated, toTaskTemplateResponse(t))
+		return nil
 	}
 }
 
 // handleGetTaskTemplate GET /api/task-templates/:id
-func handleGetTaskTemplate(store *LocalTaskTemplateStore) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		id := c.Param("id")
+func handleGetTaskTemplate(store *LocalTaskTemplateStore) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		id := httpbridge.Param(c, "id")
 		if id == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "id 不能为空"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "id 不能为空"})
+			return nil
 		}
 
 		t := store.Get(id)
 		if t == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "模板不存在"})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "模板不存在"})
+			return nil
 		}
-
-		c.JSON(http.StatusOK, toTaskTemplateResponse(t))
+		httpbridge.JSON(c, http.StatusOK, toTaskTemplateResponse(t))
+		return nil
 	}
 }
 
 // PLACEHOLDER_UPDATE_DELETE
 
 // handleUpdateTaskTemplate PUT /api/task-templates/:id
-func handleUpdateTaskTemplate(store *LocalTaskTemplateStore) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		id := c.Param("id")
+func handleUpdateTaskTemplate(store *LocalTaskTemplateStore) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		id := httpbridge.Param(c, "id")
 		if id == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "id 不能为空"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "id 不能为空"})
+			return nil
 		}
 
 		existing := store.Get(id)
 		if existing == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "模板不存在"})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "模板不存在"})
+			return nil
 		}
 
 		var req UpdateTaskTemplateRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数无效: " + err.Error()})
-			return
+		if err := httpbridge.BindJSON(c, &req); err != nil {
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "请求参数无效: " + err.Error()})
+			return nil
 		}
 
 		// 原地修改现有模板
@@ -211,40 +214,41 @@ func handleUpdateTaskTemplate(store *LocalTaskTemplateStore) gin.HandlerFunc {
 		}
 
 		if err := existing.Validate(); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "校验失败: " + err.Error()})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "校验失败: " + err.Error()})
+			return nil
 		}
 
 		if err := store.Upsert(existing); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "更新失败: " + err.Error()})
-			return
+			httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": "更新失败: " + err.Error()})
+			return nil
 		}
 
 		log.Printf("[TaskTemplate-Update] 更新模板: id=%s name=%s", existing.TemplateID, existing.Name)
-		c.JSON(http.StatusOK, toTaskTemplateResponse(existing))
+		httpbridge.JSON(c, http.StatusOK, toTaskTemplateResponse(existing))
+		return nil
 	}
 }
 
 // handleDeleteTaskTemplate DELETE /api/task-templates/:id
-func handleDeleteTaskTemplate(store *LocalTaskTemplateStore) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		id := c.Param("id")
+func handleDeleteTaskTemplate(store *LocalTaskTemplateStore) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		id := httpbridge.Param(c, "id")
 		if id == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "id 不能为空"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "id 不能为空"})
+			return nil
 		}
 
 		if store.Get(id) == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "模板不存在"})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "模板不存在"})
+			return nil
 		}
 
 		if err := store.Delete(id); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "删除失败: " + err.Error()})
-			return
+			httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": "删除失败: " + err.Error()})
+			return nil
 		}
-
-		c.JSON(http.StatusOK, gin.H{"message": "已删除", "templateId": id})
+		httpbridge.JSON(c, http.StatusOK, fiber.Map{"message": "已删除", "templateId": id})
+		return nil
 	}
 }
 
@@ -295,19 +299,19 @@ func normalizeStringSlice(items []string) []string {
 
 // PLACEHOLDER_CONTEXT_HELPER
 
-// ContextKeyTaskTemplateStore 是 gin.Context 中 LocalTaskTemplateStore 的 key。
+// ContextKeyTaskTemplateStore 是 fiber.Ctx 中 LocalTaskTemplateStore 的 key。
 // 需与 compact_local.go 中的常量保持一致。
 const ContextKeyTaskTemplateStore = "autopilot_task_template_store"
 
-// SetTaskTemplateStore 在 gin.Context 中设置模板存储（供 compact 层读取）。
-func SetTaskTemplateStore(c *gin.Context, store *LocalTaskTemplateStore) {
-	c.Set(ContextKeyTaskTemplateStore, store)
+// SetTaskTemplateStore 在 fiber.Ctx 中设置模板存储（供 compact 层读取）。
+func SetTaskTemplateStore(c fiber.Ctx, store *LocalTaskTemplateStore) {
+	httpbridge.SetValue(c, ContextKeyTaskTemplateStore, store)
 }
 
-// GetTaskTemplateStoreFromContext 从 gin.Context 获取模板存储。
+// GetTaskTemplateStoreFromContext 从 fiber.Ctx 获取模板存储。
 // 不存在时返回 nil（零模板模式，使用默认提示词）。
-func GetTaskTemplateStoreFromContext(c *gin.Context) *LocalTaskTemplateStore {
-	val, ok := c.Get(ContextKeyTaskTemplateStore)
+func GetTaskTemplateStoreFromContext(c fiber.Ctx) *LocalTaskTemplateStore {
+	val, ok := httpbridge.Value(c, ContextKeyTaskTemplateStore)
 	if !ok {
 		return nil
 	}

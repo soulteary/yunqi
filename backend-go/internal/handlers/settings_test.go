@@ -9,9 +9,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/metrics"
-	"github.com/gin-gonic/gin"
 )
 
 func newSettingsTestConfigManager(t *testing.T) *config.ConfigManager {
@@ -30,17 +31,17 @@ func newSettingsTestConfigManager(t *testing.T) *config.ConfigManager {
 	return cfgManager
 }
 
-func performSettingsJSON(handler gin.HandlerFunc, method string, body string) *httptest.ResponseRecorder {
+func performSettingsJSON(handler fiber.Handler, method string, body string) *httptest.ResponseRecorder {
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(method, "/api/settings/circuit-breaker", strings.NewReader(body))
-	c.Request.Header.Set("Content-Type", "application/json")
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(method, "/api/settings/circuit-breaker", strings.NewReader(body)))
+	httpbridge.Request(c).Header.Set("Content-Type", "application/json")
 	handler(c)
 	return w
 }
 
 func TestGetCircuitBreaker_ReturnsToolCallIdleTimeout(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	config.SetRuntimeTimeouts(123000, 45000)
 	t.Cleanup(func() { config.SetRuntimeTimeouts(120000, 60000) })
 
@@ -75,7 +76,7 @@ func TestGetCircuitBreaker_ReturnsToolCallIdleTimeout(t *testing.T) {
 }
 
 func TestSetCircuitBreaker_AcceptsRequestLifecycleTimeouts(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	cfgManager := newSettingsTestConfigManager(t)
 
 	w := performSettingsJSON(SetCircuitBreaker(cfgManager), http.MethodPut, `{"requestTimeoutMs":300000,"responseHeaderTimeoutMs":180000}`)
@@ -93,7 +94,7 @@ func TestSetCircuitBreaker_AcceptsRequestLifecycleTimeouts(t *testing.T) {
 }
 
 func TestSetCircuitBreaker_RejectsInvalidRequestLifecycleTimeouts(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	cfgManager := newSettingsTestConfigManager(t)
 
 	w := performSettingsJSON(SetCircuitBreaker(cfgManager), http.MethodPut, `{"requestTimeoutMs":300001}`)
@@ -114,7 +115,7 @@ func TestSetCircuitBreaker_RejectsInvalidRequestLifecycleTimeouts(t *testing.T) 
 }
 
 func TestSetCircuitBreaker_AcceptsToolCallIdleTimeout(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	cfgManager := newSettingsTestConfigManager(t)
 
 	w := performSettingsJSON(SetCircuitBreaker(cfgManager), http.MethodPut, `{"streamToolCallIdleTimeoutMs":300000}`)
@@ -129,7 +130,7 @@ func TestSetCircuitBreaker_AcceptsToolCallIdleTimeout(t *testing.T) {
 }
 
 func TestSetCircuitBreaker_AcceptsInactivityTimeout(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	cfgManager := newSettingsTestConfigManager(t)
 
 	w := performSettingsJSON(SetCircuitBreaker(cfgManager), http.MethodPut, `{"streamInactivityTimeoutMs":180000}`)
@@ -144,7 +145,7 @@ func TestSetCircuitBreaker_AcceptsInactivityTimeout(t *testing.T) {
 }
 
 func TestSetCircuitBreaker_RejectsInvalidToolCallIdleTimeout(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	cfgManager := newSettingsTestConfigManager(t)
 
 	w := performSettingsJSON(SetCircuitBreaker(cfgManager), http.MethodPut, `{"streamToolCallIdleTimeoutMs":29999}`)

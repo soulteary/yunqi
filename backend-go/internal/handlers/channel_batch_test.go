@@ -7,14 +7,15 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/errutil"
 	"github.com/soulteary/yunqi/internal/handlers"
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 func init() {
-	gin.SetMode(gin.TestMode)
+
 }
 
 // newTestEnvCfg 创建测试用 EnvConfig（单 key 模式，admin key = proxy key）。
@@ -36,8 +37,8 @@ func newTestEnvCfgMultiKey(adminKey string, extraKeys []string) *config.EnvConfi
 	}
 }
 
-// setupTestRouter 创建带测试渠道的 ConfigManager 和 Gin 路由。
-func setupTestRouter(t *testing.T) (*config.ConfigManager, *gin.Engine) {
+// setupTestRouter 创建带测试渠道的 ConfigManager 和 Fiber 路由。
+func setupTestRouter(t *testing.T) (*config.ConfigManager, *fiber.App) {
 	t.Helper()
 	tmpDir := t.TempDir()
 	cfgPath := tmpDir + "/config.json"
@@ -74,12 +75,12 @@ func setupTestRouter(t *testing.T) (*config.ConfigManager, *gin.Engine) {
 	}
 
 	envCfg := newTestEnvCfg("test-admin-key")
-	r := gin.New()
-	r.POST("/api/channels/export", handlers.ExportChannels(envCfg, cfgManager))
-	r.GET("/api/channels/export", handlers.ExportAllChannels(envCfg, cfgManager))
-	r.POST("/api/channels/import", handlers.ImportChannels(cfgManager))
-	r.POST("/api/channels/import/confirm", handlers.ImportChannelsConfirm(cfgManager))
-	r.GET("/api/channels/templates", handlers.GetChannelTemplates())
+	r := httpbridge.NewApp()
+	r.Post("/api/channels/export", handlers.ExportChannels(envCfg, cfgManager))
+	r.Get("/api/channels/export", handlers.ExportAllChannels(envCfg, cfgManager))
+	r.Post("/api/channels/import", handlers.ImportChannels(cfgManager))
+	r.Post("/api/channels/import/confirm", handlers.ImportChannelsConfirm(cfgManager))
+	r.Get("/api/channels/templates", handlers.GetChannelTemplates())
 
 	return cfgManager, r
 }
@@ -95,8 +96,7 @@ func TestExportChannels_DefaultExcludesKeys(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/channels/export", bytes.NewReader(bodyBytes))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
@@ -142,8 +142,7 @@ func TestExportChannels_IncludeKeys(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-api-key", "test-admin-key")
 	w := httptest.NewRecorder()
-
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
@@ -184,8 +183,8 @@ func TestExportChannels_IncludeKeysNoAuth(t *testing.T) {
 	})
 
 	envCfg := newTestEnvCfgMultiKey("real-admin-key", []string{"extra-proxy-1"})
-	r := gin.New()
-	r.POST("/api/channels/export", handlers.ExportChannels(envCfg, cfgManager))
+	r := httpbridge.NewApp()
+	r.Post("/api/channels/export", handlers.ExportChannels(envCfg, cfgManager))
 
 	body := handlers.ExportChannelsRequest{
 		ChannelUIDs: []string{},
@@ -198,8 +197,7 @@ func TestExportChannels_IncludeKeysNoAuth(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-api-key", "extra-proxy-1")
 	w := httptest.NewRecorder()
-
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusForbidden {
 		t.Errorf("expected 403 when using proxy key with includeKeys=true, got %d", w.Code)
@@ -211,8 +209,7 @@ func TestExportAllChannels_GetEndpoint(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/channels/export", nil)
 	w := httptest.NewRecorder()
-
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
@@ -244,8 +241,7 @@ func TestExportAllChannels_FilterByType(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/channels/export?channelTypes=chat", nil)
 	w := httptest.NewRecorder()
-
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
@@ -294,8 +290,7 @@ func TestImportChannels_Preview(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/channels/import", bytes.NewReader(bodyBytes))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
@@ -359,8 +354,7 @@ func TestImportChannelsConfirm_RegeneratesUID(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/channels/import/confirm", bytes.NewReader(bodyBytes))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
@@ -380,7 +374,7 @@ func TestImportChannelsConfirm_RegeneratesUID(t *testing.T) {
 	// 重新设置路由读取配置
 	readReq := httptest.NewRequest(http.MethodGet, "/api/channels/export?channelTypes=messages", nil)
 	readW := httptest.NewRecorder()
-	r.ServeHTTP(readW, readReq)
+	httpbridge.Handler(r).ServeHTTP(readW, readReq)
 
 	var exportPack handlers.ChannelPack
 	_ = json.Unmarshal(readW.Body.Bytes(), &exportPack)
@@ -420,8 +414,7 @@ func TestImportChannelsConfirm_NameConflict(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/channels/import/confirm", bytes.NewReader(bodyBytes))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
@@ -468,8 +461,7 @@ func TestImportChannelsConfirm_SkipNaming(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/channels/import/confirm", bytes.NewReader(bodyBytes))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
@@ -508,8 +500,7 @@ func TestImportChannelsConfirm_EmptyPack(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/channels/import/confirm", bytes.NewReader(bodyBytes))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("expected 400 for empty pack, got %d", w.Code)
@@ -537,8 +528,7 @@ func TestImportChannels_InvalidChannelType(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/channels/import", bytes.NewReader(bodyBytes))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("expected 400 for invalid channelType, got %d", w.Code)
@@ -550,8 +540,7 @@ func TestGetChannelTemplates(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/channels/templates", nil)
 	w := httptest.NewRecorder()
-
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
@@ -589,8 +578,7 @@ func TestExportChannels_AllChannels(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/channels/export", bytes.NewReader(bodyBytes))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())

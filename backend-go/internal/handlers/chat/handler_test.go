@@ -8,14 +8,14 @@ import (
 	"testing"
 
 	"github.com/soulteary/yunqi/internal/config"
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 func TestBuildProviderRequest_KeepsRequestModelPassthrough(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(context.Background())
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(context.Background()))
 
 	bodyBytes := []byte(`{"model":"gpt-5.1-codex","messages":[{"role":"user","content":"hi"}]}`)
 	upstream := &config.UpstreamConfig{
@@ -121,10 +121,10 @@ func TestStripImageGenerationFromChatTools(t *testing.T) {
 }
 
 func TestBuildProviderRequest_StripsImageGenerationTool(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(context.Background())
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(context.Background()))
 
 	bodyBytes := []byte(`{"model":"gpt-5.5","messages":[{"role":"user","content":"hi"}],"tools":[{"type":"image_generation","output_format":"png"},{"type":"function","function":{"name":"lookup_user"}}]}`)
 	upstream := &config.UpstreamConfig{
@@ -173,10 +173,10 @@ func TestConvertChatToClaudeRequest_MapsUserIDToMetadata(t *testing.T) {
 }
 
 func TestBuildProviderRequest_KeepsRequestReasoningParamsPassthrough(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(context.Background())
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(context.Background()))
 
 	// 显式 ReasoningMapping 已退役：请求路径不再注入/改写思考参数，
 	// 客户端自带的 reasoning 形态按原样透传（风格改写仅存在于 autopilot 决档注入路径）。
@@ -209,10 +209,10 @@ func TestBuildProviderRequest_KeepsRequestReasoningParamsPassthrough(t *testing.
 }
 
 func TestBuildProviderRequest_NormalizeNonstandardChatRolesDefaultOff(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(context.Background())
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(context.Background()))
 
 	bodyBytes := []byte(`{"model":"gpt-5","messages":[{"role":"developer","content":"dev"},{"role":"user","content":"hi"}]}`)
 	upstream := &config.UpstreamConfig{ServiceType: "openai"}
@@ -235,7 +235,7 @@ func TestBuildProviderRequest_NormalizeNonstandardChatRolesDefaultOff(t *testing
 }
 
 func TestBuildProviderRequest_NormalizeNonstandardChatRoles(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	tests := []struct {
 		name        string
 		serviceType string
@@ -250,8 +250,8 @@ func TestBuildProviderRequest_NormalizeNonstandardChatRoles(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
-			c, _ := gin.CreateTestContext(w)
-			c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(context.Background())
+			c, _ := httpbridge.TestContext(w)
+			httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(context.Background()))
 
 			upstream := &config.UpstreamConfig{
 				ServiceType: tt.serviceType,
@@ -286,10 +286,10 @@ func TestBuildProviderRequest_NormalizeNonstandardChatRoles(t *testing.T) {
 }
 
 func TestBuildProviderRequest_FunctionWithToolCallIDMapsToTool(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(context.Background())
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(context.Background()))
 
 	bodyBytes := []byte(`{"model":"gpt-5","messages":[{"role":"assistant","content":"ok","tool_calls":[{"id":"call_1","type":"function","function":{"name":"f","arguments":"{}"}}]},{"role":"function","name":"f","content":"result","tool_call_id":"call_1"}]}`)
 	upstream := &config.UpstreamConfig{
@@ -317,7 +317,6 @@ func TestBuildProviderRequest_FunctionWithToolCallIDMapsToTool(t *testing.T) {
 }
 
 func TestBuildProviderRequest_PreservesMultimodalContentArray(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	tests := []struct {
 		name        string
@@ -369,8 +368,8 @@ func TestBuildProviderRequest_PreservesMultimodalContentArray(t *testing.T) {
 		bodyBytes := []byte(`{"model":"` + tt.model + `","messages":[{"role":"user","content":[{"type":"text","text":"修改这个图片"},{"type":"image_url","image_url":{"url":"https://example.com/image.png"}}]}]}`)
 		t.Run(tt.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
-			c, _ := gin.CreateTestContext(w)
-			c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(context.Background())
+			c, _ := httpbridge.TestContext(w)
+			httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(context.Background()))
 
 			req, err := buildProviderRequest(c, tt.upstream, "https://api.example.com", "sk-test", bodyBytes, tt.model, false)
 			if err != nil {
@@ -448,10 +447,10 @@ func TestBuildProviderRequest_PreservesMultimodalContentArray(t *testing.T) {
 }
 
 func TestBuildProviderRequest_ClaudePassbackThinkingBlocksKeepsThinking(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(context.Background())
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(context.Background()))
 
 	bodyBytes := []byte(`{
 		"model":"deepseek-v4-pro",

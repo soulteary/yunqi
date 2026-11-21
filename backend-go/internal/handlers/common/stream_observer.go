@@ -4,8 +4,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/metrics"
-	"github.com/gin-gonic/gin"
 )
 
 const streamTimeoutObservationKey = "streamTimeoutObservation"
@@ -34,14 +35,14 @@ type StreamTimeoutObserver struct {
 	maxToolCallIdleMs int64
 }
 
-func StartStreamTimeoutObservation(c *gin.Context, store *metrics.ChannelLogStore, metricsKey, requestID string, startedAt time.Time) {
+func StartStreamTimeoutObservation(c fiber.Ctx, store *metrics.ChannelLogStore, metricsKey, requestID string, startedAt time.Time) {
 	if c == nil || store == nil || metricsKey == "" || requestID == "" {
 		return
 	}
 	if startedAt.IsZero() {
 		startedAt = time.Now()
 	}
-	c.Set(streamTimeoutObservationKey, &StreamTimeoutObserver{
+	httpbridge.SetValue(c, streamTimeoutObservationKey, &StreamTimeoutObserver{
 		store:      store,
 		metricsKey: metricsKey,
 		requestID:  requestID,
@@ -49,11 +50,11 @@ func StartStreamTimeoutObservation(c *gin.Context, store *metrics.ChannelLogStor
 	})
 }
 
-func GetStreamTimeoutObserver(c *gin.Context) *StreamTimeoutObserver {
+func GetStreamTimeoutObserver(c fiber.Ctx) *StreamTimeoutObserver {
 	if c == nil {
 		return nil
 	}
-	value, ok := c.Get(streamTimeoutObservationKey)
+	value, ok := httpbridge.Value(c, streamTimeoutObservationKey)
 	if !ok {
 		return nil
 	}
@@ -64,34 +65,39 @@ func GetStreamTimeoutObserver(c *gin.Context) *StreamTimeoutObserver {
 	return observer
 }
 
-func MarkStreamFirstContent(c *gin.Context) {
+func MarkStreamFirstContent(c fiber.Ctx) error {
 	if observer := GetStreamTimeoutObserver(c); observer != nil {
 		observer.MarkFirstContent(time.Now())
 	}
+	return nil
 }
 
-func MarkStreamActivity(c *gin.Context) {
+func MarkStreamActivity(c fiber.Ctx) error {
 	if observer := GetStreamTimeoutObserver(c); observer != nil {
 		observer.MarkStreamActivity(time.Now())
 	}
+	return nil
 }
 
-func MarkStreamToolCallActivity(c *gin.Context) {
+func MarkStreamToolCallActivity(c fiber.Ctx) error {
 	if observer := GetStreamTimeoutObserver(c); observer != nil {
 		observer.MarkToolCallActivity(time.Now())
 	}
+	return nil
 }
 
-func MarkStreamToolCallComplete(c *gin.Context) {
+func MarkStreamToolCallComplete(c fiber.Ctx) error {
 	if observer := GetStreamTimeoutObserver(c); observer != nil {
 		observer.MarkToolCallComplete(time.Now())
 	}
+	return nil
 }
 
-func FinishStreamTimeoutObservation(c *gin.Context) {
+func FinishStreamTimeoutObservation(c fiber.Ctx) error {
 	if observer := GetStreamTimeoutObserver(c); observer != nil {
 		observer.Finish(time.Now())
 	}
+	return nil
 }
 
 func (o *StreamTimeoutObserver) MarkFirstContent(now time.Time) {
@@ -210,10 +216,11 @@ func (o *StreamTimeoutObserver) FirstContentMs() int64 {
 
 // MarkStreamSeverityTag 标记本次流式输出中出现了安全分类格式标记（<severity）。
 // 由各协议流处理器的文本增量扫描调用，供 MaybeLearnSeverityClassOutcome 读取。
-func MarkStreamSeverityTag(c *gin.Context) {
+func MarkStreamSeverityTag(c fiber.Ctx) error {
 	if observer := GetStreamTimeoutObserver(c); observer != nil {
 		observer.MarkSeverityTag()
 	}
+	return nil
 }
 
 // MarkSeverityTag 线程安全地记录"已见到 <severity 标记"事实。
@@ -238,10 +245,11 @@ func (o *StreamTimeoutObserver) SawSeverityTag() bool {
 
 // MarkPseudoToolCallMarker 标记本次流式输出文本中命中了伪工具调用标记。
 // 由各协议流处理器的文本扫描点调用，供 MaybeCountPseudoToolCallMiss 读取。
-func MarkPseudoToolCallMarker(c *gin.Context) {
+func MarkPseudoToolCallMarker(c fiber.Ctx) error {
 	if observer := GetStreamTimeoutObserver(c); observer != nil {
 		observer.markPseudoToolCallMarker()
 	}
+	return nil
 }
 
 // markPseudoToolCallMarker 线程安全地记录"已见到伪工具调用标记"事实。
@@ -266,10 +274,11 @@ func (o *StreamTimeoutObserver) SawPseudoToolCallMarker() bool {
 
 // MarkStreamRepetitionLoop 标记本次流式输出命中了无限重复检测。
 // 由各协议流处理器的重复扫描点调用，供日志与后续学习扩展读取。
-func MarkStreamRepetitionLoop(c *gin.Context) {
+func MarkStreamRepetitionLoop(c fiber.Ctx) error {
 	if observer := GetStreamTimeoutObserver(c); observer != nil {
 		observer.MarkRepetitionLoop()
 	}
+	return nil
 }
 
 // MarkRepetitionLoop 线程安全地记录"已命中无限重复检测"事实。

@@ -6,19 +6,20 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v3"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
-func newBranchTestContext() (*gin.Context, *httptest.ResponseRecorder) {
+func newBranchTestContext() (fiber.Ctx, *httptest.ResponseRecorder) {
 	recorder := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(recorder)
+	c, _ := httpbridge.TestContext(recorder)
 	return c, recorder
 }
 
 // pre-commit 缓冲：头/状态码/体不得触达真实 writer。
 func TestRacingBranchWriterBuffersBeforeCommit(t *testing.T) {
 	c, recorder := newBranchTestContext()
-	bw := newRacingBranchWriter(c.Writer)
+	bw := newRacingBranchWriter(httpbridge.Writer(c))
 
 	bw.Header().Set("X-Branch", "shadow")
 	bw.WriteHeader(http.StatusAccepted)
@@ -38,7 +39,7 @@ func TestRacingBranchWriterBuffersBeforeCommit(t *testing.T) {
 // Commit 桥接：私有头（含多值）并入真实 writer，缓冲体回放，之后透传。
 func TestRacingBranchWriterCommitBridges(t *testing.T) {
 	c, recorder := newBranchTestContext()
-	bw := newRacingBranchWriter(c.Writer)
+	bw := newRacingBranchWriter(httpbridge.Writer(c))
 
 	bw.Header().Add("X-Multi", "a")
 	bw.Header().Add("X-Multi", "b")
@@ -80,7 +81,7 @@ func TestRacingBranchWriterCommitBridges(t *testing.T) {
 // Discard 放弃写出权：缓冲丢弃，后续写出全部静默丢弃且不得触达真实 writer。
 func TestRacingBranchWriterDiscard(t *testing.T) {
 	c, recorder := newBranchTestContext()
-	bw := newRacingBranchWriter(c.Writer)
+	bw := newRacingBranchWriter(httpbridge.Writer(c))
 
 	bw.Header().Set("X-Branch", "loser")
 	_, _ = bw.Write([]byte("lost"))
@@ -108,8 +109,8 @@ func TestRacingBranchWriterDiscard(t *testing.T) {
 // 只有 claim 赢家的字节到达真实 writer；输家的头不污染赢家响应。
 func TestRacingBranchWriterSingleWinnerEnforcement(t *testing.T) {
 	c, recorder := newBranchTestContext()
-	winner := newRacingBranchWriter(c.Writer)
-	loser := newRacingBranchWriter(c.Writer)
+	winner := newRacingBranchWriter(httpbridge.Writer(c))
+	loser := newRacingBranchWriter(httpbridge.Writer(c))
 
 	loser.Header().Set("X-Who", "loser")
 	winner.Header().Set("X-Who", "winner")
@@ -142,7 +143,7 @@ func TestRacingBranchWriterSingleWinnerEnforcement(t *testing.T) {
 // 未 commit 的分支 Hijack 返回错误而非 panic（竞速路径不武装 WS，防御兜底）。
 func TestRacingBranchWriterHijackGuard(t *testing.T) {
 	c, _ := newBranchTestContext()
-	bw := newRacingBranchWriter(c.Writer)
+	bw := newRacingBranchWriter(httpbridge.Writer(c))
 	if _, _, err := bw.Hijack(); err == nil {
 		t.Fatal("pre-commit Hijack 应返回错误")
 	}

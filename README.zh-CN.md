@@ -74,18 +74,6 @@ Yunqi 对外提供一个统一后端入口：
 
 ## 快速开始
 
-### 方式零：Yunqi Desktop
-
-Yunqi Desktop 提供原生桌面体验，通过 GUI 管理渠道、密钥和客户端配置。
-
-| 平台 | 安装方式 | 说明 |
-|------|---------|------|
-| **Windows** | 在 [Microsoft Store](https://apps.microsoft.com/detail/yunqi-desktop) 搜索 **Yunqi Desktop** | 推荐方式。自动更新，无需手动签名。也可从 [GitHub Releases](https://github.com/soulteary/yunqi/releases/latest) 下载 `setup.exe`。 |
-| **macOS** | `brew tap BenedictKing/yunqi && brew install --cask yunqi-desktop` | 或从 [GitHub Releases](https://github.com/soulteary/yunqi/releases/latest) 下载 `.dmg`（支持 arm64/amd64）。 |
-| **Linux** | 从 [GitHub Releases](https://github.com/soulteary/yunqi/releases/latest) 下载 `.AppImage` | 设置可执行权限后运行。 |
-
-详细安装和配置说明请参考 [Yunqi Desktop 用户教程](docs/guide/desktop)。
-
 ### 方式一：直接运行二进制
 
 1. 从 [Releases](https://github.com/soulteary/yunqi/releases/latest) 下载最新可执行文件。
@@ -98,7 +86,7 @@ ENABLE_WEB_UI=true
 APP_UI_LANGUAGE=zh-CN
 ```
 
-3. 启动后访问 `http://localhost:3000`
+3. 启动后访问 `http://localhost:3688`
 
 Windows 下如果客户端运行在 cmd、PowerShell、WSL 或 Docker 中，且 `localhost` 无法访问 Yunqi，建议改用 Windows 主机的局域网 IPv4 地址，例如 `http://192.168.1.23:3000`。`BIND_HOST` 留空时，Yunqi 默认通过 `:PORT` 监听所有网卡地址；如需仅本机访问，设置 `BIND_HOST=127.0.0.1`。
 
@@ -137,7 +125,7 @@ docker compose up -d yunqi
 
 ### 方式三：源码构建
 
-前置依赖：[Go 1.25+](https://go.dev/dl/)、[Bun](https://bun.sh)、Make（macOS 需先执行 `xcode-select --install`）。
+前置依赖：[Go 1.26+](https://go.dev/dl/)、[Bun](https://bun.sh)、Make（macOS 需先执行 `xcode-select --install`）。
 
 ```bash
 git clone https://github.com/soulteary/yunqi
@@ -206,7 +194,7 @@ make dev
 
 ## 相关文档
 
-- [Yunqi Desktop 用户教程](docs/guide/desktop)
+- [Web 控制台与迁移指南](docs/guide/desktop)
 - [客户端接入总览](docs/guide/clients)
 - [README.md](README.md)
 - [backend-go/README.md](backend-go/README.md)
@@ -242,3 +230,7 @@ make dev
 ## 许可证
 
 AGPL-3.0-only。上游 MIT 许可与版权声明保留于 [LICENSES/MIT-upstream.txt](LICENSES/MIT-upstream.txt)，详见 [NOTICE](NOTICE)。
+
+## Web console / Web 控制台
+
+Yunqi 统一使用内嵌 Web 控制台的 Go 服务。在浏览器打开实际配置的端口，使用管理密钥登录，在「服务与接入」查看运行状态、导出诊断和生成客户端配置。服务二进制与 Docker 为维护中的部署方式，原桌面版迁移见 `docs/guide/desktop/index.md`。

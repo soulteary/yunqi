@@ -6,10 +6,11 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v3"
 	"github.com/tidwall/gjson"
 
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 // 渠道兼容性错误信号识别。
@@ -134,11 +135,11 @@ func BodyHasHistoricalThinking(body []byte) bool {
 //
 // 与 BodyHas* 系列不同：anthropic-beta 是 HTTP header 级标志，body 判定不可靠。
 // 任何非空值都视为携带——provider 后续会在 token 粒度精确剥离被拒的子 token。
-func HeaderHasAnthropicBeta(c *gin.Context) bool {
-	if c == nil || c.Request == nil {
+func HeaderHasAnthropicBeta(c fiber.Ctx) bool {
+	if c == nil || httpbridge.Request(c) == nil {
 		return false
 	}
-	return c.Request.Header.Get("anthropic-beta") != ""
+	return httpbridge.Request(c).Header.Get("anthropic-beta") != ""
 }
 
 // CompatSignal 一条识别出的兼容性信号。

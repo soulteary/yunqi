@@ -12,14 +12,15 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/converters"
 	"github.com/soulteary/yunqi/internal/copilot"
 	"github.com/soulteary/yunqi/internal/errutil"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/session"
 	"github.com/soulteary/yunqi/internal/types"
 	"github.com/soulteary/yunqi/internal/utils"
-	"github.com/gin-gonic/gin"
 )
 
 // ResponsesProvider Responses API 提供商
@@ -41,7 +42,7 @@ type responsesStreamToolState struct {
 
 // ConvertToProviderRequest 将请求转换为上游格式
 func (p *ResponsesProvider) ConvertToProviderRequest(
-	c *gin.Context,
+	c fiber.Ctx,
 	upstream *config.UpstreamConfig,
 	apiKey string,
 ) (*http.Request, []byte, error) {
@@ -50,12 +51,12 @@ func (p *ResponsesProvider) ConvertToProviderRequest(
 		return nil, nil, fmt.Errorf("读取请求体失败: %w", err)
 	}
 
-	return p.ConvertBodyToProviderRequest(c, upstream, apiKey, bodyBytes, c.Request.URL.Path)
+	return p.ConvertBodyToProviderRequest(c, upstream, apiKey, bodyBytes, httpbridge.Request(c).URL.Path)
 }
 
 // ConvertBodyToProviderRequest 将指定 body 转换为上游请求（公共入口，供 compact 等场景复用）
 func (p *ResponsesProvider) ConvertBodyToProviderRequest(
-	c *gin.Context,
+	c fiber.Ctx,
 	upstream *config.UpstreamConfig,
 	apiKey string,
 	bodyBytes []byte,
@@ -82,7 +83,7 @@ func (p *ResponsesProvider) ConvertBodyToProviderRequest(
 
 	requestAPIKey := apiKey
 	if upstream.ServiceType == "copilot" {
-		copilotToken, copilotBaseURL, err := copilot.ResolveTokenWithProxy(c.Request.Context(), apiKey, upstream.ProxyURL)
+		copilotToken, copilotBaseURL, err := copilot.ResolveTokenWithProxy(httpbridge.Request(c).Context(), apiKey, upstream.ProxyURL)
 		if err != nil {
 			return nil, bodyBytes, fmt.Errorf("获取 GitHub Copilot token 失败: %w", err)
 		}
@@ -92,7 +93,7 @@ func (p *ResponsesProvider) ConvertBodyToProviderRequest(
 		}
 	}
 
-	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, targetURL, bytes.NewReader(reqBody))
+	req, err := http.NewRequestWithContext(httpbridge.Request(c).Context(), http.MethodPost, targetURL, bytes.NewReader(reqBody))
 	if err != nil {
 		return nil, bodyBytes, err
 	}
@@ -132,7 +133,7 @@ func (p *ResponsesProvider) ConvertBodyToProviderRequest(
 	return req, bodyBytes, nil
 }
 
-func (p *ResponsesProvider) buildProviderRequestBody(c *gin.Context, requestPath string, bodyBytes []byte, upstream *config.UpstreamConfig) (interface{}, []byte, error) {
+func (p *ResponsesProvider) buildProviderRequestBody(c fiber.Ctx, requestPath string, bodyBytes []byte, upstream *config.UpstreamConfig) (interface{}, []byte, error) {
 	if strings.HasSuffix(requestPath, "/v1/messages") {
 		responsesReq, err := p.buildResponsesRequestFromClaude(c, bodyBytes, upstream)
 		if err != nil {
@@ -181,7 +182,7 @@ func (p *ResponsesProvider) buildProviderRequestBody(c *gin.Context, requestPath
 			if harvested, ok := hoistCodexAdditionalTools(c, reqMapHoist); ok {
 				if normalizedBody, err := utils.MarshalJSONNoEscape(reqMapHoist); err == nil {
 					bodyBytes = normalizedBody
-					c.Set("codex_merged_raw_tools", harvested)
+					httpbridge.SetValue(c, "codex_merged_raw_tools", harvested)
 					codexHoisted = true
 				}
 			}
@@ -220,10 +221,10 @@ func (p *ResponsesProvider) buildProviderRequestBody(c *gin.Context, requestPath
 		if codexHoisted {
 			// 提升前 ctx/原始工具形态经 TransformerMetadata 传入转换器，保证
 			// 请求转换与响应 remap 都用带 custom 代理语义的上下文。
-			if ctxVal, ok := c.Get("codex_tool_context"); ok {
+			if ctxVal, ok := httpbridge.Value(c, "codex_tool_context"); ok {
 				responsesReq.TransformerMetadata["codex_tool_context"] = ctxVal
 			}
-			if harvested, ok := c.Get("codex_merged_raw_tools"); ok {
+			if harvested, ok := httpbridge.Value(c, "codex_merged_raw_tools"); ok {
 				responsesReq.TransformerMetadata["codex_merged_raw_tools"] = harvested
 			}
 		}
@@ -234,10 +235,10 @@ func (p *ResponsesProvider) buildProviderRequestBody(c *gin.Context, requestPath
 		}
 		if c != nil {
 			if ctx, ok := responsesReq.TransformerMetadata["codex_tool_context"]; ok {
-				c.Set("codex_tool_context", ctx)
+				httpbridge.SetValue(c, "codex_tool_context", ctx)
 			}
 			if tools, ok := responsesReq.TransformerMetadata["codex_merged_raw_tools"]; ok {
-				c.Set("codex_merged_raw_tools", tools)
+				httpbridge.SetValue(c, "codex_merged_raw_tools", tools)
 			}
 		}
 
@@ -324,7 +325,7 @@ func (p *ResponsesProvider) buildProviderRequestBody(c *gin.Context, requestPath
 	return providerReq, bodyBytes, nil
 }
 
-func (p *ResponsesProvider) buildResponsesRequestFromClaude(c *gin.Context, bodyBytes []byte, upstream *config.UpstreamConfig) (map[string]interface{}, error) {
+func (p *ResponsesProvider) buildResponsesRequestFromClaude(c fiber.Ctx, bodyBytes []byte, upstream *config.UpstreamConfig) (map[string]interface{}, error) {
 	var claudeReq types.ClaudeRequest
 	if err := json.Unmarshal(bodyBytes, &claudeReq); err != nil {
 		return nil, err
@@ -1514,7 +1515,7 @@ func convertCodexToolsForPassthrough(reqMap map[string]interface{}) {
 // 返回提升前的原始工具数组（namespace/custom 形态）与是否提升；原始工具供
 // 协议转换路径（responses→chat 等）经 codex_merged_raw_tools 通道重建响应侧
 // remap 上下文——提升后的扁平形态丢了 custom 代理语义，无法还原 custom_tool_call。
-func hoistCodexAdditionalTools(c *gin.Context, reqMap map[string]interface{}) ([]interface{}, bool) {
+func hoistCodexAdditionalTools(c fiber.Ctx, reqMap map[string]interface{}) ([]interface{}, bool) {
 	if rawTools, ok := reqMap["tools"].([]interface{}); ok && len(rawTools) > 0 {
 		return nil, false
 	}
@@ -1597,8 +1598,8 @@ func hoistCodexAdditionalTools(c *gin.Context, reqMap map[string]interface{}) ([
 	reqMap["input"] = kept
 	reqMap["tools"] = hoisted
 	reqMap["tool_choice"] = converters.ConvertToolChoiceForCodex(reqMap["tool_choice"], ctx)
-	c.Set("codex_tool_context", ctx)
-	c.Set("codex_additional_tools_hoisted", true)
+	httpbridge.SetValue(c, "codex_tool_context", ctx)
+	httpbridge.SetValue(c, "codex_additional_tools_hoisted", true)
 	return harvested, true
 }
 

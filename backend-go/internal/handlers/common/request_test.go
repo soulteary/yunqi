@@ -14,16 +14,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/klauspost/compress/zstd"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/errutil"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/providers"
 	"github.com/soulteary/yunqi/internal/utils"
-	"github.com/gin-gonic/gin"
-	"github.com/klauspost/compress/zstd"
 )
 
 func TestReadRequestBodyDecompressesZstd(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	original := []byte(`{"model":"gpt-5","stream":true}`)
 
 	var compressed bytes.Buffer
@@ -39,9 +39,9 @@ func TestReadRequestBodyDecompressesZstd(t *testing.T) {
 	}
 
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(compressed.Bytes()))
-	c.Request.Header.Set("Content-Encoding", "zstd")
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(compressed.Bytes())))
+	httpbridge.Request(c).Header.Set("Content-Encoding", "zstd")
 
 	got, err := ReadRequestBody(c, 1024*1024)
 	if err != nil {
@@ -50,10 +50,10 @@ func TestReadRequestBodyDecompressesZstd(t *testing.T) {
 	if !bytes.Equal(got, original) {
 		t.Fatalf("decompressed body = %s, want %s", string(got), string(original))
 	}
-	if got := c.Request.Header.Get("Content-Encoding"); got != "" {
+	if got := httpbridge.Request(c).Header.Get("Content-Encoding"); got != "" {
 		t.Fatalf("Content-Encoding header should be cleared after decompression, got %q", got)
 	}
-	restored, err := io.ReadAll(c.Request.Body)
+	restored, err := io.ReadAll(httpbridge.Request(c).Body)
 	if err != nil {
 		t.Fatalf("read restored body err = %v", err)
 	}
@@ -188,7 +188,6 @@ func TestNormalizeMetadataUserID(t *testing.T) {
 }
 
 func TestExtractUnifiedSessionID(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	tests := []struct {
 		name     string
@@ -279,10 +278,10 @@ func TestExtractUnifiedSessionID(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
-			c, _ := gin.CreateTestContext(w)
-			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewBufferString(tt.body))
+			c, _ := httpbridge.TestContext(w)
+			httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewBufferString(tt.body)))
 			for k, v := range tt.headers {
-				c.Request.Header.Set(k, v)
+				httpbridge.Request(c).Header.Set(k, v)
 			}
 
 			if got := utils.ExtractUnifiedSessionID(c, []byte(tt.body)); got != tt.expected {
@@ -293,9 +292,9 @@ func TestExtractUnifiedSessionID(t *testing.T) {
 }
 
 func TestPassthroughResponse(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
+	c, _ := httpbridge.TestContext(w)
 
 	resp := &http.Response{
 		StatusCode: http.StatusAccepted,
@@ -319,11 +318,10 @@ func TestPassthroughResponse(t *testing.T) {
 }
 
 func TestPassthroughJSONResponse(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	t.Run("decode success", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		c, _ := gin.CreateTestContext(w)
+		c, _ := httpbridge.TestContext(w)
 		resp := &http.Response{
 			StatusCode: http.StatusOK,
 			Header:     http.Header{"X-Test": []string{"ok"}},
@@ -346,7 +344,7 @@ func TestPassthroughJSONResponse(t *testing.T) {
 
 	t.Run("decode failure still writes full body", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		c, _ := gin.CreateTestContext(w)
+		c, _ := httpbridge.TestContext(w)
 		resp := &http.Response{
 			StatusCode: http.StatusOK,
 			Body:       io.NopCloser(bytes.NewBufferString(`{"usage": invalid-json}`)),
@@ -741,17 +739,17 @@ func TestSendRequestWithLifecycleTraceUsesChannelResponseHeaderTimeout(t *testin
 }
 
 func TestRestoreRequestBodyAndContextCacheUseAttemptBody(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
+	c, _ := httpbridge.TestContext(w)
 	original := []byte(`{"model":"claude-3","metadata":{"user_id":"{\"device_id\":\"abc\"}"}}`)
 	attemptBody := NormalizeMetadataUserID(original)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(original))
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(original)))
 
 	RestoreRequestBody(c, attemptBody)
-	c.Set("requestBodyBytes", attemptBody)
+	httpbridge.SetValue(c, "requestBodyBytes", attemptBody)
 
-	body, err := io.ReadAll(c.Request.Body)
+	body, err := io.ReadAll(httpbridge.Request(c).Body)
 	if err != nil {
 		t.Fatalf("ReadAll() err = %v", err)
 	}
@@ -759,7 +757,7 @@ func TestRestoreRequestBodyAndContextCacheUseAttemptBody(t *testing.T) {
 		t.Fatalf("request body = %s, want %s", string(body), string(attemptBody))
 	}
 
-	cached, ok := c.Get("requestBodyBytes")
+	cached, ok := httpbridge.Value(c, "requestBodyBytes")
 	if !ok {
 		t.Fatal("requestBodyBytes not found in context")
 	}
@@ -769,14 +767,14 @@ func TestRestoreRequestBodyAndContextCacheUseAttemptBody(t *testing.T) {
 }
 
 func TestGetEffectiveRequestBody(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	fallback := []byte(`{"original":true}`)
 
 	t.Run("returns context body when set", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		c, _ := gin.CreateTestContext(w)
+		c, _ := httpbridge.TestContext(w)
 		updated := []byte(`{"updated":true}`)
-		c.Set("requestBodyBytes", updated)
+		httpbridge.SetValue(c, "requestBodyBytes", updated)
 		if got := GetEffectiveRequestBody(c, fallback); string(got) != string(updated) {
 			t.Fatalf("got %s, want %s", string(got), string(updated))
 		}
@@ -784,7 +782,7 @@ func TestGetEffectiveRequestBody(t *testing.T) {
 
 	t.Run("returns fallback when context empty", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		c, _ := gin.CreateTestContext(w)
+		c, _ := httpbridge.TestContext(w)
 		if got := GetEffectiveRequestBody(c, fallback); string(got) != string(fallback) {
 			t.Fatalf("got %s, want fallback %s", string(got), string(fallback))
 		}
@@ -792,8 +790,8 @@ func TestGetEffectiveRequestBody(t *testing.T) {
 
 	t.Run("returns fallback when context value wrong type", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		c, _ := gin.CreateTestContext(w)
-		c.Set("requestBodyBytes", "not-bytes")
+		c, _ := httpbridge.TestContext(w)
+		httpbridge.SetValue(c, "requestBodyBytes", "not-bytes")
 		if got := GetEffectiveRequestBody(c, fallback); string(got) != string(fallback) {
 			t.Fatalf("got %s, want fallback %s", string(got), string(fallback))
 		}
@@ -807,7 +805,6 @@ func TestGetEffectiveRequestBody(t *testing.T) {
 }
 
 func TestDeduplicateTotalTokensSystemBlocks(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	t.Run("重复块只保留最后一份", func(t *testing.T) {
 		body := []byte(`{"model":"m","system":[` +
@@ -914,7 +911,6 @@ func TestDeduplicateTotalTokensSystemBlocks(t *testing.T) {
 }
 
 func TestDeduplicateIdenticalSystemBlocks(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	// 复刻实测 harness 形态：裸 output-style 提醒逐字重复累积，最后一份带断点。
 	const styleReminder = "engineer-professional output style is active. Remember to follow the specific guidelines for this style."

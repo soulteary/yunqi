@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 // racingBranchWriter 竞速分支的独立响应写出端。
@@ -20,7 +20,7 @@ import (
 // 取代此前"影子直接回填主 Writer + 各协议 handler 自觉遵守 claim 纪律"的约定式
 // 单写者模型（2026-09-08 双 panic 事故的临时修复形态）。
 type racingBranchWriter struct {
-	real gin.ResponseWriter
+	real httpbridge.ResponseWriter
 
 	mu        sync.Mutex
 	header    http.Header
@@ -30,9 +30,9 @@ type racingBranchWriter struct {
 	discarded bool
 }
 
-var _ gin.ResponseWriter = (*racingBranchWriter)(nil)
+var _ httpbridge.ResponseWriter = (*racingBranchWriter)(nil)
 
-func newRacingBranchWriter(real gin.ResponseWriter) *racingBranchWriter {
+func newRacingBranchWriter(real httpbridge.ResponseWriter) *racingBranchWriter {
 	return &racingBranchWriter{real: real, header: make(http.Header)}
 }
 

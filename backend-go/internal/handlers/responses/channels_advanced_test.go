@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/soulteary/yunqi/internal/config"
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 func setupResponsesConfigManager(t *testing.T, upstream []config.UpstreamConfig) *config.ConfigManager {
@@ -68,13 +68,12 @@ func TestGetUpstreams_IncludesUnifiedStateFields(t *testing.T) {
 	channel.SetCompatSeed(config.TraitPassbackThinkingBlocks, true)
 	cm := setupResponsesConfigManager(t, []config.UpstreamConfig{channel})
 
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
-	r.GET("/responses/channels", GetUpstreams(cm))
+	r := httpbridge.NewApp()
+	r.Get("/responses/channels", GetUpstreams(cm))
 
 	req := httptest.NewRequest(http.MethodGet, "/responses/channels", nil)
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", w.Code)
@@ -119,13 +118,12 @@ func TestPingChannel_WithoutBaseURLReturnsError(t *testing.T) {
 		ServiceType: "responses",
 	}})
 
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
-	r.GET("/responses/ping/:id", PingChannel(cm))
+	r := httpbridge.NewApp()
+	r.Get("/responses/ping/:id", PingChannel(cm))
 
 	req := httptest.NewRequest(http.MethodGet, "/responses/ping/0", nil)
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200, body=%s", w.Code, w.Body.String())
@@ -146,13 +144,12 @@ func TestPingAllChannels_WithoutBaseURLMarksChannelError(t *testing.T) {
 		ServiceType: "responses",
 	}})
 
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
-	r.GET("/responses/ping", PingAllChannels(cm))
+	r := httpbridge.NewApp()
+	r.Get("/responses/ping", PingAllChannels(cm))
 
 	req := httptest.NewRequest(http.MethodGet, "/responses/ping", nil)
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200, body=%s", w.Code, w.Body.String())

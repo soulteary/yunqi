@@ -6,11 +6,12 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/autopilot"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/utils"
-	"github.com/gin-gonic/gin"
 )
 
 // scenarioConfigProvider 返回全局场景配置快照。
@@ -25,7 +26,7 @@ func SetScenarioConfigProvider(provider func() config.ScenarioRoutingConfig) {
 // AttachAutopilotRequestProfile 从已校验的请求体提取脱敏特征，并绑定到请求 context。
 // channel 级 SmartRouter 与 endpoint policy 必须读取这一份画像，避免能力下界漂移。
 func AttachAutopilotRequestProfile(
-	c *gin.Context,
+	c fiber.Ctx,
 	kind scheduler.ChannelKind,
 	model string,
 	operation string,
@@ -34,12 +35,12 @@ func AttachAutopilotRequestProfile(
 	embeddingDimension int,
 ) autopilot.RequestProfile {
 	agentRole, agentType := "", ""
-	if agentCtx := AgentContextFromGin(c); agentCtx != nil {
+	if agentCtx := AgentContextFromFiber(c); agentCtx != nil {
 		agentRole = agentCtx.AgentRole
 		agentType = agentCtx.AgentType
 	} else if c != nil {
 		agentCtx := utils.ExtractAgentContext(c, bodyBytes)
-		c.Set("agentContext", agentCtx)
+		httpbridge.SetValue(c, "agentContext", agentCtx)
 		agentRole = agentCtx.AgentRole
 		agentType = agentCtx.AgentType
 	}
@@ -50,9 +51,9 @@ func AttachAutopilotRequestProfile(
 	req := decodeAutopilotRequest(bodyBytes)
 	explicitDomain, routingScenarioHeader, costPreferenceHeader := "", "", ""
 	if c != nil {
-		explicitDomain = c.GetHeader("X-Task-Domain")
-		routingScenarioHeader = c.GetHeader("X-Routing-Scenario")
-		costPreferenceHeader = c.GetHeader("X-Cost-Preference")
+		explicitDomain = httpbridge.GetHeader(c, "X-Task-Domain")
+		routingScenarioHeader = httpbridge.GetHeader(c, "X-Routing-Scenario")
+		costPreferenceHeader = httpbridge.GetHeader(c, "X-Cost-Preference")
 	}
 	var scenarioCfg config.ScenarioRoutingConfig
 	if scenarioConfigProvider != nil {
@@ -89,24 +90,24 @@ func AttachAutopilotRequestProfile(
 		ScenarioCfg:           scenarioCfg,
 	})
 
-	if c != nil && c.Request != nil {
-		ctx := autopilot.ContextWithRequestProfile(c.Request.Context(), profile)
-		c.Request = c.Request.WithContext(ctx)
+	if c != nil && httpbridge.Request(c) != nil {
+		ctx := autopilot.ContextWithRequestProfile(httpbridge.Request(c).Context(), profile)
+		httpbridge.SetRequest(c, httpbridge.Request(c).WithContext(ctx))
 	}
 	return profile
 }
 
 // EnsureAutopilotRequestProfile 为未显式接线的多渠道入口提供保守兜底。
 func EnsureAutopilotRequestProfile(
-	c *gin.Context,
+	c fiber.Ctx,
 	kind scheduler.ChannelKind,
 	model string,
 	operation string,
 	sessionID string,
 	bodyBytes []byte,
 ) autopilot.RequestProfile {
-	if c != nil && c.Request != nil {
-		if profile, ok := autopilot.RequestProfileFromContext(c.Request.Context()); ok {
+	if c != nil && httpbridge.Request(c) != nil {
+		if profile, ok := autopilot.RequestProfileFromContext(httpbridge.Request(c).Context()); ok {
 			return profile
 		}
 	}
@@ -126,7 +127,7 @@ func estimateAutopilotInputTokens(kind scheduler.ChannelKind, bodyBytes []byte) 
 	}
 }
 
-func normalizeAutopilotOperation(kind scheduler.ChannelKind, operation string, c *gin.Context) string {
+func normalizeAutopilotOperation(kind scheduler.ChannelKind, operation string, c fiber.Ctx) string {
 	op := strings.ToLower(strings.TrimSpace(operation))
 	switch op {
 	case "generations", "generation", "image_generation":
@@ -147,8 +148,8 @@ func normalizeAutopilotOperation(kind scheduler.ChannelKind, operation string, c
 	case scheduler.ChannelKindVectors:
 		return "embedding"
 	}
-	if c != nil && c.Request != nil && c.Request.URL != nil {
-		path := strings.ToLower(c.Request.URL.Path)
+	if c != nil && httpbridge.Request(c) != nil && httpbridge.Request(c).URL != nil {
+		path := strings.ToLower(httpbridge.Request(c).URL.Path)
 		if strings.Contains(path, "count_tokens") {
 			return "count_tokens"
 		}

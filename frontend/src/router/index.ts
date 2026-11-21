@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
 const routes = [
+  { path: '/console', component: () => import('@/views/ConsoleView.vue'), meta: { requiresAuth: true } },
   {
     path: '/',
     redirect: '/channels/messages'  // 默认跳转到统一渠道列表

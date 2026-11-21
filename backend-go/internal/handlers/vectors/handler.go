@@ -11,14 +11,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/errutil"
 	"github.com/soulteary/yunqi/internal/handlers/common"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/middleware"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/types"
 	"github.com/soulteary/yunqi/internal/utils"
-	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 )
 
@@ -28,41 +29,42 @@ func Handler(
 	envCfg *config.EnvConfig,
 	cfgManager *config.ConfigManager,
 	channelScheduler *scheduler.ChannelScheduler,
-) gin.HandlerFunc {
-	return gin.HandlerFunc(func(c *gin.Context) {
-		middleware.ProxyAuthMiddleware(envCfg)(c)
-		if c.IsAborted() {
-			return
+) fiber.Handler {
+	return fiber.Handler(func(c fiber.Ctx) error {
+		middleware.AuthenticateProxy(c, envCfg)
+		if httpbridge.IsAborted(c) {
+			return nil
 		}
 		if channelScheduler == nil {
 			vectorsErrorResponse(c, http.StatusServiceUnavailable, "Vectors scheduler unavailable", "service_unavailable", "service_unavailable")
-			return
+			return nil
 		}
 
 		startTime := time.Now()
 		bodyBytes, err := common.ReadRequestBody(c, envCfg.MaxRequestBodySize)
 		if err != nil {
-			return
+			return nil
 		}
-		c.Set("requestBodyBytes", bodyBytes)
+		httpbridge.SetValue(c, "requestBodyBytes", bodyBytes)
 
 		_, model, dimensions, ok := parseEmbeddingsRequest(c, bodyBytes)
 		if !ok {
-			return
+			return nil
 		}
 
 		userID := utils.ExtractUnifiedSessionID(c, bodyBytes)
 		agentCtx := utils.ExtractAgentContext(c, bodyBytes)
-		c.Set("agentContext", agentCtx)
+		httpbridge.SetValue(c, "agentContext", agentCtx)
 		common.SetRequestLogContextWithAgent(c, userID, 0, agentCtx)
 		common.LogOriginalRequest(c, bodyBytes, envCfg, "Vectors")
 		common.AttachAutopilotRequestProfile(c, scheduler.ChannelKindVectors, model, "embedding", userID, bodyBytes, dimensions)
 
 		handleVectorsFailover(c, envCfg, cfgManager, channelScheduler, bodyBytes, model, dimensions, userID, startTime)
+		return nil
 	})
 }
 
-func parseEmbeddingsRequest(c *gin.Context, bodyBytes []byte) (map[string]interface{}, string, int, bool) {
+func parseEmbeddingsRequest(c fiber.Ctx, bodyBytes []byte) (map[string]interface{}, string, int, bool) {
 	var reqMap map[string]interface{}
 	if len(bodyBytes) == 0 {
 		vectorsErrorResponse(c, http.StatusBadRequest, "request body is required", "invalid_request_error", "missing_body")
@@ -97,7 +99,7 @@ func parseEmbeddingsRequest(c *gin.Context, bodyBytes []byte) (map[string]interf
 	return reqMap, model, dimensions, true
 }
 
-func parseEmbeddingsDimensions(c *gin.Context, reqMap map[string]interface{}) (int, bool) {
+func parseEmbeddingsDimensions(c fiber.Ctx, reqMap map[string]interface{}) (int, bool) {
 	raw, exists := reqMap["dimensions"]
 	if !exists || raw == nil {
 		return 0, true
@@ -130,7 +132,7 @@ func validEmbeddingsInput(input interface{}) bool {
 }
 
 func handleVectorsFailover(
-	c *gin.Context,
+	c fiber.Ctx,
 	envCfg *config.EnvConfig,
 	cfgManager *config.ConfigManager,
 	channelScheduler *scheduler.ChannelScheduler,
@@ -142,7 +144,7 @@ func handleVectorsFailover(
 ) {
 	metricsManager := channelScheduler.GetVectorsMetricsManager()
 	agentRole := ""
-	if ac := common.AgentContextFromGin(c); ac != nil {
+	if ac := common.AgentContextFromFiber(c); ac != nil {
 		agentRole = ac.AgentRole
 	}
 	common.HandleMultiChannelFailoverWithSelectionFilter(
@@ -157,7 +159,7 @@ func handleVectorsFailover(
 		false,
 		agentRole,
 		newEmbeddingCompatibilityFilter(c, model, dimensions),
-		func(c *gin.Context, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
+		func(c fiber.Ctx, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
 			upstream := selection.Upstream
 			channelIndex := selection.ChannelIndex
 			if upstream == nil {
@@ -182,7 +184,7 @@ func handleVectorsFailover(
 				func(upstream *config.UpstreamConfig, failedKeys map[string]bool) (string, error) {
 					return cfgManager.GetNextVectorsAPIKey(upstream, failedKeys)
 				},
-				func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
+				func(c fiber.Ctx, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
 					return buildProviderRequest(c, upstreamCopy, upstreamCopy.BaseURL, apiKey, common.GetEffectiveRequestBody(c, bodyBytes), model)
 				},
 				func(apiKey string) {
@@ -194,7 +196,7 @@ func handleVectorsFailover(
 				func(url string) {
 					channelScheduler.MarkURLSuccess(scheduler.ChannelKindVectors, channelIndex, url)
 				},
-				func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
+				func(c fiber.Ctx, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 					return handleSuccess(c, resp, envCfg, startTime)
 				},
 				model,
@@ -215,14 +217,14 @@ func handleVectorsFailover(
 			}
 		},
 		nil,
-		func(ctx *gin.Context, failoverErr *common.FailoverError, lastError error) {
+		func(ctx fiber.Ctx, failoverErr *common.FailoverError, lastError error) {
 			handleAllChannelsFailed(ctx, failoverErr, lastError)
 		},
 	)
 }
 
 func buildProviderRequest(
-	c *gin.Context,
+	c fiber.Ctx,
 	upstream *config.UpstreamConfig,
 	baseURL string,
 	apiKey string,
@@ -249,14 +251,14 @@ func buildProviderRequest(
 	common.RequestLogf(c, "[Vectors-Model] channel=%q model=%q upstream_body_model=%q base_host=%q",
 		upstream.Name, model, extractEmbeddingsBodyModel(requestBody), safeURLHost(endpointURL))
 
-	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, endpointURL, bytes.NewReader(requestBody))
+	req, err := http.NewRequestWithContext(httpbridge.Request(c).Context(), http.MethodPost, endpointURL, bytes.NewReader(requestBody))
 	if err != nil {
 		common.RequestLogf(c, "[Vectors-BuildRequest] base_url=%q key_mask=%s model=%q stage=new_request reason=request_init_failed error=%q",
 			baseURL, utils.MaskAPIKey(apiKey), model, sanitizeDiagnosticError(err))
 		return nil, err
 	}
-	if c.Request.URL != nil {
-		req.URL.RawQuery = c.Request.URL.RawQuery
+	if httpbridge.Request(c).URL != nil {
+		req.URL.RawQuery = httpbridge.Request(c).URL.RawQuery
 	}
 	req.Header = prepareVectorsUpstreamHeaders(c, req.URL.Host)
 	utils.SetAuthenticationHeaderWithOverride(req.Header, apiKey, upstream.AuthHeader)
@@ -304,13 +306,13 @@ func buildEmbeddingsURL(baseURL string) string {
 	return buildEndpointURL(baseURL, "/v1", "/embeddings")
 }
 
-func prepareVectorsUpstreamHeaders(c *gin.Context, targetHost string) http.Header {
+func prepareVectorsUpstreamHeaders(c fiber.Ctx, targetHost string) http.Header {
 	headers := utils.PrepareUpstreamHeaders(c, targetHost)
 	headers.Set("Content-Type", "application/json")
 	return headers
 }
 
-func handleSuccess(c *gin.Context, resp *http.Response, envCfg *config.EnvConfig, startTime time.Time) (*types.Usage, error) {
+func handleSuccess(c fiber.Ctx, resp *http.Response, envCfg *config.EnvConfig, startTime time.Time) (*types.Usage, error) {
 	defer errutil.IgnoreDeferred(resp.Body.Close)
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -330,10 +332,10 @@ func handleSuccess(c *gin.Context, resp *http.Response, envCfg *config.EnvConfig
 		common.LogUpstreamResponse(c, resp, bodyBytes, envCfg, "Vectors")
 	}
 
-	utils.ForwardResponseHeaders(resp.Header, c.Writer)
-	utils.ForwardContentType(resp.Header, c.Writer)
-	c.Status(resp.StatusCode)
-	if _, err := c.Writer.Write(bodyBytes); err != nil {
+	utils.ForwardResponseHeaders(resp.Header, httpbridge.Writer(c))
+	utils.ForwardContentType(resp.Header, httpbridge.Writer(c))
+	httpbridge.Status(c, resp.StatusCode)
+	if _, err := httpbridge.Writer(c).Write(bodyBytes); err != nil {
 		return nil, err
 	}
 	return extractEmbeddingsUsage(bodyBytes), nil
@@ -410,9 +412,9 @@ func sanitizeDiagnosticError(err error) string {
 	return msg
 }
 
-func vectorsErrorResponse(c *gin.Context, statusCode int, message, errorType, code string) {
-	c.JSON(statusCode, gin.H{
-		"error": gin.H{
+func vectorsErrorResponse(c fiber.Ctx, statusCode int, message, errorType, code string) {
+	httpbridge.JSON(c, statusCode, fiber.Map{
+		"error": fiber.Map{
 			"message": message,
 			"type":    errorType,
 			"code":    code,
@@ -420,9 +422,9 @@ func vectorsErrorResponse(c *gin.Context, statusCode int, message, errorType, co
 	})
 }
 
-func handleAllChannelsFailed(c *gin.Context, failoverErr *common.FailoverError, lastError error) {
+func handleAllChannelsFailed(c fiber.Ctx, failoverErr *common.FailoverError, lastError error) {
 	if failoverErr != nil {
-		c.Data(failoverErr.Status, "application/json", failoverErr.Body)
+		httpbridge.Data(c, failoverErr.Status, "application/json", failoverErr.Body)
 		return
 	}
 	errMsg := "All Vectors channels failed"

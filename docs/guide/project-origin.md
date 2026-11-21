@@ -43,11 +43,11 @@ Claude Code / Codex / 其他客户端
 
 ## 当前仓库与本轮范围
 
-本仓库从上游 `3a08db977187a37ed4236d6a755fb8ab3aebc214` 快照建立，初始提交为 [`02d7a24`](https://github.com/soulteary/yunqi/commit/02d7a24f3b97d229f32872f00aa76a3dd3bb13c1)。本轮首先完成项目更名、许可调整、暂停继承的发布动作和移除广告赞助。当前仍保留 Gin 后端与 Wails 桌面外壳；另一维护目录中的 Web-only、Fiber 与模块拆分尚未迁入，不能将其视为本仓库已完成的能力。
+本仓库从上游 `3a08db977187a37ed4236d6a755fb8ab3aebc214` 快照建立，初始提交为 [`02d7a24`](https://github.com/soulteary/yunqi/commit/02d7a24f3b97d229f32872f00aa76a3dd3bb13c1)。初始化阶段完成项目更名、许可调整、暂停继承的发布动作和移除广告赞助。当前已逐项迁入 Web-only 改造、启动装配和前端业务模块拆分；Wails 桌面外壳已经移除，管理入口统一为内嵌 Web 控制台。Gin 已完全替换为 Fiber v3，Go 最低版本为 1.26；代理传输继续保留 net/http 的流式、取消、HTTP/2 与 WebSocket 语义。迁移范围与验证见[迁移记录](migration-ccx.md)。
 
 ## 名称与兼容边界
 
-- Go 服务模块为 `github.com/soulteary/yunqi`，桌面模块为 `github.com/soulteary/yunqi/desktop`。服务命令及本地构建输出为 `dist/yunqi`；桌面产品显示为 Yunqi Desktop。
+- Go 服务模块为 `github.com/soulteary/yunqi`。服务命令及本地构建输出为 `dist/yunqi`；桌面不再作为构建和发布目标。
 - 原有代理与管理 API、认证方式、配置 JSON 和数据库格式保持兼容。默认 `.config` 目录不变；桌面旧数据目录、IPC 标识、`X-CCX-*` 协议头、浏览器认证/偏好键、模型注册表文件名中的旧标识按兼容需要保留。
 - 更新检查改为读取 Yunqi 仓库的 Releases，浏览器版本缓存独立命名，避免误指向上游更新。预设更新地址指向 Yunqi 的 Pages 清单。发布或站点尚未就绪时，可以设置 `PRESET_UPDATE_ENABLED=false` 或自定义 `PRESET_UPDATE_URL`。
 - 新仓库的发布资源和镜像在首次发布前不保证存在，Compose 默认本地构建。更新已有服务时保留原数据路径，由部署者安排重启。本次更名不会移动数据或停止现有服务。

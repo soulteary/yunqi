@@ -10,19 +10,20 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/autopilot"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/handlers/common"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/racing"
 	"github.com/soulteary/yunqi/internal/ratelimit"
 	"github.com/soulteary/yunqi/internal/scheduler"
-	"github.com/gin-gonic/gin"
 )
 
-// newRacingGinContext 竞速测试专用 gin context：必须带真实 ResponseRecorder——
+// newRacingFiberContext 竞速测试专用 Fiber context：必须带真实 ResponseRecorder——
 // 分支 writer 在 claim 赢家 Commit 时向真实 writer 桥接，nil recorder 会 panic。
-func newRacingGinContext() *gin.Context {
-	return newTestGinContext(httptest.NewRecorder())
+func newRacingFiberContext() fiber.Ctx {
+	return newTestFiberContext(httptest.NewRecorder())
 }
 
 // racingTestEnv 竞速编排测试环境：三渠道 + 全局竞速开启。
@@ -72,11 +73,11 @@ type racingBranchInput struct {
 // racingStubBranch 构造模拟渠道分支：等待 delay（可被分支取消打断）后
 // 模拟提交闸门并按 succeed 返回；record 非空时记录每次调用结果。
 func racingStubBranch(delay time.Duration, succeed bool, record func(racingBranchInput)) common.TrySelectedChannelFunc {
-	return func(c *gin.Context, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
+	return func(c fiber.Ctx, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
 		if delay > 0 {
 			select {
 			case <-time.After(delay):
-			case <-c.Request.Context().Done():
+			case <-httpbridge.Request(c).Context().Done():
 			}
 		}
 		if !common.RacingClaimClientCommit(c) {
@@ -140,10 +141,10 @@ func racingInput(env affinityTestEnv, selection *scheduler.SelectionResult) comm
 func TestRunRacingAttemptDisabledWithoutHub(t *testing.T) {
 	env := racingTestEnv(t, nil)
 	selection := racingPrimarySelection(t, env)
-	c := newRacingGinContext()
+	c := newRacingFiberContext()
 
 	called := false
-	sel, result := common.RunRacingAttempt(c, func(_ *gin.Context, _ *scheduler.SelectionResult) common.MultiChannelAttemptResult {
+	sel, result := common.RunRacingAttempt(c, func(_ fiber.Ctx, _ *scheduler.SelectionResult) common.MultiChannelAttemptResult {
 		called = true
 		return common.MultiChannelAttemptResult{Handled: true, SuccessKey: "ok"}
 	}, racingInput(env, selection))
@@ -160,7 +161,7 @@ func TestRunRacingAttemptDisabledByChannelPolicy(t *testing.T) {
 	installRacingHub(t, racingCandidateList("ch_second"), racing.Behavior{MaxShadows: 1, StreamFloorMs: 20})
 
 	var calls atomic.Int32
-	branch := func(_ *gin.Context, _ *scheduler.SelectionResult) common.MultiChannelAttemptResult {
+	branch := func(_ fiber.Ctx, _ *scheduler.SelectionResult) common.MultiChannelAttemptResult {
 		calls.Add(1)
 		time.Sleep(80 * time.Millisecond)
 		return common.MultiChannelAttemptResult{Handled: true, SuccessKey: "ok"}
@@ -168,7 +169,7 @@ func TestRunRacingAttemptDisabledByChannelPolicy(t *testing.T) {
 
 	selection := racingPrimarySelection(t, env)
 	startedAt := time.Now()
-	sel, result := common.RunRacingAttempt(newRacingGinContext(), branch, racingInput(env, selection))
+	sel, result := common.RunRacingAttempt(newRacingFiberContext(), branch, racingInput(env, selection))
 	elapsed := time.Since(startedAt)
 
 	if !result.Handled || sel != selection {
@@ -187,11 +188,11 @@ func TestRunRacingAttemptShadowWinsOverSlowPrimary(t *testing.T) {
 	installRacingHub(t, racingCandidateList("ch_second"), racing.Behavior{MaxShadows: 1, StreamFloorMs: 30})
 
 	var superseded atomic.Bool
-	primaryBranch := func(c *gin.Context, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
+	primaryBranch := func(c fiber.Ctx, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
 		// 慢主：阻塞至影子 claim 后被取消（模拟上游读被打断）。
 		select {
 		case <-time.After(2 * time.Second):
-		case <-c.Request.Context().Done():
+		case <-httpbridge.Request(c).Context().Done():
 		}
 		if !common.RacingClaimClientCommit(c) {
 			superseded.Store(true)
@@ -199,7 +200,7 @@ func TestRunRacingAttemptShadowWinsOverSlowPrimary(t *testing.T) {
 		}
 		return common.MultiChannelAttemptResult{Route: selection.Route, Handled: true, SuccessKey: "sk-primary"}
 	}
-	shadowBranch := func(c *gin.Context, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
+	shadowBranch := func(c fiber.Ctx, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
 		time.Sleep(10 * time.Millisecond)
 		if !common.RacingClaimClientCommit(c) {
 			return common.MultiChannelAttemptResult{Route: selection.Route, Attempted: true, LastError: common.ErrRacingSuperseded}
@@ -209,7 +210,7 @@ func TestRunRacingAttemptShadowWinsOverSlowPrimary(t *testing.T) {
 
 	selection := racingPrimarySelection(t, env)
 	startedAt := time.Now()
-	sel, result := common.RunRacingAttempt(newRacingGinContext(), func(c *gin.Context, sel *scheduler.SelectionResult) common.MultiChannelAttemptResult {
+	sel, result := common.RunRacingAttempt(newRacingFiberContext(), func(c fiber.Ctx, sel *scheduler.SelectionResult) common.MultiChannelAttemptResult {
 		if sel.Route.ChannelUID == "ch_first" {
 			return primaryBranch(c, sel)
 		}
@@ -239,18 +240,18 @@ func TestRunRacingAttemptShadowWinnerStreamNotCanceled(t *testing.T) {
 	installRacingHub(t, racingCandidateList("ch_second"), racing.Behavior{MaxShadows: 1, StreamFloorMs: 30})
 
 	var winnerCtxKilled atomic.Bool
-	primaryBranch := func(c *gin.Context, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
+	primaryBranch := func(c fiber.Ctx, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
 		// 慢主：阻塞至影子 claim 后败出（与 TestRunRacingAttemptShadowWinsOverSlowPrimary 同）。
 		select {
 		case <-time.After(2 * time.Second):
-		case <-c.Request.Context().Done():
+		case <-httpbridge.Request(c).Context().Done():
 		}
 		if !common.RacingClaimClientCommit(c) {
 			return common.MultiChannelAttemptResult{Route: selection.Route, Attempted: true, LastError: common.ErrRacingSuperseded}
 		}
 		return common.MultiChannelAttemptResult{Route: selection.Route, Handled: true, SuccessKey: "sk-primary"}
 	}
-	shadowBranch := func(c *gin.Context, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
+	shadowBranch := func(c fiber.Ctx, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
 		time.Sleep(10 * time.Millisecond)
 		if !common.RacingClaimClientCommit(c) {
 			return common.MultiChannelAttemptResult{Route: selection.Route, Attempted: true, LastError: common.ErrRacingSuperseded}
@@ -259,14 +260,14 @@ func TestRunRacingAttemptShadowWinnerStreamNotCanceled(t *testing.T) {
 		// 赢家 ctx 在透传窗口内被 cancel 即为回归。
 		select {
 		case <-time.After(150 * time.Millisecond):
-		case <-c.Request.Context().Done():
+		case <-httpbridge.Request(c).Context().Done():
 			winnerCtxKilled.Store(true)
 		}
 		return common.MultiChannelAttemptResult{Route: selection.Route, Handled: true, SuccessKey: "sk-shadow"}
 	}
 
 	selection := racingPrimarySelection(t, env)
-	sel, result := common.RunRacingAttempt(newRacingGinContext(), func(c *gin.Context, sel *scheduler.SelectionResult) common.MultiChannelAttemptResult {
+	sel, result := common.RunRacingAttempt(newRacingFiberContext(), func(c fiber.Ctx, sel *scheduler.SelectionResult) common.MultiChannelAttemptResult {
 		if sel.Route.ChannelUID == "ch_first" {
 			return primaryBranch(c, sel)
 		}
@@ -286,7 +287,7 @@ func TestRunRacingAttemptPrimaryWinsFastPath(t *testing.T) {
 	installRacingHub(t, racingCandidateList("ch_second"), racing.Behavior{MaxShadows: 1, StreamFloorMs: 10_000})
 
 	selection := racingPrimarySelection(t, env)
-	sel, result := common.RunRacingAttempt(newRacingGinContext(), racingStubBranch(5*time.Millisecond, true, nil), racingInput(env, selection))
+	sel, result := common.RunRacingAttempt(newRacingFiberContext(), racingStubBranch(5*time.Millisecond, true, nil), racingInput(env, selection))
 	if sel != selection || !result.Handled || result.SuccessKey != "sk-ch_first" {
 		t.Fatalf("阈值未到时主分支应直接获胜: %+v", result)
 	}
@@ -297,10 +298,17 @@ func TestRunRacingAttemptBothFailMergesShadowRoutes(t *testing.T) {
 	installRacingHub(t, racingCandidateList("ch_second"), racing.Behavior{MaxShadows: 1, StreamFloorMs: 30})
 
 	selection := racingPrimarySelection(t, env)
-	// 主 50ms 失败（晚于 30ms 阈值，保证影子已被派出），影子立即失败。
-	branch := func(c *gin.Context, sel *scheduler.SelectionResult) common.MultiChannelAttemptResult {
+	// 等待影子实际进入分支，避免机器负载较高时定时器晚于主分支完成。
+	shadowStarted := make(chan struct{})
+	branch := func(c fiber.Ctx, sel *scheduler.SelectionResult) common.MultiChannelAttemptResult {
 		if sel.Route.ChannelUID == "ch_first" {
-			time.Sleep(50 * time.Millisecond)
+			select {
+			case <-shadowStarted:
+			case <-time.After(5 * time.Second):
+				t.Error("等待影子分支启动超时")
+			}
+		} else {
+			defer close(shadowStarted)
 		}
 		if !common.RacingClaimClientCommit(c) {
 			return common.MultiChannelAttemptResult{Route: sel.Route, Attempted: true, LastError: common.ErrRacingSuperseded}
@@ -308,7 +316,7 @@ func TestRunRacingAttemptBothFailMergesShadowRoutes(t *testing.T) {
 		return common.MultiChannelAttemptResult{Route: sel.Route, Attempted: true, LastError: errors.New("boom")}
 	}
 
-	sel, result := common.RunRacingAttempt(newRacingGinContext(), branch, racingInput(env, selection))
+	sel, result := common.RunRacingAttempt(newRacingFiberContext(), branch, racingInput(env, selection))
 	if sel != selection {
 		t.Fatal("双败时应返回主 selection")
 	}
@@ -336,7 +344,7 @@ func TestRunRacingAttemptCostFirstFiltersCandidates(t *testing.T) {
 			racing.Behavior{MaxShadows: 1, StreamFloorMs: 30, CheapCandidateOnly: true})
 
 		var shadowUID atomic.Value
-		branch := func(c *gin.Context, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
+		branch := func(c fiber.Ctx, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
 			if selection.Route.ChannelUID != "ch_first" {
 				shadowUID.Store(selection.Route.ChannelUID)
 				time.Sleep(5 * time.Millisecond)
@@ -349,7 +357,7 @@ func TestRunRacingAttemptCostFirstFiltersCandidates(t *testing.T) {
 			return common.MultiChannelAttemptResult{Route: selection.Route, Handled: true, SuccessKey: "ok"}
 		}
 
-		common.RunRacingAttempt(newRacingGinContext(), branch, racingInput(env, racingPrimarySelection(t, env)))
+		common.RunRacingAttempt(newRacingFiberContext(), branch, racingInput(env, racingPrimarySelection(t, env)))
 		if got, _ := shadowUID.Load().(string); got != "ch_second" {
 			t.Fatalf("cost_first 应允许便宜候选作影子, got %q", got)
 		}
@@ -364,7 +372,7 @@ func TestRunRacingAttemptCostFirstFiltersCandidates(t *testing.T) {
 			racing.Behavior{MaxShadows: 1, StreamFloorMs: 30, CheapCandidateOnly: true})
 
 		var shadowSeen atomic.Bool
-		branch := func(c *gin.Context, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
+		branch := func(c fiber.Ctx, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
 			if selection.Route.ChannelUID != "ch_first" {
 				shadowSeen.Store(true)
 			}
@@ -375,7 +383,7 @@ func TestRunRacingAttemptCostFirstFiltersCandidates(t *testing.T) {
 			return common.MultiChannelAttemptResult{Route: selection.Route, Handled: true, SuccessKey: "ok"}
 		}
 
-		_, result := common.RunRacingAttempt(newRacingGinContext(), branch, racingInput(env, racingPrimarySelection(t, env)))
+		_, result := common.RunRacingAttempt(newRacingFiberContext(), branch, racingInput(env, racingPrimarySelection(t, env)))
 		if !result.Handled {
 			t.Fatalf("主分支应完成: %+v", result)
 		}
@@ -396,7 +404,7 @@ func TestRunRacingAttemptSkipsRateLimitHotCandidate(t *testing.T) {
 	env.scheduler.MarkChannelCooldown(scheduler.ChannelKindMessages, 1, time.Minute)
 
 	var shadowUID atomic.Value
-	branch := func(c *gin.Context, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
+	branch := func(c fiber.Ctx, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
 		if selection.Route.ChannelUID != "ch_first" {
 			shadowUID.Store(selection.Route.ChannelUID)
 			time.Sleep(10 * time.Millisecond)
@@ -404,7 +412,7 @@ func TestRunRacingAttemptSkipsRateLimitHotCandidate(t *testing.T) {
 			// 慢主：阻塞至影子 claim 后被取消
 			select {
 			case <-time.After(2 * time.Second):
-			case <-c.Request.Context().Done():
+			case <-httpbridge.Request(c).Context().Done():
 			}
 		}
 		if !common.RacingClaimClientCommit(c) {
@@ -413,7 +421,7 @@ func TestRunRacingAttemptSkipsRateLimitHotCandidate(t *testing.T) {
 		return common.MultiChannelAttemptResult{Route: selection.Route, Handled: true, SuccessKey: "sk-" + selection.Route.ChannelUID}
 	}
 
-	_, result := common.RunRacingAttempt(newRacingGinContext(), branch, racingInput(env, racingPrimarySelection(t, env)))
+	_, result := common.RunRacingAttempt(newRacingFiberContext(), branch, racingInput(env, racingPrimarySelection(t, env)))
 	if result.SuccessKey != "sk-ch_third" {
 		t.Fatalf("影子应落到未冷却的 ch_third 并获胜: %+v", result)
 	}
@@ -427,13 +435,13 @@ func TestRunRacingAttemptSkipsRateLimitHotCandidate(t *testing.T) {
 // 只放大流量与 429 风险）。
 func TestRunRacingAttemptShadowsChannelDedup(t *testing.T) {
 	recordBranch := func(shadowCalls *[]string, mu *sync.Mutex) common.TrySelectedChannelFunc {
-		return func(c *gin.Context, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
+		return func(c fiber.Ctx, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
 			uid := selection.Route.ChannelUID
 			if uid == "ch_first" {
 				// 慢主：阻塞至影子 claim 后被取消
 				select {
 				case <-time.After(2 * time.Second):
-				case <-c.Request.Context().Done():
+				case <-httpbridge.Request(c).Context().Done():
 				}
 			} else {
 				mu.Lock()
@@ -443,7 +451,7 @@ func TestRunRacingAttemptShadowsChannelDedup(t *testing.T) {
 				// 提前 claim 终止后续派出，干扰去重计数。
 				select {
 				case <-time.After(200 * time.Millisecond):
-				case <-c.Request.Context().Done():
+				case <-httpbridge.Request(c).Context().Done():
 				}
 			}
 			if !common.RacingClaimClientCommit(c) {
@@ -466,7 +474,7 @@ func TestRunRacingAttemptShadowsChannelDedup(t *testing.T) {
 
 		var mu sync.Mutex
 		var shadowCalls []string
-		_, result := common.RunRacingAttempt(newRacingGinContext(), recordBranch(&shadowCalls, &mu), racingInput(env, racingPrimarySelection(t, env)))
+		_, result := common.RunRacingAttempt(newRacingFiberContext(), recordBranch(&shadowCalls, &mu), racingInput(env, racingPrimarySelection(t, env)))
 		if !result.Handled {
 			t.Fatalf("应有赢家: %+v", result)
 		}
@@ -491,7 +499,7 @@ func TestRunRacingAttemptShadowsChannelDedup(t *testing.T) {
 
 		var mu sync.Mutex
 		var shadowCalls []string
-		_, result := common.RunRacingAttempt(newRacingGinContext(), recordBranch(&shadowCalls, &mu), racingInput(env, racingPrimarySelection(t, env)))
+		_, result := common.RunRacingAttempt(newRacingFiberContext(), recordBranch(&shadowCalls, &mu), racingInput(env, racingPrimarySelection(t, env)))
 		if !result.Handled {
 			t.Fatalf("应有赢家: %+v", result)
 		}
@@ -508,7 +516,7 @@ func TestRunRacingAttemptShadowsChannelDedup(t *testing.T) {
 
 		var mu sync.Mutex
 		var shadowCalls []string
-		_, result := common.RunRacingAttempt(newRacingGinContext(), recordBranch(&shadowCalls, &mu), racingInput(env, racingPrimarySelection(t, env)))
+		_, result := common.RunRacingAttempt(newRacingFiberContext(), recordBranch(&shadowCalls, &mu), racingInput(env, racingPrimarySelection(t, env)))
 		if !result.Handled {
 			t.Fatalf("应有赢家: %+v", result)
 		}

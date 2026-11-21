@@ -11,13 +11,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/errutil"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/providers"
 	"github.com/soulteary/yunqi/internal/thinkingcache"
 	"github.com/soulteary/yunqi/internal/types"
 	"github.com/soulteary/yunqi/internal/utils"
-	"github.com/gin-gonic/gin"
 )
 
 // isEmptyContent 判断流式响应的累积文本是否为空内容
@@ -115,8 +116,8 @@ func buildTruncationEndEvents(ctx *StreamContext) []string {
 }
 
 func handleToolUseBufferEvent(
-	c *gin.Context,
-	w gin.ResponseWriter,
+	c fiber.Ctx,
+	w httpbridge.ResponseWriter,
 	flusher http.Flusher,
 	event string,
 	ctx *StreamContext,
@@ -160,7 +161,7 @@ func handleToolUseBufferEvent(
 	return true
 }
 
-func flushClosedToolUseBuffers(c *gin.Context, w gin.ResponseWriter, flusher http.Flusher, ctx *StreamContext) {
+func flushClosedToolUseBuffers(c fiber.Ctx, w httpbridge.ResponseWriter, flusher http.Flusher, ctx *StreamContext) {
 	if ctx == nil || ctx.ToolUseTruncated {
 		return
 	}
@@ -719,21 +720,21 @@ func seedSynthesizerFromRequest(ctx *StreamContext, requestBody []byte) {
 }
 
 // SetupStreamHeaders 设置流式响应头
-func SetupStreamHeaders(c *gin.Context, resp *http.Response, envCfg *config.EnvConfig, apiType string) {
+func SetupStreamHeaders(c fiber.Ctx, resp *http.Response, envCfg *config.EnvConfig, apiType string) {
 	LogUpstreamResponseHeaders(c, resp, envCfg, apiType)
-	utils.ForwardResponseHeaders(resp.Header, c.Writer)
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-	c.Header("X-Accel-Buffering", "no")
-	c.Status(200)
+	utils.ForwardResponseHeaders(resp.Header, httpbridge.Writer(c))
+	httpbridge.Header(c, "Content-Type", "text/event-stream")
+	httpbridge.Header(c, "Cache-Control", "no-cache")
+	httpbridge.Header(c, "Connection", "keep-alive")
+	httpbridge.Header(c, "X-Accel-Buffering", "no")
+	httpbridge.Status(c, 200)
 }
 
 // ProcessStreamEvents 处理流事件循环
 // 返回值: error 表示流处理过程中是否发生错误（用于调用方决定是否记录失败指标）
 func ProcessStreamEvents(
-	c *gin.Context,
-	w gin.ResponseWriter,
+	c fiber.Ctx,
+	w httpbridge.ResponseWriter,
 	flusher http.Flusher,
 	eventChan <-chan string,
 	errChan <-chan error,
@@ -901,8 +902,8 @@ func ProcessStreamEvents(
 
 // ProcessStreamEvent 处理单个流事件
 func ProcessStreamEvent(
-	c *gin.Context,
-	w gin.ResponseWriter,
+	c fiber.Ctx,
+	w httpbridge.ResponseWriter,
 	flusher http.Flusher,
 	event string,
 	ctx *StreamContext,
@@ -1349,7 +1350,7 @@ func IsClientDisconnectError(err error) bool {
 //   - 首字后断流 → return nil, ErrStreamStalled（Header 未发送，可安全重试）
 //   - 非空   → SetupStreamHeaders → 回放缓冲事件 → ProcessStreamEvents
 func HandleStreamResponse(
-	c *gin.Context,
+	c fiber.Ctx,
 	resp *http.Response,
 	provider providers.Provider,
 	envCfg *config.EnvConfig,
@@ -1363,7 +1364,7 @@ func HandleStreamResponse(
 
 	eventChan, errChan, err := provider.HandleStreamResponse(resp.Body)
 	if err != nil {
-		c.JSON(500, gin.H{"error": "Failed to handle stream response"})
+		httpbridge.JSON(c, 500, fiber.Map{"error": "Failed to handle stream response"})
 		return nil, err
 	}
 
@@ -1415,7 +1416,7 @@ func HandleStreamResponse(
 	}
 	SetupStreamHeaders(c, resp, envCfg, "Messages")
 
-	w := c.Writer
+	w := httpbridge.Writer(c)
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		RequestLogf(c, "[Messages-Stream] 警告: ResponseWriter不支持Flush接口")
@@ -1442,7 +1443,7 @@ func HandleStreamResponse(
 	}
 
 	usage, err := ProcessStreamEvents(c, w, flusher, eventChan, errChan, ctx, envCfg, startTime, requestBody, timeouts)
-	c.Set("responseText", ctx.ResponseText)
+	httpbridge.SetValue(c, "responseText", ctx.ResponseText)
 	if err != nil {
 		return nil, err
 	}

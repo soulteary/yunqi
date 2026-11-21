@@ -10,13 +10,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gin-gonic/gin"
-
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 func TestHandlePatchKeyMultiplier(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	cfgManager := newTestConfigManager(t, config.Config{
 		Upstream: []config.UpstreamConfig{{
 			ChannelUID: "msg-1",
@@ -52,8 +52,8 @@ func TestHandlePatchKeyMultiplier(t *testing.T) {
 			APIKeyConfigs: []config.APIKeyConfig{{Key: "vec-key", KeyUID: "vec-key-uid"}},
 		}},
 	})
-	register := func() *gin.Engine {
-		router := gin.New()
+	register := func() *fiber.App {
+		router := httpbridge.NewApp()
 		RegisterKeyMultiplierRoutes(router, cfgManager)
 		return router
 	}
@@ -180,7 +180,7 @@ func TestHandlePatchKeyMultiplier(t *testing.T) {
 }
 
 func TestHandlePatchKeyMultiplierConsumptionPolicy(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	cfgManager := newTestConfigManager(t, config.Config{
 		Upstream: []config.UpstreamConfig{{
 			ChannelUID: "msg-1",
@@ -191,7 +191,7 @@ func TestHandlePatchKeyMultiplierConsumptionPolicy(t *testing.T) {
 			}},
 		}},
 	})
-	router := gin.New()
+	router := httpbridge.NewApp()
 	RegisterKeyMultiplierRoutes(router, cfgManager)
 
 	assertPolicy := func(t *testing.T, expected config.KeyConsumptionPolicy, effectiveCostClass string) {
@@ -331,18 +331,18 @@ func osWriteFile(name string, data []byte, perm uint32) error {
 	return os.WriteFile(name, data, os.FileMode(perm))
 }
 
-func performRawJSON(router http.Handler, method, path string, payload []byte) *httptest.ResponseRecorder {
+func performRawJSON(router *fiber.App, method, path string, payload []byte) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, bytes.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
 	resp := httptest.NewRecorder()
-	router.ServeHTTP(resp, req)
+	httpbridge.Handler(router).ServeHTTP(resp, req)
 	return resp
 }
 
 // 托管账号手工 key 无 KeyUID（仅 new-api 同步路径生成），
 // findAPIKeyConfigByKeyUID 应兜底按 CredentialUID 定位，使倍率编辑对自定义托管渠道可用。
 func TestHandlePatchKeyMultiplierByCredentialUID(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	cfgManager := newTestConfigManager(t, config.Config{
 		Upstream: []config.UpstreamConfig{{
 			ChannelUID: "msg-cred",
@@ -354,7 +354,7 @@ func TestHandlePatchKeyMultiplierByCredentialUID(t *testing.T) {
 			}},
 		}},
 	})
-	router := gin.New()
+	router := httpbridge.NewApp()
 	RegisterKeyMultiplierRoutes(router, cfgManager)
 
 	// 用 credentialUid 定位并标记为零成本（免费签到额度场景）

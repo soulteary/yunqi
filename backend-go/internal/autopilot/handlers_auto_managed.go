@@ -13,9 +13,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/utils"
-	"github.com/gin-gonic/gin"
 )
 
 // ─── 请求/响应类型 ────────────────────────────────────────────────────────────────────
@@ -273,33 +274,33 @@ func resetChangedChannelMetrics(deps *AutoManagedDeps, refs []existingChannelRef
 // 路由直接挂载到 apiGroup（不创建子组），与现有渠道管理路由共存。
 //
 // 注意：必须为每个 kind 显式注册静态路径，不能用 `:kind` 参数，
-// 否则会与现有的 `/messages/channels/...` 等静态路由在 Gin radix tree 中冲突。
-func RegisterAutoManagedRoutes(apiGroup *gin.RouterGroup, deps *AutoManagedDeps) {
-	apiGroup.GET("/accounts", handleListAccounts(deps))
-	apiGroup.PATCH("/accounts/:accountUid", handleRenameAccount(deps))
-	apiGroup.PUT("/accounts/:accountUid", handleUpdateAccount(deps))
-	apiGroup.DELETE("/accounts/:accountUid", handleDeleteAccount(deps))
-	apiGroup.POST("/accounts/:accountUid/credentials", handleAddAccountCredentials(deps))
-	apiGroup.PATCH("/accounts/:accountUid/credentials", handlePatchAccountCredentials(deps))
-	apiGroup.DELETE("/accounts/:accountUid/credentials/:credentialUid", handleDeleteAccountCredential(deps))
-	apiGroup.PUT("/accounts/:accountUid/credentials/:credentialUid/volcengine-access-key", handleSetVolcengineAccessKey(deps))
-	apiGroup.DELETE("/accounts/:accountUid/credentials/:credentialUid/volcengine-access-key", handleClearVolcengineAccessKey(deps))
-	apiGroup.POST("/accounts/:accountUid/credentials/:credentialUid/volcengine-plan-usage/refresh", handleRefreshVolcenginePlanUsage(deps))
-	apiGroup.PUT("/accounts/:accountUid/credentials/:credentialUid/mimo-console-cookie", handleSetMiMoConsoleCookie(deps))
-	apiGroup.POST("/accounts/:accountUid/credentials/:credentialUid/mimo-console-cookie/refresh", handleRefreshMiMoConsoleCookie(deps))
-	apiGroup.DELETE("/accounts/:accountUid/credentials/:credentialUid/mimo-console-cookie", handleClearMiMoConsoleCookie(deps))
-	apiGroup.PUT("/accounts/:accountUid/credentials/:credentialUid/compshare-console-cookie", handleSetCompshareConsoleCookie(deps))
-	apiGroup.POST("/accounts/:accountUid/credentials/:credentialUid/compshare-console-cookie/refresh", handleRefreshCompshareConsoleCookie(deps))
-	apiGroup.DELETE("/accounts/:accountUid/credentials/:credentialUid/compshare-console-cookie", handleClearCompshareConsoleCookie(deps))
-	apiGroup.PUT("/accounts/:accountUid/credentials/:credentialUid/kimi-console-token", handleSetKimiConsoleToken(deps))
-	apiGroup.POST("/accounts/:accountUid/credentials/:credentialUid/kimi-console-token/refresh", handleRefreshKimiConsoleToken(deps))
-	apiGroup.DELETE("/accounts/:accountUid/credentials/:credentialUid/kimi-console-token", handleClearKimiConsoleToken(deps))
-	apiGroup.GET("/accounts/:accountUid/deepseek-balance", handleDeepSeekBalance(deps))
+// 否则会与现有的 `/messages/channels/...` 等静态路由在 Fiber radix tree 中冲突。
+func RegisterAutoManagedRoutes(apiGroup fiber.Router, deps *AutoManagedDeps) {
+	apiGroup.Get("/accounts", handleListAccounts(deps))
+	apiGroup.Patch("/accounts/:accountUid", handleRenameAccount(deps))
+	apiGroup.Put("/accounts/:accountUid", handleUpdateAccount(deps))
+	apiGroup.Delete("/accounts/:accountUid", handleDeleteAccount(deps))
+	apiGroup.Post("/accounts/:accountUid/credentials", handleAddAccountCredentials(deps))
+	apiGroup.Patch("/accounts/:accountUid/credentials", handlePatchAccountCredentials(deps))
+	apiGroup.Delete("/accounts/:accountUid/credentials/:credentialUid", handleDeleteAccountCredential(deps))
+	apiGroup.Put("/accounts/:accountUid/credentials/:credentialUid/volcengine-access-key", handleSetVolcengineAccessKey(deps))
+	apiGroup.Delete("/accounts/:accountUid/credentials/:credentialUid/volcengine-access-key", handleClearVolcengineAccessKey(deps))
+	apiGroup.Post("/accounts/:accountUid/credentials/:credentialUid/volcengine-plan-usage/refresh", handleRefreshVolcenginePlanUsage(deps))
+	apiGroup.Put("/accounts/:accountUid/credentials/:credentialUid/mimo-console-cookie", handleSetMiMoConsoleCookie(deps))
+	apiGroup.Post("/accounts/:accountUid/credentials/:credentialUid/mimo-console-cookie/refresh", handleRefreshMiMoConsoleCookie(deps))
+	apiGroup.Delete("/accounts/:accountUid/credentials/:credentialUid/mimo-console-cookie", handleClearMiMoConsoleCookie(deps))
+	apiGroup.Put("/accounts/:accountUid/credentials/:credentialUid/compshare-console-cookie", handleSetCompshareConsoleCookie(deps))
+	apiGroup.Post("/accounts/:accountUid/credentials/:credentialUid/compshare-console-cookie/refresh", handleRefreshCompshareConsoleCookie(deps))
+	apiGroup.Delete("/accounts/:accountUid/credentials/:credentialUid/compshare-console-cookie", handleClearCompshareConsoleCookie(deps))
+	apiGroup.Put("/accounts/:accountUid/credentials/:credentialUid/kimi-console-token", handleSetKimiConsoleToken(deps))
+	apiGroup.Post("/accounts/:accountUid/credentials/:credentialUid/kimi-console-token/refresh", handleRefreshKimiConsoleToken(deps))
+	apiGroup.Delete("/accounts/:accountUid/credentials/:credentialUid/kimi-console-token", handleClearKimiConsoleToken(deps))
+	apiGroup.Get("/accounts/:accountUid/deepseek-balance", handleDeepSeekBalance(deps))
 	kinds := []string{"messages", "chat", "responses", "gemini", "images", "vectors"}
 	for _, kind := range kinds {
-		apiGroup.POST("/"+kind+"/channels/auto-add", handleAutoAdd(deps))
-		apiGroup.POST("/"+kind+"/channels/:id/auto-discover", handleAutoDiscover(deps))
-		apiGroup.GET("/"+kind+"/channels/:id/auto-status", handleAutoStatus(deps))
+		apiGroup.Post("/"+kind+"/channels/auto-add", handleAutoAdd(deps))
+		apiGroup.Post("/"+kind+"/channels/:id/auto-discover", handleAutoDiscover(deps))
+		apiGroup.Get("/"+kind+"/channels/:id/auto-status", handleAutoStatus(deps))
 	}
 }
 
@@ -312,13 +313,13 @@ type managedDeepSeekCredentialBalance struct {
 	Error         string                `json:"error,omitempty"`
 }
 
-func handleDeepSeekBalance(deps *AutoManagedDeps) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handleDeepSeekBalance(deps *AutoManagedDeps) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		if deps == nil || deps.CfgManager == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "配置管理器不可用"})
-			return
+			httpbridge.JSON(c, http.StatusServiceUnavailable, fiber.Map{"error": "配置管理器不可用"})
+			return nil
 		}
-		accountUID := strings.TrimSpace(c.Param("accountUid"))
+		accountUID := strings.TrimSpace(httpbridge.Param(c, "accountUid"))
 		cfg := deps.CfgManager.GetConfig()
 		var account *config.ManagedAccountConfig
 		for i := range cfg.ManagedAccounts {
@@ -328,19 +329,19 @@ func handleDeepSeekBalance(deps *AutoManagedDeps) gin.HandlerFunc {
 			}
 		}
 		if account == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "账号不存在"})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "账号不存在"})
+			return nil
 		}
 		if account.ProviderID != "deepseek" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "仅 DeepSeek 自动托管账号支持余额查询"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "仅 DeepSeek 自动托管账号支持余额查询"})
+			return nil
 		}
 
 		client := deps.DeepSeekClient
 		if client == nil {
 			client = NewDeepSeekClient(nil)
 		}
-		ctx, cancel := context.WithTimeout(c.Request.Context(), deepSeekRequestTimeout)
+		ctx, cancel := context.WithTimeout(httpbridge.Request(c).Context(), deepSeekRequestTimeout)
 		defer cancel()
 		balances := make([]managedDeepSeekCredentialBalance, len(account.Credentials))
 		workers := make(chan struct{}, deepSeekBalanceWorkers)
@@ -376,29 +377,31 @@ func handleDeepSeekBalance(deps *AutoManagedDeps) gin.HandlerFunc {
 			}(i, credential)
 		}
 		wg.Wait()
-		c.JSON(http.StatusOK, gin.H{"accountUid": accountUID, "balances": balances})
+		httpbridge.JSON(c, http.StatusOK, fiber.Map{"accountUid": accountUID, "balances": balances})
+		return nil
 	}
 }
 
-func handleRenameAccount(deps *AutoManagedDeps) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handleRenameAccount(deps *AutoManagedDeps) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		if deps == nil || deps.CfgManager == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "配置管理器不可用"})
-			return
+			httpbridge.JSON(c, http.StatusServiceUnavailable, fiber.Map{"error": "配置管理器不可用"})
+			return nil
 		}
 		var req struct {
 			Name string `json:"name"`
 		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "无效的请求体"})
-			return
+		if err := httpbridge.BindJSON(c, &req); err != nil {
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "无效的请求体"})
+			return nil
 		}
-		accountUID := strings.TrimSpace(c.Param("accountUid"))
+		accountUID := strings.TrimSpace(httpbridge.Param(c, "accountUid"))
 		if err := deps.CfgManager.RenameManagedAccount(accountUID, req.Name); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
+			return nil
 		}
-		c.JSON(http.StatusOK, gin.H{"accountUid": accountUID, "name": strings.TrimSpace(req.Name)})
+		httpbridge.JSON(c, http.StatusOK, fiber.Map{"accountUid": accountUID, "name": strings.TrimSpace(req.Name)})
+		return nil
 	}
 }
 
@@ -489,11 +492,11 @@ type managedAccountView struct {
 	EndpointCount int                            `json:"endpointCount"`
 }
 
-func handleListAccounts(deps *AutoManagedDeps) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handleListAccounts(deps *AutoManagedDeps) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		if deps == nil || deps.CfgManager == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "配置管理器不可用"})
-			return
+			httpbridge.JSON(c, http.StatusServiceUnavailable, fiber.Map{"error": "配置管理器不可用"})
+			return nil
 		}
 		cfg := deps.CfgManager.GetConfig()
 		var profileStore *ProfileStore
@@ -559,7 +562,8 @@ func handleListAccounts(deps *AutoManagedDeps) gin.HandlerFunc {
 			}
 			accounts = append(accounts, view)
 		}
-		c.JSON(http.StatusOK, gin.H{"accounts": accounts})
+		httpbridge.JSON(c, http.StatusOK, fiber.Map{"accounts": accounts})
+		return nil
 	}
 }
 
@@ -937,52 +941,52 @@ func compsharePlanView(source *config.CompshareConsoleCredential) *managedCompsh
 	}
 }
 
-func handleSetMiMoConsoleCookie(deps *AutoManagedDeps) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handleSetMiMoConsoleCookie(deps *AutoManagedDeps) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		var req struct {
 			Cookie         string `json:"cookie"`
 			AdoptCookieKey bool   `json:"adoptCookieKey"`
 		}
 		if deps == nil || deps.CfgManager == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "配置管理器不可用"})
-			return
+			httpbridge.JSON(c, http.StatusServiceUnavailable, fiber.Map{"error": "配置管理器不可用"})
+			return nil
 		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "无效的请求体"})
-			return
+		if err := httpbridge.BindJSON(c, &req); err != nil {
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "无效的请求体"})
+			return nil
 		}
-		accountUID, credentialUID := strings.TrimSpace(c.Param("accountUid")), strings.TrimSpace(c.Param("credentialUid"))
+		accountUID, credentialUID := strings.TrimSpace(httpbridge.Param(c, "accountUid")), strings.TrimSpace(httpbridge.Param(c, "credentialUid"))
 		credential, ok := deps.CfgManager.GetManagedAccountCredential(accountUID, credentialUID)
 		if !ok {
-			c.JSON(http.StatusNotFound, gin.H{"error": "推理 Key 凭证不存在"})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "推理 Key 凭证不存在"})
+			return nil
 		}
 		channels := deps.CfgManager.GetAccountChannels(accountUID)
 		if len(channels) == 0 || channels[0].Upstream.ProviderID != "mimo" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "仅 MiMo 自动托管账号支持绑定控制台 Cookie"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "仅 MiMo 自动托管账号支持绑定控制台 Cookie"})
+			return nil
 		}
-		verification, err := mimoConsoleClient(deps).Verify(c.Request.Context(), req.Cookie)
+		verification, err := mimoConsoleClient(deps).Verify(httpbridge.Request(c).Context(), req.Cookie)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
+			return nil
 		}
 		matches := apiKeysEqual(credential.APIKey, verification.APIKey)
 		if !matches && !req.AdoptCookieKey {
-			c.JSON(http.StatusConflict, gin.H{
+			httpbridge.JSON(c, http.StatusConflict, fiber.Map{
 				"error": "Cookie 所属 Token Plan Key 与当前渠道 Key 不一致",
 				"code":  "mimo_cookie_key_mismatch", "currentKeyMask": utils.MaskAPIKey(credential.APIKey),
 				"cookieKeyMask": utils.MaskAPIKey(verification.APIKey),
 			})
-			return
+			return nil
 		}
 		replacementKey := ""
 		if !matches {
 			replacementKey = verification.APIKey
 		}
 		if err := deps.CfgManager.BindManagedAccountMiMoConsole(accountUID, credentialUID, replacementKey, verification.Snapshot); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
+			return nil
 		}
 		// Cookie 采用了新 Key 时，旧 Key 不再属于当前账号，不触发恢复。
 		if replacementKey == "" {
@@ -996,7 +1000,7 @@ func handleSetMiMoConsoleCookie(deps *AutoManagedDeps) gin.HandlerFunc {
 				}
 			}
 		}
-		response := gin.H{
+		response := fiber.Map{
 			"accountUid": accountUID, "credentialUid": credentialUID, "keyAdopted": replacementKey != "",
 			"keyMask": utils.MaskAPIKey(verification.APIKey), "tokenPlan": mimoTokenPlanView(&verification.Snapshot),
 			"discoveryStarted": started,
@@ -1004,51 +1008,54 @@ func handleSetMiMoConsoleCookie(deps *AutoManagedDeps) gin.HandlerFunc {
 		if replacementKey != "" {
 			response["adoptedApiKey"] = replacementKey
 		}
-		c.JSON(http.StatusOK, response)
+		httpbridge.JSON(c, http.StatusOK, response)
+		return nil
 	}
 }
 
-func handleRefreshMiMoConsoleCookie(deps *AutoManagedDeps) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handleRefreshMiMoConsoleCookie(deps *AutoManagedDeps) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		if deps == nil || deps.CfgManager == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "配置管理器不可用"})
-			return
+			httpbridge.JSON(c, http.StatusServiceUnavailable, fiber.Map{"error": "配置管理器不可用"})
+			return nil
 		}
-		accountUID, credentialUID := strings.TrimSpace(c.Param("accountUid")), strings.TrimSpace(c.Param("credentialUid"))
+		accountUID, credentialUID := strings.TrimSpace(httpbridge.Param(c, "accountUid")), strings.TrimSpace(httpbridge.Param(c, "credentialUid"))
 		credential, ok := deps.CfgManager.GetManagedAccountCredential(accountUID, credentialUID)
 		if !ok || credential.MiMoConsole == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "未绑定 MiMo 控制台 Cookie"})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "未绑定 MiMo 控制台 Cookie"})
+			return nil
 		}
-		verification, err := mimoConsoleClient(deps).Verify(c.Request.Context(), credential.MiMoConsole.Cookie)
+		verification, err := mimoConsoleClient(deps).Verify(httpbridge.Request(c).Context(), credential.MiMoConsole.Cookie)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
+			return nil
 		}
 		if !apiKeysEqual(credential.APIKey, verification.APIKey) {
-			c.JSON(http.StatusConflict, gin.H{"error": "Cookie 所属 Key 已变化，请重新绑定并确认是否采用新 Key", "code": "mimo_cookie_key_mismatch"})
-			return
+			httpbridge.JSON(c, http.StatusConflict, fiber.Map{"error": "Cookie 所属 Key 已变化，请重新绑定并确认是否采用新 Key", "code": "mimo_cookie_key_mismatch"})
+			return nil
 		}
 		if err := deps.CfgManager.BindManagedAccountMiMoConsole(accountUID, credentialUID, "", verification.Snapshot); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
+			return nil
 		}
 		config.TryRestoreDisabledKeysByUsage(deps.CfgManager, accountUID, credential.APIKey, credentialUID)
-		c.JSON(http.StatusOK, gin.H{"tokenPlan": mimoTokenPlanView(&verification.Snapshot)})
+		httpbridge.JSON(c, http.StatusOK, fiber.Map{"tokenPlan": mimoTokenPlanView(&verification.Snapshot)})
+		return nil
 	}
 }
 
-func handleClearMiMoConsoleCookie(deps *AutoManagedDeps) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handleClearMiMoConsoleCookie(deps *AutoManagedDeps) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		if deps == nil || deps.CfgManager == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "配置管理器不可用"})
-			return
+			httpbridge.JSON(c, http.StatusServiceUnavailable, fiber.Map{"error": "配置管理器不可用"})
+			return nil
 		}
-		if err := deps.CfgManager.ClearManagedAccountMiMoConsole(strings.TrimSpace(c.Param("accountUid")), strings.TrimSpace(c.Param("credentialUid"))); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
+		if err := deps.CfgManager.ClearManagedAccountMiMoConsole(strings.TrimSpace(httpbridge.Param(c, "accountUid")), strings.TrimSpace(httpbridge.Param(c, "credentialUid"))); err != nil {
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
+			return nil
 		}
-		c.Status(http.StatusNoContent)
+		httpbridge.Status(c, http.StatusNoContent)
+		return nil
 	}
 }
 
@@ -1065,83 +1072,86 @@ func apiKeysEqual(left, right string) bool {
 	return subtle.ConstantTimeCompare(leftHash[:], rightHash[:]) == 1
 }
 
-func handleSetCompshareConsoleCookie(deps *AutoManagedDeps) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handleSetCompshareConsoleCookie(deps *AutoManagedDeps) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		var req struct {
 			Cookie string `json:"cookie"`
 		}
 		if deps == nil || deps.CfgManager == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "配置管理器不可用"})
-			return
+			httpbridge.JSON(c, http.StatusServiceUnavailable, fiber.Map{"error": "配置管理器不可用"})
+			return nil
 		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "无效的请求体"})
-			return
+		if err := httpbridge.BindJSON(c, &req); err != nil {
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "无效的请求体"})
+			return nil
 		}
-		accountUID, credentialUID := strings.TrimSpace(c.Param("accountUid")), strings.TrimSpace(c.Param("credentialUid"))
+		accountUID, credentialUID := strings.TrimSpace(httpbridge.Param(c, "accountUid")), strings.TrimSpace(httpbridge.Param(c, "credentialUid"))
 		credential, ok := deps.CfgManager.GetManagedAccountCredential(accountUID, credentialUID)
 		if !ok {
-			c.JSON(http.StatusNotFound, gin.H{"error": "推理 Key 凭证不存在"})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "推理 Key 凭证不存在"})
+			return nil
 		}
 		channels := deps.CfgManager.GetAccountChannels(accountUID)
 		if len(channels) == 0 || channels[0].Upstream.ProviderID != "compshare" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "仅优云智算自动托管账号支持绑定控制台 Cookie"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "仅优云智算自动托管账号支持绑定控制台 Cookie"})
+			return nil
 		}
-		snapshot, err := compshareConsoleClient(deps).Verify(c.Request.Context(), req.Cookie, credential.APIKey)
+		snapshot, err := compshareConsoleClient(deps).Verify(httpbridge.Request(c).Context(), req.Cookie, credential.APIKey)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
+			return nil
 		}
 		if err := deps.CfgManager.BindManagedAccountCompshareConsole(accountUID, credentialUID, *snapshot); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
+			return nil
 		}
 		config.TryRestoreDisabledKeysByUsage(deps.CfgManager, accountUID, credential.APIKey, credentialUID)
-		c.JSON(http.StatusOK, gin.H{
+		httpbridge.JSON(c, http.StatusOK, fiber.Map{
 			"accountUid": accountUID, "credentialUid": credentialUID, "plan": compsharePlanView(snapshot),
 		})
+		return nil
 	}
 }
 
-func handleRefreshCompshareConsoleCookie(deps *AutoManagedDeps) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handleRefreshCompshareConsoleCookie(deps *AutoManagedDeps) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		if deps == nil || deps.CfgManager == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "配置管理器不可用"})
-			return
+			httpbridge.JSON(c, http.StatusServiceUnavailable, fiber.Map{"error": "配置管理器不可用"})
+			return nil
 		}
-		accountUID, credentialUID := strings.TrimSpace(c.Param("accountUid")), strings.TrimSpace(c.Param("credentialUid"))
+		accountUID, credentialUID := strings.TrimSpace(httpbridge.Param(c, "accountUid")), strings.TrimSpace(httpbridge.Param(c, "credentialUid"))
 		credential, ok := deps.CfgManager.GetManagedAccountCredential(accountUID, credentialUID)
 		if !ok || credential.CompshareConsole == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "未绑定优云智算控制台 Cookie"})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "未绑定优云智算控制台 Cookie"})
+			return nil
 		}
-		snapshot, err := compshareConsoleClient(deps).Verify(c.Request.Context(), credential.CompshareConsole.Cookie, credential.APIKey)
+		snapshot, err := compshareConsoleClient(deps).Verify(httpbridge.Request(c).Context(), credential.CompshareConsole.Cookie, credential.APIKey)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
+			return nil
 		}
 		if err := deps.CfgManager.BindManagedAccountCompshareConsole(accountUID, credentialUID, *snapshot); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
+			return nil
 		}
 		config.TryRestoreDisabledKeysByUsage(deps.CfgManager, accountUID, credential.APIKey, credentialUID)
-		c.JSON(http.StatusOK, gin.H{"plan": compsharePlanView(snapshot)})
+		httpbridge.JSON(c, http.StatusOK, fiber.Map{"plan": compsharePlanView(snapshot)})
+		return nil
 	}
 }
 
-func handleClearCompshareConsoleCookie(deps *AutoManagedDeps) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handleClearCompshareConsoleCookie(deps *AutoManagedDeps) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		if deps == nil || deps.CfgManager == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "配置管理器不可用"})
-			return
+			httpbridge.JSON(c, http.StatusServiceUnavailable, fiber.Map{"error": "配置管理器不可用"})
+			return nil
 		}
-		if err := deps.CfgManager.ClearManagedAccountCompshareConsole(strings.TrimSpace(c.Param("accountUid")), strings.TrimSpace(c.Param("credentialUid"))); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
+		if err := deps.CfgManager.ClearManagedAccountCompshareConsole(strings.TrimSpace(httpbridge.Param(c, "accountUid")), strings.TrimSpace(httpbridge.Param(c, "credentialUid"))); err != nil {
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
+			return nil
 		}
-		c.Status(http.StatusNoContent)
+		httpbridge.Status(c, http.StatusNoContent)
+		return nil
 	}
 }
 
@@ -1152,85 +1162,88 @@ func compshareConsoleClient(deps *AutoManagedDeps) *CompshareConsoleClient {
 	return &CompshareConsoleClient{HTTPClient: &http.Client{Timeout: 10 * time.Second}}
 }
 
-func handleSetKimiConsoleToken(deps *AutoManagedDeps) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handleSetKimiConsoleToken(deps *AutoManagedDeps) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		var req struct {
 			AccessToken string `json:"accessToken"`
 		}
 		if deps == nil || deps.CfgManager == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "配置管理器不可用"})
-			return
+			httpbridge.JSON(c, http.StatusServiceUnavailable, fiber.Map{"error": "配置管理器不可用"})
+			return nil
 		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "无效的请求体"})
-			return
+		if err := httpbridge.BindJSON(c, &req); err != nil {
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "无效的请求体"})
+			return nil
 		}
-		accountUID, credentialUID := strings.TrimSpace(c.Param("accountUid")), strings.TrimSpace(c.Param("credentialUid"))
+		accountUID, credentialUID := strings.TrimSpace(httpbridge.Param(c, "accountUid")), strings.TrimSpace(httpbridge.Param(c, "credentialUid"))
 		credential, ok := deps.CfgManager.GetManagedAccountCredential(accountUID, credentialUID)
 		if !ok {
-			c.JSON(http.StatusNotFound, gin.H{"error": "推理 Key 凭证不存在"})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "推理 Key 凭证不存在"})
+			return nil
 		}
 		channels := deps.CfgManager.GetAccountChannels(accountUID)
 		if len(channels) == 0 || channels[0].Upstream.ProviderID != "kimi" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "仅 Kimi 自动托管账号支持绑定控制台令牌"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "仅 Kimi 自动托管账号支持绑定控制台令牌"})
+			return nil
 		}
-		console, err := kimiConsoleClient(deps).Verify(c.Request.Context(), req.AccessToken)
+		console, err := kimiConsoleClient(deps).Verify(httpbridge.Request(c).Context(), req.AccessToken)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
+			return nil
 		}
 		if err := deps.CfgManager.BindManagedAccountKimiConsole(accountUID, credentialUID, *console); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
+			return nil
 		}
 		config.TryRestoreDisabledKeysByUsage(deps.CfgManager, accountUID, credential.APIKey, credentialUID)
-		c.JSON(http.StatusOK, gin.H{
+		httpbridge.JSON(c, http.StatusOK, fiber.Map{
 			"accountUid": accountUID, "credentialUid": credentialUID, "usage": console.Usage,
 		})
+		return nil
 	}
 }
 
-func handleRefreshKimiConsoleToken(deps *AutoManagedDeps) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handleRefreshKimiConsoleToken(deps *AutoManagedDeps) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		if deps == nil || deps.CfgManager == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "配置管理器不可用"})
-			return
+			httpbridge.JSON(c, http.StatusServiceUnavailable, fiber.Map{"error": "配置管理器不可用"})
+			return nil
 		}
-		accountUID, credentialUID := strings.TrimSpace(c.Param("accountUid")), strings.TrimSpace(c.Param("credentialUid"))
+		accountUID, credentialUID := strings.TrimSpace(httpbridge.Param(c, "accountUid")), strings.TrimSpace(httpbridge.Param(c, "credentialUid"))
 		credential, ok := deps.CfgManager.GetManagedAccountCredential(accountUID, credentialUID)
 		if !ok || credential.KimiConsole == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "未绑定 Kimi 控制台令牌"})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "未绑定 Kimi 控制台令牌"})
+			return nil
 		}
-		console, err := kimiConsoleClient(deps).Verify(c.Request.Context(), credential.KimiConsole.AccessToken)
+		console, err := kimiConsoleClient(deps).Verify(httpbridge.Request(c).Context(), credential.KimiConsole.AccessToken)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
+			return nil
 		}
 		if err := deps.CfgManager.BindManagedAccountKimiConsole(accountUID, credentialUID, *console); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
+			return nil
 		}
 		config.TryRestoreDisabledKeysByUsage(deps.CfgManager, accountUID, credential.APIKey, credentialUID)
-		c.JSON(http.StatusOK, gin.H{"usage": console.Usage})
+		httpbridge.JSON(c, http.StatusOK, fiber.Map{"usage": console.Usage})
+		return nil
 	}
 }
 
-func handleClearKimiConsoleToken(deps *AutoManagedDeps) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handleClearKimiConsoleToken(deps *AutoManagedDeps) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		if deps == nil || deps.CfgManager == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "配置管理器不可用"})
-			return
+			httpbridge.JSON(c, http.StatusServiceUnavailable, fiber.Map{"error": "配置管理器不可用"})
+			return nil
 		}
 		if err := deps.CfgManager.ClearManagedAccountKimiConsole(
-			strings.TrimSpace(c.Param("accountUid")), strings.TrimSpace(c.Param("credentialUid")),
+			strings.TrimSpace(httpbridge.Param(c, "accountUid")), strings.TrimSpace(httpbridge.Param(c, "credentialUid")),
 		); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
+			return nil
 		}
-		c.Status(http.StatusNoContent)
+		httpbridge.Status(c, http.StatusNoContent)
+		return nil
 	}
 }
 
@@ -1241,31 +1254,31 @@ func kimiConsoleClient(deps *AutoManagedDeps) *KimiConsoleClient {
 	return &KimiConsoleClient{HTTPClient: &http.Client{Timeout: 10 * time.Second}}
 }
 
-func handleSetVolcengineAccessKey(deps *AutoManagedDeps) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handleSetVolcengineAccessKey(deps *AutoManagedDeps) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		if deps == nil || deps.CfgManager == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "配置管理器不可用"})
-			return
+			httpbridge.JSON(c, http.StatusServiceUnavailable, fiber.Map{"error": "配置管理器不可用"})
+			return nil
 		}
 		var req struct {
 			AccessKeyID     string `json:"accessKeyId"`
 			SecretAccessKey string `json:"secretAccessKey"`
 		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "无效的请求体"})
-			return
+		if err := httpbridge.BindJSON(c, &req); err != nil {
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "无效的请求体"})
+			return nil
 		}
-		accountUID := strings.TrimSpace(c.Param("accountUid"))
-		credentialUID := strings.TrimSpace(c.Param("credentialUid"))
+		accountUID := strings.TrimSpace(httpbridge.Param(c, "accountUid"))
+		credentialUID := strings.TrimSpace(httpbridge.Param(c, "credentialUid"))
 		channels := deps.CfgManager.GetAccountChannels(accountUID)
 		if len(channels) == 0 || channels[0].Upstream.ProviderID != "volcengine" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "仅火山方舟自动托管账号支持绑定 Access Key"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "仅火山方舟自动托管账号支持绑定 Access Key"})
+			return nil
 		}
 		credential, ok := deps.CfgManager.GetManagedAccountCredential(accountUID, credentialUID)
 		if !ok {
-			c.JSON(http.StatusNotFound, gin.H{"error": "推理 Key 凭证不存在"})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "推理 Key 凭证不存在"})
+			return nil
 		}
 		pair := &config.VolcengineAccessKeyPair{AccessKeyID: strings.TrimSpace(req.AccessKeyID), SecretAccessKey: strings.TrimSpace(req.SecretAccessKey)}
 		planClient := &volcenginePlanClient{}
@@ -1285,21 +1298,21 @@ func handleSetVolcengineAccessKey(deps *AutoManagedDeps) gin.HandlerFunc {
 				break
 			}
 		}
-		buckets, plan, err := planClient.DetectPlans(c.Request.Context(), pair, hint)
+		buckets, plan, err := planClient.DetectPlans(httpbridge.Request(c).Context(), pair, hint)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
+			return nil
 		}
 		if err := deps.CfgManager.SetManagedAccountVolcengineAccessKey(accountUID, credentialUID, req.AccessKeyID, req.SecretAccessKey); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
+			return nil
 		}
 		if err := deps.CfgManager.SetManagedAccountVolcenginePlan(accountUID, credentialUID, plan.Plan, plan.Tier, plan.Status); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
+			httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": err.Error()})
+			return nil
 		}
 		// 逐桶查询用量：单桶失败只记桶级快照，不阻断保存流程。
-		buckets = planClient.FetchBucketsUsage(c.Request.Context(), pair, buckets)
+		buckets = planClient.FetchBucketsUsage(httpbridge.Request(c).Context(), pair, buckets)
 		usage := primaryUsageFromBuckets(buckets, plan.Plan)
 		if usage == nil {
 			usage = &config.VolcenginePlanUsage{FetchedAt: time.Now(), Error: "未查询到主套餐用量"}
@@ -1322,7 +1335,7 @@ func handleSetVolcengineAccessKey(deps *AutoManagedDeps) gin.HandlerFunc {
 				started++
 			}
 		}
-		c.JSON(http.StatusOK, gin.H{
+		httpbridge.JSON(c, http.StatusOK, fiber.Map{
 			"accountUid": accountUID, "credentialUid": credentialUID,
 			"accessKeyIdMask": utils.MaskAPIKey(strings.TrimSpace(req.AccessKeyID)),
 			"plan":            plan.Plan, "planTier": plan.Tier, "planStatus": plan.Status,
@@ -1330,47 +1343,49 @@ func handleSetVolcengineAccessKey(deps *AutoManagedDeps) gin.HandlerFunc {
 			"plans":            buckets,
 			"discoveryStarted": started,
 		})
+		return nil
 	}
 }
 
-func handleClearVolcengineAccessKey(deps *AutoManagedDeps) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handleClearVolcengineAccessKey(deps *AutoManagedDeps) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		if deps == nil || deps.CfgManager == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "配置管理器不可用"})
-			return
+			httpbridge.JSON(c, http.StatusServiceUnavailable, fiber.Map{"error": "配置管理器不可用"})
+			return nil
 		}
-		accountUID := strings.TrimSpace(c.Param("accountUid"))
-		credentialUID := strings.TrimSpace(c.Param("credentialUid"))
+		accountUID := strings.TrimSpace(httpbridge.Param(c, "accountUid"))
+		credentialUID := strings.TrimSpace(httpbridge.Param(c, "credentialUid"))
 		if err := deps.CfgManager.ClearManagedAccountVolcengineAccessKey(accountUID, credentialUID); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
+			return nil
 		}
-		c.Status(http.StatusNoContent)
+		httpbridge.Status(c, http.StatusNoContent)
+		return nil
 	}
 }
 
 const volcenginePlanUsageTTL = 5 * time.Minute
 
-func handleRefreshVolcenginePlanUsage(deps *AutoManagedDeps) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handleRefreshVolcenginePlanUsage(deps *AutoManagedDeps) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		if deps == nil || deps.CfgManager == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "配置管理器不可用"})
-			return
+			httpbridge.JSON(c, http.StatusServiceUnavailable, fiber.Map{"error": "配置管理器不可用"})
+			return nil
 		}
-		accountUID := strings.TrimSpace(c.Param("accountUid"))
-		credentialUID := strings.TrimSpace(c.Param("credentialUid"))
+		accountUID := strings.TrimSpace(httpbridge.Param(c, "accountUid"))
+		credentialUID := strings.TrimSpace(httpbridge.Param(c, "credentialUid"))
 		credential, ok := deps.CfgManager.GetManagedAccountCredential(accountUID, credentialUID)
 		if !ok || credential.VolcengineAccessKey == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "未绑定火山 Access Key"})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "未绑定火山 Access Key"})
+			return nil
 		}
 		accessKey := credential.VolcengineAccessKey
 		// TTL 缓存：距上次成功查询未超过 TTL 时直接返回缓存。
-		force := strings.EqualFold(strings.TrimSpace(c.Query("force")), "true")
+		force := strings.EqualFold(strings.TrimSpace(httpbridge.Query(c, "force")), "true")
 		if !force && accessKey.Usage != nil && accessKey.Usage.Error == "" &&
 			time.Since(accessKey.Usage.FetchedAt) < volcenginePlanUsageTTL {
-			c.JSON(http.StatusOK, gin.H{"usage": accessKey.Usage, "cached": true})
-			return
+			httpbridge.JSON(c, http.StatusOK, fiber.Map{"usage": accessKey.Usage, "cached": true})
+			return nil
 		}
 		pair := &config.VolcengineAccessKeyPair{AccessKeyID: accessKey.AccessKeyID, SecretAccessKey: accessKey.SecretAccessKey}
 		planClient := &volcenginePlanClient{}
@@ -1381,11 +1396,11 @@ func handleRefreshVolcenginePlanUsage(deps *AutoManagedDeps) gin.HandlerFunc {
 		// 多桶快照存在时逐桶刷新（单桶失败只记桶级快照）；旧数据或主桶缺失退回单桶查询。
 		var buckets []config.VolcenginePlanBucket
 		if len(accessKey.Plans) > 0 {
-			buckets = planClient.FetchBucketsUsage(c.Request.Context(), pair, accessKey.Plans)
+			buckets = planClient.FetchBucketsUsage(httpbridge.Request(c).Context(), pair, accessKey.Plans)
 		}
 		usage := primaryUsageFromBuckets(buckets, accessKey.Plan)
 		if usage == nil {
-			u, err := planClient.FetchUsage(c.Request.Context(), pair, accessKey.Plan)
+			u, err := planClient.FetchUsage(httpbridge.Request(c).Context(), pair, accessKey.Plan)
 			if err != nil {
 				u = &config.VolcenginePlanUsage{FetchedAt: time.Now(), Error: err.Error()}
 				log.Printf("[Volcengine-Usage] 查询套餐用量失败: account=%s credential=%s err=%v", accountUID, credentialUID, err)
@@ -1404,30 +1419,31 @@ func handleRefreshVolcenginePlanUsage(deps *AutoManagedDeps) gin.HandlerFunc {
 			config.TryRestoreDisabledKeysByUsage(deps.CfgManager, accountUID, credential.APIKey, credentialUID)
 		}
 		if usage.Error != "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": usage.Error, "usage": usage})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": usage.Error, "usage": usage})
+			return nil
 		}
-		c.JSON(http.StatusOK, gin.H{"usage": usage, "cached": false, "plans": buckets})
+		httpbridge.JSON(c, http.StatusOK, fiber.Map{"usage": usage, "cached": false, "plans": buckets})
+		return nil
 	}
 }
 
-func handleDeleteAccount(deps *AutoManagedDeps) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handleDeleteAccount(deps *AutoManagedDeps) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		if deps == nil || deps.CfgManager == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "配置管理器不可用"})
-			return
+			httpbridge.JSON(c, http.StatusServiceUnavailable, fiber.Map{"error": "配置管理器不可用"})
+			return nil
 		}
-		accountUID := strings.TrimSpace(c.Param("accountUid"))
+		accountUID := strings.TrimSpace(httpbridge.Param(c, "accountUid"))
 		channels := deps.CfgManager.GetAccountChannels(accountUID)
 		if len(channels) == 0 {
-			c.JSON(http.StatusNotFound, gin.H{"error": "账号不存在"})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "账号不存在"})
+			return nil
 		}
 		// 只级联删除自动托管渠道；非托管渠道保留并解除账号关联，避免误删用户手工渠道。
 		removed, skipped, err := deps.CfgManager.DeleteAccountChannels(accountUID)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
+			httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": err.Error()})
+			return nil
 		}
 		if deps.Runner != nil && deps.Runner.store != nil {
 			if err := deps.Runner.store.DeleteByAccount(accountUID); err != nil {
@@ -1442,12 +1458,13 @@ func handleDeleteAccount(deps *AutoManagedDeps) gin.HandlerFunc {
 			}
 		}
 		log.Printf("[AutoManaged-Delete] 已删除自动托管账号 account=%s deletedChannels=%d skippedNonManaged=%d", accountUID, len(removed), len(skipped))
-		c.JSON(http.StatusOK, gin.H{
+		httpbridge.JSON(c, http.StatusOK, fiber.Map{
 			"accountUid":        accountUID,
 			"deletedChannels":   len(removed),
 			"skippedChannels":   skipped,
 			"skippedChannelNum": len(skipped),
 		})
+		return nil
 	}
 }
 
@@ -1475,30 +1492,31 @@ type updateAccountResponse struct {
 
 // respondAccountUpdateError 输出账号更新错误；新增 key 验证失败时附加结构化标识，
 // 供前端识别并给出"仍要保存"入口。
-func respondAccountUpdateError(c *gin.Context, status int, err error) {
-	payload := gin.H{"error": err.Error()}
+func respondAccountUpdateError(c fiber.Ctx, status int, err error) {
+	payload := fiber.Map{"error": err.Error()}
 	var kvErr *KeyVerifyError
 	if errors.As(err, &kvErr) {
 		payload["verifyFailure"] = true
 		payload["authFailed"] = kvErr.AuthFailed
 	}
-	c.JSON(status, payload)
+	httpbridge.JSON(c, status, payload)
 }
 
 // handleUpdateAccount 在账号范围原子替换凭证集合，并只为新增 Key 探测各协议 route。
-func handleUpdateAccount(deps *AutoManagedDeps) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handleUpdateAccount(deps *AutoManagedDeps) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		var req updateAccountRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "无效的请求体"})
-			return
+		if err := httpbridge.BindJSON(c, &req); err != nil {
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "无效的请求体"})
+			return nil
 		}
-		response, status, err := applyManagedAccountUpdate(c.Request.Context(), deps, strings.TrimSpace(c.Param("accountUid")), req)
+		response, status, err := applyManagedAccountUpdate(httpbridge.Request(c).Context(), deps, strings.TrimSpace(httpbridge.Param(c, "accountUid")), req)
 		if err != nil {
 			respondAccountUpdateError(c, status, err)
-			return
+			return nil
 		}
-		c.JSON(http.StatusOK, response)
+		httpbridge.JSON(c, http.StatusOK, response)
+		return nil
 	}
 }
 
@@ -1727,55 +1745,56 @@ func planManagedAccountUpdates(
 	return updates, http.StatusOK, nil
 }
 
-func handleAddAccountCredentials(deps *AutoManagedDeps) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handleAddAccountCredentials(deps *AutoManagedDeps) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		if deps == nil || deps.CfgManager == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "配置管理器不可用"})
-			return
+			httpbridge.JSON(c, http.StatusServiceUnavailable, fiber.Map{"error": "配置管理器不可用"})
+			return nil
 		}
 		var req struct {
 			APIKeys []string `json:"apiKeys"`
 		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "无效的请求体"})
-			return
+		if err := httpbridge.BindJSON(c, &req); err != nil {
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "无效的请求体"})
+			return nil
 		}
-		accountUID := strings.TrimSpace(c.Param("accountUid"))
+		accountUID := strings.TrimSpace(httpbridge.Param(c, "accountUid"))
 		channels := deps.CfgManager.GetAccountChannels(accountUID)
 		if len(channels) == 0 {
-			c.JSON(http.StatusNotFound, gin.H{"error": "账号不存在"})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "账号不存在"})
+			return nil
 		}
 		desired := append([]string(nil), channels[0].Upstream.APIKeys...)
 		desired = append(desired, req.APIKeys...)
-		response, status, err := applyManagedAccountUpdate(c.Request.Context(), deps, accountUID, updateAccountRequest{APIKeys: desired})
+		response, status, err := applyManagedAccountUpdate(httpbridge.Request(c).Context(), deps, accountUID, updateAccountRequest{APIKeys: desired})
 		if err != nil {
 			respondAccountUpdateError(c, status, err)
-			return
+			return nil
 		}
-		c.JSON(http.StatusCreated, response)
+		httpbridge.JSON(c, http.StatusCreated, response)
+		return nil
 	}
 }
 
-func handlePatchAccountCredentials(deps *AutoManagedDeps) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handlePatchAccountCredentials(deps *AutoManagedDeps) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		if deps == nil || deps.CfgManager == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "配置管理器不可用"})
-			return
+			httpbridge.JSON(c, http.StatusServiceUnavailable, fiber.Map{"error": "配置管理器不可用"})
+			return nil
 		}
 		var req struct {
 			AddAPIKeys           []string `json:"addApiKeys"`
 			RemoveCredentialUIDs []string `json:"removeCredentialUids"`
 		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "无效的请求体"})
-			return
+		if err := httpbridge.BindJSON(c, &req); err != nil {
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "无效的请求体"})
+			return nil
 		}
-		accountUID := strings.TrimSpace(c.Param("accountUid"))
+		accountUID := strings.TrimSpace(httpbridge.Param(c, "accountUid"))
 		channels := deps.CfgManager.GetAccountChannels(accountUID)
 		if len(channels) == 0 {
-			c.JSON(http.StatusNotFound, gin.H{"error": "账号不存在"})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "账号不存在"})
+			return nil
 		}
 		removeSet := make(map[string]bool, len(req.RemoveCredentialUIDs))
 		for _, uid := range req.RemoveCredentialUIDs {
@@ -1791,21 +1810,22 @@ func handlePatchAccountCredentials(deps *AutoManagedDeps) gin.HandlerFunc {
 			desired = append(desired, keyConfig.Key)
 		}
 		if len(removedKeys) != len(removeSet) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "包含不存在的 credentialUid"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "包含不存在的 credentialUid"})
+			return nil
 		}
 		desired = append(desired, req.AddAPIKeys...)
 		if len(uniqueNonEmptyStrings(desired)) == 0 {
-			c.JSON(http.StatusConflict, gin.H{"error": "账号至少需要保留一个 Key"})
-			return
+			httpbridge.JSON(c, http.StatusConflict, fiber.Map{"error": "账号至少需要保留一个 Key"})
+			return nil
 		}
-		response, status, err := applyManagedAccountUpdate(c.Request.Context(), deps, accountUID, updateAccountRequest{APIKeys: desired})
+		response, status, err := applyManagedAccountUpdate(httpbridge.Request(c).Context(), deps, accountUID, updateAccountRequest{APIKeys: desired})
 		if err != nil {
 			respondAccountUpdateError(c, status, err)
-			return
+			return nil
 		}
 		cleanupRemovedCredentialProfiles(deps, accountUID, channels, removedKeys)
-		c.JSON(http.StatusOK, response)
+		httpbridge.JSON(c, http.StatusOK, response)
+		return nil
 	}
 }
 
@@ -1830,18 +1850,18 @@ func cleanupRemovedCredentialProfiles(deps *AutoManagedDeps, accountUID string, 
 	}
 }
 
-func handleDeleteAccountCredential(deps *AutoManagedDeps) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handleDeleteAccountCredential(deps *AutoManagedDeps) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		if deps == nil || deps.CfgManager == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "配置管理器不可用"})
-			return
+			httpbridge.JSON(c, http.StatusServiceUnavailable, fiber.Map{"error": "配置管理器不可用"})
+			return nil
 		}
-		accountUID := strings.TrimSpace(c.Param("accountUid"))
-		credentialUID := strings.TrimSpace(c.Param("credentialUid"))
+		accountUID := strings.TrimSpace(httpbridge.Param(c, "accountUid"))
+		credentialUID := strings.TrimSpace(httpbridge.Param(c, "credentialUid"))
 		channels := deps.CfgManager.GetAccountChannels(accountUID)
 		if len(channels) == 0 {
-			c.JSON(http.StatusNotFound, gin.H{"error": "账号不存在"})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "账号不存在"})
+			return nil
 		}
 		var removeKey string
 		for _, keyConfig := range channels[0].Upstream.APIKeyConfigs {
@@ -1851,8 +1871,8 @@ func handleDeleteAccountCredential(deps *AutoManagedDeps) gin.HandlerFunc {
 			}
 		}
 		if removeKey == "" {
-			c.JSON(http.StatusNotFound, gin.H{"error": "凭证不存在"})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "凭证不存在"})
+			return nil
 		}
 		var desired []string
 		for _, key := range channels[0].Upstream.APIKeys {
@@ -1861,16 +1881,17 @@ func handleDeleteAccountCredential(deps *AutoManagedDeps) gin.HandlerFunc {
 			}
 		}
 		if len(desired) == 0 {
-			c.JSON(http.StatusConflict, gin.H{"error": "不能删除账号的最后一个 Key，请删除整个账号"})
-			return
+			httpbridge.JSON(c, http.StatusConflict, fiber.Map{"error": "不能删除账号的最后一个 Key，请删除整个账号"})
+			return nil
 		}
-		response, status, err := applyManagedAccountUpdate(c.Request.Context(), deps, accountUID, updateAccountRequest{APIKeys: desired})
+		response, status, err := applyManagedAccountUpdate(httpbridge.Request(c).Context(), deps, accountUID, updateAccountRequest{APIKeys: desired})
 		if err != nil {
 			respondAccountUpdateError(c, status, err)
-			return
+			return nil
 		}
 		cleanupRemovedCredentialProfiles(deps, accountUID, channels, map[string]string{credentialUID: removeKey})
-		c.JSON(http.StatusOK, response)
+		httpbridge.JSON(c, http.StatusOK, response)
+		return nil
 	}
 }
 
@@ -1929,8 +1950,8 @@ var validChannelKinds = map[string]bool{
 
 // extractKindFromPath 从请求路径中提取 kind。
 // 路径格式：/api/{kind}/channels/...
-func extractKindFromPath(c *gin.Context) string {
-	path := c.Request.URL.Path
+func extractKindFromPath(c fiber.Ctx) string {
+	path := httpbridge.Request(c).URL.Path
 	parts := strings.Split(strings.Trim(path, "/"), "/")
 	// 路径格式：api/{kind}/channels/...
 	// parts[0]="api", parts[1]=kind
@@ -1944,41 +1965,42 @@ func extractKindFromPath(c *gin.Context) string {
 
 // handleAutoAdd POST /{kind}/channels/auto-add
 // 创建自动托管渠道并异步触发发现。
-func handleAutoAdd(deps *AutoManagedDeps) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handleAutoAdd(deps *AutoManagedDeps) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		kind := extractKindFromPath(c)
 		if !validChannelKinds[kind] {
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("不支持的渠道类型: %s", kind)})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": fmt.Sprintf("不支持的渠道类型: %s", kind)})
+			return nil
 		}
 
 		var req AutoAddRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "无效的请求体"})
-			return
+		if err := httpbridge.BindJSON(c, &req); err != nil {
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "无效的请求体"})
+			return nil
 		}
 		req.ProviderID = strings.ToLower(strings.TrimSpace(req.ProviderID))
 		req.BaseURLs = uniqueNonEmptyStrings(req.BaseURLs)
 		req.APIKeys = uniqueNonEmptyStrings(req.APIKeys)
 		if len(req.APIKeys) == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "apiKeys 不能为空"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "apiKeys 不能为空"})
+			return nil
 		}
 		if req.ProviderID == "" {
 			req.ProviderID = inferAutoAddProviderID(req.BaseURLs, req.APIKeys)
 		}
 		// provider 模板模式无需 baseUrls（由模板判定）；自定义模式必须带 baseUrls
 		if req.ProviderID == "" && len(req.BaseURLs) == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "baseUrls 不能为空"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "baseUrls 不能为空"})
+			return nil
 		}
 
 		if req.ProviderID != "" {
 			handleProviderAutoAdd(c, deps, kind, req)
-			return
+			return nil
 		}
 
 		handleCustomAutoAdd(c, deps, kind, req)
+		return nil
 	}
 }
 
@@ -2009,15 +2031,15 @@ func inferAutoAddProviderID(baseURLs, apiKeys []string) string {
 	return providerID
 }
 
-func handleCustomAutoAdd(c *gin.Context, deps *AutoManagedDeps, requestKind string, req AutoAddRequest) {
+func handleCustomAutoAdd(c fiber.Ctx, deps *AutoManagedDeps, requestKind string, req AutoAddRequest) {
 	routes, err := normalizeCustomAutoAddRoutes(requestKind, req.Routes)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
 		return
 	}
 	baseURLs := uniqueNonEmptyStrings(req.BaseURLs)
 	if len(baseURLs) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "baseUrls 不能为空"})
+		httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "baseUrls 不能为空"})
 		return
 	}
 	baseName := strings.TrimSpace(req.Name)
@@ -2034,7 +2056,7 @@ func handleCustomAutoAdd(c *gin.Context, deps *AutoManagedDeps, requestKind stri
 	for _, route := range routes {
 		name := customAutoAddRouteName(baseName, route.ChannelKind, multiRoute)
 		if channelNameExists(getChannelSlice(cfg, route.ChannelKind), name) {
-			c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("渠道名称 '%s' 已存在", name)})
+			httpbridge.JSON(c, http.StatusConflict, fiber.Map{"error": fmt.Sprintf("渠道名称 '%s' 已存在", name)})
 			return
 		}
 	}
@@ -2054,7 +2076,7 @@ func handleCustomAutoAdd(c *gin.Context, deps *AutoManagedDeps, requestKind stri
 		additions = append(additions, config.AccountChannelAddition{Kind: route.ChannelKind, Upstream: upstream, Placement: req.Placement})
 	}
 	if err := deps.CfgManager.ApplyAccountChannelChanges(accountUID, nil, additions); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("创建渠道失败: %v", err)})
+		httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": fmt.Sprintf("创建渠道失败: %v", err)})
 		return
 	}
 
@@ -2078,14 +2100,14 @@ func handleCustomAutoAdd(c *gin.Context, deps *AutoManagedDeps, requestKind stri
 			addition.Kind, upstream.ServiceType, len(upstream.SupportedModels), upstream.Name, upstream.ChannelUID)
 	}
 	primary := primaryAutoAddResult(results, requestKind)
-	c.JSON(http.StatusCreated, AutoAddResponse{
+	httpbridge.JSON(c, http.StatusCreated, AutoAddResponse{
 		AccountUID: accountUID, ChannelUID: primary.ChannelUID, Index: primary.Index,
 		DiscoveryStarted: primary.DiscoveryStarted, Channels: results,
 	})
 }
 
 func handleExistingCustomAutoAdd(
-	c *gin.Context,
+	c fiber.Ctx,
 	deps *AutoManagedDeps,
 	requestKind string,
 	req AutoAddRequest,
@@ -2102,7 +2124,7 @@ func handleExistingCustomAutoAdd(
 }
 
 func appendCredentialsToCustomAccount(
-	c *gin.Context,
+	c fiber.Ctx,
 	deps *AutoManagedDeps,
 	requestKind string,
 	req AutoAddRequest,
@@ -2111,7 +2133,7 @@ func appendCredentialsToCustomAccount(
 ) {
 	channels := deps.CfgManager.GetAccountChannels(accountUID)
 	if len(channels) == 0 {
-		c.JSON(http.StatusNotFound, gin.H{"error": "已有自动托管账号不存在"})
+		httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "已有自动托管账号不存在"})
 		return
 	}
 
@@ -2135,7 +2157,7 @@ func appendCredentialsToCustomAccount(
 		Name: baseName, APIKeys: desiredKeys,
 	}, channels, totalRouteCount)
 	if err != nil {
-		c.JSON(status, gin.H{"error": err.Error()})
+		httpbridge.JSON(c, status, fiber.Map{"error": err.Error()})
 		return
 	}
 
@@ -2148,7 +2170,7 @@ func appendCredentialsToCustomAccount(
 		}
 		name := customAutoAddRouteName(baseName, route.ChannelKind, totalRouteCount > 1)
 		if channelNameExists(getChannelSlice(deps.CfgManager.GetConfig(), route.ChannelKind), name) {
-			c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("渠道名称 '%s' 已存在", name)})
+			httpbridge.JSON(c, http.StatusConflict, fiber.Map{"error": fmt.Sprintf("渠道名称 '%s' 已存在", name)})
 			return
 		}
 		upstream := buildCustomManagedProtocolRoute(config.UpstreamConfig{
@@ -2161,13 +2183,13 @@ func appendCredentialsToCustomAccount(
 		additions = append(additions, config.AccountChannelAddition{Kind: route.ChannelKind, Upstream: upstream, Placement: req.Placement})
 	}
 
-	if _, err := verifyAddedKeysForUpdates(c.Request.Context(), deps, channels, updates); err != nil {
+	if _, err := verifyAddedKeysForUpdates(httpbridge.Request(c).Context(), deps, channels, updates); err != nil {
 		respondAccountUpdateError(c, http.StatusBadRequest, err)
 		return
 	}
 	changed := channelsWithAddedKeys(channels, desiredKeys)
 	if err := deps.CfgManager.ApplyAccountChannelChanges(accountUID, updates, additions); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("追加渠道密钥失败: %v", err)})
+		httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": fmt.Sprintf("追加渠道密钥失败: %v", err)})
 		return
 	}
 	resetChangedChannelMetrics(deps, changed)
@@ -2187,7 +2209,7 @@ func customAutoAddKeyConfigs(accountUID string, apiKeys []string, baseURL string
 }
 
 func appendCredentialsToLegacyChannels(
-	c *gin.Context,
+	c fiber.Ctx,
 	deps *AutoManagedDeps,
 	requestKind string,
 	req AutoAddRequest,
@@ -2198,7 +2220,7 @@ func appendCredentialsToLegacyChannels(
 	for _, match := range matches {
 		channels = append(channels, config.AccountChannel{Kind: match.Kind, Upstream: match.Upstream})
 	}
-	if _, err := verifyNewKeysForChannels(c.Request.Context(), deps, channels, desiredKeys); err != nil {
+	if _, err := verifyNewKeysForChannels(httpbridge.Request(c).Context(), deps, channels, desiredKeys); err != nil {
 		respondAccountUpdateError(c, http.StatusBadRequest, err)
 		return
 	}
@@ -2213,7 +2235,7 @@ func appendCredentialsToLegacyChannels(
 				continue
 			}
 			if err := appendAPIKeyToExistingChannel(deps.CfgManager, match.Kind, match.Index, apiKey); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("向已有渠道追加密钥失败: %v", err)})
+				httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": fmt.Sprintf("向已有渠道追加密钥失败: %v", err)})
 				return
 			}
 			existingKeys[apiKey] = true
@@ -2241,7 +2263,7 @@ func appendCredentialsToLegacyChannels(
 		})
 	}
 	primary := primaryAutoAddResult(results, requestKind)
-	c.JSON(http.StatusOK, AutoAddResponse{
+	httpbridge.JSON(c, http.StatusOK, AutoAddResponse{
 		AccountUID: primary.AccountUID, ChannelUID: primary.ChannelUID, Index: primary.Index,
 		DiscoveryStarted: primary.DiscoveryStarted, Channels: results,
 	})
@@ -2366,7 +2388,7 @@ func seedAutoAddRateLimitHint(
 	}
 }
 
-func respondAutoAddAccountChannels(c *gin.Context, deps *AutoManagedDeps, requestKind, accountUID string) {
+func respondAutoAddAccountChannels(c fiber.Ctx, deps *AutoManagedDeps, requestKind, accountUID string) {
 	channels := deps.CfgManager.GetAccountChannels(accountUID)
 	cfg := deps.CfgManager.GetConfig()
 	results := make([]AutoAddChannelResult, 0, len(channels))
@@ -2380,7 +2402,7 @@ func respondAutoAddAccountChannels(c *gin.Context, deps *AutoManagedDeps, reques
 		})
 	}
 	primary := primaryAutoAddResult(results, requestKind)
-	c.JSON(http.StatusOK, AutoAddResponse{
+	httpbridge.JSON(c, http.StatusOK, AutoAddResponse{
 		AccountUID: accountUID, ChannelUID: primary.ChannelUID, Index: primary.Index,
 		DiscoveryStarted: primary.DiscoveryStarted, Channels: results,
 	})
@@ -2415,19 +2437,19 @@ func normalizeCustomAutoAddRoutes(requestKind string, requested []AutoAddRouteRe
 	return routes, nil
 }
 
-func handleProviderAutoAdd(c *gin.Context, deps *AutoManagedDeps, requestKind string, req AutoAddRequest) {
+func handleProviderAutoAdd(c fiber.Ctx, deps *AutoManagedDeps, requestKind string, req AutoAddRequest) {
 	tmpl, ok := config.GetProviderTemplate(req.ProviderID)
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("未知的 provider: %s", req.ProviderID)})
+		httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": fmt.Sprintf("未知的 provider: %s", req.ProviderID)})
 		return
 	}
 	routes := tmpl.AutoAddRoutes()
 	if len(routes) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("provider %s 未配置可添加的渠道 route", req.ProviderID)})
+		httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": fmt.Sprintf("provider %s 未配置可添加的渠道 route", req.ProviderID)})
 		return
 	}
 	if !tmpl.SupportsChannelKind(requestKind) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("provider %s 不支持添加到 %s 渠道", req.ProviderID, requestKind)})
+		httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": fmt.Sprintf("provider %s 不支持添加到 %s 渠道", req.ProviderID, requestKind)})
 		return
 	}
 	if accountUID := managedAccountUIDForProvider(deps.CfgManager.GetConfig(), tmpl.ProviderID); accountUID != "" {
@@ -2443,7 +2465,7 @@ func handleProviderAutoAdd(c *gin.Context, deps *AutoManagedDeps, requestKind st
 	for _, route := range routes {
 		name := providerRouteName(baseName, route, len(routes) > 1)
 		if channelNameExists(getChannelSlice(cfg, route.ChannelKind), name) {
-			c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("渠道名称 '%s' 已存在", name)})
+			httpbridge.JSON(c, http.StatusConflict, fiber.Map{"error": fmt.Sprintf("渠道名称 '%s' 已存在", name)})
 			return
 		}
 	}
@@ -2456,9 +2478,9 @@ func handleProviderAutoAdd(c *gin.Context, deps *AutoManagedDeps, requestKind st
 	}
 	planned := make([]plannedRoute, 0, len(routes))
 	for _, route := range routes {
-		keyConfigs, baseURLs, verr := verifyProviderRouteKeys(c.Request.Context(), tmpl, route, req.APIKeys)
+		keyConfigs, baseURLs, verr := verifyProviderRouteKeys(httpbridge.Request(c).Context(), tmpl, route, req.APIKeys)
 		if verr != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": verr.Error()})
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": verr.Error()})
 			return
 		}
 		planned = append(planned, plannedRoute{
@@ -2497,7 +2519,7 @@ func handleProviderAutoAdd(c *gin.Context, deps *AutoManagedDeps, requestKind st
 		additions = append(additions, config.AccountChannelAddition{Kind: item.route.ChannelKind, Upstream: upstream, Placement: req.Placement})
 	}
 	if err := deps.CfgManager.ApplyAccountChannelChanges(accountUID, nil, additions); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("创建渠道失败: %v", err)})
+		httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": fmt.Sprintf("创建渠道失败: %v", err)})
 		return
 	}
 
@@ -2521,7 +2543,7 @@ func handleProviderAutoAdd(c *gin.Context, deps *AutoManagedDeps, requestKind st
 	}
 
 	primary := primaryAutoAddResult(results, requestKind)
-	c.JSON(http.StatusCreated, AutoAddResponse{
+	httpbridge.JSON(c, http.StatusCreated, AutoAddResponse{
 		AccountUID:       accountUID,
 		ChannelUID:       primary.ChannelUID,
 		Index:            primary.Index,
@@ -2544,10 +2566,10 @@ func managedAccountUIDForProvider(cfg config.Config, providerID string) string {
 	return uid
 }
 
-func appendCredentialsToProviderAccount(c *gin.Context, deps *AutoManagedDeps, requestKind, accountUID string, apiKeys []string) {
+func appendCredentialsToProviderAccount(c fiber.Ctx, deps *AutoManagedDeps, requestKind, accountUID string, apiKeys []string) {
 	channels := deps.CfgManager.GetAccountChannels(accountUID)
 	if len(channels) == 0 {
-		c.JSON(http.StatusNotFound, gin.H{"error": "provider 账号不存在"})
+		httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "provider 账号不存在"})
 		return
 	}
 	var desired []string
@@ -2557,25 +2579,25 @@ func appendCredentialsToProviderAccount(c *gin.Context, deps *AutoManagedDeps, r
 	desired = uniqueNonEmptyStrings(append(desired, apiKeys...))
 	tmpl, ok := config.GetProviderTemplate(channels[0].Upstream.ProviderID)
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "provider 模板不存在"})
+		httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "provider 模板不存在"})
 		return
 	}
-	additions, status, err := planProviderAccountRouteAdditions(c.Request.Context(), deps.CfgManager.GetConfig(), tmpl, accountUID, desired, channels)
+	additions, status, err := planProviderAccountRouteAdditions(httpbridge.Request(c).Context(), deps.CfgManager.GetConfig(), tmpl, accountUID, desired, channels)
 	if err != nil {
-		c.JSON(status, gin.H{"error": err.Error()})
+		httpbridge.JSON(c, status, fiber.Map{"error": err.Error()})
 		return
 	}
 	accountName := strings.TrimSuffix(channels[0].Upstream.Name, accountRouteSuffix(channels[0].Kind))
-	updates, status, err := planManagedAccountUpdates(c.Request.Context(), accountUID, updateAccountRequest{
+	updates, status, err := planManagedAccountUpdates(httpbridge.Request(c).Context(), accountUID, updateAccountRequest{
 		Name: accountName, APIKeys: desired,
 	}, channels, tmpl, len(channels)+len(additions))
 	if err != nil {
-		c.JSON(status, gin.H{"error": err.Error()})
+		httpbridge.JSON(c, status, fiber.Map{"error": err.Error()})
 		return
 	}
 	changed := channelsWithAddedKeys(channels, desired)
 	if err := deps.CfgManager.ApplyAccountChannelChanges(accountUID, updates, additions); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": err.Error()})
 		return
 	}
 	resetChangedChannelMetrics(deps, changed)
@@ -2601,7 +2623,7 @@ func appendCredentialsToProviderAccount(c *gin.Context, deps *AutoManagedDeps, r
 	}
 	primary := primaryAutoAddResult(results, requestKind)
 	log.Printf("[AutoManaged-Add] 已向 provider 账号追加凭证: provider=%s account=%s keys=%d", channels[0].Upstream.ProviderID, accountUID, len(apiKeys))
-	c.JSON(http.StatusOK, AutoAddResponse{
+	httpbridge.JSON(c, http.StatusOK, AutoAddResponse{
 		AccountUID: accountUID, ChannelUID: primary.ChannelUID, Index: primary.Index,
 		DiscoveryStarted: primary.DiscoveryStarted, Channels: results,
 	})
@@ -2907,36 +2929,36 @@ func primaryAutoAddResult(results []AutoAddChannelResult, requestKind string) Au
 
 // handleAutoDiscover POST /{kind}/channels/:id/auto-discover
 // 重新触发发现。
-func handleAutoDiscover(deps *AutoManagedDeps) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handleAutoDiscover(deps *AutoManagedDeps) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		kind := extractKindFromPath(c)
 		if !validChannelKinds[kind] {
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("不支持的渠道类型: %s", kind)})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": fmt.Sprintf("不支持的渠道类型: %s", kind)})
+			return nil
 		}
 
 		cfg := deps.CfgManager.GetConfig()
 		channels := getChannelSlice(cfg, kind)
-		id, found := findChannelIndex(channels, c.Param("id"))
+		id, found := findChannelIndex(channels, httpbridge.Param(c, "id"))
 		if !found {
-			c.JSON(http.StatusNotFound, gin.H{"error": "渠道不存在"})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "渠道不存在"})
+			return nil
 		}
 
 		channel := channels[id]
 		if deps.Runner == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "发现服务未就绪"})
-			return
+			httpbridge.JSON(c, http.StatusServiceUnavailable, fiber.Map{"error": "发现服务未就绪"})
+			return nil
 		}
 
 		started, err := deps.Runner.TriggerDiscoveryWithStatus(channel.ChannelUID, &channel, deps.CfgManager)
 		if err != nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": fmt.Sprintf("发现任务持久化失败: %v", err)})
-			return
+			httpbridge.JSON(c, http.StatusServiceUnavailable, fiber.Map{"error": fmt.Sprintf("发现任务持久化失败: %v", err)})
+			return nil
 		}
 		if !started {
-			c.JSON(http.StatusConflict, gin.H{"error": "发现任务已在运行中"})
-			return
+			httpbridge.JSON(c, http.StatusConflict, fiber.Map{"error": "发现任务已在运行中"})
+			return nil
 		}
 
 		log.Printf("[AutoManaged-Discover] 重新触发发现: kind=%s id=%d uid=%s", kind, id, channel.ChannelUID)
@@ -2944,7 +2966,7 @@ func handleAutoDiscover(deps *AutoManagedDeps) gin.HandlerFunc {
 		// 「重新发现」的语义是刷新整个逻辑渠道：对同一逻辑渠道下的兄弟协议上游
 		// 幂等联动触发（started=false 表示已在运行，不算错误），否则用户点一次按钮
 		// 只有本条协议上游被刷新，chat/responses 等兄弟上游的清单会永久滞留。
-		triggered := []gin.H{{"kind": kind, "channelUid": channel.ChannelUID}}
+		triggered := []fiber.Map{{"kind": kind, "channelUid": channel.ChannelUID}}
 		currentCfg := deps.CfgManager.GetConfig()
 		for _, siblingUID := range deps.CfgManager.LogicalSiblingChannelUIDs(channel.ChannelUID) {
 			if siblingUID == channel.ChannelUID {
@@ -2961,33 +2983,33 @@ func handleAutoDiscover(deps *AutoManagedDeps) gin.HandlerFunc {
 				log.Printf("[AutoManaged-Discover] 兄弟渠道 %s 触发发现失败: %v", siblingUID, err)
 				continue
 			}
-			triggered = append(triggered, gin.H{"kind": siblingKind, "channelUid": siblingUID})
+			triggered = append(triggered, fiber.Map{"kind": siblingKind, "channelUid": siblingUID})
 		}
-
-		c.JSON(http.StatusOK, gin.H{
+		httpbridge.JSON(c, http.StatusOK, fiber.Map{
 			"channelUid":       channel.ChannelUID,
 			"discoveryStarted": true,
 			"triggered":        triggered,
 		})
+		return nil
 	}
 }
 
 // handleAutoStatus GET /{kind}/channels/:id/auto-status
 // 返回自动托管状态和发现结果。
-func handleAutoStatus(deps *AutoManagedDeps) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handleAutoStatus(deps *AutoManagedDeps) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		kind := extractKindFromPath(c)
 		if !validChannelKinds[kind] {
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("不支持的渠道类型: %s", kind)})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": fmt.Sprintf("不支持的渠道类型: %s", kind)})
+			return nil
 		}
 
 		cfg := deps.CfgManager.GetConfig()
 		channels := getChannelSlice(cfg, kind)
-		id, found := findChannelIndex(channels, c.Param("id"))
+		id, found := findChannelIndex(channels, httpbridge.Param(c, "id"))
 		if !found {
-			c.JSON(http.StatusNotFound, gin.H{"error": "渠道不存在"})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "渠道不存在"})
+			return nil
 		}
 
 		channel := channels[id]
@@ -3025,8 +3047,8 @@ func handleAutoStatus(deps *AutoManagedDeps) gin.HandlerFunc {
 				resp.Discovery = info
 			}
 		}
-
-		c.JSON(http.StatusOK, resp)
+		httpbridge.JSON(c, http.StatusOK, resp)
+		return nil
 	}
 }
 

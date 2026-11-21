@@ -11,19 +11,20 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/converters"
 	"github.com/soulteary/yunqi/internal/errutil"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/types"
 	"github.com/soulteary/yunqi/internal/utils"
-	"github.com/gin-gonic/gin"
 )
 
 // OpenAIProvider OpenAI 提供商
 type OpenAIProvider struct{}
 
 // ConvertToProviderRequest 转换为 OpenAI 请求
-func (p *OpenAIProvider) ConvertToProviderRequest(c *gin.Context, upstream *config.UpstreamConfig, apiKey string) (*http.Request, []byte, error) {
+func (p *OpenAIProvider) ConvertToProviderRequest(c fiber.Ctx, upstream *config.UpstreamConfig, apiKey string) (*http.Request, []byte, error) {
 	// 读取和解析原始请求体
 	originalBodyBytes, err := getRequestBodyBytes(c)
 	if err != nil {
@@ -105,7 +106,7 @@ func (p *OpenAIProvider) ConvertToProviderRequest(c *gin.Context, upstream *conf
 	}
 	url := baseURL + endpoint
 
-	req, err := http.NewRequestWithContext(c.Request.Context(), "POST", url, bytes.NewReader(reqBodyBytes))
+	req, err := http.NewRequestWithContext(httpbridge.Request(c).Context(), "POST", url, bytes.NewReader(reqBodyBytes))
 	if err != nil {
 		return nil, originalBodyBytes, fmt.Errorf("创建OpenAI请求失败: %w", err)
 	}

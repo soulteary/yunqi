@@ -13,12 +13,11 @@ import (
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/conversation"
 	"github.com/soulteary/yunqi/internal/errutil"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/scheduler"
-	"github.com/gin-gonic/gin"
 )
 
 func TestConversationSettings(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	// 创建临时配置目录
 	tmpDir := t.TempDir()
@@ -60,8 +59,8 @@ func TestConversationSettings(t *testing.T) {
 	// 测试 GET /api/conversations/settings
 	t.Run("GetSettings", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		c, _ := gin.CreateTestContext(w)
-		c.Request = httptest.NewRequest("GET", "/api/conversations/settings", nil)
+		c, _ := httpbridge.TestContext(w)
+		httpbridge.SetRequest(c, httptest.NewRequest("GET", "/api/conversations/settings", nil))
 
 		GetConversationSettings(deps)(c)
 
@@ -88,9 +87,9 @@ func TestConversationSettings(t *testing.T) {
 		reqJSON, _ := json.Marshal(reqBody)
 
 		w := httptest.NewRecorder()
-		c, _ := gin.CreateTestContext(w)
-		c.Request = httptest.NewRequest("PUT", "/api/conversations/settings", bytes.NewReader(reqJSON))
-		c.Request.Header.Set("Content-Type", "application/json")
+		c, _ := httpbridge.TestContext(w)
+		httpbridge.SetRequest(c, httptest.NewRequest("PUT", "/api/conversations/settings", bytes.NewReader(reqJSON)))
+		httpbridge.Request(c).Header.Set("Content-Type", "application/json")
 
 		UpdateConversationSettings(deps)(c)
 
@@ -113,9 +112,9 @@ func TestConversationSettings(t *testing.T) {
 		reqJSON, _ := json.Marshal(reqBody)
 
 		w := httptest.NewRecorder()
-		c, _ := gin.CreateTestContext(w)
-		c.Request = httptest.NewRequest("PUT", "/api/conversations/settings", bytes.NewReader(reqJSON))
-		c.Request.Header.Set("Content-Type", "application/json")
+		c, _ := httpbridge.TestContext(w)
+		httpbridge.SetRequest(c, httptest.NewRequest("PUT", "/api/conversations/settings", bytes.NewReader(reqJSON)))
+		httpbridge.Request(c).Header.Set("Content-Type", "application/json")
 
 		UpdateConversationSettings(deps)(c)
 
@@ -137,9 +136,9 @@ func TestConversationSettings(t *testing.T) {
 		reqJSON, _ := json.Marshal(reqBody)
 
 		w := httptest.NewRecorder()
-		c, _ := gin.CreateTestContext(w)
-		c.Request = httptest.NewRequest("PUT", "/api/conversations/settings", bytes.NewReader(reqJSON))
-		c.Request.Header.Set("Content-Type", "application/json")
+		c, _ := httpbridge.TestContext(w)
+		httpbridge.SetRequest(c, httptest.NewRequest("PUT", "/api/conversations/settings", bytes.NewReader(reqJSON)))
+		httpbridge.Request(c).Header.Set("Content-Type", "application/json")
 
 		UpdateConversationSettings(deps)(c)
 
@@ -161,9 +160,9 @@ func TestConversationSettings(t *testing.T) {
 		reqJSON, _ := json.Marshal(reqBody)
 
 		w := httptest.NewRecorder()
-		c, _ := gin.CreateTestContext(w)
-		c.Request = httptest.NewRequest("PUT", "/api/conversations/settings", bytes.NewReader(reqJSON))
-		c.Request.Header.Set("Content-Type", "application/json")
+		c, _ := httpbridge.TestContext(w)
+		httpbridge.SetRequest(c, httptest.NewRequest("PUT", "/api/conversations/settings", bytes.NewReader(reqJSON)))
+		httpbridge.Request(c).Header.Set("Content-Type", "application/json")
 
 		UpdateConversationSettings(deps)(c)
 
@@ -186,15 +185,15 @@ func TestConversationSettings(t *testing.T) {
 		}
 		reqJSON, _ := json.Marshal(reqBody)
 		w := httptest.NewRecorder()
-		c, _ := gin.CreateTestContext(w)
-		c.Request = httptest.NewRequest("PUT", "/api/conversations/settings", bytes.NewReader(reqJSON))
-		c.Request.Header.Set("Content-Type", "application/json")
+		c, _ := httpbridge.TestContext(w)
+		httpbridge.SetRequest(c, httptest.NewRequest("PUT", "/api/conversations/settings", bytes.NewReader(reqJSON)))
+		httpbridge.Request(c).Header.Set("Content-Type", "application/json")
 		UpdateConversationSettings(deps)(c)
 
 		// 然后读取验证
 		w = httptest.NewRecorder()
-		c, _ = gin.CreateTestContext(w)
-		c.Request = httptest.NewRequest("GET", "/api/conversations/settings", nil)
+		c, _ = httpbridge.TestContext(w)
+		httpbridge.SetRequest(c, httptest.NewRequest("GET", "/api/conversations/settings", nil))
 
 		GetConversationSettings(deps)(c)
 

@@ -1,5 +1,6 @@
 # 渠道模型清单一致性与发现链路 设计文档
 
+> 历史设计记录：文中的桌面实现与 Agent Config 描述仅反映迁移前状态。当前产品只维护 `frontend/` Web 控制台；桌面外壳、原生文件配置与 MSIX 已移除。
 > 范围:渠道「上游协议与模型」展示、自动发现(AutoDiscovery)、Key 级模型徽章三条链路的口径梳理与一致性改造。
 > 状态:已全部落地(P0/P1 于 2026-08-28,P2 画像收敛于 2026-08-29);存储层归并随 channel-data-model-v2 推进。
 > 证据来源:`backend-go/.config/autopilot.db` 画像实测、`backend-go/logs/app.log` 发现日志、相关代码锚点见 §7。

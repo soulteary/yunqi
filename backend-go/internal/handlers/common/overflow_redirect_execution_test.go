@@ -7,12 +7,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/types"
 	"github.com/soulteary/yunqi/internal/warmup"
-	"github.com/gin-gonic/gin"
 )
 
 // tryUpstreamHarness 聚合一次 TryUpstreamWithAllKeys 跨模型执行所需的依赖。
@@ -50,8 +51,8 @@ func newCrossModelHarness(t *testing.T, serverURL string) *tryUpstreamHarness {
 func (h *tryUpstreamHarness) run(t *testing.T, requestBody []byte, extraOpts ...TryUpstreamOption) (handled bool, failoverErr *FailoverError, lastErr error, recorder *httptest.ResponseRecorder) {
 	t.Helper()
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{}`))
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{}`)))
 
 	opts := append([]TryUpstreamOption{
 		WithExecutionRoute(h.executionRoute),
@@ -73,15 +74,15 @@ func (h *tryUpstreamHarness) run(t *testing.T, requestBody []byte, extraOpts ...
 		func(upstream *config.UpstreamConfig, failedKeys map[string]bool) (string, error) {
 			return h.cfgManager.GetNextAPIKey(upstream, failedKeys, ChannelAPIType(scheduler.ChannelKindChat))
 		},
-		func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
-			body, _ := c.Get("requestBodyBytes")
+		func(c fiber.Ctx, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
+			body, _ := httpbridge.Value(c, "requestBodyBytes")
 			raw, _ := body.([]byte)
-			return http.NewRequestWithContext(c.Request.Context(), http.MethodPost, upstreamCopy.BaseURL, strings.NewReader(string(raw)))
+			return http.NewRequestWithContext(httpbridge.Request(c).Context(), http.MethodPost, upstreamCopy.BaseURL, strings.NewReader(string(raw)))
 		},
 		func(apiKey string) {},
 		nil,
 		nil,
-		func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
+		func(c fiber.Ctx, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 			_ = resp.Body.Close()
 			return nil, nil
 		},
@@ -106,7 +107,6 @@ func (h *tryUpstreamHarness) openCircuitOn(model string) {
 // 检查 Key（A3）：执行模型熔断 → Key 被跳过、请求不发出；原模型熔断而执行模型
 // 正常 → Key 放行、请求成功（旧实现读侧固定原始模型，两个方向都会判错）。
 func TestTryUpstreamCircuitBindsExecutionModel(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	received := make(chan string, 4)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -170,7 +170,6 @@ func TestTryUpstreamCircuitBindsExecutionModel(t *testing.T) {
 // executionModel != model 判定溢出后处理，条件恒假导致密文未剥离、
 // 重定向头与日志全部缺失。
 func TestTryUpstreamOverflowRedirectResponsesCrossModel(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	type inputItem struct {
 		Type             string          `json:"type"`
@@ -202,8 +201,8 @@ func TestTryUpstreamOverflowRedirectResponsesCrossModel(t *testing.T) {
 	h.executionRoute = scheduler.ChannelRouteRef{Kind: string(scheduler.ChannelKindResponses), Index: 0, ChannelUID: "ch_gpt_chat"}
 
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{}`))
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{}`)))
 
 	requestBody := []byte(`{
 	  "model": "gpt-5.6-sol",
@@ -229,15 +228,15 @@ func TestTryUpstreamOverflowRedirectResponsesCrossModel(t *testing.T) {
 		func(upstream *config.UpstreamConfig, failedKeys map[string]bool) (string, error) {
 			return h.cfgManager.GetNextAPIKey(upstream, failedKeys, ChannelAPIType(scheduler.ChannelKindChat))
 		},
-		func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
-			body, _ := c.Get("requestBodyBytes")
+		func(c fiber.Ctx, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
+			body, _ := httpbridge.Value(c, "requestBodyBytes")
 			raw, _ := body.([]byte)
-			return http.NewRequestWithContext(c.Request.Context(), http.MethodPost, upstreamCopy.BaseURL, strings.NewReader(string(raw)))
+			return http.NewRequestWithContext(httpbridge.Request(c).Context(), http.MethodPost, upstreamCopy.BaseURL, strings.NewReader(string(raw)))
 		},
 		func(apiKey string) {},
 		nil,
 		nil,
-		func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
+		func(c fiber.Ctx, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 			_ = resp.Body.Close()
 			return nil, nil
 		},

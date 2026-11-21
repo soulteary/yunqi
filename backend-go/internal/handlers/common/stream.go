@@ -12,11 +12,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/types"
 	"github.com/soulteary/yunqi/internal/utils"
-	"github.com/gin-gonic/gin"
 )
 
 // ErrEmptyStreamResponse 上游返回 HTTP 200 但流式响应内容为空或几乎为空
@@ -76,7 +77,7 @@ func (e *UpstreamRequestRejectedError) reasonLabel() string {
 // 写回客户端。调用点处于 SSE 头写出之前（预检在设置响应头前返回），与 HTTP 4xx
 // 「非 failover 错误」分支（先写响应体再返回 handled=true）同一契约：终态错误
 // 必须带着错误体返回，否则调用方按 handled=true 直接返回会造成 200 + 零字节。
-func RespondUpstreamRequestRejected(c *gin.Context, apiType string, rejected *UpstreamRequestRejectedError) {
+func RespondUpstreamRequestRejected(c fiber.Ctx, apiType string, rejected *UpstreamRequestRejectedError) {
 	if rejected == nil {
 		return
 	}
@@ -85,7 +86,7 @@ func RespondUpstreamRequestRejected(c *gin.Context, apiType string, rejected *Up
 		message = rejected.Error()
 	}
 	if strings.EqualFold(apiType, "Gemini") {
-		c.JSON(400, types.GeminiError{
+		httpbridge.JSON(c, 400, types.GeminiError{
 			Error: types.GeminiErrorDetail{
 				Code:    400,
 				Message: message,
@@ -101,11 +102,11 @@ func RespondUpstreamRequestRejected(c *gin.Context, apiType string, rejected *Up
 	if errType == "" {
 		errType = "invalid_request_error"
 	}
-	errObj := gin.H{"message": message, "type": errType, "param": nil}
+	errObj := fiber.Map{"message": message, "type": errType, "param": nil}
 	if code := strings.TrimSpace(rejected.Code); code != "" {
 		errObj["code"] = code
 	}
-	c.JSON(400, gin.H{"error": errObj})
+	httpbridge.JSON(c, 400, fiber.Map{"error": errObj})
 }
 
 func streamPreflightEmptyError(preflight *StreamPreflightResult) error {

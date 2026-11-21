@@ -4,7 +4,8 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v3"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 // ─── 渠道推荐 API（Phase 4 Item 4）───────────────────────────────────────────────
@@ -20,22 +21,22 @@ type RecommendationsResponse struct {
 }
 
 // RegisterRecommendationRoutes 注册渠道推荐只读 API 到给定路由组。
-func RegisterRecommendationRoutes(router gin.IRouter, mgr *Manager) {
-	router.GET("/autopilot/recommendations", handleRecommendations(mgr))
+func RegisterRecommendationRoutes(router fiber.Router, mgr *Manager) {
+	router.Get("/autopilot/recommendations", handleRecommendations(mgr))
 }
 
 // handleRecommendations GET /api/autopilot/recommendations?proxyKeyMask=xxx&windowDays=7
 // proxyKeyMask 缺省时聚合当前累积器中出现过的全部 proxyKeyMask，逐个生成推荐后合并返回。
-func handleRecommendations(mgr *Manager) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handleRecommendations(mgr *Manager) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		acc := mgr.UsagePatternAccumulator()
 		if acc == nil {
-			c.JSON(http.StatusOK, RecommendationsResponse{Recommendations: []ChannelRecommendation{}})
-			return
+			httpbridge.JSON(c, http.StatusOK, RecommendationsResponse{Recommendations: []ChannelRecommendation{}})
+			return nil
 		}
 
 		windowDays := defaultRecommendationOptions().WindowDays
-		if v := c.Query("windowDays"); v != "" {
+		if v := httpbridge.Query(c, "windowDays"); v != "" {
 			if n, err := strconv.Atoi(v); err == nil && n > 0 {
 				windowDays = n
 			}
@@ -44,7 +45,7 @@ func handleRecommendations(mgr *Manager) gin.HandlerFunc {
 
 		lookup := buildChannelScoreLookup(mgr)
 
-		proxyKeyMask := c.Query("proxyKeyMask")
+		proxyKeyMask := httpbridge.Query(c, "proxyKeyMask")
 		var recommendations []ChannelRecommendation
 		if proxyKeyMask != "" {
 			recommendations = BuildRecommendationsForUser(proxyKeyMask, acc, lookup, opts)
@@ -56,11 +57,11 @@ func handleRecommendations(mgr *Manager) gin.HandlerFunc {
 		if recommendations == nil {
 			recommendations = []ChannelRecommendation{}
 		}
-
-		c.JSON(http.StatusOK, RecommendationsResponse{
+		httpbridge.JSON(c, http.StatusOK, RecommendationsResponse{
 			ProxyKeyMask:    proxyKeyMask,
 			Recommendations: recommendations,
 		})
+		return nil
 	}
 }
 

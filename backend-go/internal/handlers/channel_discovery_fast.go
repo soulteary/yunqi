@@ -8,10 +8,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/autopilot"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/utils"
-	"github.com/gin-gonic/gin"
 )
 
 // fast 探活专用参数：多模型候选 × 4 协议并行探测，相较全量 ChannelDiscovery
@@ -58,29 +59,29 @@ type ChannelDiscoveryFastResponse struct {
 // 采用多模型候选策略：Strong/Primary/Fast + 全列表前几个模型，逐个并行探测 4 协议，
 // 只要有一个模型在一个协议上成功就返回成功，其余模型留给后台 discovery 补全。
 // 全部候选模型均失败时返回 4xx，不建渠道；错误信息不泄露 API Key / baseURL 明文。
-func ChannelDiscoveryFast(cfgManager *config.ConfigManager) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func ChannelDiscoveryFast(cfgManager *config.ConfigManager) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		var req ChannelDiscoveryFastRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
-			return
+		if err := httpbridge.BindJSON(c, &req); err != nil {
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "invalid request body"})
+			return nil
 		}
 
 		baseURLs := normalizeDiscoveryBaseURLs(req.BaseURL, req.BaseURLs)
 		if len(baseURLs) == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "baseUrl is required"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "baseUrl is required"})
+			return nil
 		}
 		for _, baseURL := range baseURLs {
 			if err := utils.ValidateBaseURL(baseURL); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-				return
+				httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
+				return nil
 			}
 		}
 		apiKeys := normalizeFastDiscoveryAPIKeys(req.APIKey, req.APIKeys)
 		if len(apiKeys) == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "apiKey is required"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "apiKey is required"})
+			return nil
 		}
 
 		// 遍历 (baseURL, apiKey) 组合，选择第一组能成功获取真实模型并完成探测的凭证。
@@ -107,7 +108,7 @@ func ChannelDiscoveryFast(cfgManager *config.ConfigManager) gin.HandlerFunc {
 				}
 				tried++
 				channel := buildFastTransientChannel(baseURL, apiKey, req)
-				models := discoverTransientModelsWithFetchers(c.Request.Context(), channel, "", apiKey, nil)
+				models := discoverTransientModelsWithFetchers(httpbridge.Request(c).Context(), channel, "", apiKey, nil)
 				if len(models.Items) == 0 {
 					// models 端点失败：仅当命中已知内置 manifest 才用其静态清单兜底。
 					manifestModels := fastDiscoveryManifestFallback(baseURL)
@@ -125,8 +126,8 @@ func ChannelDiscoveryFast(cfgManager *config.ConfigManager) gin.HandlerFunc {
 			}
 		}
 		if selected == nil {
-			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "无法获取上游真实模型清单，且无已知 provider manifest 兜底"})
-			return
+			httpbridge.JSON(c, http.StatusUnprocessableEntity, fiber.Map{"error": "无法获取上游真实模型清单，且无已知 provider manifest 兜底"})
+			return nil
 		}
 
 		// 构建候选模型列表（Strong/Primary/Fast + 全列表前几个），逐模型探测。
@@ -138,8 +139,8 @@ func ChannelDiscoveryFast(cfgManager *config.ConfigManager) gin.HandlerFunc {
 		selectedModels := selectDiscoveryModels(selected.models, globalCapabilities)
 		probeModels := discoveryProbeModels(selectedModels, selected.models)
 		if len(probeModels) == 0 {
-			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "未找到可探测的真实模型"})
-			return
+			httpbridge.JSON(c, http.StatusUnprocessableEntity, fiber.Map{"error": "未找到可探测的真实模型"})
+			return nil
 		}
 
 		probeChannel := buildFastTransientChannel(baseURLs[0], selected.testedKey, req)
@@ -170,7 +171,7 @@ func ChannelDiscoveryFast(cfgManager *config.ConfigManager) gin.HandlerFunc {
 				go func(idx int, proto string) {
 					defer wg.Done()
 					pacer := newDiscoveryProbePacer(fastDiscoveryRPM)
-					success, streaming, balanceFailure := fastProbeProtocol(c.Request.Context(), probeChannel, proto, model, fastDiscoveryProbeTimeout, cfgManager, pacer)
+					success, streaming, balanceFailure := fastProbeProtocol(httpbridge.Request(c).Context(), probeChannel, proto, model, fastDiscoveryProbeTimeout, cfgManager, pacer)
 					results[idx] = DiscoveryProtocolResult{Protocol: proto, Success: success}
 					r := pacer.result()
 					rateLimitMu.Lock()
@@ -224,15 +225,14 @@ func ChannelDiscoveryFast(cfgManager *config.ConfigManager) gin.HandlerFunc {
 			// 兼容性（付费模型欠费时平台免费模型仍可调用），错误信息须直说，
 			// 避免误导用户以为渠道类型无法判定。
 			if totalFailures > 0 && totalFailures == totalBalanceFailures {
-				c.JSON(http.StatusUnprocessableEntity, gin.H{"error": fmt.Sprintf(
+				httpbridge.JSON(c, http.StatusUnprocessableEntity, fiber.Map{"error": fmt.Sprintf(
 					"所有 %d 个候选模型的协议探测均因 Key 余额/配额不足失败（402），无法确定渠道类型；候选均为付费模型，若平台有限时免费模型可稍后重试或先充值后重试", len(probeModels))})
-				return
+				return nil
 			}
-			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "所有候选模型的协议探测均失败，无法确定渠道类型"})
-			return
+			httpbridge.JSON(c, http.StatusUnprocessableEntity, fiber.Map{"error": "所有候选模型的协议探测均失败，无法确定渠道类型"})
+			return nil
 		}
-
-		c.JSON(http.StatusOK, ChannelDiscoveryFastResponse{
+		httpbridge.JSON(c, http.StatusOK, ChannelDiscoveryFastResponse{
 			PrimaryKind:        bestKind,
 			TestedModel:        bestModel,
 			StreamingSupported: bestStreaming,
@@ -241,7 +241,8 @@ func ChannelDiscoveryFast(cfgManager *config.ConfigManager) gin.HandlerFunc {
 		})
 		_ = modelsSource // 保留用于后续诊断日志，当前不返回
 		_ = warnings
-		_ = bestResults // 最终探测结果，用于未来扩展诊断
+		_ = bestResults
+		return nil // 最终探测结果，用于未来扩展诊断
 	}
 }
 

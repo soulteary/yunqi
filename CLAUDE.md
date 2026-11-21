@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with th
 
 Yunqi 是一个支持 Claude、OpenAI Chat、OpenAI Images、OpenAI Embeddings、Codex Responses 和 Gemini 的多上游 AI API 代理与协议转换网关，提供统一代理入口和 Web 管理界面。
 
-**技术栈**: Go 1.25 + Gin（后端）+ Vue 3 + Vuetify 3 + TypeScript（前端）+ Docker  
+**技术栈**: Go 1.26 + Fiber v3（后端）+ Vue 3 + Vuetify 4 + TypeScript（前端）+ Docker
 **版本管理**: 根目录 `VERSION` 是唯一版本源，构建时通过 `backend-go/Makefile` 的 `-ldflags` 注入运行时版本信息。
 
 ## 常用命令
@@ -91,7 +91,7 @@ Client -> backend :3000 ->
 - `/api/images/channels/*`
 - `/api/vectors/channels/*`
 
-说明：实际路由以 `backend-go/main.go` 为准，文档只保留概览层信息。
+说明：实际路由以 `backend-go/routes*.go` 为准，文档只保留概览层信息。
 
 ## 关键配置
 
@@ -133,7 +133,7 @@ Go 测试优先使用表驱动测试 + `httptest`。
 
 ## 前端注意事项
 
-- `frontend/` 与 `desktop/frontend/` 均以 Bun 为主包管理器，`bun.lock` 是权威锁文件；`pnpm-lock.yaml` 仅用于兼容验证
+- `frontend/` 以 Bun 为主包管理器，`bun.lock` 是权威锁文件；`pnpm-lock.yaml` 仅用于兼容验证
 - 不要为了运行 `npm audit` 重新生成 `package-lock.json`，避免重复锁文件和旧锁文件误报
 - 安全检查优先使用 `bun install` 触发 Socket 扫描器，漏洞审计使用 `bun audit --registry=https://registry.npmjs.org`
 - Vuetify 组件采用手动按需导入
@@ -145,8 +145,6 @@ Go 测试优先使用表驱动测试 + `httptest`。
 
 - [backend-go/CLAUDE.md](backend-go/CLAUDE.md) - 后端模块索引
 - [frontend/CLAUDE.md](frontend/CLAUDE.md) - Web 前端模块索引
-- [desktop/CLAUDE.md](desktop/CLAUDE.md) - 桌面模块索引
-- [desktop/frontend/CLAUDE.md](desktop/frontend/CLAUDE.md) - 桌面前端模块索引
 - [backend-go/README.md](backend-go/README.md) - 后端专项文档
 - [ARCHITECTURE.md](docs/guide/architecture.md) - 架构说明
 - [DEVELOPMENT.md](docs/guide/development.md) - 开发指南
@@ -158,3 +156,7 @@ Go 测试优先使用表驱动测试 + `httptest`。
 - 修改 `.env` 后需要重启服务
 - `.config/config.json` 修改后会自动热重载
 - 默认假设用户已通过 `make dev` 或 `make frontend-dev` 启动开发服务，不要自动杀进程重启
+
+## Web-only 产品边界
+
+Wails 桌面外壳已移除。唯一前端为 `frontend/`；构建与发布仅面向服务二进制和容器。客户端文件由用户手动合并配置，进程生命周期由部署工具管理。原桌面目录只用于说明旧版数据迁移，不得作为新构建依赖。

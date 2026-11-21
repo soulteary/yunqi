@@ -7,9 +7,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/scheduler"
-	"github.com/gin-gonic/gin"
 )
 
 // ── Route Preview 单元测试 ──
@@ -265,10 +266,10 @@ func TestRoutePreview_ExtractModelFromBody(t *testing.T) {
 
 // ── HTTP Handler 测试 ──
 
-func setupRoutePreviewTestRouter(t *testing.T, smartRouter *SmartRouter, sch *scheduler.ChannelScheduler) *gin.Engine {
+func setupRoutePreviewTestRouter(t *testing.T, smartRouter *SmartRouter, sch *scheduler.ChannelScheduler) *fiber.App {
 	t.Helper()
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
+
+	r := httpbridge.NewApp()
 	RegisterRoutePreviewRoutes(r, smartRouter, sch)
 	return r
 }
@@ -298,7 +299,7 @@ func TestRoutePreviewHandler_ReturnsPlanAndSchedulerDiagnose(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/autopilot/route-preview", bytes.NewReader(bodyBytes))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("期望 200，实际=%d，body=%s", w.Code, w.Body.String())
@@ -338,7 +339,7 @@ func TestRoutePreviewHandler_InvalidBody(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/autopilot/route-preview", bytes.NewReader([]byte(`{invalid json`)))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("期望 400，实际=%d", w.Code)
@@ -351,7 +352,7 @@ func TestRoutePreviewHandler_MissingChannelKind(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/autopilot/route-preview", bytes.NewReader([]byte(`{"model":"claude-sonnet-4"}`)))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("期望 400（缺少 channelKind），实际=%d", w.Code)
@@ -478,7 +479,7 @@ func TestRoutePreview_DryRunDoesNotUpdateState(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/autopilot/route-preview", bytes.NewReader(bodyBytes))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
-		router.ServeHTTP(w, req)
+		httpbridge.Handler(router).ServeHTTP(w, req)
 
 		if w.Code != http.StatusOK {
 			t.Fatalf("第 %d 次调用失败: code=%d", i+1, w.Code)

@@ -10,8 +10,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/soulteary/yunqi/internal/errutil"
 	"github.com/klauspost/compress/zstd"
+	"github.com/soulteary/yunqi/internal/errutil"
 )
 
 // DecompressGzipIfNeeded 检测并解压缩压缩响应体。

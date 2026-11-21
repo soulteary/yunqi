@@ -8,11 +8,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/converters"
 	"github.com/soulteary/yunqi/internal/handlers/common"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/types"
-	"github.com/gin-gonic/gin"
 )
 
 // streamLineReader 从 chunk channel 逐行读取，支持超时，用于替换阻塞的 bufio.Scanner。
@@ -437,7 +438,7 @@ func hasResponsesSemanticContent(line string) bool {
 
 // handleStreamSuccess 处理流式响应
 func handleStreamSuccess(
-	c *gin.Context,
+	c fiber.Ctx,
 	resp *http.Response,
 	upstreamType string,
 	envCfg *config.EnvConfig,
@@ -471,14 +472,15 @@ func handleStreamSuccess(
 	if !common.RacingClaimClientCommitForStream(c, strings.Join(bufferedLines, "\n")) {
 		return nil, common.ErrRacingSuperseded
 	}
+	httpbridge.
 
-	// 设置 SSE 响应头
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-	c.Header("X-Accel-Buffering", "no")
+		// 设置 SSE 响应头
+		Header(c, "Content-Type", "text/event-stream")
+	httpbridge.Header(c, "Cache-Control", "no-cache")
+	httpbridge.Header(c, "Connection", "keep-alive")
+	httpbridge.Header(c, "X-Accel-Buffering", "no")
 
-	flusher, ok := c.Writer.(http.Flusher)
+	flusher, ok := httpbridge.Writer(c).(http.Flusher)
 	if !ok {
 		common.RequestLogf(c, "[Gemini-Stream] 警告: ResponseWriter 不支持 Flusher")
 	}
@@ -563,7 +565,7 @@ func geminiFeedRepetitionFromChunk(s *common.RepetitionLoopScanner, chunk *types
 
 // geminiAbortRepetitionLoop 无限重复命中后的统一中止：写 Gemini 错误收尾
 // （带 error 的 data 行，避免客户端裸断连）并返回哨兵。
-func geminiAbortRepetitionLoop(c *gin.Context, flusher http.Flusher, progress *common.StreamProgressLogger, scanner *common.RepetitionLoopScanner) error {
+func geminiAbortRepetitionLoop(c fiber.Ctx, flusher http.Flusher, progress *common.StreamProgressLogger, scanner *common.RepetitionLoopScanner) error {
 	common.MarkStreamRepetitionLoop(c)
 	common.RequestLogf(c, "[Gemini-Stream-RepetitionLoop] 检测到模型无限重复输出（%s），中止当前流（Header 已发送，不换渠道；由调度层强制熔断该渠道模型）", scanner.Detail())
 	errPayload := types.GeminiError{
@@ -574,7 +576,7 @@ func geminiAbortRepetitionLoop(c *gin.Context, flusher http.Flusher, progress *c
 		},
 	}
 	chunkBytes, _ := json.Marshal(errPayload)
-	_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", string(chunkBytes))
+	_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(chunkBytes))
 	if flusher != nil {
 		flusher.Flush()
 	}
@@ -583,7 +585,7 @@ func geminiAbortRepetitionLoop(c *gin.Context, flusher http.Flusher, progress *c
 }
 
 func streamGeminiToGemini(
-	c *gin.Context,
+	c fiber.Ctx,
 	reader *streamLineReader,
 	flusher http.Flusher,
 	logBuffer *common.LimitedLogBuffer,
@@ -609,7 +611,7 @@ func streamGeminiToGemini(
 			if lastWasDataLine {
 				// 上游最后一个 data 行只有单个 "\n"（没有空行）：补空行完成事件派发，
 				// 否则严格 SSE 解析器会丢掉最后一帧（finish / usage / [DONE]）。
-				_, _ = fmt.Fprint(c.Writer, "\n")
+				_, _ = fmt.Fprint(httpbridge.Writer(c), "\n")
 				if flusher != nil {
 					flusher.Flush()
 				}
@@ -645,13 +647,13 @@ func streamGeminiToGemini(
 				}
 			}
 			lastWasDataLine = true
-			_, _ = fmt.Fprintf(c.Writer, "%s\n", line)
+			_, _ = fmt.Fprintf(httpbridge.Writer(c), "%s\n", line)
 		} else if line != "" {
 			lastWasDataLine = false
-			_, _ = fmt.Fprintf(c.Writer, "%s\n", line)
+			_, _ = fmt.Fprintf(httpbridge.Writer(c), "%s\n", line)
 		} else {
 			lastWasDataLine = false
-			_, _ = fmt.Fprintf(c.Writer, "\n")
+			_, _ = fmt.Fprintf(httpbridge.Writer(c), "\n")
 		}
 
 		if flusher != nil {
@@ -662,7 +664,7 @@ func streamGeminiToGemini(
 
 // streamClaudeToGemini Claude 流式响应转换为 Gemini 格式
 func streamClaudeToGemini(
-	c *gin.Context,
+	c fiber.Ctx,
 	reader *streamLineReader,
 	flusher http.Flusher,
 	model string,
@@ -743,7 +745,7 @@ func streamClaudeToGemini(
 					},
 				}
 				chunkBytes, _ := json.Marshal(geminiChunk)
-				_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", string(chunkBytes))
+				_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(chunkBytes))
 				if flusher != nil {
 					flusher.Flush()
 				}
@@ -769,7 +771,7 @@ func streamClaudeToGemini(
 				}
 
 				chunkBytes, _ := json.Marshal(geminiChunk)
-				_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", string(chunkBytes))
+				_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(chunkBytes))
 				if flusher != nil {
 					flusher.Flush()
 				}
@@ -805,7 +807,7 @@ func streamClaudeToGemini(
 					},
 				}
 				chunkBytes, _ := json.Marshal(geminiChunk)
-				_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", string(chunkBytes))
+				_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(chunkBytes))
 				if flusher != nil {
 					flusher.Flush()
 				}
@@ -818,7 +820,7 @@ func streamClaudeToGemini(
 
 // streamOpenAIToGemini OpenAI 流式响应转换为 Gemini 格式
 func streamOpenAIToGemini(
-	c *gin.Context,
+	c fiber.Ctx,
 	reader *streamLineReader,
 	flusher http.Flusher,
 	model string,
@@ -893,7 +895,7 @@ func streamOpenAIToGemini(
 					},
 				}
 				chunkBytes, _ := json.Marshal(geminiChunk)
-				_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", string(chunkBytes))
+				_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(chunkBytes))
 				if flusher != nil {
 					flusher.Flush()
 				}
@@ -923,7 +925,7 @@ func streamOpenAIToGemini(
 					},
 				}
 				chunkBytes, _ := json.Marshal(geminiChunk)
-				_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", string(chunkBytes))
+				_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(chunkBytes))
 				if flusher != nil {
 					flusher.Flush()
 				}
@@ -954,7 +956,7 @@ func streamOpenAIToGemini(
 			}
 
 			chunkBytes, _ := json.Marshal(geminiChunk)
-			_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", string(chunkBytes))
+			_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(chunkBytes))
 			if flusher != nil {
 				flusher.Flush()
 			}
@@ -981,7 +983,7 @@ func streamOpenAIToGemini(
 			}
 
 			chunkBytes, _ := json.Marshal(geminiChunk)
-			_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", string(chunkBytes))
+			_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(chunkBytes))
 			if flusher != nil {
 				flusher.Flush()
 			}
@@ -998,7 +1000,7 @@ func streamOpenAIToGemini(
 				},
 			}
 			chunkBytes, _ := json.Marshal(geminiChunk)
-			_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", string(chunkBytes))
+			_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(chunkBytes))
 			if flusher != nil {
 				flusher.Flush()
 			}
@@ -1026,7 +1028,7 @@ func openaiFinishReasonToGemini(finishReason string) string {
 
 // streamResponsesToGemini Responses 流式响应转换为 Gemini 格式
 func streamResponsesToGemini(
-	c *gin.Context,
+	c fiber.Ctx,
 	reader *streamLineReader,
 	flusher http.Flusher,
 	model string,
@@ -1065,9 +1067,7 @@ func streamResponsesToGemini(
 		}
 
 		// 使用转换器将 Responses SSE 转换为 Gemini SSE
-		events := converters.ConvertResponsesToGeminiStream(
-			c.Request.Context(),
-			model,
+		events := converters.ConvertResponsesToGeminiStream(httpbridge.Request(c).Context(), model,
 			[]byte(line),
 			&converterState,
 		)
@@ -1090,7 +1090,7 @@ func streamResponsesToGemini(
 					}
 				}
 			}
-			_, _ = fmt.Fprint(c.Writer, event)
+			_, _ = fmt.Fprint(httpbridge.Writer(c), event)
 			if flusher != nil {
 				flusher.Flush()
 			}

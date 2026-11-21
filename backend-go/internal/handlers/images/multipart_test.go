@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/soulteary/yunqi/internal/config"
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 type flushRecorder struct {
@@ -58,8 +58,8 @@ func TestExtractOperation(t *testing.T) {
 }
 
 func TestPassthroughStreamingResponseClientDisconnect(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	c, _ := gin.CreateTestContext(brokenPipeWriter{})
+
+	c, _ := httpbridge.TestContext(brokenPipeWriter{})
 	resp := &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
@@ -73,12 +73,12 @@ func TestPassthroughStreamingResponseClientDisconnect(t *testing.T) {
 }
 
 func TestBuildOperationRequest_JSONEdits(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
+	c, _ := httpbridge.TestContext(w)
 	body := []byte(`{"model":"image-default","prompt":"add sparkles","stream":true}`)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/edits", bytes.NewReader(body))
-	c.Request.Header.Set("Content-Type", "application/json")
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/images/edits", bytes.NewReader(body)))
+	httpbridge.Request(c).Header.Set("Content-Type", "application/json")
 
 	upstream := &config.UpstreamConfig{
 		ServiceType: "openai",
@@ -104,7 +104,7 @@ func TestBuildOperationRequest_JSONEdits(t *testing.T) {
 }
 
 func TestBuildOperationRequest_MultipartEdits(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 	if err := writer.WriteField("model", "image-default"); err != nil {
@@ -125,10 +125,10 @@ func TestBuildOperationRequest_MultipartEdits(t *testing.T) {
 	}
 
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/edits", bytes.NewReader(body.Bytes()))
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/images/edits", bytes.NewReader(body.Bytes())))
 	contentType := writer.FormDataContentType()
-	c.Request.Header.Set("Content-Type", contentType)
+	httpbridge.Request(c).Header.Set("Content-Type", contentType)
 
 	upstream := &config.UpstreamConfig{
 		ServiceType: "openai",
@@ -157,12 +157,12 @@ func TestBuildOperationRequest_MultipartEdits(t *testing.T) {
 }
 
 func TestBuildOperationRequest_VariationsURL(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
+	c, _ := httpbridge.TestContext(w)
 	body := []byte(`{"n":1,"size":"1024x1024"}`)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/variations", bytes.NewReader(body))
-	c.Request.Header.Set("Content-Type", "application/json")
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/images/variations", bytes.NewReader(body)))
+	httpbridge.Request(c).Header.Set("Content-Type", "application/json")
 
 	upstream := &config.UpstreamConfig{ServiceType: "openai"}
 	req, err := buildOperationRequest(c, upstream, "https://api.openai.com", "sk-test", body, "", operationVariations, "application/json")
@@ -175,9 +175,9 @@ func TestBuildOperationRequest_VariationsURL(t *testing.T) {
 }
 
 func TestPassthroughStreamingResponseFlushes(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	recorder := &flushRecorder{ResponseRecorder: httptest.NewRecorder()}
-	c, _ := gin.CreateTestContext(recorder)
+	c, _ := httpbridge.TestContext(recorder)
 	resp := &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
@@ -209,7 +209,7 @@ func TestBuildJSONRequestBody_NullBodyDoesNotPanic(t *testing.T) {
 }
 
 func TestBuildOperationRequest_AddsDefaultModelToMultipart(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 	if err := writer.WriteField("prompt", "add sparkles"); err != nil {
@@ -220,10 +220,10 @@ func TestBuildOperationRequest_AddsDefaultModelToMultipart(t *testing.T) {
 	}
 
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/edits", bytes.NewReader(body.Bytes()))
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/images/edits", bytes.NewReader(body.Bytes())))
 	contentType := writer.FormDataContentType()
-	c.Request.Header.Set("Content-Type", contentType)
+	httpbridge.Request(c).Header.Set("Content-Type", contentType)
 
 	upstream := &config.UpstreamConfig{ServiceType: "openai"}
 	req, err := buildOperationRequest(c, upstream, "https://api.openai.com", "sk-test", body.Bytes(), "gpt-image-2", operationEdits, contentType)
@@ -240,12 +240,12 @@ func TestBuildOperationRequest_AddsDefaultModelToMultipart(t *testing.T) {
 }
 
 func TestBuildOperationRequest_PreservesQueryString(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
+	c, _ := httpbridge.TestContext(w)
 	body := []byte(`{"model":"image-default","prompt":"add sparkles"}`)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/edits?stream=true&foo=bar", bytes.NewReader(body))
-	c.Request.Header.Set("Content-Type", "application/json")
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/images/edits?stream=true&foo=bar", bytes.NewReader(body)))
+	httpbridge.Request(c).Header.Set("Content-Type", "application/json")
 
 	upstream := &config.UpstreamConfig{
 		ServiceType: "openai",
@@ -265,10 +265,9 @@ func TestExtractImagesModelAndStream(t *testing.T) {
 		t.Fatalf("extractImagesModel json = %q", got)
 	}
 
-	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/edits?stream=true", bytes.NewReader(jsonBody))
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/images/edits?stream=true", bytes.NewReader(jsonBody)))
 	if !isImagesStreamRequest(c, jsonBody, "application/json") {
 		t.Fatal("expected JSON stream request")
 	}

@@ -11,12 +11,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/conversation"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/session"
-	"github.com/gin-gonic/gin"
 )
 
 func setupResponsesTestConfigManager(t *testing.T, upstream []config.UpstreamConfig) *config.ConfigManager {
@@ -38,13 +39,13 @@ func setupResponsesTestConfigManager(t *testing.T, upstream []config.UpstreamCon
 	return cm
 }
 
-func newResponsesTestRouter(t *testing.T, upstream config.UpstreamConfig, sessionManager *session.SessionManager) *gin.Engine {
+func newResponsesTestRouter(t *testing.T, upstream config.UpstreamConfig, sessionManager *session.SessionManager) *fiber.App {
 	return newResponsesTestRouterWithConversationTracker(t, upstream, sessionManager, nil)
 }
 
-func newResponsesTestRouterWithConversationTracker(t *testing.T, upstream config.UpstreamConfig, sessionManager *session.SessionManager, tracker *conversation.ConversationTracker) *gin.Engine {
+func newResponsesTestRouterWithConversationTracker(t *testing.T, upstream config.UpstreamConfig, sessionManager *session.SessionManager, tracker *conversation.ConversationTracker) *fiber.App {
 	t.Helper()
-	gin.SetMode(gin.TestMode)
+
 	cfgManager := setupResponsesTestConfigManager(t, []config.UpstreamConfig{upstream})
 	channelScheduler := scheduler.NewChannelScheduler(
 		cfgManager,
@@ -64,18 +65,18 @@ func newResponsesTestRouterWithConversationTracker(t *testing.T, upstream config
 		MaxRequestBodySize: 1024 * 1024,
 	}
 
-	r := gin.New()
-	r.POST("/v1/responses", Handler(envCfg, cfgManager, sessionManager, channelScheduler))
+	r := httpbridge.NewApp()
+	r.Post("/v1/responses", Handler(envCfg, cfgManager, sessionManager, channelScheduler))
 	return r
 }
 
-func performResponsesHandlerRequest(t *testing.T, router *gin.Engine, body string) *httptest.ResponseRecorder {
+func performResponsesHandlerRequest(t *testing.T, router *fiber.App, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-api-key", "secret-key")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 	return w
 }
 

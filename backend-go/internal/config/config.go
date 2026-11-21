@@ -9,10 +9,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/soulteary/yunqi/internal/eventbus"
 	"github.com/soulteary/yunqi/internal/statelog"
 	"github.com/soulteary/yunqi/internal/utils"
-	"github.com/fsnotify/fsnotify"
 )
 
 // ============== 核心类型定义 ==============

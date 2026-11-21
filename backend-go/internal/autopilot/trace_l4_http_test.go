@@ -8,17 +8,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gin-gonic/gin"
-
+	"github.com/gofiber/fiber/v3"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	_ "modernc.org/sqlite"
 )
 
 // ── L4 HTTP 契约测试 ──
 
 // newTestTraceRouter 创建测试用的 gin router + TraceStore。
-func newTestTraceRouter(t *testing.T) (*gin.Engine, *TraceStore) {
+func newTestTraceRouter(t *testing.T) (*fiber.App, *TraceStore) {
 	t.Helper()
-	gin.SetMode(gin.TestMode)
 
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
@@ -31,7 +30,7 @@ func newTestTraceRouter(t *testing.T) (*gin.Engine, *TraceStore) {
 		t.Fatalf("创建 TraceStore 失败: %v", err)
 	}
 
-	router := gin.New()
+	router := httpbridge.NewApp()
 	RegisterTraceRoutes(router, store)
 	return router, store
 }
@@ -41,7 +40,7 @@ func TestHTTP_ListTraces_Empty(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/traces", nil)
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200", w.Code)
@@ -78,7 +77,7 @@ func TestHTTP_ListTraces_WithFilters(t *testing.T) {
 	// 过滤 auto 模式
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/traces?mode=auto", nil)
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200", w.Code)
@@ -96,7 +95,7 @@ func TestHTTP_GetTraceDetail_NotFound(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/traces/rt_nonexistent", nil)
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", w.Code)
@@ -125,7 +124,7 @@ func TestHTTP_GetTraceDetail_Found(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/traces/"+traceUID, nil)
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200", w.Code)
@@ -163,7 +162,7 @@ func TestHTTP_GetTraceDetail_NoSensitiveFields(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/traces/"+traceUID, nil)
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	// 扫描响应 JSON 不含敏感字段
 	sensitive := ScanJSONForSensitive(w.Body.Bytes())
@@ -177,7 +176,7 @@ func TestHTTP_Stats_Empty(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/traces/stats", nil)
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200", w.Code)
@@ -220,7 +219,7 @@ func TestHTTP_Stats_WithTraces(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/traces/stats", nil)
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200", w.Code)
@@ -262,7 +261,7 @@ func TestHTTP_ListTraces_LimitDefault(t *testing.T) {
 	// 不带 limit 参数，应使用默认 50
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/traces", nil)
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	var resp TraceListResponse
 	_ = json.Unmarshal(w.Body.Bytes(), &resp)
@@ -288,7 +287,7 @@ func TestHTTP_ListTraces_LimitMax(t *testing.T) {
 	// 请求 limit=500，应限制到 200
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/traces?limit=500", nil)
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	var resp TraceListResponse
 	_ = json.Unmarshal(w.Body.Bytes(), &resp)

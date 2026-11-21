@@ -9,11 +9,10 @@ import (
 	"testing"
 
 	"github.com/soulteary/yunqi/internal/config"
-	"github.com/gin-gonic/gin"
 )
 
 func TestMessagesEntry_RequestMatrix_AllFourUpstreams(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	tests := []struct {
 		name            string
 		serviceType     string
@@ -70,7 +69,7 @@ func TestMessagesEntry_RequestMatrix_AllFourUpstreams(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// 显式 ModelMapping 已退役：客户端直接以上游真实模型名发起请求。
 			reqJSON := strings.Replace(tt.body, `"model":"sonnet"`, fmt.Sprintf(`"model":%q`, tt.expectedModel), 1)
-			c := newGinContext(http.MethodPost, tt.path, []byte(reqJSON), context.Background())
+			c := newFiberContext(http.MethodPost, tt.path, []byte(reqJSON), context.Background())
 			upstream := &config.UpstreamConfig{
 				BaseURL:     "https://api.example.com",
 				ServiceType: tt.serviceType,

@@ -66,7 +66,7 @@ Images 与 Vectors 当前没有 capability-test / snapshot 路由。
 
 ```go
 type Provider interface {
-    ConvertToProviderRequest(c *gin.Context, upstream *config.UpstreamConfig, apiKey string) (*http.Request, []byte, error)
+    ConvertToProviderRequest(c fiber.Ctx, upstream *config.UpstreamConfig, apiKey string) (*http.Request, []byte, error)
     ConvertToClaudeResponse(providerResp *types.ProviderResponse) (*types.ClaudeResponse, error)
     HandleStreamResponse(body io.ReadCloser) (<-chan string, <-chan error, error)
 }
@@ -127,3 +127,13 @@ log.Printf("[Component-Action] 消息内容: %v", value)
 - [../docs/guide/architecture.md](../docs/guide/architecture.md) - 架构说明
 - [../docs/guide/development.md](../docs/guide/development.md) - 开发指南
 - [../docs/guide/release.md](../docs/guide/release.md) - 发布流程
+
+## HTTP 框架与传输边界
+
+路由、中间件、Provider 请求上下文和 HTTP Handler 统一使用 Fiber v3 的 `fiber.Ctx` / `fiber.Handler`，不引入 Gin。Go 最低版本为 1.26。
+
+`internal/httpbridge.NewApp()` 创建原生 `*fiber.App`；HTTP 服务器使用 `httpbridge.Handler(app)` 接入 Fiber。桥接层只复制路由元数据，保留原始 `*http.Request` 和 `http.ResponseWriter`，使请求体大小限制、客户端取消、HTTP/2、SSE Flush、WebSocket Hijack、TLS 和同端口 HTTP/HTTPS 继续沿用现有传输逻辑。
+
+从 `httpbridge.Request(c)` / `Writer(c)` 访问代理传输，从 `SetValue` / `Value` 访问需要并发保护的请求级状态。不要将池化 Fiber 上下文交给请求结束后的 goroutine；竞速分支通过 `httpbridge.Copy` 持有独立上下文。Handler 内部校验代理鉴权时调用 `AuthenticateProxy`；只有路由中间件才调用 `c.Next()`。
+
+`httpbridge` 的真实网络测试覆盖流式首帧、断开取消、HTTP/2 和 WebSocket；路由清单测试继续核对既有端点，通配符注册语法按 Fiber 使用 `*`，业务参数读取保持原值。

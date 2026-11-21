@@ -8,16 +8,17 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/errutil"
 	"github.com/soulteary/yunqi/internal/handlers/common"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/providers"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/session"
 	"github.com/soulteary/yunqi/internal/types"
 	"github.com/soulteary/yunqi/internal/utils"
-	"github.com/gin-gonic/gin"
 )
 
 func hasCompactionTrigger(input interface{}) bool {
@@ -34,7 +35,7 @@ func hasCompactionTrigger(input interface{}) bool {
 }
 
 func tryLocalCompactV2WithAllKeys(
-	c *gin.Context,
+	c fiber.Ctx,
 	upstream *config.UpstreamConfig,
 	channelIndex int,
 	requestModel string,
@@ -78,7 +79,7 @@ func tryLocalCompactV2WithAllKeys(
 				channelScheduler.RecordFailure(upstream.BaseURL, apiKey, metricsServiceType, requestModel, scheduler.ChannelKindResponses)
 				continue
 			}
-			c.Data(compactErr.status, "application/json", compactErr.body)
+			httpbridge.Data(c, compactErr.status, "application/json", compactErr.body)
 			return true, "", nil
 		}
 	}
@@ -87,7 +88,7 @@ func tryLocalCompactV2WithAllKeys(
 }
 
 func tryLocalCompactV2WithKey(
-	c *gin.Context,
+	c fiber.Ctx,
 	upstream *config.UpstreamConfig,
 	apiKey string,
 	bodyBytes []byte,

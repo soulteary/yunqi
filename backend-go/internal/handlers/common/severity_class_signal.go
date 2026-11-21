@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"strings"
 
-	"github.com/gin-gonic/gin"
-
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/autopilot"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 // 安全分类请求能力的运行期自学习（docs/specs/severity-class-capability.md）。
@@ -72,7 +72,7 @@ func (s *SeverityTagScanner) Found() bool {
 
 // MarkSeverityTagIfHit 扫描一段完整文本（如 responses 预检缓冲），命中则标记观察器。
 // 完整文本无分片风险，直接 Contains。
-func MarkSeverityTagIfHit(c *gin.Context, text string) {
+func MarkSeverityTagIfHit(c fiber.Ctx, text string) {
 	if observer := GetStreamTimeoutObserver(c); observer != nil && strings.Contains(text, severityTagMarker) {
 		observer.MarkSeverityTag()
 	}
@@ -87,7 +87,7 @@ func MarkSeverityTagIfHit(c *gin.Context, text string) {
 // 学习口径：
 //   - sawSeverityTag=true → 记录"支持"（enabled=false，翻转既有负结论）；
 //   - sawSeverityTag=false → 记录"不支持"（enabled=true），后续路由自动规避。
-func MaybeLearnSeverityClassOutcome(c *gin.Context, upstream *config.UpstreamConfig, apiKey, model string, attemptBody []byte, sawSeverityTag bool, streamErr error) {
+func MaybeLearnSeverityClassOutcome(c fiber.Ctx, upstream *config.UpstreamConfig, apiKey, model string, attemptBody []byte, sawSeverityTag bool, streamErr error) {
 	if streamErr != nil {
 		return
 	}
@@ -116,7 +116,7 @@ func MaybeLearnSeverityClassOutcome(c *gin.Context, upstream *config.UpstreamCon
 	}
 }
 
-// 非流式路径的扫描结论经 gin context 传递：学习挂载点在 handleSuccess 返回之后
+// 非流式路径的扫描结论经 Fiber context 传递：学习挂载点在 handleSuccess 返回之后
 // （upstream_failover.go），而响应体只在各协议的非流式成功处理函数内部可见。
 const nonStreamSeverityScanKey = "ccx_nonstream_severity_scan"
 
@@ -131,23 +131,23 @@ type nonStreamSeverityScan struct {
 // 口径与流式 SeverityTagScanner 一致（开标签即命中，闭标签可能被 stop_sequence
 // 截断）。CC 的安全分类器子请求是非流式的（stream=false），只挂流式观测会漏掉
 // 全部此类请求。同渠道重试会覆盖旧结论。
-func MarkNonStreamSeverityScan(c *gin.Context, requestBody, responseBody []byte) {
+func MarkNonStreamSeverityScan(c fiber.Ctx, requestBody, responseBody []byte) {
 	if c == nil || !autopilot.SeverityClassRequestShape(requestBody) {
 		return
 	}
 	found := bytes.Contains(responseBody, severityTagMarkerBytes) ||
 		bytes.Contains(responseBody, severityTagMarkerEscapedJSON)
-	c.Set(nonStreamSeverityScanKey, &nonStreamSeverityScan{scanned: true, found: found})
+	httpbridge.SetValue(c, nonStreamSeverityScanKey, &nonStreamSeverityScan{scanned: true, found: found})
 }
 
 // NonStreamSeverityOutcome 返回 (非流式响应是否已扫描, 是否含 <severity> 标记)。
 // 未扫描（chat 等未接线路径，或非分类形状请求）返回 false——挂载点据此跳过，
 // 防误杀红线：不得把"未观测"当成"无标记"学成负结论。
-func NonStreamSeverityOutcome(c *gin.Context) (scanned, found bool) {
+func NonStreamSeverityOutcome(c fiber.Ctx) (scanned, found bool) {
 	if c == nil {
 		return false, false
 	}
-	v, ok := c.Get(nonStreamSeverityScanKey)
+	v, ok := httpbridge.Value(c, nonStreamSeverityScanKey)
 	if !ok {
 		return false, false
 	}

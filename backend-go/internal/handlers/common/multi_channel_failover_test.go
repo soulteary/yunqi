@@ -15,14 +15,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/autopilot"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/handlers/common"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/session"
 	"github.com/soulteary/yunqi/internal/warmup"
-	"github.com/gin-gonic/gin"
 )
 
 func TestHandleMultiChannelFailoverRecordsOneTerminalOutcome(t *testing.T) {
@@ -49,12 +50,12 @@ func TestHandleMultiChannelFailoverRecordsOneTerminalOutcome(t *testing.T) {
 	})
 	t.Cleanup(func() { common.SetRoutingOutcomeRecorderHook(nil) })
 
-	c := newTestGinContext(httptest.NewRecorder())
+	c := newTestFiberContext(httptest.NewRecorder())
 	attempt := 0
 	common.HandleMultiChannelFailover(
 		c, &config.EnvConfig{}, env.scheduler, scheduler.ChannelKindMessages,
 		"Messages", "user", "model", false, "",
-		func(_ *gin.Context, _ *scheduler.SelectionResult) common.MultiChannelAttemptResult {
+		func(_ fiber.Ctx, _ *scheduler.SelectionResult) common.MultiChannelAttemptResult {
 			attempt++
 			if attempt == 1 {
 				return common.MultiChannelAttemptResult{Attempted: true, LastError: errors.New("first failed")}
@@ -85,9 +86,9 @@ func TestHandleMultiChannelFailoverRecordsFailedRouteWithoutLegacyIndexPollution
 
 	var selected []scheduler.ChannelRouteRef
 	common.HandleMultiChannelFailover(
-		newTestGinContext(httptest.NewRecorder()), &config.EnvConfig{}, env.scheduler,
+		newTestFiberContext(httptest.NewRecorder()), &config.EnvConfig{}, env.scheduler,
 		scheduler.ChannelKindMessages, "Messages", "user", "model", false, "",
-		func(_ *gin.Context, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
+		func(_ fiber.Ctx, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
 			selected = append(selected, selection.Route)
 			if len(selected) == 1 {
 				return common.MultiChannelAttemptResult{Route: selection.Route, Attempted: true, LastError: errors.New("failed")}
@@ -157,10 +158,10 @@ func newAffinityTestEnv(t *testing.T, cfg config.Config) affinityTestEnv {
 	}
 }
 
-func newTestGinContext(w *httptest.ResponseRecorder) *gin.Context {
-	gin.SetMode(gin.TestMode)
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/", http.NoBody)
+func newTestFiberContext(w *httptest.ResponseRecorder) fiber.Ctx {
+
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/", http.NoBody))
 	return c
 }
 
@@ -187,13 +188,13 @@ func TestHandleMultiChannelFailover_SkipsAffinityForVisionRequest(t *testing.T) 
 
 	env.affinity.SetPreferredChannel(string(scheduler.ChannelKindMessages)+":user-1", 0)
 
-	c := newTestGinContext(httptest.NewRecorder())
-	c.Set("lastUserMessage", "describe the image")
-	c.Set("userMessageCount", 1)
+	c := newTestFiberContext(httptest.NewRecorder())
+	httpbridge.SetValue(c, "lastUserMessage", "describe the image")
+	httpbridge.SetValue(c, "userMessageCount", 1)
 	common.HasImageContent(c, []byte(`{"messages":[{"role":"user","content":[{"type":"image","source":{"type":"base64","data":"abc"}}]}]}`))
 
 	var attempts []int
-	trySelectedChannel := func(_ *gin.Context, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
+	trySelectedChannel := func(_ fiber.Ctx, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
 		attempts = append(attempts, selection.ChannelIndex)
 		if selection.ChannelIndex == 0 {
 			return common.MultiChannelAttemptResult{
@@ -246,12 +247,12 @@ func TestHandleMultiChannelFailover_KeepsAffinityForTextRequest(t *testing.T) {
 	env := newAffinityTestEnv(t, cfg)
 	defer env.cleanup()
 
-	c := newTestGinContext(httptest.NewRecorder())
-	c.Set("lastUserMessage", "hello")
-	c.Set("userMessageCount", 1)
+	c := newTestFiberContext(httptest.NewRecorder())
+	httpbridge.SetValue(c, "lastUserMessage", "hello")
+	httpbridge.SetValue(c, "userMessageCount", 1)
 
 	var attempts []int
-	trySelectedChannel := func(_ *gin.Context, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
+	trySelectedChannel := func(_ fiber.Ctx, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
 		attempts = append(attempts, selection.ChannelIndex)
 		if selection.ChannelIndex == 0 {
 			return common.MultiChannelAttemptResult{
@@ -316,7 +317,7 @@ func TestHandleMultiChannelFailoverLogsSelectionTraceInDebug(t *testing.T) {
 		log.SetPrefix(oldPrefix)
 	}()
 
-	c := newTestGinContext(httptest.NewRecorder())
+	c := newTestFiberContext(httptest.NewRecorder())
 	envCfg := config.NewEnvConfig()
 	envCfg.LogLevel = "debug"
 
@@ -330,7 +331,7 @@ func TestHandleMultiChannelFailoverLogsSelectionTraceInDebug(t *testing.T) {
 		"gpt-4o",
 		false,
 		"",
-		func(_ *gin.Context, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
+		func(_ fiber.Ctx, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
 			return common.MultiChannelAttemptResult{Handled: true, SuccessKey: "ok"}
 		},
 		nil,
@@ -375,12 +376,12 @@ func TestHandleMultiChannelFailover_KeepsExistingTextAffinityOnVisionFallback(t 
 
 	env.affinity.SetPreferredChannel(string(scheduler.ChannelKindMessages)+":user-3", 0)
 
-	c := newTestGinContext(httptest.NewRecorder())
-	c.Set("lastUserMessage", "describe the image")
-	c.Set("userMessageCount", 1)
+	c := newTestFiberContext(httptest.NewRecorder())
+	httpbridge.SetValue(c, "lastUserMessage", "describe the image")
+	httpbridge.SetValue(c, "userMessageCount", 1)
 	common.HasImageContent(c, []byte(`{"messages":[{"role":"user","content":[{"type":"image","source":{"type":"base64","data":"abc"}}]}]}`))
 
-	trySelectedChannel := func(_ *gin.Context, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
+	trySelectedChannel := func(_ fiber.Ctx, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
 		if selection.ChannelIndex == 0 {
 			return common.MultiChannelAttemptResult{Handled: false, Attempted: true}
 		}

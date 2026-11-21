@@ -103,12 +103,15 @@ func TestBus_ConcurrentSubscribeAndPublish(t *testing.T) {
 	bus := NewBus()
 	var received atomic.Int64
 	var wg sync.WaitGroup
+	var ready sync.WaitGroup
+	ready.Add(8)
 	for i := 0; i < 8; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			ch, unsub := bus.Subscribe()
 			defer unsub()
+			ready.Done()
 			for j := 0; j < 200; j++ {
 				select {
 				case <-ch:
@@ -119,6 +122,8 @@ func TestBus_ConcurrentSubscribeAndPublish(t *testing.T) {
 			}
 		}()
 	}
+	// The bus does not replay past events: wait until subscriptions exist.
+	ready.Wait()
 	for i := 0; i < 2000; i++ {
 		bus.Publish(Event{Type: TypeKeyBlacklisted, Subject: "k"})
 	}

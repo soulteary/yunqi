@@ -9,12 +9,13 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/errutil"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/session"
-	"github.com/gin-gonic/gin"
 )
 
 func setupChatTestConfigManager(t *testing.T, upstream []config.UpstreamConfig) *config.ConfigManager {
@@ -36,9 +37,9 @@ func setupChatTestConfigManager(t *testing.T, upstream []config.UpstreamConfig) 
 	return cm
 }
 
-func newChatTestRouter(t *testing.T, upstream config.UpstreamConfig) *gin.Engine {
+func newChatTestRouter(t *testing.T, upstream config.UpstreamConfig) *fiber.App {
 	t.Helper()
-	gin.SetMode(gin.TestMode)
+
 	cfgManager := setupChatTestConfigManager(t, []config.UpstreamConfig{upstream})
 	channelScheduler := scheduler.NewChannelScheduler(
 		cfgManager,
@@ -55,18 +56,18 @@ func newChatTestRouter(t *testing.T, upstream config.UpstreamConfig) *gin.Engine
 		MaxRequestBodySize: 1024 * 1024,
 	}
 
-	r := gin.New()
-	r.POST("/v1/chat/completions", Handler(envCfg, cfgManager, channelScheduler))
+	r := httpbridge.NewApp()
+	r.Post("/v1/chat/completions", Handler(envCfg, cfgManager, channelScheduler))
 	return r
 }
 
-func performChatHandlerRequest(t *testing.T, router *gin.Engine, body string) *httptest.ResponseRecorder {
+func performChatHandlerRequest(t *testing.T, router *fiber.App, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer secret-key")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 	return w
 }
 

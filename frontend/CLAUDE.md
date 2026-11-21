@@ -4,7 +4,7 @@
 
 ## 模块职责
 
-Vue 3 + Vuetify 3 Web 管理界面：渠道配置、能力测试、模型列表查询、拖拽排序、监控面板、主题切换。
+Vue 3 + Vuetify 4 Web 管理界面：渠道配置、能力测试、模型列表查询、拖拽排序、监控面板、主题切换。
 
 ## 启动命令
 
@@ -26,13 +26,31 @@ bun run preview   # 预览构建
 
 ## API 服务
 
-`src/services/api.ts` 封装后端交互，涵盖：
+`src/services/api.ts` 是兼容门面，保留 `api` 单例、默认导出和 `new ApiService()`。页面仍可沿用现有导入，不需要随内部文件移动修改调用方式。
 
-- 渠道 CRUD、排序、状态切换
-- 单渠道模型列表查询
-- 渠道能力测试
-- Dashboard / 指标 / 历史数据查询
-- 认证相关请求头管理
+- `src/services/api/client.ts`：统一请求处理，动态读取认证与语言，处理响应和 `ApiError`。
+- `src/services/api/channels/`：六类协议渠道的 CRUD、密钥、排序和状态管理。
+- `src/services/api/channel-management.ts`：稳定 UID 的 v2 与逻辑渠道操作。
+- 其他业务模块：能力测试、监控、健康、会话、订阅、账号、路由治理、成本和系统设置。
+- `src/services/types/`：按业务保存 DTO；共享协议枚举位于 `common.ts`，跨模块引用使用 `import type`。
+- `src/services/api-types.ts`、`console-types.ts`：保留旧类型导入路径；运行时常量只在所属模块定义一次。
+
+新增请求放到对应业务模块，统一经过 `ApiClient`。不要在业务模块重复读取密钥、实现响应解析或修改错误语义。门面的类型由同一份组合函数推导，新增模块只维护一次组合清单。
+
+`api-contract.test.ts` 固定六类渠道请求、历史默认值、可选字段、鉴权和错误解析行为；`__fixtures__/api-methods.json` 记录兼容的公共方法清单。新增或明确变更公共 API 时同步更新契约。
+
+## 根组件控制器
+
+`src/composables/useAppController.ts` 保留 `App.vue` 使用的返回字段，组合 `composables/app/` 中的职责模块；渠道操作、熔断器表单和对话框快捷键仍在原入口。
+
+- `useAppAuth.ts`：保存密钥的自动认证、手动登录、失败锁定、注销，以及认证状态驱动的渠道刷新和连接状态。
+- `useAppNavigation.ts`：导航选项、语言、标题、新用户指引和渠道类型切换后的刷新；路由到渠道类型的同步仍由 ChannelStore 管理。
+- `useAppTheme.ts`：复古主题初始化、明暗模式和系统主题监听，复用原 `useTheme.ts` 的字体设置。
+- `useAppVersion.ts`：启动时版本检查、并发检查保护、更新对话框和 `yunqi-check-version` 事件。
+
+每个模块负责注册和清理自身监听器；入口按主题、版本、导航、认证顺序组合，保持启动时先应用主题、发起版本检查，再自动认证和刷新渠道。认证模块通过参数接收翻译与提示函数，不回调根控制器。
+
+`useAppController.test.ts` 使用真实 Pinia Store 和内存路由验证公开字段、认证与锁定、导航刷新、指引、主题、版本事件及卸载清理。请求和版本服务在测试中替换，不访问真实上游。
 
 ## 主题配置
 

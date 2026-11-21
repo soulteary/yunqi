@@ -10,17 +10,16 @@ import (
 	"testing"
 
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/quota"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/session"
-	"github.com/gin-gonic/gin"
 )
 
 // PUT /api/logical-channels/:uid 带 removals 移除协议时，必须与 DELETE 一样清理被移除
 // 物理渠道的指标/日志/亲和/配额。removals 是协议 kind（"messages"）而不是 ChannelUID，
 // 且必须在 Update 之前解析——更新后上游已不在配置里。
 func TestUpdateLogicalChannelRemovalsTriggerCleanup(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.json")
@@ -88,15 +87,15 @@ func TestUpdateLogicalChannelRemovalsTriggerCleanup(t *testing.T) {
 		t.Fatalf("前置配额快照数量 = %d, want 2", len(qm.SnapshotAll()))
 	}
 
-	router := gin.New()
+	router := httpbridge.NewApp()
 	h := &Handler{cm: cm, scheduler: sch}
-	router.PUT("/api/logical-channels/:uid", h.Update)
+	router.Put("/api/logical-channels/:uid", h.Update)
 
 	body := `{"removals":["messages"],"protocols":[{"kind":"chat","serviceType":"openai","apiKeys":["k1"],"baseUrls":["https://api.test.com/v1"]}]}`
 	req := httptest.NewRequest(http.MethodPut, "/api/logical-channels/"+logical.LogicalChannelUID, bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
+	httpbridge.Handler(router).ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("PUT 失败: %d %s", rec.Code, rec.Body.String())
 	}

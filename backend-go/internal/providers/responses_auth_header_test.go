@@ -6,11 +6,9 @@ import (
 	"testing"
 
 	"github.com/soulteary/yunqi/internal/config"
-	"github.com/gin-gonic/gin"
 )
 
 func TestResponsesProvider_ConvertToProviderRequest_AuthHeaderByServiceType(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	tests := []struct {
 		name           string
@@ -83,7 +81,7 @@ func TestResponsesProvider_ConvertToProviderRequest_AuthHeaderByServiceType(t *t
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c := newGinContext(http.MethodPost, "/v1/responses", []byte(`{"model":"test","input":"hi"}`), context.Background())
+			c := newFiberContext(http.MethodPost, "/v1/responses", []byte(`{"model":"test","input":"hi"}`), context.Background())
 			upstream := &config.UpstreamConfig{
 				BaseURL:     "https://api.example.com",
 				ServiceType: tt.serviceType,

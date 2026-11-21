@@ -7,12 +7,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/autopilot"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/types"
 	"github.com/soulteary/yunqi/internal/warmup"
-	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 )
 
@@ -43,7 +44,7 @@ func newStreamRequirementTestServers(t *testing.T) (badURL, goodURL string, badC
 // 走「非 failover 错误」分支直接把 400 终结给客户端，既不学习也不换渠道。
 // 修复后：学习 requires_stream 结论，并按 failover 语义返回（交由上层换渠道）。
 func TestStreamRequirementLearnsAndFailsOver(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	t.Cleanup(swapChannelCompatCacheForTest(config.NewChannelCompatCache()))
 
 	badURL, _, badCalls, _ := newStreamRequirementTestServers(t)
@@ -59,9 +60,9 @@ func TestStreamRequirementLearnsAndFailsOver(t *testing.T) {
 	t.Cleanup(cleanup)
 
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
+	c, _ := httpbridge.TestContext(w)
 	reqBody := `{"model":"gpt-5","input":[{"type":"message","role":"user","content":"hi"}]}`
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(reqBody))
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(reqBody)))
 
 	cfg := cfgManager.GetConfig()
 	upstream := &cfg.Upstream[0]
@@ -82,13 +83,13 @@ func TestStreamRequirementLearnsAndFailsOver(t *testing.T) {
 		func(upstream *config.UpstreamConfig, failedKeys map[string]bool) (string, error) {
 			return cfgManager.GetNextAPIKey(upstream, failedKeys, "Responses")
 		},
-		func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
-			return http.NewRequestWithContext(c.Request.Context(), http.MethodPost, upstreamCopy.BaseURL, strings.NewReader(reqBody))
+		func(c fiber.Ctx, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
+			return http.NewRequestWithContext(httpbridge.Request(c).Context(), http.MethodPost, upstreamCopy.BaseURL, strings.NewReader(reqBody))
 		},
 		func(apiKey string) {},
 		func(url string) {},
 		func(url string) {},
-		func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
+		func(c fiber.Ctx, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 			return nil, nil
 		},
 		"gpt-5",
@@ -119,7 +120,7 @@ func TestStreamRequirementLearnsAndFailsOver(t *testing.T) {
 // 预置学习结论后，非流式请求应做流式桥接改写：上游收到 stream:true 的请求体并按
 // SSE 正常返回（上游计数 1，无额外失败往返）。gemini 入口不支持桥接，退回发送前跳过。
 func TestStreamRequirementRewritesRequestBody(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	t.Cleanup(swapChannelCompatCacheForTest(config.NewChannelCompatCache()))
 
 	const (
@@ -161,9 +162,9 @@ func TestStreamRequirementRewritesRequestBody(t *testing.T) {
 	t.Cleanup(cleanup)
 
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
+	c, _ := httpbridge.TestContext(w)
 	reqBody := `{"model":"gpt-5","input":[{"type":"message","role":"user","content":"hi"}]}`
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(reqBody))
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(reqBody)))
 
 	cfg := cfgManager.GetConfig()
 	upstream := &cfg.Upstream[0]
@@ -184,16 +185,16 @@ func TestStreamRequirementRewritesRequestBody(t *testing.T) {
 		func(upstream *config.UpstreamConfig, failedKeys map[string]bool) (string, error) {
 			return cfgManager.GetNextAPIKey(upstream, failedKeys, "Responses")
 		},
-		func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
+		func(c fiber.Ctx, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
 			// 模拟真实 handler 闭包：从 context 读取改写后的请求体（流式桥接改写经
 			// RestoreRequestBody 落到 requestBodyBytes，此处才可观测）。
-			return http.NewRequestWithContext(c.Request.Context(), http.MethodPost, upstreamCopy.BaseURL,
+			return http.NewRequestWithContext(httpbridge.Request(c).Context(), http.MethodPost, upstreamCopy.BaseURL,
 				strings.NewReader(string(GetEffectiveRequestBody(c, []byte(reqBody)))))
 		},
 		func(apiKey string) {},
 		func(url string) {},
 		func(url string) {},
-		func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
+		func(c fiber.Ctx, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 			body, _ := io.ReadAll(resp.Body)
 			if !strings.Contains(string(body), `"finish_reason":"stop"`) {
 				t.Errorf("上游响应应为 SSE 流, got: %s", body)
@@ -227,7 +228,7 @@ func TestStreamRequirementRewritesRequestBody(t *testing.T) {
 // gemini 入口请求体无顶层 stream 字段语义，不支持桥接：预置学习结论后发送前直接跳过，
 // 不消耗必然失败的上游往返。
 func TestStreamRequirementSkipsUnsupportedExecution(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	t.Cleanup(swapChannelCompatCacheForTest(config.NewChannelCompatCache()))
 
 	callCount := 0
@@ -259,9 +260,9 @@ func TestStreamRequirementSkipsUnsupportedExecution(t *testing.T) {
 	t.Cleanup(cleanup)
 
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
+	c, _ := httpbridge.TestContext(w)
 	reqBody := `{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}`
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-3.8-flash:generateContent", strings.NewReader(reqBody))
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-3.8-flash:generateContent", strings.NewReader(reqBody)))
 
 	cfg := cfgManager.GetConfig()
 	upstream := &cfg.Upstream[0]
@@ -282,13 +283,13 @@ func TestStreamRequirementSkipsUnsupportedExecution(t *testing.T) {
 		func(upstream *config.UpstreamConfig, failedKeys map[string]bool) (string, error) {
 			return cfgManager.GetNextAPIKey(upstream, failedKeys, "Gemini")
 		},
-		func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
-			return http.NewRequestWithContext(c.Request.Context(), http.MethodPost, upstreamCopy.BaseURL, strings.NewReader(reqBody))
+		func(c fiber.Ctx, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
+			return http.NewRequestWithContext(httpbridge.Request(c).Context(), http.MethodPost, upstreamCopy.BaseURL, strings.NewReader(reqBody))
 		},
 		func(apiKey string) {},
 		func(url string) {},
 		func(url string) {},
-		func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
+		func(c fiber.Ctx, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 			return nil, nil
 		},
 		model,
@@ -311,7 +312,7 @@ func TestStreamRequirementSkipsUnsupportedExecution(t *testing.T) {
 // （流式请求携带 stream:true，正常上游不会报此错，命中说明另有原因），
 // 但错误分类放行与请求流式无关，仍按 failover 语义返回。
 func TestStreamRequirementNotLearnedForStreamingRequest(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	t.Cleanup(swapChannelCompatCacheForTest(config.NewChannelCompatCache()))
 
 	badURL, _, badCalls, _ := newStreamRequirementTestServers(t)
@@ -327,9 +328,9 @@ func TestStreamRequirementNotLearnedForStreamingRequest(t *testing.T) {
 	t.Cleanup(cleanup)
 
 	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
+	c, _ := httpbridge.TestContext(w)
 	reqBody := `{"model":"gpt-5","input":[{"type":"message","role":"user","content":"hi"}]}`
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(reqBody))
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(reqBody)))
 
 	cfg := cfgManager.GetConfig()
 	upstream := &cfg.Upstream[0]
@@ -350,13 +351,13 @@ func TestStreamRequirementNotLearnedForStreamingRequest(t *testing.T) {
 		func(upstream *config.UpstreamConfig, failedKeys map[string]bool) (string, error) {
 			return cfgManager.GetNextAPIKey(upstream, failedKeys, "Responses")
 		},
-		func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
-			return http.NewRequestWithContext(c.Request.Context(), http.MethodPost, upstreamCopy.BaseURL, strings.NewReader(reqBody))
+		func(c fiber.Ctx, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
+			return http.NewRequestWithContext(httpbridge.Request(c).Context(), http.MethodPost, upstreamCopy.BaseURL, strings.NewReader(reqBody))
 		},
 		func(apiKey string) {},
 		func(url string) {},
 		func(url string) {},
-		func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
+		func(c fiber.Ctx, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 			return nil, nil
 		},
 		"gpt-5",

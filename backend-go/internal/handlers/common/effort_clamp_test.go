@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/soulteary/yunqi/internal/autopilot"
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 // ── isEffortClampedByClient 测试 ──
@@ -123,27 +123,27 @@ func TestIsEffortClampedByClient(t *testing.T) {
 // 场景：第一个 endpoint 解析到 target 并设置 autopilot 标记，
 // 第二个 endpoint 未解析到 target → 最终日志应为 passthrough/false。
 func TestEffortMarkersResetAcrossFailover(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	c, _ := gin.CreateTestContext(nil)
+
+	c, _ := httpbridge.TestContext(nil)
 
 	// 模拟第一轮 attempt：endpoint 解析到 target，autopilot 决定 effort
 	// 复用 loop 顶部的重置逻辑 + target 解析逻辑
-	c.Set("effortDecisionSource", "passthrough")
-	c.Set("effortClampedByClient", false)
+	httpbridge.SetValue(c, "effortDecisionSource", "passthrough")
+	httpbridge.SetValue(c, "effortClampedByClient", false)
 
 	// 第一个 endpoint 成功解析到 target（autopilot 决定了 effort）
-	c.Set("effortDecisionSource", "autopilot")
-	c.Set("effortClampedByClient", true) // 假设存在钳位
+	httpbridge.SetValue(c, "effortDecisionSource", "autopilot")
+	httpbridge.SetValue(c, "effortClampedByClient", true) // 假设存在钳位
 
 	// 模拟 failover 到第二个 endpoint：loop 顶部重置
-	c.Set("effortDecisionSource", "passthrough")
-	c.Set("effortClampedByClient", false)
+	httpbridge.SetValue(c, "effortDecisionSource", "passthrough")
+	httpbridge.SetValue(c, "effortClampedByClient", false)
 
 	// 第二个 endpoint 未解析到 target（target == nil），
 	// 因此不会执行 c.Set，标记应保持重置后的默认值
 
 	// 验证最终状态为 passthrough 而非残留的 autopilot
-	source, exists := c.Get("effortDecisionSource")
+	source, exists := httpbridge.Value(c, "effortDecisionSource")
 	if !exists {
 		t.Fatal("effortDecisionSource 未设置")
 	}
@@ -151,7 +151,7 @@ func TestEffortMarkersResetAcrossFailover(t *testing.T) {
 		t.Errorf("effortDecisionSource = %q, want \"passthrough\"（不应残留上一轮 autopilot 值）", source)
 	}
 
-	clamped, exists := c.Get("effortClampedByClient")
+	clamped, exists := httpbridge.Value(c, "effortClampedByClient")
 	if !exists {
 		t.Fatal("effortClampedByClient 未设置")
 	}
@@ -163,19 +163,19 @@ func TestEffortMarkersResetAcrossFailover(t *testing.T) {
 // TestEffortMarkersPassthroughOnFirstIteration 验证第一次 attempt 开始时
 // 标记即为 passthrough/false（无残留）。
 func TestEffortMarkersPassthroughOnFirstIteration(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	c, _ := gin.CreateTestContext(nil)
+
+	c, _ := httpbridge.TestContext(nil)
 
 	// 模拟 loop 顶部的首次重置
-	c.Set("effortDecisionSource", "passthrough")
-	c.Set("effortClampedByClient", false)
+	httpbridge.SetValue(c, "effortDecisionSource", "passthrough")
+	httpbridge.SetValue(c, "effortClampedByClient", false)
 
 	// 未解析到 target → 标记应保持默认值
-	source, _ := c.Get("effortDecisionSource")
+	source, _ := httpbridge.Value(c, "effortDecisionSource")
 	if source != "passthrough" {
 		t.Errorf("effortDecisionSource = %q, want \"passthrough\"", source)
 	}
-	clamped, _ := c.Get("effortClampedByClient")
+	clamped, _ := httpbridge.Value(c, "effortClampedByClient")
 	if clamped != false {
 		t.Errorf("effortClampedByClient = %v, want false", clamped)
 	}

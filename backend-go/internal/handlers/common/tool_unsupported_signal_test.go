@@ -5,10 +5,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/gin-gonic/gin"
-
 	"github.com/soulteary/yunqi/internal/autopilot"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 func TestToolUnsupportedFromError(t *testing.T) {
@@ -208,8 +207,7 @@ func TestMaybeCountPseudoToolCallMiss(t *testing.T) {
 	restore := config.SwapSharedChannelCompatCacheForTest(config.NewChannelCompatCache())
 	defer restore()
 
-	gin.SetMode(gin.TestMode)
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c, _ := httpbridge.TestContext(httptest.NewRecorder())
 	upstream := &config.UpstreamConfig{ChannelUID: "ch_test", Name: "test-channel"}
 	cache := config.SharedChannelCompatCache()
 
@@ -277,8 +275,7 @@ func TestMaybeForgetVerifiedToolCallsOnUnsupported(t *testing.T) {
 	restore := config.SwapSharedChannelCompatCacheForTest(config.NewChannelCompatCache())
 	defer restore()
 
-	gin.SetMode(gin.TestMode)
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c, _ := httpbridge.TestContext(httptest.NewRecorder())
 	upstream := &config.UpstreamConfig{ChannelUID: "ch_test", Name: "test-channel"}
 	const apiKey = "sk-test"
 	const model = "m1"

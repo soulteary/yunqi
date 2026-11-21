@@ -74,18 +74,6 @@ See [ARCHITECTURE.md](docs/guide/architecture.md) for the detailed design.
 
 ## Quick Start
 
-### Option 0: Yunqi Desktop
-
-Yunqi Desktop provides a native desktop experience with GUI for managing channels, keys, and agent configuration.
-
-| Platform | Install Method | Notes |
-|----------|---------------|-------|
-| **Windows** | Search **Yunqi Desktop** in [Microsoft Store](https://apps.microsoft.com/detail/yunqi-desktop) | Recommended. Auto-update, no manual signing. Also available as `setup.exe` from [GitHub Releases](https://github.com/soulteary/yunqi/releases/latest). |
-| **macOS** | `brew tap BenedictKing/yunqi && brew install --cask yunqi-desktop` | Or download `.dmg` (arm64/amd64) from [GitHub Releases](https://github.com/soulteary/yunqi/releases/latest). |
-| **Linux** | Download `.AppImage` from [GitHub Releases](https://github.com/soulteary/yunqi/releases/latest) | Mark as executable and run. |
-
-See [Yunqi Desktop Guide](docs/en/guide/desktop/) for detailed setup instructions.
-
 ### Option 1: Binary
 
 1. Download the latest binary from [Releases](https://github.com/soulteary/yunqi/releases/latest).
@@ -98,7 +86,7 @@ ENABLE_WEB_UI=true
 APP_UI_LANGUAGE=en
 ```
 
-3. Run the binary and open `http://localhost:3000`
+3. Run the binary and open `http://localhost:3688`
 
 On Windows, if the client runs from cmd, PowerShell, WSL, or Docker and `localhost` does not reach Yunqi, use the Windows host IPv4 address instead, for example `http://192.168.1.23:3000`. When `BIND_HOST` is empty, Yunqi listens on all interfaces by default through `:PORT`; set `BIND_HOST=127.0.0.1` for local-only access.
 
@@ -137,7 +125,7 @@ docker compose up -d yunqi
 
 ### Option 3: Build From Source
 
-Prerequisites: [Go 1.25+](https://go.dev/dl/), [Bun](https://bun.sh), and Make (macOS: `xcode-select --install`).
+Prerequisites: [Go 1.26+](https://go.dev/dl/), [Bun](https://bun.sh), and Make (macOS: `xcode-select --install`).
 
 ```bash
 git clone https://github.com/soulteary/yunqi
@@ -206,9 +194,9 @@ make dev
 
 ## Additional Docs
 
-- [Yunqi Desktop](docs/en/guide/desktop/)
+- [Web console and migration](docs/en/guide/desktop/)
 - [Client Setup](docs/en/guide/clients/)
-- [Yunqi Desktop (中文)](docs/guide/desktop/)
+- [Web 控制台与迁移](docs/guide/desktop/)
 - [Client Setup (中文)](docs/guide/clients/)
 - [README.zh-CN.md](README.zh-CN.md)
 - [backend-go/README.md](backend-go/README.md)
@@ -244,3 +232,7 @@ make dev
 ## License
 
 AGPL-3.0-only。上游 MIT 许可与版权声明保留于 [LICENSES/MIT-upstream.txt](LICENSES/MIT-upstream.txt)，详见 [NOTICE](NOTICE)。
+
+## Web console
+
+Yunqi ships one Go service with an embedded browser console. Open the configured host and port, sign in with the administrator key, then use **Service & setup** for runtime status, diagnostic exports and client configuration. Maintained deployment targets are service binaries and Docker. See the [migration guide](docs/en/guide/desktop/) for older desktop installations.

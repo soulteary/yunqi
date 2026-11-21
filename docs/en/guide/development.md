@@ -13,7 +13,7 @@ This document explains how to set up Yunqi for local development, common command
 
 | Tool | Minimum Version | Install (macOS) | Install (Linux) | Notes |
 | --- | --- | --- | --- | --- |
-| **Go** | 1.25 | `brew install go` | [go.dev/dl](https://go.dev/dl/) | Backend compilation and runtime |
+| **Go** | 1.26 | `brew install go` | [go.dev/dl](https://go.dev/dl/) | Backend compilation and runtime |
 | **Bun** | 1.x | `brew install oven-sh/bun/bun` | `curl -fsSL https://bun.sh/install \| bash` | Frontend dependency management and build |
 | **Git** | - | Comes with Xcode CLT | `apt install git` / `yum install git` | Version control |
 | **Make** | - | Comes with Xcode CLT | Usually pre-installed | Build scripts |
@@ -26,7 +26,7 @@ xcode-select --install
 
 ### Install All Dependencies at Once
 
-The root Makefile provides `make install` to automatically install frontend dependencies, Go modules, and development tools (Air hot-reload, Wails 3):
+The root Makefile provides `make install` to automatically install frontend dependencies, Go modules, and development tools (Air hot-reload):
 
 ```bash
 make install
@@ -35,7 +35,7 @@ make install
 ### Verify Environment
 
 ```bash
-go version     # should be >= 1.25
+go version     # should be >= 1.26
 bun --version  # should be >= 1.x
 make help      # confirm available commands
 ```

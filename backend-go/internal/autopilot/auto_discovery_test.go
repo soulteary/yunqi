@@ -1001,6 +1001,11 @@ func setupTestConfigManagerForDiscovery(t *testing.T, channelUID string, support
 	if err != nil {
 		t.Fatalf("创建 ConfigManager 失败: %v", err)
 	}
+	t.Cleanup(func() {
+		if err := cfgManager.Close(); err != nil {
+			t.Errorf("关闭测试 ConfigManager 失败: %v", err)
+		}
+	})
 	return cfgManager
 }
 

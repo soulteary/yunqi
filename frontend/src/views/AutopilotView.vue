@@ -109,7 +109,7 @@ async function fetchAll() {
     ])
     config.value = cfg
     traceStats.value = stats
-    traces.value = traceResp.traces
+    traces.value = traceResp.traces ?? []
     tracesPartial.value = traceResp.partial ?? false
   } catch (e) {
     console.error('[Autopilot-View] 加载失败:', e)
@@ -122,7 +122,7 @@ async function fetchTraces() {
   tracesLoading.value = true
   try {
     const resp = await api.getAutopilotTraces({ limit: 50 })
-    traces.value = resp.traces
+    traces.value = resp.traces ?? []
     tracesPartial.value = resp.partial ?? false
   } catch (e) {
     console.error('[Autopilot-View] Trace 刷新失败:', e)

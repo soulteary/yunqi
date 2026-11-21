@@ -10,15 +10,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/converters"
 	"github.com/soulteary/yunqi/internal/errutil"
 	"github.com/soulteary/yunqi/internal/handlers/common"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/providers"
 	"github.com/soulteary/yunqi/internal/session"
 	"github.com/soulteary/yunqi/internal/types"
 	"github.com/soulteary/yunqi/internal/utils"
-	"github.com/gin-gonic/gin"
 )
 
 const localCompactMaxTranscriptRunes = 240000
@@ -350,10 +351,10 @@ func buildLocalCompactRequestBodyWithLogTag(originalBody []byte, stream bool, se
 
 // PLACEHOLDER_TRY_LOCAL_COMPACT
 
-// getTaskTemplateStoreFromContext 从 gin.Context 获取模板存储（供 compact 层使用）。
+// getTaskTemplateStoreFromContext 从 fiber.Ctx 获取模板存储（供 compact 层使用）。
 // 使用与 autopilot.ContextKeyTaskTemplateStore 一致的 key。
-func getTaskTemplateStoreFromContext(c *gin.Context) TaskTemplateStore {
-	val, exists := c.Get("autopilot_task_template_store")
+func getTaskTemplateStoreFromContext(c fiber.Ctx) TaskTemplateStore {
+	val, exists := httpbridge.Value(c, "autopilot_task_template_store")
 	if !exists {
 		return nil
 	}
@@ -362,7 +363,7 @@ func getTaskTemplateStoreFromContext(c *gin.Context) TaskTemplateStore {
 }
 
 func tryLocalCompactWithKey(
-	c *gin.Context,
+	c fiber.Ctx,
 	upstream *config.UpstreamConfig,
 	apiKey string,
 	bodyBytes []byte,
@@ -419,7 +420,7 @@ func tryLocalCompactWithKey(
 // PLACEHOLDER_HANDLE_NONSTREAM
 
 func handleLocalCompactNonStream(
-	c *gin.Context,
+	c fiber.Ctx,
 	resp *http.Response,
 	upstreamType string,
 	originalReq types.ResponsesRequest,
@@ -461,13 +462,13 @@ func handleLocalCompactNonStream(
 	// 写回 session
 	writeCompactedSession(responsesResp, originalReq, sessionManager)
 
-	utils.ForwardResponseHeaders(resp.Header, c.Writer)
-	c.JSON(200, responsesResp)
+	utils.ForwardResponseHeaders(resp.Header, httpbridge.Writer(c))
+	httpbridge.JSON(c, 200, responsesResp)
 	return true, nil
 }
 
 func handleLocalCompactV2NonStream(
-	c *gin.Context,
+	c fiber.Ctx,
 	resp *http.Response,
 	upstreamType string,
 	originalReq types.ResponsesRequest,
@@ -508,15 +509,15 @@ func handleLocalCompactV2NonStream(
 	responsesResp.Output = []types.ResponsesItem{newCompactionItem(summaryText)}
 	writeCompactedSession(responsesResp, originalReq, sessionManager)
 
-	utils.ForwardResponseHeaders(resp.Header, c.Writer)
-	c.JSON(200, responsesResp)
+	utils.ForwardResponseHeaders(resp.Header, httpbridge.Writer(c))
+	httpbridge.JSON(c, 200, responsesResp)
 	return true, nil
 }
 
 // PLACEHOLDER_HANDLE_STREAM
 
 func handleLocalCompactStream(
-	c *gin.Context,
+	c fiber.Ctx,
 	resp *http.Response,
 	upstreamType string,
 	originalReq types.ResponsesRequest,
@@ -526,14 +527,15 @@ func handleLocalCompactStream(
 	var converterState any
 	var summaryBuf strings.Builder
 	var responseID string
+	httpbridge.
 
-	// 设置 SSE headers
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-	c.Header("X-Accel-Buffering", "no")
-	c.Status(200)
-	flusher, _ := c.Writer.(http.Flusher)
+		// 设置 SSE headers
+		Header(c, "Content-Type", "text/event-stream")
+	httpbridge.Header(c, "Cache-Control", "no-cache")
+	httpbridge.Header(c, "Connection", "keep-alive")
+	httpbridge.Header(c, "X-Accel-Buffering", "no")
+	httpbridge.Status(c, 200)
+	flusher, _ := httpbridge.Writer(c).(http.Flusher)
 
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), utils.ResponsesSSEScannerMaxBufferSize)
@@ -549,17 +551,11 @@ func handleLocalCompactStream(
 		if needConvert {
 			switch upstreamType {
 			case "claude":
-				eventsToSend = converters.ConvertClaudeMessagesToResponses(
-					c.Request.Context(), originalReq.Model, nil, nil, []byte(line), &converterState,
-				)
+				eventsToSend = converters.ConvertClaudeMessagesToResponses(httpbridge.Request(c).Context(), originalReq.Model, nil, nil, []byte(line), &converterState)
 			case "gemini":
-				eventsToSend = converters.ConvertGeminiStreamToResponses(
-					c.Request.Context(), originalReq.Model, nil, nil, []byte(line), &converterState,
-				)
+				eventsToSend = converters.ConvertGeminiStreamToResponses(httpbridge.Request(c).Context(), originalReq.Model, nil, nil, []byte(line), &converterState)
 			default:
-				eventsToSend = converters.ConvertOpenAIChatToResponses(
-					c.Request.Context(), originalReq.Model, nil, nil, []byte(line), &converterState,
-				)
+				eventsToSend = converters.ConvertOpenAIChatToResponses(httpbridge.Request(c).Context(), originalReq.Model, nil, nil, []byte(line), &converterState)
 			}
 		} else {
 			// OpenRouter 等上游的非标准 reasoning 事件归一化后，
@@ -576,7 +572,7 @@ func handleLocalCompactStream(
 			// 收集摘要文本
 			collectStreamSummary(event, &summaryBuf, &responseID)
 
-			if _, err := c.Writer.Write([]byte(event)); err != nil {
+			if _, err := httpbridge.Writer(c).Write([]byte(event)); err != nil {
 				return true, nil
 			}
 			if flusher != nil {
@@ -610,7 +606,7 @@ func handleLocalCompactStream(
 }
 
 func handleLocalCompactV2Stream(
-	c *gin.Context,
+	c fiber.Ctx,
 	resp *http.Response,
 	upstreamType string,
 	originalReq types.ResponsesRequest,
@@ -635,17 +631,11 @@ func handleLocalCompactV2Stream(
 		if needConvert {
 			switch upstreamType {
 			case "claude":
-				eventsToProcess = converters.ConvertClaudeMessagesToResponses(
-					c.Request.Context(), originalReq.Model, nil, nil, []byte(line), &converterState,
-				)
+				eventsToProcess = converters.ConvertClaudeMessagesToResponses(httpbridge.Request(c).Context(), originalReq.Model, nil, nil, []byte(line), &converterState)
 			case "gemini":
-				eventsToProcess = converters.ConvertGeminiStreamToResponses(
-					c.Request.Context(), originalReq.Model, nil, nil, []byte(line), &converterState,
-				)
+				eventsToProcess = converters.ConvertGeminiStreamToResponses(httpbridge.Request(c).Context(), originalReq.Model, nil, nil, []byte(line), &converterState)
 			default:
-				eventsToProcess = converters.ConvertOpenAIChatToResponses(
-					c.Request.Context(), originalReq.Model, nil, nil, []byte(line), &converterState,
-				)
+				eventsToProcess = converters.ConvertOpenAIChatToResponses(httpbridge.Request(c).Context(), originalReq.Model, nil, nil, []byte(line), &converterState)
 			}
 		} else {
 			eventsToProcess = []string{line + "\n"}
@@ -702,18 +692,17 @@ func handleLocalCompactV2Stream(
 	}
 
 	writeCompactedSession(responsesResp, originalReq, sessionManager)
-
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-	c.Header("X-Accel-Buffering", "no")
-	c.Status(200)
+	httpbridge.Header(c, "Content-Type", "text/event-stream")
+	httpbridge.Header(c, "Cache-Control", "no-cache")
+	httpbridge.Header(c, "Connection", "keep-alive")
+	httpbridge.Header(c, "X-Accel-Buffering", "no")
+	httpbridge.Status(c, 200)
 
 	for _, event := range buildCompactionV2SSEEvents(responsesResp) {
-		if _, err := c.Writer.Write([]byte(event)); err != nil {
+		if _, err := httpbridge.Writer(c).Write([]byte(event)); err != nil {
 			return true, nil
 		}
-		if flusher, ok := c.Writer.(http.Flusher); ok {
+		if flusher, ok := httpbridge.Writer(c).(http.Flusher); ok {
 			flusher.Flush()
 		}
 	}

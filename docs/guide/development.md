@@ -13,7 +13,7 @@
 
 | 工具 | 最低版本 | 安装方式 (macOS) | 安装方式 (Linux) | 说明 |
 | --- | --- | --- | --- | --- |
-| **Go** | 1.25 | `brew install go` | [go.dev/dl](https://go.dev/dl/) | 后端编译与运行 |
+| **Go** | 1.26 | `brew install go` | [go.dev/dl](https://go.dev/dl/) | 后端编译与运行 |
 | **Bun** | 1.x | `brew install oven-sh/bun/bun` | `curl -fsSL https://bun.sh/install \| bash` | 前端依赖管理与构建 |
 | **Git** | - | Xcode CLT 自带 | `apt install git` / `yum install git` | 版本管理 |
 | **Make** | - | Xcode CLT 自带 | 通常已预装 | 构建脚本 |
@@ -26,7 +26,7 @@ xcode-select --install
 
 ### 一键安装所有依赖
 
-项目根目录 Makefile 提供了 `make install`，可自动安装前端依赖、Go 模块和开发工具（Air 热重载、Wails 3）：
+项目根目录 Makefile 提供了 `make install`，可自动安装前端依赖、Go 模块和开发工具（Air 热重载）：
 
 ```bash
 make install
@@ -35,7 +35,7 @@ make install
 ### 验证环境
 
 ```bash
-go version     # 应 >= 1.25
+go version     # 应 >= 1.26
 bun --version  # 应 >= 1.x
 make help      # 确认可用命令
 ```

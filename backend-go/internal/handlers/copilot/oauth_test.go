@@ -9,11 +9,11 @@ import (
 	"time"
 
 	corecopilot "github.com/soulteary/yunqi/internal/copilot"
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 func TestRequestDeviceCodeSuccess(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasSuffix(r.URL.Path, "/device/code") {
 			t.Fatalf("path = %q, want /device/code", r.URL.Path)
@@ -34,7 +34,7 @@ func TestRequestDeviceCodeSuccess(t *testing.T) {
 }
 
 func TestRequestDeviceCodeUsesProxyClient(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"device_code":"dev-1","user_code":"USER-1","verification_uri":"https://github.com/login/device","expires_in":900,"interval":5}`))
 	}))
@@ -61,7 +61,7 @@ func TestRequestDeviceCodeUsesProxyClient(t *testing.T) {
 }
 
 func TestRequestDeviceCodeTimesOut(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(200 * time.Millisecond)
 		_, _ = w.Write([]byte(`{"device_code":"late"}`))
@@ -108,13 +108,13 @@ func performRequestDeviceCode() *httptest.ResponseRecorder {
 }
 
 func performRequestDeviceCodeWithBody(body string) *httptest.ResponseRecorder {
-	router := gin.New()
-	router.POST("/api/copilot/oauth/device/code", RequestDeviceCode())
+	router := httpbridge.NewApp()
+	router.Post("/api/copilot/oauth/device/code", RequestDeviceCode())
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/copilot/oauth/device/code", bytes.NewBufferString(body))
 	if body != "" {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 	return w
 }

@@ -3,35 +3,36 @@ package handlers
 import (
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 // HealthCheck 健康检查处理器
-func HealthCheck(envCfg *config.EnvConfig, cfgManager *config.ConfigManager) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func HealthCheck(envCfg *config.EnvConfig, cfgManager *config.ConfigManager) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		config := cfgManager.GetConfig()
 
-		healthData := gin.H{
+		healthData := fiber.Map{
 			"status":    "healthy",
 			"timestamp": time.Now().Format(time.RFC3339),
 			"uptime":    time.Since(startTime).Seconds(),
 			"mode":      envCfg.Env,
 			"version":   getVersion(),
-			"config": gin.H{
+			"config": fiber.Map{
 				"upstreamCount": len(config.Upstream),
 			},
 		}
-
-		c.JSON(200, healthData)
+		httpbridge.JSON(c, 200, healthData)
+		return nil
 	}
 }
 
 // getVersion 获取版本信息
-func getVersion() gin.H {
+func getVersion() fiber.Map {
 	// 这些变量在编译时通过 -ldflags 注入
 	// 从根目录 VERSION 文件读取
-	return gin.H{
+	return fiber.Map{
 		"version":   getVersionString(),
 		"buildTime": getBuildTime(),
 		"gitCommit": getGitCommit(),
@@ -58,39 +59,41 @@ func SetVersionInfo(version, build, commit string) {
 }
 
 // SaveConfigHandler 配置保存处理器
-func SaveConfigHandler(cfgManager *config.ConfigManager) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func SaveConfigHandler(cfgManager *config.ConfigManager) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		if err := cfgManager.SaveConfig(); err != nil {
-			c.JSON(500, gin.H{
+			httpbridge.JSON(c, 500, fiber.Map{
 				"status":    "error",
 				"message":   "配置保存失败",
 				"error":     err.Error(),
 				"timestamp": time.Now().Format(time.RFC3339),
 			})
-			return
+			return nil
 		}
 
 		config := cfgManager.GetConfig()
-		c.JSON(200, gin.H{
+		httpbridge.JSON(c, 200, fiber.Map{
 			"status":    "success",
 			"message":   "配置已保存",
 			"timestamp": time.Now().Format(time.RFC3339),
-			"config": gin.H{
+			"config": fiber.Map{
 				"upstreamCount": len(config.Upstream),
 			},
 		})
+		return nil
 	}
 }
 
 // DevInfo 开发信息处理器
-func DevInfo(envCfg *config.EnvConfig, cfgManager *config.ConfigManager) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		c.JSON(200, gin.H{
+func DevInfo(envCfg *config.EnvConfig, cfgManager *config.ConfigManager) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		httpbridge.JSON(c, 200, fiber.Map{
 			"status":      "development",
 			"timestamp":   time.Now().Format(time.RFC3339),
 			"config":      cfgManager.GetConfig(),
 			"environment": envCfg,
 		})
+		return nil
 	}
 }
 

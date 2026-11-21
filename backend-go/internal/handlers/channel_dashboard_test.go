@@ -11,15 +11,14 @@ import (
 
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/errutil"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/session"
 	"github.com/soulteary/yunqi/internal/warmup"
-	"github.com/gin-gonic/gin"
 )
 
 func TestGetChannelDashboard_IncludesBreakerFields(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	cfg := config.Config{
 		Upstream: []config.UpstreamConfig{{
@@ -65,12 +64,12 @@ func TestGetChannelDashboard_IncludesBreakerFields(t *testing.T) {
 	urlManager := warmup.NewURLManager(30*time.Second, 3)
 	sch := scheduler.NewChannelScheduler(cfgManager, messagesMetrics, responsesMetrics, geminiMetrics, chatMetrics, imagesMetrics, traceAffinity, urlManager)
 
-	r := gin.New()
-	r.GET("/messages/channels/dashboard", GetChannelDashboard(cfgManager, sch))
+	r := httpbridge.NewApp()
+	r.Get("/messages/channels/dashboard", GetChannelDashboard(cfgManager, sch))
 
 	req := httptest.NewRequest(http.MethodGet, "/messages/channels/dashboard?type=messages", nil)
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status=%d, want=%d, body=%s", w.Code, http.StatusOK, w.Body.String())
@@ -105,7 +104,6 @@ func TestGetChannelDashboard_IncludesBreakerFields(t *testing.T) {
 }
 
 func TestGetChannelDashboard_IncludesConsumptionPolicyDistribution(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	tmpDir := t.TempDir()
 	configFile := filepath.Join(tmpDir, "config.json")
@@ -192,12 +190,12 @@ func TestGetChannelDashboard_IncludesConsumptionPolicyDistribution(t *testing.T)
 	urlManager := warmup.NewURLManager(30*time.Second, 3)
 	sch := scheduler.NewChannelScheduler(cfgManager, messagesMetrics, responsesMetrics, geminiMetrics, chatMetrics, imagesMetrics, traceAffinity, urlManager)
 
-	r := gin.New()
-	r.GET("/messages/channels/dashboard", GetChannelDashboard(cfgManager, sch))
+	r := httpbridge.NewApp()
+	r.Get("/messages/channels/dashboard", GetChannelDashboard(cfgManager, sch))
 
 	req := httptest.NewRequest(http.MethodGet, "/messages/channels/dashboard?type=messages", nil)
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status=%d, want=%d, body=%s", w.Code, http.StatusOK, w.Body.String())
@@ -235,7 +233,6 @@ func TestGetChannelDashboard_IncludesConsumptionPolicyDistribution(t *testing.T)
 }
 
 func TestGetChannelDashboard_LLMReturnsAllProtocolDashboards(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	upstream := func(name, serviceType string) []config.UpstreamConfig {
 		return []config.UpstreamConfig{{
@@ -291,10 +288,10 @@ func TestGetChannelDashboard_LLMReturnsAllProtocolDashboards(t *testing.T) {
 		warmup.NewURLManager(30*time.Second, 3),
 	)
 
-	r := gin.New()
-	r.GET("/messages/channels/dashboard", GetChannelDashboard(cfgManager, sch))
+	r := httpbridge.NewApp()
+	r.Get("/messages/channels/dashboard", GetChannelDashboard(cfgManager, sch))
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/messages/channels/dashboard?type=llm", nil))
+	httpbridge.Handler(r).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/messages/channels/dashboard?type=llm", nil))
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status=%d, want=%d, body=%s", w.Code, http.StatusOK, w.Body.String())
@@ -320,7 +317,6 @@ func TestGetChannelDashboard_LLMReturnsAllProtocolDashboards(t *testing.T) {
 }
 
 func TestGetChannelDashboard_GeminiFallbackServiceTypeReadsMetrics(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	cfg := config.Config{
 		GeminiUpstream: []config.UpstreamConfig{{
@@ -366,12 +362,12 @@ func TestGetChannelDashboard_GeminiFallbackServiceTypeReadsMetrics(t *testing.T)
 	urlManager := warmup.NewURLManager(30*time.Second, 3)
 	sch := scheduler.NewChannelScheduler(cfgManager, messagesMetrics, responsesMetrics, geminiMetrics, chatMetrics, imagesMetrics, traceAffinity, urlManager)
 
-	r := gin.New()
-	r.GET("/messages/channels/dashboard", GetChannelDashboard(cfgManager, sch))
+	r := httpbridge.NewApp()
+	r.Get("/messages/channels/dashboard", GetChannelDashboard(cfgManager, sch))
 
 	req := httptest.NewRequest(http.MethodGet, "/messages/channels/dashboard?type=gemini", nil)
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status=%d, want=%d, body=%s", w.Code, http.StatusOK, w.Body.String())
@@ -392,7 +388,7 @@ func TestGetChannelDashboard_GeminiFallbackServiceTypeReadsMetrics(t *testing.T)
 }
 
 func TestGetChannelDashboard_Gemini_IncludesAdvancedOptionFields(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	enabled := true
 	cfg := config.Config{
 		GeminiUpstream: []config.UpstreamConfig{
@@ -441,12 +437,12 @@ func TestGetChannelDashboard_Gemini_IncludesAdvancedOptionFields(t *testing.T) {
 	urlManager := warmup.NewURLManager(30*time.Second, 3)
 	sch := scheduler.NewChannelScheduler(cfgManager, messagesMetrics, responsesMetrics, geminiMetrics, chatMetrics, imagesMetrics, traceAffinity, urlManager)
 
-	r := gin.New()
-	r.GET("/messages/channels/dashboard", GetChannelDashboard(cfgManager, sch))
+	r := httpbridge.NewApp()
+	r.Get("/messages/channels/dashboard", GetChannelDashboard(cfgManager, sch))
 
 	req := httptest.NewRequest(http.MethodGet, "/messages/channels/dashboard?type=gemini", nil)
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status=%d, want=%d, body=%s", w.Code, http.StatusOK, w.Body.String())
@@ -491,7 +487,6 @@ func TestGetChannelDashboard_Gemini_IncludesAdvancedOptionFields(t *testing.T) {
 }
 
 func TestGetChannelDashboard_MessagesIncludesStripEmptyTextBlocks(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	channel := config.UpstreamConfig{
 		Name:        "msg-claude",
@@ -537,12 +532,12 @@ func TestGetChannelDashboard_MessagesIncludesStripEmptyTextBlocks(t *testing.T) 
 	urlManager := warmup.NewURLManager(30*time.Second, 3)
 	sch := scheduler.NewChannelScheduler(cfgManager, messagesMetrics, responsesMetrics, geminiMetrics, chatMetrics, imagesMetrics, traceAffinity, urlManager)
 
-	r := gin.New()
-	r.GET("/messages/channels/dashboard", GetChannelDashboard(cfgManager, sch))
+	r := httpbridge.NewApp()
+	r.Get("/messages/channels/dashboard", GetChannelDashboard(cfgManager, sch))
 
 	req := httptest.NewRequest(http.MethodGet, "/messages/channels/dashboard?type=messages", nil)
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status=%d, want=%d, body=%s", w.Code, http.StatusOK, w.Body.String())
@@ -563,7 +558,6 @@ func TestGetChannelDashboard_MessagesIncludesStripEmptyTextBlocks(t *testing.T) 
 }
 
 func TestGetChannelDashboard_ChatFallbackServiceTypeReadsMetrics(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	cfg := config.Config{
 		ChatUpstream: []config.UpstreamConfig{{
@@ -609,12 +603,12 @@ func TestGetChannelDashboard_ChatFallbackServiceTypeReadsMetrics(t *testing.T) {
 	urlManager := warmup.NewURLManager(30*time.Second, 3)
 	sch := scheduler.NewChannelScheduler(cfgManager, messagesMetrics, responsesMetrics, geminiMetrics, chatMetrics, imagesMetrics, traceAffinity, urlManager)
 
-	r := gin.New()
-	r.GET("/messages/channels/dashboard", GetChannelDashboard(cfgManager, sch))
+	r := httpbridge.NewApp()
+	r.Get("/messages/channels/dashboard", GetChannelDashboard(cfgManager, sch))
 
 	req := httptest.NewRequest(http.MethodGet, "/messages/channels/dashboard?type=chat", nil)
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status=%d, want=%d, body=%s", w.Code, http.StatusOK, w.Body.String())

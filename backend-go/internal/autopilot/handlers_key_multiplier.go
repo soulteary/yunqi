@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gin-gonic/gin"
-
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 type OptionalFloat64 struct {
@@ -92,45 +92,45 @@ type keyMultiplierResponse struct {
 	ExpiresAt          *time.Time                  `json:"expiresAt,omitempty"`
 }
 
-func RegisterKeyMultiplierRoutes(router gin.IRouter, cfgManager *config.ConfigManager) {
+func RegisterKeyMultiplierRoutes(router fiber.Router, cfgManager *config.ConfigManager) {
 	if router == nil || cfgManager == nil {
 		return
 	}
-	router.PATCH("/:kind/channels/:channelUid/keys/:keyUid/multiplier", handlePatchKeyMultiplier(cfgManager))
+	router.Patch("/:kind/channels/:channelUid/keys/:keyUid/multiplier", handlePatchKeyMultiplier(cfgManager))
 }
 
-func handlePatchKeyMultiplier(cfgManager *config.ConfigManager) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		kind := strings.TrimSpace(c.Param("kind"))
-		channelUID := strings.TrimSpace(c.Param("channelUid"))
-		keyUID := strings.TrimSpace(c.Param("keyUid"))
+func handlePatchKeyMultiplier(cfgManager *config.ConfigManager) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		kind := strings.TrimSpace(httpbridge.Param(c, "kind"))
+		channelUID := strings.TrimSpace(httpbridge.Param(c, "channelUid"))
+		keyUID := strings.TrimSpace(httpbridge.Param(c, "keyUid"))
 		if kind == "" || channelUID == "" || keyUID == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "kind、channelUid、keyUid 不能为空"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "kind、channelUid、keyUid 不能为空"})
+			return nil
 		}
 		apiType, err := normalizeChannelKind(kind)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
+			return nil
 		}
 
 		var req keyMultiplierPatchRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数无效: " + err.Error()})
-			return
+		if err := httpbridge.BindJSON(c, &req); err != nil {
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "请求参数无效: " + err.Error()})
+			return nil
 		}
 		if !req.GroupMultiplier.Present && !req.ConsumptionPolicy.Present {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "至少提供一个字段"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "至少提供一个字段"})
+			return nil
 		}
 		if req.GroupMultiplier.IsSet() && !isFiniteNonNegativeValue(req.GroupMultiplier.Value) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "groupMultiplier 必须是有限且非负数"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "groupMultiplier 必须是有限且非负数"})
+			return nil
 		}
 		if req.ConsumptionPolicy.Present && req.ConsumptionPolicy.Valid {
 			if !config.IsKeyConsumptionPolicyValid(req.ConsumptionPolicy.Value) {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "consumptionPolicy 必须是 normal 或 opportunistic"})
-				return
+				httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "consumptionPolicy 必须是 normal 或 opportunistic"})
+				return nil
 			}
 		}
 
@@ -140,20 +140,20 @@ func handlePatchKeyMultiplier(cfgManager *config.ConfigManager) gin.HandlerFunc 
 			if strings.Contains(err.Error(), "不存在") {
 				status = http.StatusNotFound
 			}
-			c.JSON(status, gin.H{"error": err.Error()})
-			return
+			httpbridge.JSON(c, status, fiber.Map{"error": err.Error()})
+			return nil
 		}
 		cfgIndex, current, err := findAPIKeyConfigByKeyUID(*upstream, keyUID)
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-			return
+			httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": err.Error()})
+			return nil
 		}
 
 		next := cloneAPIKeyConfigForPatch(current)
 		isNewAPI := strings.EqualFold(strings.TrimSpace(next.MultiplierSource), "new_api")
 		if isNewAPI && req.GroupMultiplier.Present {
-			c.JSON(http.StatusConflict, gin.H{"error": "new_api key 的 groupMultiplier 由远端同步，不能手动修改"})
-			return
+			httpbridge.JSON(c, http.StatusConflict, fiber.Map{"error": "new_api key 的 groupMultiplier 由远端同步，不能手动修改"})
+			return nil
 		}
 
 		now := time.Now().UTC()
@@ -207,10 +207,11 @@ func handlePatchKeyMultiplier(cfgManager *config.ConfigManager) gin.HandlerFunc 
 		// 必须绕过渠道编辑表单的 merge 回填，否则清除倍率会被旧值填回。
 		updates := config.UpstreamUpdate{APIKeyConfigs: patchAPIKeyConfigAt(upstream.APIKeyConfigs, cfgIndex, next), SkipAPIKeyConfigMerge: true}
 		if err := updateUpstreamByType(cfgManager, apiType, channelIndex, updates); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
+			httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": err.Error()})
+			return nil
 		}
-		c.JSON(http.StatusOK, response)
+		httpbridge.JSON(c, http.StatusOK, response)
+		return nil
 	}
 }
 

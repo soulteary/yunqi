@@ -3,10 +3,10 @@ package common
 import (
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/types"
-	"github.com/gin-gonic/gin"
 )
 
 // 上下文窗口自学习（放宽侧）。
@@ -20,7 +20,7 @@ import (
 // MaybeRecordContextWindowProven 在请求成功后记录实证输入承载量。
 // 只在 handleSuccess 无错误（流式正常完成/非流式 2xx 落定）且 usage 携带输入量时学习；
 // 中途出错、客户端取消、空响应都不构成"实证"。
-func MaybeRecordContextWindowProven(c *gin.Context, apiType string, upstream *config.UpstreamConfig, kind scheduler.ChannelKind, model string, usage *types.Usage, err error) {
+func MaybeRecordContextWindowProven(c fiber.Ctx, apiType string, upstream *config.UpstreamConfig, kind scheduler.ChannelKind, model string, usage *types.Usage, err error) {
 	if err != nil || upstream == nil || upstream.ChannelUID == "" || model == "" || usage == nil {
 		return
 	}

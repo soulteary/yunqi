@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/soulteary/yunqi/internal/errutil"
-	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"github.com/soulteary/yunqi/internal/errutil"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 func newTestManagerForHandlers(t *testing.T) *Manager {
@@ -28,18 +28,18 @@ func newTestManagerForHandlers(t *testing.T) *Manager {
 // ── REST /health-center/changelog ──
 
 func TestHandleChangelog_DefaultLimit(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	mgr := newTestManagerForHandlers(t)
 	for i := 0; i < 5; i++ {
 		mgr.ChangelogStore().Record(ProfileChangeEvent{ChannelUID: "ch-1", EventType: EventTypeHealthChanged})
 	}
 
-	router := gin.New()
+	router := httpbridge.NewApp()
 	RegisterRoutes(router, mgr)
 
 	req := httptest.NewRequest(http.MethodGet, "/health-center/changelog", nil)
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("状态码 = %d, want 200", w.Code)
@@ -47,15 +47,15 @@ func TestHandleChangelog_DefaultLimit(t *testing.T) {
 }
 
 func TestHandleChangelog_LimitClampedTo200(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	mgr := newTestManagerForHandlers(t)
 
-	router := gin.New()
+	router := httpbridge.NewApp()
 	RegisterRoutes(router, mgr)
 
 	req := httptest.NewRequest(http.MethodGet, "/health-center/changelog?limit=99999", nil)
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("状态码 = %d, want 200", w.Code)
@@ -63,17 +63,17 @@ func TestHandleChangelog_LimitClampedTo200(t *testing.T) {
 }
 
 func TestHandleChangelog_FilterByChannelUID(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	mgr := newTestManagerForHandlers(t)
 	mgr.ChangelogStore().Record(ProfileChangeEvent{ChannelUID: "ch-a", EventType: EventTypeHealthChanged})
 	mgr.ChangelogStore().Record(ProfileChangeEvent{ChannelUID: "ch-b", EventType: EventTypeHealthChanged})
 
-	router := gin.New()
+	router := httpbridge.NewApp()
 	RegisterRoutes(router, mgr)
 
 	req := httptest.NewRequest(http.MethodGet, "/health-center/changelog?channelUid=ch-a", nil)
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("状态码 = %d, want 200", w.Code)
@@ -87,15 +87,15 @@ func TestHandleChangelog_FilterByChannelUID(t *testing.T) {
 }
 
 func TestHandleChangelog_NilChangelogStore_ReturnsEmpty(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	mgr := &Manager{} // changelogStore 为 nil
 
-	router := gin.New()
+	router := httpbridge.NewApp()
 	RegisterRoutes(router, mgr)
 
 	req := httptest.NewRequest(http.MethodGet, "/health-center/changelog", nil)
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("状态码 = %d, want 200", w.Code)
@@ -108,12 +108,12 @@ func TestHandleChangelog_NilChangelogStore_ReturnsEmpty(t *testing.T) {
 // ── WebSocket /health-center/events ──
 
 func TestHandleChangelogEvents_ConnectReceiveDisconnect(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	mgr := newTestManagerForHandlers(t)
 
-	router := gin.New()
+	router := httpbridge.NewApp()
 	RegisterRoutes(router, mgr)
-	server := httptest.NewServer(router)
+	server := httptest.NewServer(httpbridge.Handler(router))
 	defer server.Close()
 
 	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/health-center/events"
@@ -149,12 +149,12 @@ func TestHandleChangelogEvents_ConnectReceiveDisconnect(t *testing.T) {
 // 通过 Sec-WebSocket-Protocol 传入的子协议（承载 API key）会被服务端原样回显，
 // 满足部分浏览器要求握手响应包含已选定子协议的行为（Phase 3A 鉴权基础）。
 func TestHandleChangelogEvents_EchoesSecWebSocketProtocol(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	mgr := newTestManagerForHandlers(t)
 
-	router := gin.New()
+	router := httpbridge.NewApp()
 	RegisterRoutes(router, mgr)
-	server := httptest.NewServer(router)
+	server := httptest.NewServer(httpbridge.Handler(router))
 	defer server.Close()
 
 	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/health-center/events"
@@ -175,12 +175,12 @@ func TestHandleChangelogEvents_EchoesSecWebSocketProtocol(t *testing.T) {
 }
 
 func TestHandleChangelogEvents_UnsubscribesOnDisconnect(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	mgr := newTestManagerForHandlers(t)
 
-	router := gin.New()
+	router := httpbridge.NewApp()
 	RegisterRoutes(router, mgr)
-	server := httptest.NewServer(router)
+	server := httptest.NewServer(httpbridge.Handler(router))
 	defer server.Close()
 
 	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/health-center/events"
@@ -207,12 +207,12 @@ func TestHandleChangelogEvents_UnsubscribesOnDisconnect(t *testing.T) {
 }
 
 func TestHandleChangelogEvents_NilEventHub_ReturnsServiceUnavailable(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	mgr := &Manager{} // eventHub 为 nil
 
-	router := gin.New()
+	router := httpbridge.NewApp()
 	RegisterRoutes(router, mgr)
-	server := httptest.NewServer(router)
+	server := httptest.NewServer(httpbridge.Handler(router))
 	defer server.Close()
 
 	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/health-center/events"

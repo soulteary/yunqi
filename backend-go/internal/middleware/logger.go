@@ -1,11 +1,14 @@
 package middleware
 
 import (
+	"log"
 	"net/http"
 	"strings"
+	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 // 默认跳过日志的路径前缀（仅 GET 请求）
@@ -22,38 +25,34 @@ var defaultSkipPrefixes = []string{
 // FilteredLogger 创建一个可过滤路径的 Logger 中间件
 // 仅对 GET 请求且匹配 skipPrefixes 前缀的路径跳过日志输出
 // POST/PUT/DELETE 等管理操作始终记录日志以保留审计跟踪
-func FilteredLogger(envCfg *config.EnvConfig, skipPrefixes ...string) gin.HandlerFunc {
-	// 如果 QuietPollingLogs 为 false，使用标准 Logger
-	if !envCfg.QuietPollingLogs {
-		return gin.Logger()
-	}
-
+func FilteredLogger(envCfg *config.EnvConfig, skipPrefixes ...string) fiber.Handler {
 	if len(skipPrefixes) == 0 {
 		skipPrefixes = defaultSkipPrefixes
 	}
-
-	return gin.LoggerWithConfig(gin.LoggerConfig{
-		Skip: func(c *gin.Context) bool {
-			path := c.Request.URL.Path
-
-			// CORS 预检不改变服务状态；排障按钮读取 Responses 渠道日志时会触发该预检，静默避免刷屏。
-			if c.Request.Method == http.MethodOptions && isResponsesChannelLogsPath(path) {
-				return true
+	return func(c fiber.Ctx) error {
+		path := httpbridge.Request(c).URL.Path
+		method := httpbridge.Request(c).Method
+		skip := false
+		if envCfg.QuietPollingLogs {
+			if method == http.MethodOptions && isResponsesChannelLogsPath(path) {
+				skip = true
 			}
-
-			// 只跳过 GET 请求，保留其他方法的审计日志
-			if c.Request.Method != http.MethodGet {
-				return false
-			}
-
-			for _, prefix := range skipPrefixes {
-				if strings.HasPrefix(path, prefix) {
-					return true
+			if method == http.MethodGet {
+				for _, prefix := range skipPrefixes {
+					if strings.HasPrefix(path, prefix) {
+						skip = true
+						break
+					}
 				}
 			}
-			return false
-		},
-	})
+		}
+		start := time.Now()
+		err := c.Next()
+		if !skip {
+			log.Printf("[HTTP] %s %s | %d | %s | %s", method, path, httpbridge.Writer(c).Status(), time.Since(start), httpbridge.ClientIP(c))
+		}
+		return err
+	}
 }
 
 func isResponsesChannelLogsPath(path string) bool {

@@ -3,7 +3,8 @@ package common
 import (
 	"strings"
 
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v3"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 // 竞速质量闸门：伪工具调用标记的软校验。
@@ -98,7 +99,7 @@ func (s *PseudoToolCallMarkerScanner) Found() bool {
 
 // MarkPseudoToolCallMarkerIfHit 扫描一段完整文本（如 responses 预检缓冲），
 // 命中则标记观察器（MarkSeverityTagIfHit 的对偶）。
-func MarkPseudoToolCallMarkerIfHit(c *gin.Context, text string) {
+func MarkPseudoToolCallMarkerIfHit(c fiber.Ctx, text string) {
 	if DetectPseudoToolCallMarker(text) {
 		MarkPseudoToolCallMarker(c)
 	}
@@ -108,12 +109,12 @@ func MarkPseudoToolCallMarkerIfHit(c *gin.Context, text string) {
 // bufferedOutput 为 preflight 期间缓冲的输出文本（各协议的 text delta/原始行拼接）。
 // 无闸门时直接放行（零开销）；有闸门时带工具请求且缓冲输出命中伪标记的
 // 分支让出提交权并丢弃分支缓冲，调用方应以 ErrRacingSuperseded 收尾。
-func RacingClaimClientCommitForStream(c *gin.Context, bufferedOutput string) bool {
+func RacingClaimClientCommitForStream(c fiber.Ctx, bufferedOutput string) bool {
 	if gateFromContext(c) == nil {
 		return true
 	}
 	if bufferedOutput != "" && DetectPseudoToolCallMarker(bufferedOutput) && streamRequestHasTools(c) {
-		if bw, ok := c.Writer.(*racingBranchWriter); ok {
+		if bw, ok := httpbridge.Writer(c).(*racingBranchWriter); ok {
 			bw.Discard()
 		}
 		RequestLogf(c, "[Racing-QualityGate] 分支首包命中伪工具调用标记（tool_choice=auto 下模型把工具调用写成文本），让出提交权")
@@ -126,7 +127,7 @@ func RacingClaimClientCommitForStream(c *gin.Context, bufferedOutput string) boo
 }
 
 // streamRequestHasTools 本请求是否携带工具定义（伪标记校验仅对带工具请求启用）。
-func streamRequestHasTools(c *gin.Context) bool {
+func streamRequestHasTools(c fiber.Ctx) bool {
 	body := GetEffectiveRequestBody(c, nil)
 	return BodyHasTools(body)
 }
@@ -135,6 +136,6 @@ func streamRequestHasTools(c *gin.Context) bool {
 // 伪标记观察窗（preflight 延长收流）的启用条件。影子分支多观察几个
 // delta 不影响客户端（主分支同时在服务）；主分支与非竞速路径不启用，
 // 保持原有放行节奏。
-func RacingShadowWithTools(c *gin.Context) bool {
+func RacingShadowWithTools(c fiber.Ctx) bool {
 	return gateFromContext(c) != nil && racingIsShadow(c) && streamRequestHasTools(c)
 }

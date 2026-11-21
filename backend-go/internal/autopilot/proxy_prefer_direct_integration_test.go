@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/soulteary/yunqi/internal/httpbridge"
+
 	"github.com/soulteary/yunqi/internal/config"
 )
 
@@ -40,7 +42,7 @@ func TestHandleNewApiProvision_PersistsProxySettings(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/subscriptions/newapi/provision", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 
 	if w.Code != http.StatusCreated {
 		t.Fatalf("期望 201, got %d, body=%s", w.Code, w.Body.String())
@@ -109,7 +111,7 @@ func TestCustomAutoAddPersistsProxyPreferDirect(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/chat/channels/auto-add", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}

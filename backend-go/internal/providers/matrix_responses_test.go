@@ -9,11 +9,10 @@ import (
 	"testing"
 
 	"github.com/soulteary/yunqi/internal/config"
-	"github.com/gin-gonic/gin"
 )
 
 func TestResponsesEntry_RequestMatrix_AllFourUpstreams(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	tests := []struct {
 		name            string
 		serviceType     string
@@ -74,7 +73,7 @@ func TestResponsesEntry_RequestMatrix_AllFourUpstreams(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// 显式 ModelMapping 已退役：客户端直接以上游真实模型名发起请求。
 			reqJSON := strings.Replace(tt.body, `"model":"gpt-5"`, fmt.Sprintf(`"model":%q`, tt.expectedModel), 1)
-			c := newGinContext(http.MethodPost, tt.path, []byte(reqJSON), context.Background())
+			c := newFiberContext(http.MethodPost, tt.path, []byte(reqJSON), context.Background())
 			upstream := &config.UpstreamConfig{
 				BaseURL:     "https://api.example.com",
 				ServiceType: tt.serviceType,
@@ -104,10 +103,9 @@ func TestResponsesEntry_RequestMatrix_AllFourUpstreams(t *testing.T) {
 }
 
 func TestResponsesEntry_RequestMatrix_PreservesKeyParams(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	t.Run("responses_passthrough_preserves_instructions_and_stream", func(t *testing.T) {
-		c := newGinContext(http.MethodPost, "/v1/responses", []byte(`{"model":"gpt-5","input":"hi","instructions":"be helpful","stream":true,"max_output_tokens":1024}`), context.Background())
+		c := newFiberContext(http.MethodPost, "/v1/responses", []byte(`{"model":"gpt-5","input":"hi","instructions":"be helpful","stream":true,"max_output_tokens":1024}`), context.Background())
 		upstream := &config.UpstreamConfig{
 			BaseURL:     "https://api.example.com",
 			ServiceType: "responses",
@@ -137,7 +135,7 @@ func TestResponsesEntry_RequestMatrix_PreservesKeyParams(t *testing.T) {
 	})
 
 	t.Run("responses_passthrough_strips_internal_metadata", func(t *testing.T) {
-		c := newGinContext(http.MethodPost, "/v1/responses", []byte(`{"model":"gpt-5","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}],"internal_chat_message_metadata_passthrough":{"conversation_id":"local"},"status":"completed"}],"internal_chat_message_metadata_passthrough":{"conversation_id":"local"},"transformer_metadata":{"codex_tool_compat_enabled":false}}`), context.Background())
+		c := newFiberContext(http.MethodPost, "/v1/responses", []byte(`{"model":"gpt-5","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}],"internal_chat_message_metadata_passthrough":{"conversation_id":"local"},"status":"completed"}],"internal_chat_message_metadata_passthrough":{"conversation_id":"local"},"transformer_metadata":{"codex_tool_compat_enabled":false}}`), context.Background())
 		upstream := &config.UpstreamConfig{
 			BaseURL:     "https://api.example.com",
 			ServiceType: "responses",
@@ -174,7 +172,7 @@ func TestResponsesEntry_RequestMatrix_PreservesKeyParams(t *testing.T) {
 	})
 
 	t.Run("responses_to_claude_preserves_instructions_as_system", func(t *testing.T) {
-		c := newGinContext(http.MethodPost, "/v1/responses", []byte(`{"model":"claude","input":"hi","instructions":"be helpful","stream":false}`), context.Background())
+		c := newFiberContext(http.MethodPost, "/v1/responses", []byte(`{"model":"claude","input":"hi","instructions":"be helpful","stream":false}`), context.Background())
 		upstream := &config.UpstreamConfig{
 			BaseURL:     "https://api.example.com",
 			ServiceType: "claude",
@@ -198,7 +196,7 @@ func TestResponsesEntry_RequestMatrix_PreservesKeyParams(t *testing.T) {
 	})
 
 	t.Run("responses_to_gemini_uses_model_in_url", func(t *testing.T) {
-		c := newGinContext(http.MethodPost, "/v1/responses", []byte(`{"model":"gemini-2.5-pro","input":"hi","stream":false}`), context.Background())
+		c := newFiberContext(http.MethodPost, "/v1/responses", []byte(`{"model":"gemini-2.5-pro","input":"hi","stream":false}`), context.Background())
 		upstream := &config.UpstreamConfig{
 			BaseURL:     "https://api.example.com",
 			ServiceType: "gemini",
@@ -218,7 +216,6 @@ func TestResponsesEntry_RequestMatrix_PreservesKeyParams(t *testing.T) {
 }
 
 func TestResponsesProvider_NormalizeNonstandardChatRolesForOpenAIChatUpstream(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	tests := []struct {
 		name      string
@@ -232,7 +229,7 @@ func TestResponsesProvider_NormalizeNonstandardChatRolesForOpenAIChatUpstream(t 
 	body := []byte(`{"model":"gpt-5","input":[{"type":"message","role":"developer","content":"dev message"},{"type":"message","role":"user","content":"user message"}]}`)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c := newGinContext(http.MethodPost, "/v1/responses", body, context.Background())
+			c := newFiberContext(http.MethodPost, "/v1/responses", body, context.Background())
 			upstream := &config.UpstreamConfig{
 				BaseURL:     "https://api.example.com",
 				ServiceType: "openai",
@@ -268,7 +265,7 @@ func TestResponsesProvider_NormalizeNonstandardChatRolesForOpenAIChatUpstream(t 
 // TestResponsesEntry_BudgetReminderStripMatrix 验证 Codex 预算提醒剔除的分支语义：
 // passthrough 命中映射才剔、未命中保留；converter 跨协议无条件剔。
 func TestResponsesEntry_BudgetReminderStripMatrix(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	reminderBody := `{"model":"gpt-5","input":[{"type":"message","role":"developer","content":[{"type":"input_text","text":"You have 710 tokens left in this context window."}]},{"type":"message","role":"user","content":"hi"}]}`
 
 	tests := []struct {
@@ -296,7 +293,7 @@ func TestResponsesEntry_BudgetReminderStripMatrix(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c := newGinContext(http.MethodPost, "/v1/responses", []byte(reminderBody), context.Background())
+			c := newFiberContext(http.MethodPost, "/v1/responses", []byte(reminderBody), context.Background())
 			upstream := &config.UpstreamConfig{
 				BaseURL:     "https://api.example.com",
 				ServiceType: tt.serviceType,

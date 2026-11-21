@@ -12,18 +12,19 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/errutil"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/types"
 	"github.com/soulteary/yunqi/internal/utils"
-	"github.com/gin-gonic/gin"
 )
 
 // GeminiProvider Gemini 提供商
 type GeminiProvider struct{}
 
 // ConvertToProviderRequest 转换为 Gemini 请求
-func (p *GeminiProvider) ConvertToProviderRequest(c *gin.Context, upstream *config.UpstreamConfig, apiKey string) (*http.Request, []byte, error) {
+func (p *GeminiProvider) ConvertToProviderRequest(c fiber.Ctx, upstream *config.UpstreamConfig, apiKey string) (*http.Request, []byte, error) {
 	// 读取和解析原始请求体
 	originalBodyBytes, err := getRequestBodyBytes(c)
 	if err != nil {
@@ -62,7 +63,7 @@ func (p *GeminiProvider) ConvertToProviderRequest(c *gin.Context, upstream *conf
 
 	url := fmt.Sprintf("%s/models/%s:%s", baseURL, model, action)
 
-	req, err := http.NewRequestWithContext(c.Request.Context(), "POST", url, bytes.NewReader(reqBodyBytes))
+	req, err := http.NewRequestWithContext(httpbridge.Request(c).Context(), "POST", url, bytes.NewReader(reqBodyBytes))
 	if err != nil {
 		return nil, originalBodyBytes, fmt.Errorf("创建Gemini请求失败: %w", err)
 	}

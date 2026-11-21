@@ -11,12 +11,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/errutil"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/thinkingcache"
 	"github.com/soulteary/yunqi/internal/types"
 	"github.com/soulteary/yunqi/internal/utils"
-	"github.com/gin-gonic/gin"
 )
 
 // ClaudeProvider Claude 提供商（直接透传）
@@ -736,7 +737,7 @@ func convertReasoningContentToThinking(bodyBytes []byte) []byte {
 }
 
 // ConvertToProviderRequest 转换为 Claude 请求（实现真正的透传）
-func (p *ClaudeProvider) ConvertToProviderRequest(c *gin.Context, upstream *config.UpstreamConfig, apiKey string) (*http.Request, []byte, error) {
+func (p *ClaudeProvider) ConvertToProviderRequest(c fiber.Ctx, upstream *config.UpstreamConfig, apiKey string) (*http.Request, []byte, error) {
 	// 读取原始请求体
 	bodyBytes, err := getRequestBodyBytes(c)
 	if err != nil {
@@ -771,8 +772,8 @@ func (p *ClaudeProvider) ConvertToProviderRequest(c *gin.Context, upstream *conf
 	// 2. 如果 baseURL 已包含版本号后缀（如 /v1, /v2, /v3），直接拼接端点路径
 	// 3. 如果 baseURL 不包含版本号后缀，自动添加 /v1 再拼接端点路径
 	// 先剥离 routePrefix（如 /glm），再剥离 /v1，得到纯端点路径（如 /messages）
-	path := c.Request.URL.Path
-	if routePrefix := c.Param("routePrefix"); routePrefix != "" {
+	path := httpbridge.Request(c).URL.Path
+	if routePrefix := httpbridge.Param(c, "routePrefix"); routePrefix != "" {
 		path = strings.TrimPrefix(path, "/"+routePrefix)
 	}
 	endpoint := strings.TrimPrefix(path, "/v1")
@@ -795,17 +796,17 @@ func (p *ClaudeProvider) ConvertToProviderRequest(c *gin.Context, upstream *conf
 		targetURL = baseURL + "/v1" + endpoint
 	}
 
-	if c.Request.URL.RawQuery != "" {
-		targetURL += "?" + c.Request.URL.RawQuery
+	if httpbridge.Request(c).URL.RawQuery != "" {
+		targetURL += "?" + httpbridge.Request(c).URL.RawQuery
 	}
 
 	// 创建请求
 	var req *http.Request
 	if len(bodyBytes) > 0 {
-		req, err = http.NewRequestWithContext(c.Request.Context(), c.Request.Method, targetURL, bytes.NewReader(bodyBytes))
+		req, err = http.NewRequestWithContext(httpbridge.Request(c).Context(), httpbridge.Request(c).Method, targetURL, bytes.NewReader(bodyBytes))
 	} else {
 		// 如果 bodyBytes 为空（例如 GET 请求或原始请求体为空），则直接使用 nil Body
-		req, err = http.NewRequestWithContext(c.Request.Context(), c.Request.Method, targetURL, nil)
+		req, err = http.NewRequestWithContext(httpbridge.Request(c).Context(), httpbridge.Request(c).Method, targetURL, nil)
 	}
 	if err != nil {
 		return nil, nil, err

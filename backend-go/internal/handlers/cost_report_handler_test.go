@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/metrics"
-	"github.com/gin-gonic/gin"
 )
 
 // testCostReportStore 实现 PersistenceStore 接口，仅关注成本报表相关方法
@@ -62,7 +62,6 @@ func newTestMetricsManager(store metrics.PersistenceStore) *metrics.MetricsManag
 }
 
 func TestGetCostReport_BasicFlow(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	store := &testCostReportStore{
 		reportRows: []metrics.CostReportRow{
@@ -81,11 +80,10 @@ func TestGetCostReport_BasicFlow(t *testing.T) {
 	}
 
 	w := httptest.NewRecorder()
-	c, r := gin.CreateTestContext(w)
-	r.GET("/api/reports/cost", GetCostReport(deps))
-
-	c.Request = httptest.NewRequest(http.MethodGet, "/api/reports/cost?groupBy=user&duration=7d&type=messages", nil)
-	r.ServeHTTP(w, c.Request)
+	c, r := httpbridge.TestContext(w)
+	r.Get("/api/reports/cost", GetCostReport(deps))
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodGet, "/api/reports/cost?groupBy=user&duration=7d&type=messages", nil))
+	httpbridge.Handler(r).ServeHTTP(w, httpbridge.Request(c))
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
@@ -122,7 +120,6 @@ func TestGetCostReport_BasicFlow(t *testing.T) {
 }
 
 func TestGetCostReport_ReportsIncompletePricing(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	store := &testCostReportStore{
 		reportRows: []metrics.CostReportRow{{
@@ -139,10 +136,10 @@ func TestGetCostReport_ReportsIncompletePricing(t *testing.T) {
 	}}
 
 	w := httptest.NewRecorder()
-	c, r := gin.CreateTestContext(w)
-	r.GET("/api/reports/cost", GetCostReport(deps))
-	c.Request = httptest.NewRequest(http.MethodGet, "/api/reports/cost?type=messages", nil)
-	r.ServeHTTP(w, c.Request)
+	c, r := httpbridge.TestContext(w)
+	r.Get("/api/reports/cost", GetCostReport(deps))
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodGet, "/api/reports/cost?type=messages", nil))
+	httpbridge.Handler(r).ServeHTTP(w, httpbridge.Request(c))
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
@@ -170,7 +167,6 @@ func TestGetCostReport_ReportsIncompletePricing(t *testing.T) {
 }
 
 func TestGetCostReport_ReportsEffectiveCostReasonBreakdown(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	store := &testCostReportStore{
 		reportRows: []metrics.CostReportRow{{
@@ -192,10 +188,10 @@ func TestGetCostReport_ReportsEffectiveCostReasonBreakdown(t *testing.T) {
 	}}
 
 	w := httptest.NewRecorder()
-	c, r := gin.CreateTestContext(w)
-	r.GET("/api/reports/cost", GetCostReport(deps))
-	c.Request = httptest.NewRequest(http.MethodGet, "/api/reports/cost?type=messages", nil)
-	r.ServeHTTP(w, c.Request)
+	c, r := httpbridge.TestContext(w)
+	r.Get("/api/reports/cost", GetCostReport(deps))
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodGet, "/api/reports/cost?type=messages", nil))
+	httpbridge.Handler(r).ServeHTTP(w, httpbridge.Request(c))
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
@@ -226,18 +222,16 @@ func TestGetCostReport_ReportsEffectiveCostReasonBreakdown(t *testing.T) {
 }
 
 func TestGetCostReport_InvalidAPIType(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	deps := &CostReportDeps{
 		MetricsManagers: map[string]*metrics.MetricsManager{},
 	}
 
 	w := httptest.NewRecorder()
-	c, r := gin.CreateTestContext(w)
-	r.GET("/api/reports/cost", GetCostReport(deps))
-
-	c.Request = httptest.NewRequest(http.MethodGet, "/api/reports/cost?type=invalid", nil)
-	r.ServeHTTP(w, c.Request)
+	c, r := httpbridge.TestContext(w)
+	r.Get("/api/reports/cost", GetCostReport(deps))
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodGet, "/api/reports/cost?type=invalid", nil))
+	httpbridge.Handler(r).ServeHTTP(w, httpbridge.Request(c))
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
@@ -245,7 +239,6 @@ func TestGetCostReport_InvalidAPIType(t *testing.T) {
 }
 
 func TestGetCostReport_NilPersistenceStore(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	// MetricsManager without persistence store
 	mgr := metrics.NewMetricsManager()
@@ -256,11 +249,10 @@ func TestGetCostReport_NilPersistenceStore(t *testing.T) {
 	}
 
 	w := httptest.NewRecorder()
-	c, r := gin.CreateTestContext(w)
-	r.GET("/api/reports/cost", GetCostReport(deps))
-
-	c.Request = httptest.NewRequest(http.MethodGet, "/api/reports/cost?type=messages", nil)
-	r.ServeHTTP(w, c.Request)
+	c, r := httpbridge.TestContext(w)
+	r.Get("/api/reports/cost", GetCostReport(deps))
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodGet, "/api/reports/cost?type=messages", nil))
+	httpbridge.Handler(r).ServeHTTP(w, httpbridge.Request(c))
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
@@ -268,7 +260,6 @@ func TestGetCostReport_NilPersistenceStore(t *testing.T) {
 }
 
 func TestGetCostReport_DefaultGroupBy(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	store := &testCostReportStore{
 		reportRows: []metrics.CostReportRow{},
@@ -282,12 +273,13 @@ func TestGetCostReport_DefaultGroupBy(t *testing.T) {
 	}
 
 	w := httptest.NewRecorder()
-	c, r := gin.CreateTestContext(w)
-	r.GET("/api/reports/cost", GetCostReport(deps))
+	c, r := httpbridge.TestContext(w)
+	r.Get("/api/reports/cost", GetCostReport(deps))
+	httpbridge.
 
-	// No groupBy specified, should default to "user"
-	c.Request = httptest.NewRequest(http.MethodGet, "/api/reports/cost", nil)
-	r.ServeHTTP(w, c.Request)
+		// No groupBy specified, should default to "user"
+		SetRequest(c, httptest.NewRequest(http.MethodGet, "/api/reports/cost", nil))
+	httpbridge.Handler(r).ServeHTTP(w, httpbridge.Request(c))
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
@@ -301,7 +293,6 @@ func TestGetCostReport_DefaultGroupBy(t *testing.T) {
 }
 
 func TestGetCostReport_AllSupportedAPITypes(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	apiTypes := []string{"messages", "responses", "chat", "gemini", "images", "vectors"}
 	mgrs := make(map[string]*metrics.MetricsManager)
@@ -312,11 +303,10 @@ func TestGetCostReport_AllSupportedAPITypes(t *testing.T) {
 
 	for _, at := range apiTypes {
 		w := httptest.NewRecorder()
-		c, r := gin.CreateTestContext(w)
-		r.GET("/api/reports/cost", GetCostReport(deps))
-
-		c.Request = httptest.NewRequest(http.MethodGet, "/api/reports/cost?type="+at, nil)
-		r.ServeHTTP(w, c.Request)
+		c, r := httpbridge.TestContext(w)
+		r.Get("/api/reports/cost", GetCostReport(deps))
+		httpbridge.SetRequest(c, httptest.NewRequest(http.MethodGet, "/api/reports/cost?type="+at, nil))
+		httpbridge.Handler(r).ServeHTTP(w, httpbridge.Request(c))
 
 		// All should return 400 because no persistence store (nil)
 		if w.Code != http.StatusBadRequest {

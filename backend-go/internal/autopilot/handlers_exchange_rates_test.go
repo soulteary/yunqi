@@ -4,15 +4,14 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/gin-gonic/gin"
-
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 func TestExchangeRatesHandlers(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	manager := newTestConfigManager(t, config.Config{})
-	router := gin.New()
+	router := httpbridge.NewApp()
 	RegisterCostRoutes(router, manager)
 
 	get := performRawRequest(router, http.MethodGet, "/autopilot/cost/exchange-rates", nil)
@@ -85,10 +84,10 @@ func TestExchangeRatesHandlers(t *testing.T) {
 }
 
 func TestHandleUpdateSubscriptionExpectedVersion(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	store := newTestSubscriptionStore(t)
 	seedSubscription(t, store, &SubscriptionProfile{SubscriptionUID: "sub-version", DisplayName: "before"})
-	router := gin.New()
+	router := httpbridge.NewApp()
 	RegisterSubscriptionRoutes(router, store, nil)
 
 	ok := performJSONRequest(t, router, http.MethodPut, "/subscriptions/sub-version", map[string]any{

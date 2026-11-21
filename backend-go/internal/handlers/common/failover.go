@@ -6,9 +6,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/gofiber/fiber/v3"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/utils"
-	"github.com/gin-gonic/gin"
 )
 
 // FailoverError 封装故障转移错误信息
@@ -829,7 +830,7 @@ func isSchemaValidationMessage(msgLower string) bool {
 // handleModelRoutingError 处理可归一化的模型路由错误。
 // 如果最后失败的错误可以被归一化为非 503 状态码（如 model_not_found → 404），
 // 则透传该错误体和归一化后的状态码；否则返回 false，由调用方继续返回通用 503
-func handleModelRoutingError(c *gin.Context, lastFailoverError *FailoverError) bool {
+func handleModelRoutingError(c fiber.Ctx, lastFailoverError *FailoverError) bool {
 	if lastFailoverError == nil {
 		return false
 	}
@@ -839,9 +840,9 @@ func handleModelRoutingError(c *gin.Context, lastFailoverError *FailoverError) b
 	}
 	var errBody map[string]interface{}
 	if err := json.Unmarshal(lastFailoverError.Body, &errBody); err == nil {
-		c.JSON(normalizedStatus, errBody)
+		httpbridge.JSON(c, normalizedStatus, errBody)
 	} else {
-		c.JSON(normalizedStatus, gin.H{"error": string(lastFailoverError.Body)})
+		httpbridge.JSON(c, normalizedStatus, fiber.Map{"error": string(lastFailoverError.Body)})
 	}
 	return true
 }
@@ -850,7 +851,7 @@ func handleModelRoutingError(c *gin.Context, lastFailoverError *FailoverError) b
 // lastFailoverError: 最后一个故障转移错误
 // lastError: 最后一个错误
 // apiType: API 类型（用于错误消息）
-func HandleAllChannelsFailed(c *gin.Context, lastFailoverError *FailoverError, lastError error, apiType string) {
+func HandleAllChannelsFailed(c fiber.Ctx, lastFailoverError *FailoverError, lastError error, apiType string) {
 	// 保留明确的模型路由错误语义，其余情况默认返回通用错误
 	if handleModelRoutingError(c, lastFailoverError) {
 		return
@@ -861,9 +862,9 @@ func HandleAllChannelsFailed(c *gin.Context, lastFailoverError *FailoverError, l
 		respondContextCapacityExceeded(c, capErr)
 		return
 	}
-	c.JSON(503, gin.H{
+	httpbridge.JSON(c, 503, fiber.Map{
 		"type": "error",
-		"error": gin.H{
+		"error": fiber.Map{
 			"type":    "service_unavailable",
 			"message": "All upstream channels are currently unavailable",
 		},
@@ -872,7 +873,7 @@ func HandleAllChannelsFailed(c *gin.Context, lastFailoverError *FailoverError, l
 
 // respondContextCapacityExceeded 按上游 OpenAI 的 400 语义回包，
 // message 措辞与官方 context_length_exceeded 对齐以最大化客户端识别率。
-func respondContextCapacityExceeded(c *gin.Context, capErr *scheduler.ContextCapacityError) {
+func respondContextCapacityExceeded(c fiber.Ctx, capErr *scheduler.ContextCapacityError) {
 	outputTokens := capErr.TotalBudget - capErr.InputTokens
 	if outputTokens < 0 {
 		outputTokens = 0
@@ -889,8 +890,8 @@ func respondContextCapacityExceeded(c *gin.Context, capErr *scheduler.ContextCap
 			capErr.TotalBudget, capErr.InputTokens, outputTokens,
 		)
 	}
-	c.JSON(400, gin.H{
-		"error": gin.H{
+	httpbridge.JSON(c, 400, fiber.Map{
+		"error": fiber.Map{
 			"message": message,
 			"type":    "invalid_request_error",
 			"param":   nil,
@@ -900,14 +901,14 @@ func respondContextCapacityExceeded(c *gin.Context, capErr *scheduler.ContextCap
 }
 
 // HandleAllKeysFailed 处理所有密钥都失败的情况（单渠道模式）
-func HandleAllKeysFailed(c *gin.Context, lastFailoverError *FailoverError, lastError error, apiType string) {
+func HandleAllKeysFailed(c fiber.Ctx, lastFailoverError *FailoverError, lastError error, apiType string) {
 	// 保留明确的模型路由错误语义，其余情况默认返回通用错误
 	if handleModelRoutingError(c, lastFailoverError) {
 		return
 	}
-	c.JSON(503, gin.H{
+	httpbridge.JSON(c, 503, fiber.Map{
 		"type": "error",
-		"error": gin.H{
+		"error": fiber.Map{
 			"type":    "service_unavailable",
 			"message": "All upstream channels are currently unavailable",
 		},

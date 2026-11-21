@@ -14,8 +14,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/autopilot"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/keypool"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/middleware"
@@ -26,7 +28,6 @@ import (
 	"github.com/soulteary/yunqi/internal/types"
 	"github.com/soulteary/yunqi/internal/utils"
 	"github.com/soulteary/yunqi/internal/warmup"
-	"github.com/gin-gonic/gin"
 	"github.com/tidwall/sjson"
 )
 
@@ -54,7 +55,7 @@ func isClientSideError(err error) bool {
 type NextAPIKeyFunc func(upstream *config.UpstreamConfig, failedKeys map[string]bool) (string, error)
 
 // BuildRequestFunc 构建上游请求（upstreamCopy.BaseURL 已写入当前尝试的 BaseURL）
-type BuildRequestFunc func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error)
+type BuildRequestFunc func(c fiber.Ctx, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error)
 
 // DeprioritizeKeyFunc 对 quota 相关失败的 key 做降级（实现可选择是否记录日志）
 type DeprioritizeKeyFunc func(apiKey string)
@@ -62,7 +63,7 @@ type DeprioritizeKeyFunc func(apiKey string)
 // HandleSuccessFunc 处理成功响应（负责写回客户端），并返回 usage（可为 nil）
 // 注意：实现方需要自行关闭 resp.Body（与现有 handlers 保持一致）。
 // actualRequestBody 为本次实际转发给上游的请求体，可用于 usage 估算等后处理。
-type HandleSuccessFunc func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error)
+type HandleSuccessFunc func(c fiber.Ctx, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error)
 
 // TryUpstreamOption 为渠道内 BaseURL/Key 轮转补充可选行为。
 type TryUpstreamOption func(*tryUpstreamOptions)
@@ -187,11 +188,11 @@ func ChannelAPIType(kind scheduler.ChannelKind) string {
 // endpointPolicyProviderHook 可选的 endpoint policy 提供者。
 // 由 main.go 在 autopilot 初始化后注入；handlers 通过 TryUpstreamOption 传入 policy。
 // 签名：(c, model, upstream) → *EndpointAttemptPolicy（nil 表示不注入）。
-var endpointPolicyProviderHook func(c *gin.Context, model string, upstream *config.UpstreamConfig) *autopilot.EndpointAttemptPolicy
+var endpointPolicyProviderHook func(c fiber.Ctx, model string, upstream *config.UpstreamConfig) *autopilot.EndpointAttemptPolicy
 
 // SetEndpointPolicyProviderHook 设置 endpoint policy 提供者钩子。
 // 由 main.go 在 autopilot 初始化后调用；nil 表示不注入。
-func SetEndpointPolicyProviderHook(hook func(c *gin.Context, model string, upstream *config.UpstreamConfig) *autopilot.EndpointAttemptPolicy) {
+func SetEndpointPolicyProviderHook(hook func(c fiber.Ctx, model string, upstream *config.UpstreamConfig) *autopilot.EndpointAttemptPolicy) {
 	endpointPolicyProviderHook = hook
 }
 
@@ -235,9 +236,9 @@ func SetUsagePatternRecorderHook(hook func(proxyKeyMask, channelKind, channelUID
 
 // usagePatternTaskDomain 从请求 context 提取已推导的任务域；
 // 未绑定画像或域为空时回退 general（与 InferTaskDomain 的兜底一致）。
-func usagePatternTaskDomain(c *gin.Context) autopilot.TaskDomain {
-	if c != nil && c.Request != nil {
-		if profile, ok := autopilot.RequestProfileFromContext(c.Request.Context()); ok && profile.TaskDomain != "" {
+func usagePatternTaskDomain(c fiber.Ctx) autopilot.TaskDomain {
+	if c != nil && httpbridge.Request(c) != nil {
+		if profile, ok := autopilot.RequestProfileFromContext(httpbridge.Request(c).Context()); ok && profile.TaskDomain != "" {
 			return profile.TaskDomain
 		}
 	}
@@ -339,7 +340,7 @@ func shouldStripBillingHeader(kind scheduler.ChannelKind, upstream *config.Upstr
 }
 
 func applyAdaptiveResponseHeaderTimeout(
-	c *gin.Context,
+	c fiber.Ctx,
 	apiType string,
 	policy *autopilot.EndpointAttemptPolicy,
 	upstream *config.UpstreamConfig,
@@ -468,7 +469,7 @@ func buildRequestCostContext(cfgManager *config.ConfigManager, upstream *config.
 }
 
 func TryUpstreamWithAllKeys(
-	c *gin.Context,
+	c fiber.Ctx,
 	envCfg *config.EnvConfig,
 	cfgManager *config.ConfigManager,
 	channelScheduler *scheduler.ChannelScheduler,
@@ -509,7 +510,7 @@ func TryUpstreamWithAllKeys(
 	// 请求侧压缩：仅对 messages 类入口的 tool_result 历史做 RTK 模式压缩。
 	// fail-open：异常/保真门不通过/膨胀 均回退原文，不阻断请求。
 	if len(requestBody) > 0 {
-		scenarioKey := c.GetHeader("X-Routing-Scenario")
+		scenarioKey := httpbridge.GetHeader(c, "X-Routing-Scenario")
 		compressedBody := ApplyRequestCompression(
 			c, requestBody, kind, scenarioKey,
 			false, // 全局默认关（最小集阶段，仅场景预设触发）
@@ -518,7 +519,7 @@ func TryUpstreamWithAllKeys(
 		if len(compressedBody) != len(requestBody) {
 			requestBody = compressedBody
 			RestoreRequestBody(c, requestBody)
-			c.Set("requestBodyBytes", requestBody)
+			httpbridge.SetValue(c, "requestBodyBytes", requestBody)
 		}
 	}
 
@@ -583,13 +584,13 @@ func TryUpstreamWithAllKeys(
 			if stripped := providers.StripCCBudgetRemindersFromBody(requestBody); string(stripped) != string(requestBody) {
 				requestBody = stripped
 				RestoreRequestBody(c, requestBody)
-				c.Set("requestBodyBytes", requestBody)
+				httpbridge.SetValue(c, "requestBodyBytes", requestBody)
 			}
 		case scheduler.ChannelKindResponses:
 			if stripped := providers.StripCodexBudgetRemindersFromResponsesBody(requestBody); string(stripped) != string(requestBody) {
 				requestBody = stripped
 				RestoreRequestBody(c, requestBody)
-				c.Set("requestBodyBytes", requestBody)
+				httpbridge.SetValue(c, "requestBodyBytes", requestBody)
 			}
 		}
 		RequestLogf(c, "[%s-Federation] 请求协议 %s 走执行协议 %s，模型改写: %s -> %s",
@@ -606,10 +607,10 @@ func TryUpstreamWithAllKeys(
 			if stripped := stripResponsesEncryptedContent(requestBody); string(stripped) != string(requestBody) {
 				requestBody = stripped
 				RestoreRequestBody(c, requestBody)
-				c.Set("requestBodyBytes", requestBody)
+				httpbridge.SetValue(c, "requestBodyBytes", requestBody)
 			}
 		}
-		c.Header("X-CCX-Model-Redirect", originalModel+" -> "+tryOpts.executionModel)
+		httpbridge.Header(c, "X-CCX-Model-Redirect", originalModel+" -> "+tryOpts.executionModel)
 		RequestLogf(c, "[%s-Overflow] 上下文溢出重定向生效: %s -> %s（执行协议 %s）",
 			apiType, originalModel, tryOpts.executionModel, executionKind)
 	}
@@ -676,10 +677,10 @@ func TryUpstreamWithAllKeys(
 			isRetryAttempt := attemptOrdinal > 0 || urlIdx > 0
 			// 每次 attempt 开始时清除上一轮的 effort 可观测性标记，
 			// 防止 failover 到未产生 resolved target 的 endpoint 时残留旧值。
-			c.Set("effortDecisionSource", "passthrough")
-			c.Set("effortClampedByClient", false)
+			httpbridge.SetValue(c, "effortDecisionSource", "passthrough")
+			httpbridge.SetValue(c, "effortClampedByClient", false)
 			// 自动映射未命中原因同样按 attempt 重置：映射成功的尝试不携带上一轮的失败原因。
-			c.Set("mappingFailReason", "")
+			httpbridge.SetValue(c, "mappingFailReason", "")
 			// 流式桥接改写标记同样按 attempt 重置：仅对已应用改写的 Key 生效，
 			// 防止上一 attempt 的标记污染无需改写的后续 Key（见 ForceStreamRequestBody）。
 			SetUpstreamStreamBridge(c, false)
@@ -706,7 +707,7 @@ func TryUpstreamWithAllKeys(
 				}
 			}
 			RestoreRequestBody(c, attemptBody)
-			c.Set("requestBodyBytes", attemptBody)
+			httpbridge.SetValue(c, "requestBodyBytes", attemptBody)
 
 			var selection keypool.Selection
 			var apiKey string
@@ -747,7 +748,7 @@ func TryUpstreamWithAllKeys(
 					if filtered, modified := applySystemHeaderFilterToBody(attemptBody, providers.SystemHeaderFilterLevel(entry.Level)); modified {
 						attemptBody = filtered
 						RestoreRequestBody(c, attemptBody)
-						c.Set("requestBodyBytes", attemptBody)
+						httpbridge.SetValue(c, "requestBodyBytes", attemptBody)
 						RequestLogf(c, "[%s-SystemFilter] 渠道 %s 应用过滤层级 %d", apiType, upstream.Name, entry.Level)
 					}
 				}
@@ -764,7 +765,7 @@ func TryUpstreamWithAllKeys(
 				probeKey := currentBaseURL + "|" + apiKey
 				if !metricsManager.TryAcquireProbe(currentBaseURL, apiKey, metricsServiceType) {
 					RequestLogf(c, "[%s-Circuit] half-open 探针已占用，等待 Key 恢复: %s", apiType, utils.MaskAPIKey(apiKey))
-					acquired, state := waitForHalfOpenProbe(c.Request.Context(), metricsManager, currentBaseURL, apiKey, metricsServiceType)
+					acquired, state := waitForHalfOpenProbe(httpbridge.Request(c).Context(), metricsManager, currentBaseURL, apiKey, metricsServiceType)
 					if acquired {
 						probeAcquired[probeKey] = true
 						RequestLogf(c, "[%s-Circuit] 等待后取得 half-open 探针 Key: %s", apiType, utils.MaskAPIKey(apiKey))
@@ -843,7 +844,7 @@ func TryUpstreamWithAllKeys(
 									target = nil
 									// 外层 else-if 只在未进入本块时消费 mappingFailReason，
 									// 冲突原因须直接落 context 才不会静默丢失。
-									c.Set("mappingFailReason", "tool_whitelist_conflict")
+									httpbridge.SetValue(c, "mappingFailReason", "tool_whitelist_conflict")
 								}
 							}
 						}
@@ -865,7 +866,7 @@ func TryUpstreamWithAllKeys(
 					// 完成协议转换后再按物理上游协议写入，否则 Responses→Chat/Gemini
 					// 会在中间结构体反序列化时静默丢掉目标协议字段。
 					// 注意必须赋回外层 attemptBody：此前此处用 := 声明了块内影子变量，
-					// 模型改写只短暂进入 gin context，随后的 system 归一化/参数约束等步骤
+					// 模型改写只短暂进入 Fiber context，随后的 system 归一化/参数约束等步骤
 					// 基于外层旧 body 再次 Set，会把改写静默覆盖（火山渠道 auto_resolve 后
 					// 仍以原模型发出、上游 400 的根因）。
 					if rewritten, rewriteOk := atomicModelRewrite(attemptBody, target); rewriteOk {
@@ -874,7 +875,7 @@ func TryUpstreamWithAllKeys(
 						appliedMappedModel = target.Model
 						resolvedAttemptTarget = target
 						RestoreRequestBody(c, attemptBody)
-						c.Set("requestBodyBytes", attemptBody)
+						httpbridge.SetValue(c, "requestBodyBytes", attemptBody)
 						RequestLogf(c, "[%s-AutoModel] endpoint=%s model override: %s -> %s (effort=%s, decided=%v)",
 							apiType, euid, model, target.Model, target.Effort, target.EffortDecided)
 					}
@@ -882,20 +883,20 @@ func TryUpstreamWithAllKeys(
 					// 记录 effort 决策来源与钳位状态，供 ChannelLog 可观测性字段使用。
 					// target 可能已被上方白名单终审置 nil（放弃 override 透传），须判空。
 					if target != nil && target.EffortDecided {
-						c.Set("effortDecisionSource", "autopilot")
+						httpbridge.SetValue(c, "effortDecisionSource", "autopilot")
 						// 注意：ExtractClientEffortExplicit 按 scheduler.ChannelKind（小写 messages/chat/...）
 						// 分支判断协议字段，而非 apiType 显示名（Messages/Chat/...），此处须传入 kind。
 						clientRaw, clientExplicit := ExtractClientEffortExplicit(requestBody, string(kind))
 						if isEffortClampedByClient(clientRaw, clientExplicit, target.Effort) {
-							c.Set("effortClampedByClient", true)
+							httpbridge.SetValue(c, "effortClampedByClient", true)
 						}
 					} else {
-						c.Set("effortDecisionSource", "passthrough")
+						httpbridge.SetValue(c, "effortDecisionSource", "passthrough")
 					}
 				} else if mappingFailReason != "" {
 					// 自动映射链路运行过但未命中：fail-open 透传原始模型，
 					// 记录原因供事后排查（ChannelLog.mappingFailReason + 请求日志）。
-					c.Set("mappingFailReason", mappingFailReason)
+					httpbridge.SetValue(c, "mappingFailReason", mappingFailReason)
 					RequestLogf(c, "[%s-AutoModel] endpoint=%s 自动映射未命中，按原始模型透传: model=%s reason=%s",
 						apiType, euid, model, mappingFailReason)
 				}
@@ -916,7 +917,7 @@ func TryUpstreamWithAllKeys(
 						if rewritten, changed := ForceStreamRequestBody(attemptBody, bodyKind, executionKindStr); changed {
 							attemptBody = rewritten
 							RestoreRequestBody(c, attemptBody)
-							c.Set("requestBodyBytes", attemptBody)
+							httpbridge.SetValue(c, "requestBodyBytes", attemptBody)
 							SetUpstreamStreamBridge(c, true)
 							channelCompatCache.MarkApplied(upstream.ChannelUID, keyHash, attemptModel, config.TraitRequiresStream)
 							RequestLogf(c, "[%s-ChannelCompat] 渠道 %s 模型 %s 仅接受流式请求，非流式请求已改写为流式桥接（上游 SSE 将合成回非流式响应）",
@@ -943,7 +944,7 @@ func TryUpstreamWithAllKeys(
 					if normalizedBody, normChanged := providers.NormalizeSystemRoleToTopLevelWithChanged(attemptBody); normChanged {
 						attemptBody = normalizedBody
 						RestoreRequestBody(c, attemptBody)
-						c.Set("requestBodyBytes", attemptBody)
+						httpbridge.SetValue(c, "requestBodyBytes", attemptBody)
 						RequestLogf(c, "[%s-Preprocess] 已将 messages 中的 system 角色抽回顶层 system 字段（原因: %s）", apiType, normReason)
 					}
 				}
@@ -955,7 +956,7 @@ func TryUpstreamWithAllKeys(
 			if deduped, changed := DeduplicateTotalTokensSystemBlocks(c, attemptBody, envCfg.EnableRequestLogs, apiType); changed {
 				attemptBody = deduped
 				RestoreRequestBody(c, attemptBody)
-				c.Set("requestBodyBytes", attemptBody)
+				httpbridge.SetValue(c, "requestBodyBytes", attemptBody)
 			}
 
 			// 同源问题的另一半：无 total_tokens 前缀的裸提醒块（output-style 提醒等）
@@ -964,7 +965,7 @@ func TryUpstreamWithAllKeys(
 			if deduped, changed := DeduplicateIdenticalSystemBlocks(c, attemptBody, envCfg.EnableRequestLogs, apiType); changed {
 				attemptBody = deduped
 				RestoreRequestBody(c, attemptBody)
-				c.Set("requestBodyBytes", attemptBody)
+				httpbridge.SetValue(c, "requestBodyBytes", attemptBody)
 			}
 
 			// 已知厂商参数约束（主动侧）：无需先失败一次，按 model-registry 里的文档约束直接规避。
@@ -975,7 +976,7 @@ func TryUpstreamWithAllKeys(
 				if stripped, applied := ApplyKnownParamConstraints(attemptBody, paramCap.Capability.ParamConstraints); len(applied) > 0 {
 					attemptBody = stripped
 					RestoreRequestBody(c, attemptBody)
-					c.Set("requestBodyBytes", attemptBody)
+					httpbridge.SetValue(c, "requestBodyBytes", attemptBody)
 					RequestLogf(c, "[%s-ParamConstraint] 模型 %s 应用已知参数约束: %s",
 						apiType, attemptModel, strings.Join(applied, ","))
 				}
@@ -991,7 +992,7 @@ func TryUpstreamWithAllKeys(
 					if clamped, changed := clampMaxTokensInBody(attemptBody, kind, state.MaxOutputTokens); changed {
 						attemptBody = clamped
 						RestoreRequestBody(c, attemptBody)
-						c.Set("requestBodyBytes", attemptBody)
+						httpbridge.SetValue(c, "requestBodyBytes", attemptBody)
 						RequestLogf(c, "[%s-OutputLimit] 渠道 %s 模型 %s 按实测上限 %d 下调最大输出 token（来源 %s）",
 							apiType, upstream.Name, attemptModel, state.MaxOutputTokens, state.Source)
 					}
@@ -1043,7 +1044,7 @@ func TryUpstreamWithAllKeys(
 					if stripped, modified := StripDeprecatedParams(attemptBody, params); modified {
 						attemptBody = stripped
 						RestoreRequestBody(c, attemptBody)
-						c.Set("requestBodyBytes", attemptBody)
+						httpbridge.SetValue(c, "requestBodyBytes", attemptBody)
 						deprecatedParamCache.MarkStripped(upstream.ChannelUID, keyHash, attemptModel)
 						RequestLogf(c, "[%s-DeprecatedParam] 渠道 %s 模型 %s 预剥离已知弃用参数: %s",
 							apiType, upstream.Name, attemptModel, strings.Join(params, ","))
@@ -1056,7 +1057,7 @@ func TryUpstreamWithAllKeys(
 				const maxRateLimitWait = 10 * time.Second
 				releases := make([]func(), 0, 2)
 				if limiter := rateLimitMgr.Get(executionAPIType, executionIndex); limiter != nil {
-					release, rlErr := limiter.Acquire(c.Request.Context(), maxRateLimitWait, time.Now())
+					release, rlErr := limiter.Acquire(httpbridge.Request(c).Context(), maxRateLimitWait, time.Now())
 					if rlErr != nil {
 						lastError = rlErr
 						RequestLogf(c, "[%s-RateLimit] 渠道限速器拦截: %v，尝试下一个 Key/渠道", apiType, rlErr)
@@ -1067,7 +1068,7 @@ func TryUpstreamWithAllKeys(
 				}
 				if selection.LimiterScope != "" {
 					keyLimiter := rateLimitMgr.GetOrCreateScoped(executionAPIType, executionIndex, selection.LimiterScope, keypool.ConfigForCandidate(*upstream, selection.Config))
-					release, rlErr := keyLimiter.Acquire(c.Request.Context(), maxRateLimitWait, time.Now())
+					release, rlErr := keyLimiter.Acquire(httpbridge.Request(c).Context(), maxRateLimitWait, time.Now())
 					if rlErr != nil {
 						lastError = rlErr
 						RequestLogf(c, "[%s-RateLimit] Key/Quota 限速器拦截: scope=%s, err=%v，尝试下一个 Key/渠道", apiType, selection.LimiterScope, rlErr)
@@ -1107,8 +1108,8 @@ func TryUpstreamWithAllKeys(
 			if actualAttemptModel == "" {
 				actualAttemptModel = attemptModel
 			}
-			c.Set(autopilotActualModelKey, actualAttemptModel)
-			c.Set(autopilotActualEffortKey, actualReasoningEffort)
+			httpbridge.SetValue(c, autopilotActualModelKey, actualAttemptModel)
+			httpbridge.SetValue(c, autopilotActualEffortKey, actualReasoningEffort)
 			// 竞速质量闸门「让出即证据」的学习身份：分支在 claim 裁决处只有 gin
 			// context 可用，提前把本尝试的 渠道×Key×模型×协议 挂上（影子分支持
 			// 独立 context 副本，互不串扰；模型与成功路径学习同口径 attemptModel）。
@@ -1141,59 +1142,59 @@ func TryUpstreamWithAllKeys(
 			// 计算本次尝试的 metricsKey（与统计同源的身份指纹）
 			metricsKey := metrics.GenerateMetricsIdentityKey(currentBaseURL, apiKey, metricsServiceType)
 
-			// 提取代理 Key 掩码（ProxyAuthMiddleware 写入 gin context），用于成本报表按用户维度分组
+			// 提取代理 Key 掩码（ProxyAuthMiddleware 写入 Fiber context），用于成本报表按用户维度分组
 			proxyKeyMask := middleware.GetProxyKeyMask(c)
 			logOpts := tryOpts.channelLogOptions
 			if proxyKeyMask != "" {
 				logOpts = append(logOpts, WithProxyKeyMask(proxyKeyMask))
 			}
 
-			// 竞速角色（编排器写入分支 gin context）：影子分支日志带 shadow 标记
-			if role, ok := c.Get(racing.ContextKeyRole); ok {
+			// 竞速角色（编排器写入分支 Fiber context）：影子分支日志带 shadow 标记
+			if role, ok := httpbridge.Value(c, racing.ContextKeyRole); ok {
 				if roleStr, ok := role.(string); ok && roleStr != "" {
 					logOpts = append(logOpts, WithRacingRole(roleStr))
 				}
 			}
 
-			// 提取请求关联 ID（multi_channel_failover 生成，写入 gin context）；
+			// 提取请求关联 ID（multi_channel_failover 生成，写入 Fiber context）；
 			// 同时挂到 metrics pending 记录（真实用户请求数聚合口径）。
 			requestCorrelationID := ""
-			if correlationID, ok := c.Get("ccx.request_correlation_id"); ok {
+			if correlationID, ok := httpbridge.Value(c, "ccx.request_correlation_id"); ok {
 				if cid, ok := correlationID.(string); ok && cid != "" {
 					requestCorrelationID = cid
 					logOpts = append(logOpts, WithRequestCorrelationID(cid))
 				}
 			}
 
-			// 提取 Autopilot trace UID（SmartRouter 生成，写入 gin context）
-			if traceUID, ok := c.Get("ccx.autopilot_trace_uid"); ok {
+			// 提取 Autopilot trace UID（SmartRouter 生成，写入 Fiber context）
+			if traceUID, ok := httpbridge.Value(c, "ccx.autopilot_trace_uid"); ok {
 				if uid, ok := traceUID.(string); ok && uid != "" {
 					logOpts = append(logOpts, WithAutopilotTraceUID(uid))
 				}
 			}
 
-			// 提取 effort 决策来源与钳位状态（endpoint policy 写入 gin context）
-			if source, ok := c.Get("effortDecisionSource"); ok {
+			// 提取 effort 决策来源与钳位状态（endpoint policy 写入 Fiber context）
+			if source, ok := httpbridge.Value(c, "effortDecisionSource"); ok {
 				if s, ok := source.(string); ok && s != "" {
 					logOpts = append(logOpts, WithEffortDecisionSource(s))
 				}
 			}
-			if clamped, ok := c.Get("effortClampedByClient"); ok {
+			if clamped, ok := httpbridge.Value(c, "effortClampedByClient"); ok {
 				if c, ok := clamped.(bool); ok && c {
 					logOpts = append(logOpts, WithEffortClampedByClient(true))
 				}
 			}
 
-			// 提取自动映射未命中原因（endpoint policy 写入 gin context）。
+			// 提取自动映射未命中原因（endpoint policy 写入 Fiber context）。
 			// 非空表示本次尝试 fail-open 透传了原始模型，原因进 ChannelLog 供事后排查。
-			if reason := c.GetString("mappingFailReason"); reason != "" {
+			if reason := httpbridge.StringValue(c, "mappingFailReason"); reason != "" {
 				logOpts = append(logOpts, WithMappingFailReason(reason))
 			}
 
 			// 创建 pending 状态日志（附带代理上下文与会话标识，用于 subagent 观测）
 			// interfaceType 记录实际执行协议：联邦 sibling 必须归属到 chat/responses，
 			// 否则日志会把 chat 上的尝试错误地展示成 messages 渠道的尝试。
-			logRequestID := CreatePendingLog(channelLogStore, metricsKey, executionIndex, upstream.Name, actualAttemptModel, actualOriginalModel, originalReasoningEffort, actualReasoningEffort, apiKey, currentBaseURL, executionAPIType, operation, metrics.RequestSourceProxy, AgentContextFromGin(c), SessionIDFromGin(c), logOpts...)
+			logRequestID := CreatePendingLog(channelLogStore, metricsKey, executionIndex, upstream.Name, actualAttemptModel, actualOriginalModel, originalReasoningEffort, actualReasoningEffort, apiKey, currentBaseURL, executionAPIType, operation, metrics.RequestSourceProxy, AgentContextFromFiber(c), SessionIDFromFiber(c), logOpts...)
 
 			// 计算当前 Key 的 ConsumptionPolicy，供 metrics 与 trace 共同使用。
 			consumptionPolicy := ""
@@ -1202,10 +1203,10 @@ func TryUpstreamWithAllKeys(
 					consumptionPolicy = cands[0].ConsumptionPolicy
 				}
 			}
-			c.Set("ccx.autopilot_consumption_policy", consumptionPolicy)
+			httpbridge.SetValue(c, "ccx.autopilot_consumption_policy", consumptionPolicy)
 
 			// 向 Autopilot trace 追加一条 "started" endpoint 尝试摘要（fail-open）
-			attemptTraceUID, _ := c.Get("ccx.autopilot_trace_uid")
+			attemptTraceUID, _ := httpbridge.Value(c, "ccx.autopilot_trace_uid")
 			if uid, ok := attemptTraceUID.(string); ok && uid != "" {
 				configuredCostMultiplier := -1.0
 				if endpointPolicy != nil {
@@ -1213,7 +1214,7 @@ func TryUpstreamWithAllKeys(
 						configuredCostMultiplier = cands[0].ConfiguredCostMultiplier
 					}
 				}
-				c.Set("ccx.autopilot_configured_cost_multiplier", configuredCostMultiplier)
+				httpbridge.SetValue(c, "ccx.autopilot_configured_cost_multiplier", configuredCostMultiplier)
 				recordEndpointAttempt(uid, autopilot.EndpointAttemptSummary{
 					AttemptUID:               logRequestID,
 					Status:                   "started",
@@ -1276,8 +1277,8 @@ func TryUpstreamWithAllKeys(
 				switch {
 				case appliedMappedModel != "":
 					mappingNote = "auto_resolve"
-				case c.GetString("mappingFailReason") != "":
-					mappingNote = "fail_open:" + c.GetString("mappingFailReason")
+				case httpbridge.StringValue(c, "mappingFailReason") != "":
+					mappingNote = "fail_open:" + httpbridge.StringValue(c, "mappingFailReason")
 				case attemptModel != model:
 					mappingNote = "manual_redirect"
 				}
@@ -1490,7 +1491,7 @@ func TryUpstreamWithAllKeys(
 				// 立即重试。与上下文上限不同，这里做同 Key 重试：下调输出 token 是可自动改写的
 				// 方向（与模型注册表 clamp 的静默下调一致），请求内容本身没有被拒绝。
 				// 仅当首次学到更严格结论且请求体字段确实需要下调时重试，避免死循环。
-				if (resp.StatusCode == 400 || resp.StatusCode == 422) && upstream.ChannelUID != "" && !c.Writer.Written() {
+				if (resp.StatusCode == 400 || resp.StatusCode == 422) && upstream.ChannelUID != "" && !httpbridge.Writer(c).Written() {
 					if requested := maxOutputTokensInBody(attemptBody, kind); requested > 0 {
 						if signal := OutputLimitFromError(resp.StatusCode, respBodyBytes, requested); signal != nil {
 							if channelCompatCache.RecordOutputLimit(upstream.ChannelUID, keyHash, attemptModel,
@@ -1517,7 +1518,7 @@ func TryUpstreamWithAllKeys(
 				// 弃用参数自适应（被动侧）：上游以 400 明确拒绝某个采样参数时，
 				// 记忆该 渠道-Key-模型 组合并用同一 Key 立即重试（剥离在下一轮循环开头生效）。
 				// 仅当参数首次记录且请求体中确实存在该字段时重试，避免记忆已生效后死循环。
-				if resp.StatusCode == 400 && upstream.ChannelUID != "" && !c.Writer.Written() {
+				if resp.StatusCode == 400 && upstream.ChannelUID != "" && !httpbridge.Writer(c).Written() {
 					if param := DeprecatedParamFromError(respBodyBytes); param != "" {
 						keyHash := autopilot.KeyHashFromAPIKey(apiKey)
 						if _, present := StripDeprecatedParams(attemptBody, []string{param}); present &&
@@ -1547,7 +1548,7 @@ func TryUpstreamWithAllKeys(
 				// 并在下面 continue，若放在其后，developer role 降级等结论将永远学不到。
 				// 与上面的弃用参数块是兄弟关系而非嵌套：弃用参数识别只针对 400，
 				// 兼容性学习同时覆盖 400 与 422（部分上游用 422 表达结构不受支持）。
-				if (resp.StatusCode == 400 || resp.StatusCode == 422) && upstream.ChannelUID != "" && !c.Writer.Written() {
+				if (resp.StatusCode == 400 || resp.StatusCode == 422) && upstream.ChannelUID != "" && !httpbridge.Writer(c).Written() {
 					signalCtx := CompatSignalContext{
 						HasDeveloperRole:       BodyHasDeveloperRole(attemptBody),
 						HasCodexClientTools:    kind == scheduler.ChannelKindResponses,
@@ -1579,7 +1580,7 @@ func TryUpstreamWithAllKeys(
 				// 改写之处（强制 stream:true 需要合成非流式响应，不属于兼容改写），不做同 Key
 				// 重试；学到结论后按正常流程 failover 到其他渠道（错误分类已放行该文案），
 				// 后续非流式请求在 attempt 循环开头直接跳过该组合。流式请求不受影响。
-				if (resp.StatusCode == 400 || resp.StatusCode == 422) && upstream.ChannelUID != "" && !c.Writer.Written() {
+				if (resp.StatusCode == 400 || resp.StatusCode == 422) && upstream.ChannelUID != "" && !httpbridge.Writer(c).Written() {
 					if signal := StreamRequirementFromError(resp.StatusCode, respBodyBytes, isStream); signal != nil {
 						keyHash := autopilot.KeyHashFromAPIKey(apiKey)
 						if channelCompatCache.Record(upstream.ChannelUID, keyHash, attemptModel,
@@ -1773,7 +1774,7 @@ func TryUpstreamWithAllKeys(
 				// 记账只会让反复发送此类请求的客户端把健康渠道打成熔断。
 				// 记录渠道日志
 				CompleteLog(channelLogStore, metricsKey, logRequestID, clientStatusCode, false, channelErrorInfo, isRetryAttempt)
-				c.Data(clientStatusCode, "application/json", respBodyBytes)
+				httpbridge.Data(c, clientStatusCode, "application/json", respBodyBytes)
 				return true, "", 0, nil, nil, nil
 			}
 
@@ -1892,7 +1893,7 @@ func TryUpstreamWithAllKeys(
 					// 空响应（流式 / 非流式）或无效响应体（如 HTML）或流式首字超时/断流：Header 未发送，可安全 failover
 					retryKey := currentBaseURL + "|" + apiKey
 					elapsed := time.Since(attemptStartedAt)
-					if shouldRetryShortEmptyResponse(kind, err) && !shortEmptyRetried[retryKey] && elapsed <= shortEmptyResponseRetryWindow && !c.Writer.Written() {
+					if shouldRetryShortEmptyResponse(kind, err) && !shortEmptyRetried[retryKey] && elapsed <= shortEmptyResponseRetryWindow && !httpbridge.Writer(c).Written() {
 						shortEmptyRetried[retryKey] = true
 						retrySelection = selection
 						retryAPIKey = apiKey
@@ -2098,7 +2099,7 @@ func waitForHalfOpenProbe(ctx context.Context, metricsManager *metrics.MetricsMa
 // 步骤 1 + 步骤 2：过滤 + 排序 baseURL 列表。
 // policy 为 nil 时原样返回。
 // 任一 policy 函数 panic 时回退原列表（fail-open）。
-func applyPolicyToURLs(policy *autopilot.EndpointAttemptPolicy, urlResults []warmup.URLLatencyResult, apiType string, c *gin.Context) (ret []warmup.URLLatencyResult) {
+func applyPolicyToURLs(policy *autopilot.EndpointAttemptPolicy, urlResults []warmup.URLLatencyResult, apiType string, c fiber.Ctx) (ret []warmup.URLLatencyResult) {
 	if policy == nil || len(urlResults) == 0 {
 		return urlResults
 	}
@@ -2137,7 +2138,7 @@ func applyPolicyToURLs(policy *autopilot.EndpointAttemptPolicy, urlResults []war
 }
 
 // callPolicyFilterURLs 安全调用 policy.FilterURLs，panic 时回退原列表。
-func callPolicyFilterURLs(policy *autopilot.EndpointAttemptPolicy, urls []string, apiType string, c *gin.Context) []string {
+func callPolicyFilterURLs(policy *autopilot.EndpointAttemptPolicy, urls []string, apiType string, c fiber.Ctx) []string {
 	if policy == nil || policy.FilterURLs == nil {
 		return urls
 	}
@@ -2147,7 +2148,7 @@ func callPolicyFilterURLs(policy *autopilot.EndpointAttemptPolicy, urls []string
 
 // callPolicySortURLs 安全调用 policy.SortURLs，panic 时回退原列表。
 // 使用 result-capture 模式确保 panic 时返回原始输入。
-func callPolicySortURLs(policy *autopilot.EndpointAttemptPolicy, urls []string, apiType string, c *gin.Context) ([]string, []autopilot.EndpointCandidate) {
+func callPolicySortURLs(policy *autopilot.EndpointAttemptPolicy, urls []string, apiType string, c fiber.Ctx) ([]string, []autopilot.EndpointCandidate) {
 	if policy == nil || policy.SortURLs == nil {
 		return urls, nil
 	}
@@ -2183,7 +2184,7 @@ func selectAttemptAPIKeyFiltered(
 	fallback NextAPIKeyFunc,
 	policy *autopilot.EndpointAttemptPolicy,
 	apiType string,
-	c *gin.Context,
+	c fiber.Ctx,
 	circuitOpen keypool.ModelCircuitChecker,
 	autoWeight keypool.AutoWeightFactor,
 	pinAPIKey string,
@@ -2272,7 +2273,7 @@ func selectAttemptAPIKeyFiltered(
 	if policy != nil && policy.Mode == autopilot.RoutingModeAuto {
 		baselineKeys := callPolicySortKeyBindingsBaseline(policy, upstream.ChannelUID, baseURL, filteredKeys, apiType, c)
 		if len(baselineKeys) > 0 && len(sortedKeys) > 0 && baselineKeys[0] != sortedKeys[0] {
-			c.Set("ccx.public_key_routing_shadow_diff", map[string]string{
+			httpbridge.SetValue(c, "ccx.public_key_routing_shadow_diff", map[string]string{
 				"actual":   sortedKeys[0],
 				"baseline": baselineKeys[0],
 			})
@@ -2337,7 +2338,7 @@ func selectAttemptAPIKeyFiltered(
 	return keypool.Selection{}, "", fmt.Errorf("上游 %s 没有可用的API密钥", upstream.Name)
 }
 
-func callPolicyFilterKeyBindings(policy *autopilot.EndpointAttemptPolicy, channelUID, baseURL string, keys []string, apiType string, c *gin.Context) []string {
+func callPolicyFilterKeyBindings(policy *autopilot.EndpointAttemptPolicy, channelUID, baseURL string, keys []string, apiType string, c fiber.Ctx) []string {
 	if policy == nil || policy.FilterKeyBindings == nil {
 		return callPolicyFilterKeys(policy, baseURL, keys, apiType, c)
 	}
@@ -2363,7 +2364,7 @@ func callPolicyFilterKeyBindings(policy *autopilot.EndpointAttemptPolicy, channe
 	return result
 }
 
-func callPolicySortKeyBindings(policy *autopilot.EndpointAttemptPolicy, channelUID, baseURL string, keys []string, apiType string, c *gin.Context) ([]string, []autopilot.EndpointCandidate) {
+func callPolicySortKeyBindings(policy *autopilot.EndpointAttemptPolicy, channelUID, baseURL string, keys []string, apiType string, c fiber.Ctx) ([]string, []autopilot.EndpointCandidate) {
 	if policy == nil || policy.SortKeyBindings == nil {
 		return callPolicySortKeys(policy, baseURL, keys, apiType, c)
 	}
@@ -2386,7 +2387,7 @@ func callPolicySortKeyBindings(policy *autopilot.EndpointAttemptPolicy, channelU
 }
 
 // callPolicySortKeyBindingsBaseline 安全调用 policy.SortKeyBindingsBaseline，panic 时回退原列表。
-func callPolicySortKeyBindingsBaseline(policy *autopilot.EndpointAttemptPolicy, channelUID, baseURL string, keys []string, apiType string, c *gin.Context) []string {
+func callPolicySortKeyBindingsBaseline(policy *autopilot.EndpointAttemptPolicy, channelUID, baseURL string, keys []string, apiType string, c fiber.Ctx) []string {
 	if policy == nil || policy.SortKeyBindingsBaseline == nil {
 		return keys
 	}
@@ -2407,7 +2408,7 @@ func callPolicySortKeyBindingsBaseline(policy *autopilot.EndpointAttemptPolicy, 
 }
 
 // callPolicyFilterKeys 安全调用 policy.FilterKeys，panic 时回退原列表。
-func callPolicyFilterKeys(policy *autopilot.EndpointAttemptPolicy, baseURL string, keys []string, apiType string, c *gin.Context) []string {
+func callPolicyFilterKeys(policy *autopilot.EndpointAttemptPolicy, baseURL string, keys []string, apiType string, c fiber.Ctx) []string {
 	if policy == nil || policy.FilterKeys == nil {
 		return keys
 	}
@@ -2428,7 +2429,7 @@ func callPolicyFilterKeys(policy *autopilot.EndpointAttemptPolicy, baseURL strin
 
 // callPolicySortKeys 安全调用 policy.SortKeys，panic 时回退原列表。
 // 使用 result-capture 模式确保 panic 时返回原始输入。
-func callPolicySortKeys(policy *autopilot.EndpointAttemptPolicy, baseURL string, keys []string, apiType string, c *gin.Context) ([]string, []autopilot.EndpointCandidate) {
+func callPolicySortKeys(policy *autopilot.EndpointAttemptPolicy, baseURL string, keys []string, apiType string, c fiber.Ctx) ([]string, []autopilot.EndpointCandidate) {
 	if policy == nil || policy.SortKeys == nil {
 		return keys, nil
 	}
@@ -2494,7 +2495,7 @@ func selectAttemptAPIKey(channelScheduler *scheduler.ChannelScheduler, kind sche
 }
 
 // recordModelCircuitGlobal 将整把 Key 都不可用的失败记入 global 桶。
-func recordModelCircuitGlobal(c *gin.Context, metricsManager *metrics.MetricsManager,
+func recordModelCircuitGlobal(c fiber.Ctx, metricsManager *metrics.MetricsManager,
 	upstream *config.UpstreamConfig, apiKey, errSummary, apiType string) {
 	if metricsManager == nil || upstream == nil || upstream.ChannelUID == "" {
 		return
@@ -2527,7 +2528,7 @@ func recordModelCircuitGlobal(c *gin.Context, metricsManager *metrics.MetricsMan
 // 重定向发生跨模型执行时，调用点的 model 已被改写为执行模型，与读侧
 // circuitModel（见 modelCircuitChecker）同源。不要改传 attemptModel /
 // redirectedModel——那两者与熔断读侧的键可能不一致。
-func recordModelCircuitFailure(c *gin.Context, metricsManager *metrics.MetricsManager,
+func recordModelCircuitFailure(c fiber.Ctx, metricsManager *metrics.MetricsManager,
 	upstream *config.UpstreamConfig, apiKey, model, errSummary, apiType string) {
 	if metricsManager == nil || upstream == nil || upstream.ChannelUID == "" || model == "" {
 		return
@@ -2560,7 +2561,7 @@ func recordModelCircuitSuccess(metricsManager *metrics.MetricsManager,
 // recordModelCircuitForcedFailure 记录一次「一次确证即隔离」的渠道-模型故障：
 // 调用方已拿到该渠道-模型输出确凿损坏的直接证据（流式无限重复循环），跳过
 // 双阈值直接熔断。键语义与 recordModelCircuitFailure 相同（原始模型）。
-func recordModelCircuitForcedFailure(c *gin.Context, metricsManager *metrics.MetricsManager,
+func recordModelCircuitForcedFailure(c fiber.Ctx, metricsManager *metrics.MetricsManager,
 	upstream *config.UpstreamConfig, apiKey, model, errSummary, apiType string) {
 	if metricsManager == nil || upstream == nil || upstream.ChannelUID == "" || model == "" {
 		return
@@ -2687,30 +2688,30 @@ func failedKeysWithPersistentRestrictions(upstream *config.UpstreamConfig, faile
 	return effective
 }
 
-func trackStreamingConversation(c *gin.Context, channelScheduler *scheduler.ChannelScheduler, kind scheduler.ChannelKind, model string, channelIndex int, channelName string) string {
+func trackStreamingConversation(c fiber.Ctx, channelScheduler *scheduler.ChannelScheduler, kind scheduler.ChannelKind, model string, channelIndex int, channelName string) string {
 	if c == nil || channelScheduler == nil {
 		return ""
 	}
 
-	lastUserMsg, _ := c.Get("lastUserMessage")
+	lastUserMsg, _ := httpbridge.Value(c, "lastUserMessage")
 	lastUserMsgStr, _ := lastUserMsg.(string)
-	lastUserMsgs, _ := c.Get("lastUserMessages")
+	lastUserMsgs, _ := httpbridge.Value(c, "lastUserMessages")
 	lastUserMessages, _ := lastUserMsgs.([]string)
-	userMsgCount, _ := c.Get("userMessageCount")
+	userMsgCount, _ := httpbridge.Value(c, "userMessageCount")
 	userMsgCountInt, _ := userMsgCount.(int)
 	if lastUserMsgStr == "" && userMsgCountInt == 0 {
 		return ""
 	}
 
-	userID, _, agentRole, ok := RequestConversationContextFromGin(c)
+	userID, _, agentRole, ok := RequestConversationContextFromFiber(c)
 	if !ok || userID == "" {
 		return ""
 	}
-	if agentCtx := AgentContextFromGin(c); agentCtx != nil && agentRole == "" {
+	if agentCtx := AgentContextFromFiber(c); agentCtx != nil && agentRole == "" {
 		agentRole = agentCtx.AgentRole
 	}
 
-	channelScheduler.TrackConversationWithStatusAndMessages(kind, userID, model, channelIndex, channelName, "", lastUserMsgStr, lastUserMessages, userMsgCountInt, agentRole, "streaming", AgentContextFromGin(c))
+	channelScheduler.TrackConversationWithStatusAndMessages(kind, userID, model, channelIndex, channelName, "", lastUserMsgStr, lastUserMessages, userMsgCountInt, agentRole, "streaming", AgentContextFromFiber(c))
 	return userID
 }
 

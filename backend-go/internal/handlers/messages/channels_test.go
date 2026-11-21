@@ -10,8 +10,9 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 func setupTestConfigManager(t *testing.T, upstream []config.UpstreamConfig) *config.ConfigManager {
@@ -33,20 +34,20 @@ func setupTestConfigManager(t *testing.T, upstream []config.UpstreamConfig) *con
 	return cm
 }
 
-func newModelsRouter(cfgManager *config.ConfigManager) *gin.Engine {
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
-	r.POST("/messages/channels/:id/models", GetChannelModels(cfgManager))
+func newModelsRouter(cfgManager *config.ConfigManager) *fiber.App {
+
+	r := httpbridge.NewApp()
+	r.Post("/messages/channels/:id/models", GetChannelModels(cfgManager))
 	return r
 }
 
-func postModels(t *testing.T, router *gin.Engine, id string, body GetModelsRequest) *httptest.ResponseRecorder {
+func postModels(t *testing.T, router *fiber.App, id string, body GetModelsRequest) *httptest.ResponseRecorder {
 	t.Helper()
 	raw, _ := json.Marshal(body)
 	req := httptest.NewRequest(http.MethodPost, "/messages/channels/"+id+"/models", bytes.NewReader(raw))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	httpbridge.Handler(router).ServeHTTP(w, req)
 	return w
 }
 
@@ -182,15 +183,15 @@ func TestGetChannelModels_TempBaseURL(t *testing.T) {
 // TestGetChannelModels_InvalidBody 请求体非 JSON 时返回 400
 func TestGetChannelModels_InvalidBody(t *testing.T) {
 	cm := setupTestConfigManager(t, nil)
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
-	r.POST("/messages/channels/:id/models", GetChannelModels(cm))
+
+	r := httpbridge.NewApp()
+	r.Post("/messages/channels/:id/models", GetChannelModels(cm))
 
 	req := httptest.NewRequest(http.MethodPost, "/messages/channels/0/models",
 		bytes.NewBufferString("not-json"))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("期望 400，实际 %d", w.Code)

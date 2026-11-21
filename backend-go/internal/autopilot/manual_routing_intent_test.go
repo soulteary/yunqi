@@ -9,7 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v3"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	_ "modernc.org/sqlite"
 )
 
@@ -32,9 +33,9 @@ func newTestManualIntentStore(t *testing.T) *ManualIntentStore {
 }
 
 // newTestRouter 创建测试用 gin 路由器。
-func newTestRouter(store *ManualIntentStore) *gin.Engine {
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
+func newTestRouter(store *ManualIntentStore) *fiber.App {
+
+	r := httpbridge.NewApp()
 	RegisterManualIntentRoutes(r, store)
 	return r
 }
@@ -625,7 +626,7 @@ func TestHandler_CreateIntent(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	// 使用 httptest 方式直接设置 body
 	req.Body = newStringReader(body)
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusCreated {
 		t.Errorf("POST /manual-intents 状态码 = %d, want %d, body: %s", w.Code, http.StatusCreated, w.Body.String())
@@ -643,7 +644,7 @@ func TestHandler_CreateIntent_ValidationError(t *testing.T) {
 	req, _ := http.NewRequest("POST", "/manual-intents", nil)
 	req.Header.Set("Content-Type", "application/json")
 	req.Body = newStringReader(body)
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("校验失败时状态码 = %d, want %d", w.Code, http.StatusBadRequest)
@@ -669,7 +670,7 @@ func TestHandler_ListIntents(t *testing.T) {
 	// 默认只返回 active
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", "/manual-intents", nil)
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Errorf("GET /manual-intents 状态码 = %d, want %d", w.Code, http.StatusOK)
@@ -678,7 +679,7 @@ func TestHandler_ListIntents(t *testing.T) {
 	// all=true 返回全部
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("GET", "/manual-intents?all=true", nil)
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Errorf("GET /manual-intents?all=true 状态码 = %d, want %d", w.Code, http.StatusOK)
@@ -720,7 +721,7 @@ func TestHandler_ListIntentsNeverReturnsNullSlice(t *testing.T) {
 
 			w := httptest.NewRecorder()
 			req, _ := http.NewRequest("GET", tt.query, nil)
-			r.ServeHTTP(w, req)
+			httpbridge.Handler(r).ServeHTTP(w, req)
 
 			if w.Code != http.StatusOK {
 				t.Fatalf("GET %s 状态码 = %d, want %d", tt.query, w.Code, http.StatusOK)
@@ -752,7 +753,7 @@ func TestHandler_GetIntent(t *testing.T) {
 	// 正常获取
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", "/manual-intents/"+intent.IntentUID, nil)
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Errorf("GET /manual-intents/:uid 状态码 = %d, want %d", w.Code, http.StatusOK)
@@ -761,7 +762,7 @@ func TestHandler_GetIntent(t *testing.T) {
 	// 不存在
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("GET", "/manual-intents/nonexistent", nil)
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusNotFound {
 		t.Errorf("GET /manual-intents/nonexistent 状态码 = %d, want %d", w.Code, http.StatusNotFound)
@@ -778,7 +779,7 @@ func TestHandler_DeleteIntent(t *testing.T) {
 	// 删除
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("DELETE", "/manual-intents/"+intent.IntentUID, nil)
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Errorf("DELETE /manual-intents/:uid 状态码 = %d, want %d", w.Code, http.StatusOK)
@@ -787,7 +788,7 @@ func TestHandler_DeleteIntent(t *testing.T) {
 	// 重复删除
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("DELETE", "/manual-intents/"+intent.IntentUID, nil)
-	r.ServeHTTP(w, req)
+	httpbridge.Handler(r).ServeHTTP(w, req)
 
 	if w.Code != http.StatusNotFound {
 		t.Errorf("重复 DELETE 状态码 = %d, want %d", w.Code, http.StatusNotFound)

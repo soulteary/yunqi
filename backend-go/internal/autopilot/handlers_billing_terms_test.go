@@ -9,11 +9,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v3"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 func TestHandlePatchBillingTerms(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+
 	store := newTestSubscriptionStore(t)
 	seedSubscription(t, store, &SubscriptionProfile{
 		SubscriptionUID: "sub-1",
@@ -22,7 +23,7 @@ func TestHandlePatchBillingTerms(t *testing.T) {
 		UpdatedAt:       time.Now().UTC(),
 	})
 
-	router := gin.New()
+	router := httpbridge.NewApp()
 	RegisterBillingTermsRoutes(router, store)
 
 	t.Run("set terms", func(t *testing.T) {
@@ -128,7 +129,7 @@ func seedSubscription(t *testing.T, store *SubscriptionStore, profile *Subscript
 	}
 }
 
-func performJSONRequest(t *testing.T, router http.Handler, method, path string, body any) *httptest.ResponseRecorder {
+func performJSONRequest(t *testing.T, router *fiber.App, method, path string, body any) *httptest.ResponseRecorder {
 	t.Helper()
 	payload, err := json.Marshal(body)
 	if err != nil {
@@ -137,11 +138,11 @@ func performJSONRequest(t *testing.T, router http.Handler, method, path string, 
 	return performRawRequest(router, method, path, payload)
 }
 
-func performRawRequest(router http.Handler, method, path string, payload []byte) *httptest.ResponseRecorder {
+func performRawRequest(router *fiber.App, method, path string, payload []byte) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, bytes.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
 	resp := httptest.NewRecorder()
-	router.ServeHTTP(resp, req)
+	httpbridge.Handler(router).ServeHTTP(resp, req)
 	return resp
 }
 

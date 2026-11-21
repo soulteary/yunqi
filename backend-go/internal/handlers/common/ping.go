@@ -6,10 +6,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/errutil"
 	"github.com/soulteary/yunqi/internal/httpclient"
-	"github.com/gin-gonic/gin"
 )
 
 type PingRequestBuilder func(upstream config.UpstreamConfig, baseURL string) (*http.Request, error)
@@ -20,16 +20,16 @@ type pingResult struct {
 	err     string
 }
 
-func PingSingleBaseURLUpstream(upstream config.UpstreamConfig, builder PingRequestBuilder) gin.H {
+func PingSingleBaseURLUpstream(upstream config.UpstreamConfig, builder PingRequestBuilder) fiber.Map {
 	baseURL := upstream.GetEffectiveBaseURL()
 	if baseURL == "" {
-		return gin.H{"success": false, "error": "No base URL configured", "latency": 0, "status": "error"}
+		return fiber.Map{"success": false, "error": "No base URL configured", "latency": 0, "status": "error"}
 	}
 	return pingBaseURL(upstream, baseURL, 10*time.Second, builder)
 }
 
-func PingAllSingleBaseURLUpstreams(upstreams []config.UpstreamConfig, builder PingRequestBuilder, wrapInChannels bool) gin.H {
-	results := make([]gin.H, len(upstreams))
+func PingAllSingleBaseURLUpstreams(upstreams []config.UpstreamConfig, builder PingRequestBuilder, wrapInChannels bool) fiber.Map {
+	results := make([]fiber.Map, len(upstreams))
 	var wg sync.WaitGroup
 	for i, upstream := range upstreams {
 		wg.Add(1)
@@ -44,15 +44,15 @@ func PingAllSingleBaseURLUpstreams(upstreams []config.UpstreamConfig, builder Pi
 	}
 	wg.Wait()
 	if wrapInChannels {
-		return gin.H{"channels": results}
+		return fiber.Map{"channels": results}
 	}
-	return gin.H{"results": results}
+	return fiber.Map{"results": results}
 }
 
-func PingMultiBaseURLUpstream(upstream config.UpstreamConfig, builder PingRequestBuilder) gin.H {
+func PingMultiBaseURLUpstream(upstream config.UpstreamConfig, builder PingRequestBuilder) fiber.Map {
 	urls := upstream.GetAllBaseURLs()
 	if len(urls) == 0 {
-		return gin.H{"success": false, "latency": 0, "status": "error", "error": "no_base_url"}
+		return fiber.Map{"success": false, "latency": 0, "status": "error", "error": "no_base_url"}
 	}
 	if len(urls) == 1 {
 		return pingBaseURL(upstream, urls[0], 5*time.Second, builder)
@@ -81,16 +81,16 @@ func PingMultiBaseURLUpstream(upstream config.UpstreamConfig, builder PingReques
 	}
 
 	if best == nil {
-		return gin.H{"success": false, "latency": 0, "status": "error", "error": "all_urls_failed"}
+		return fiber.Map{"success": false, "latency": 0, "status": "error", "error": "all_urls_failed"}
 	}
 	if best.success {
-		return gin.H{"success": true, "latency": best.latency, "status": "healthy"}
+		return fiber.Map{"success": true, "latency": best.latency, "status": "healthy"}
 	}
-	return gin.H{"success": false, "latency": best.latency, "status": "error", "error": best.err}
+	return fiber.Map{"success": false, "latency": best.latency, "status": "error", "error": best.err}
 }
 
-func PingAllMultiBaseURLUpstreams(upstreams []config.UpstreamConfig, builder PingRequestBuilder) []gin.H {
-	results := make(chan gin.H, len(upstreams))
+func PingAllMultiBaseURLUpstreams(upstreams []config.UpstreamConfig, builder PingRequestBuilder) []fiber.Map {
+	results := make(chan fiber.Map, len(upstreams))
 	var wg sync.WaitGroup
 	for i, upstream := range upstreams {
 		wg.Add(1)
@@ -107,14 +107,14 @@ func PingAllMultiBaseURLUpstreams(upstreams []config.UpstreamConfig, builder Pin
 		close(results)
 	}()
 
-	finalResults := make([]gin.H, 0, len(upstreams))
+	finalResults := make([]fiber.Map, 0, len(upstreams))
 	for res := range results {
 		finalResults = append(finalResults, res)
 	}
 	return finalResults
 }
 
-func pingBaseURL(upstream config.UpstreamConfig, baseURL string, timeout time.Duration, builder PingRequestBuilder) gin.H {
+func pingBaseURL(upstream config.UpstreamConfig, baseURL string, timeout time.Duration, builder PingRequestBuilder) fiber.Map {
 	client := httpclient.GetManager().GetClient(httpclient.ClientOptions{
 		Timeout:           timeout,
 		Insecure:          upstream.InsecureSkipVerify,
@@ -123,14 +123,14 @@ func pingBaseURL(upstream config.UpstreamConfig, baseURL string, timeout time.Du
 	})
 	req, err := builder(upstream, strings.TrimSuffix(baseURL, "/"))
 	if err != nil {
-		return gin.H{"success": false, "error": "req_creation_failed", "latency": 0, "status": "error"}
+		return fiber.Map{"success": false, "error": "req_creation_failed", "latency": 0, "status": "error"}
 	}
 
 	start := time.Now()
 	resp, err := client.Do(req)
 	latency := time.Since(start).Milliseconds()
 	if err != nil {
-		return gin.H{"success": false, "error": err.Error(), "latency": latency, "status": "error"}
+		return fiber.Map{"success": false, "error": err.Error(), "latency": latency, "status": "error"}
 	}
 	defer errutil.IgnoreDeferred(resp.Body.Close)
 
@@ -138,7 +138,7 @@ func pingBaseURL(upstream config.UpstreamConfig, baseURL string, timeout time.Du
 	if resp.StatusCode >= 200 && resp.StatusCode < 400 {
 		status = "healthy"
 	}
-	return gin.H{
+	return fiber.Map{
 		"success":    resp.StatusCode >= 200 && resp.StatusCode < 400,
 		"statusCode": resp.StatusCode,
 		"latency":    latency,
@@ -146,7 +146,7 @@ func pingBaseURL(upstream config.UpstreamConfig, baseURL string, timeout time.Du
 	}
 }
 
-func pingResultFromPayload(payload gin.H) pingResult {
+func pingResultFromPayload(payload fiber.Map) pingResult {
 	result := pingResult{}
 	if latency, ok := payload["latency"].(int64); ok {
 		result.latency = latency

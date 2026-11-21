@@ -7,10 +7,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gin-gonic/gin"
-
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/autopilot"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/utils"
 )
 
@@ -173,9 +173,9 @@ func ContextLimitFromError(statusCode int, bodyBytes []byte, estimatedInputToken
 // 输出预留；ContextNeed 可能包含输出预留，反推上限时优先用前者避免低估。
 // profile 缺失（未接线入口）时退化为对实际发送体重算一次；两者都拿不到则返回 0，
 // 调用方只采信上游明确声明的数值。
-func estimatedInputTokensForContextLimit(c *gin.Context, attemptBody []byte) int {
-	if c != nil && c.Request != nil {
-		if profile, ok := autopilot.RequestProfileFromContext(c.Request.Context()); ok {
+func estimatedInputTokensForContextLimit(c fiber.Ctx, attemptBody []byte) int {
+	if c != nil && httpbridge.Request(c) != nil {
+		if profile, ok := autopilot.RequestProfileFromContext(httpbridge.Request(c).Context()); ok {
 			if profile.EstTokens > 0 {
 				return profile.EstTokens
 			}

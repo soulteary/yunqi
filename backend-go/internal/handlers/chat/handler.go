@@ -7,13 +7,14 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/handlers/common"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/middleware"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/types"
 	"github.com/soulteary/yunqi/internal/utils"
-	"github.com/gin-gonic/gin"
 )
 
 // Handler Chat Completions API 代理处理器
@@ -22,12 +23,12 @@ func Handler(
 	envCfg *config.EnvConfig,
 	cfgManager *config.ConfigManager,
 	channelScheduler *scheduler.ChannelScheduler,
-) gin.HandlerFunc {
-	return gin.HandlerFunc(func(c *gin.Context) {
+) fiber.Handler {
+	return fiber.Handler(func(c fiber.Ctx) error {
 		// Chat 代理端点统一使用代理访问密钥鉴权（x-api-key / Authorization: Bearer）
-		middleware.ProxyAuthMiddleware(envCfg)(c)
-		if c.IsAborted() {
-			return
+		middleware.AuthenticateProxy(c, envCfg)
+		if httpbridge.IsAborted(c) {
+			return nil
 		}
 
 		startTime := time.Now()
@@ -36,36 +37,36 @@ func Handler(
 		maxBodySize := envCfg.MaxRequestBodySize
 		bodyBytes, err := common.ReadRequestBody(c, maxBodySize)
 		if err != nil {
-			return
+			return nil
 		}
-		c.Set("requestBodyBytes", bodyBytes)
+		httpbridge.SetValue(c, "requestBodyBytes", bodyBytes)
 
 		// 解析请求中的关键字段
 		var reqMap map[string]interface{}
 		if len(bodyBytes) > 0 {
 			if err := json.Unmarshal(bodyBytes, &reqMap); err != nil {
-				c.JSON(400, gin.H{
-					"error": gin.H{
+				httpbridge.JSON(c, 400, fiber.Map{
+					"error": fiber.Map{
 						"message": fmt.Sprintf("Invalid request body: %v", err),
 						"type":    "invalid_request_error",
 						"code":    "invalid_json",
 					},
 				})
-				return
+				return nil
 			}
 		}
 
 		// 从请求体提取 model
 		model, _ := reqMap["model"].(string)
 		if model == "" {
-			c.JSON(400, gin.H{
-				"error": gin.H{
+			httpbridge.JSON(c, 400, fiber.Map{
+				"error": fiber.Map{
 					"message": "model is required",
 					"type":    "invalid_request_error",
 					"code":    "missing_parameter",
 				},
 			})
-			return
+			return nil
 		}
 
 		// 从请求体提取 stream（默认 false）
@@ -74,7 +75,7 @@ func Handler(
 		// 提取统一会话标识用于 Trace 亲和性
 		userID := utils.ExtractUnifiedSessionID(c, bodyBytes)
 		agentCtx := utils.ExtractAgentContext(c, bodyBytes)
-		c.Set("agentContext", agentCtx)
+		httpbridge.SetValue(c, "agentContext", agentCtx)
 		common.SetRequestLogContextWithAgent(c, userID, countChatUserMessages(reqMap), agentCtx)
 
 		// 预处理：清理空 signature 字段，预防上游参数校验 400
@@ -97,12 +98,13 @@ func Handler(
 		} else {
 			handleSingleChannel(c, envCfg, cfgManager, channelScheduler, bodyBytes, model, isStream, startTime)
 		}
+		return nil
 	})
 }
 
 // handleMultiChannel 处理多渠道 Chat 请求
 func handleMultiChannel(
-	c *gin.Context,
+	c fiber.Ctx,
 	envCfg *config.EnvConfig,
 	cfgManager *config.ConfigManager,
 	channelScheduler *scheduler.ChannelScheduler,
@@ -118,7 +120,7 @@ func handleMultiChannel(
 	common.ApplyAgentModelProfile(contextRequirement, model, cfg)
 	common.LogContextEstimate(c, "Chat", contextRequirement)
 	agentRole := ""
-	if ac := common.AgentContextFromGin(c); ac != nil {
+	if ac := common.AgentContextFromFiber(c); ac != nil {
 		agentRole = ac.AgentRole
 	}
 	common.HandleMultiChannelFailoverWithContextRequirement(
@@ -132,7 +134,7 @@ func handleMultiChannel(
 		contextRequirement,
 		isStream,
 		agentRole,
-		func(c *gin.Context, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
+		func(c fiber.Ctx, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
 			upstream := selection.Upstream
 			channelIndex := selection.ChannelIndex
 
@@ -159,7 +161,7 @@ func handleMultiChannel(
 				func(upstream *config.UpstreamConfig, failedKeys map[string]bool) (string, error) {
 					return cfgManager.GetNextChatAPIKey(upstream, failedKeys)
 				},
-				func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
+				func(c fiber.Ctx, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
 					// 使用 context 中的最新请求体（已经过 failover 内的 metadata 规范化、
 					// 历史图片轮次限制替换等处理），而非闭包捕获的原始 bodyBytes。
 					return buildProviderRequest(c, upstreamCopy, upstreamCopy.BaseURL, apiKey, common.GetEffectiveRequestBody(c, bodyBytes), model, isStream)
@@ -173,7 +175,7 @@ func handleMultiChannel(
 				func(url string) {
 					channelScheduler.MarkURLSuccess(scheduler.ChannelKindChat, channelIndex, url)
 				},
-				func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
+				func(c fiber.Ctx, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 					timeouts := common.ResolveStreamPreflightTimeouts(upstreamCopy, metricsManager.GetCircuitBreakerConfig())
 					return handleSuccess(c, resp, upstreamCopy.ServiceType, envCfg, startTime, model, isStream, timeouts)
 				},
@@ -195,7 +197,7 @@ func handleMultiChannel(
 			}
 		},
 		nil,
-		func(ctx *gin.Context, failoverErr *common.FailoverError, lastError error) {
+		func(ctx fiber.Ctx, failoverErr *common.FailoverError, lastError error) {
 			handleAllChannelsFailed(ctx, failoverErr, lastError)
 		},
 	)
@@ -203,7 +205,7 @@ func handleMultiChannel(
 
 // handleSingleChannel 处理单渠道 Chat 请求
 func handleSingleChannel(
-	c *gin.Context,
+	c fiber.Ctx,
 	envCfg *config.EnvConfig,
 	cfgManager *config.ConfigManager,
 	channelScheduler *scheduler.ChannelScheduler,
@@ -252,7 +254,7 @@ func handleSingleChannel(
 		func(upstream *config.UpstreamConfig, failedKeys map[string]bool) (string, error) {
 			return cfgManager.GetNextChatAPIKey(upstream, failedKeys)
 		},
-		func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
+		func(c fiber.Ctx, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
 			return buildProviderRequest(c, upstreamCopy, upstreamCopy.BaseURL, apiKey, common.GetEffectiveRequestBody(c, bodyBytes), model, isStream)
 		},
 		func(apiKey string) {
@@ -260,7 +262,7 @@ func handleSingleChannel(
 		},
 		nil,
 		nil,
-		func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
+		func(c fiber.Ctx, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 			timeouts := common.ResolveStreamPreflightTimeouts(upstreamCopy, metricsManager.GetCircuitBreakerConfig())
 			return handleSuccess(c, resp, upstreamCopy.ServiceType, envCfg, startTime, model, isStream, timeouts)
 		},

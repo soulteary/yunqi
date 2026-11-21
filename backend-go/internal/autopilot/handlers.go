@@ -4,8 +4,9 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
-	"github.com/gin-gonic/gin"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
 // ─── 响应类型 ────────────────────────────────────────────────────────────────────
@@ -102,23 +103,23 @@ type EndpointsResponse struct {
 // ─── 路由注册 ────────────────────────────────────────────────────────────────────
 
 // RegisterRoutes 注册健康中心只读 API 到给定路由组。
-func RegisterRoutes(router gin.IRouter, mgr *Manager) {
+func RegisterRoutes(router fiber.Router, mgr *Manager) {
 	group := router.Group("/health-center")
 	{
-		group.GET("/overview", handleOverview(mgr))
-		group.GET("/channels", handleChannels(mgr))
-		group.GET("/channels/:channelUid/endpoints", handleEndpoints(mgr))
-		group.POST("/endpoints/:endpointUid/token-plan-usage/refresh", handleRefreshTokenPlanUsage(mgr))
-		group.GET("/provider-quality/budget", handleProviderQualityBudget(mgr.ProviderQualityProbe()))
-		group.POST("/provider-quality/probe", handleProviderQualityProbe(mgr.ProviderQualityProbe()))
+		group.Get("/overview", handleOverview(mgr))
+		group.Get("/channels", handleChannels(mgr))
+		group.Get("/channels/:channelUid/endpoints", handleEndpoints(mgr))
+		group.Post("/endpoints/:endpointUid/token-plan-usage/refresh", handleRefreshTokenPlanUsage(mgr))
+		group.Get("/provider-quality/budget", handleProviderQualityBudget(mgr.ProviderQualityProbe()))
+		group.Post("/provider-quality/probe", handleProviderQualityProbe(mgr.ProviderQualityProbe()))
 
 		// Phase 3A：画像变更事件（只读展示，不影响调度）
-		group.GET("/changelog", handleChangelog(mgr))
-		group.GET("/events", handleChangelogEvents(mgr))
+		group.Get("/changelog", handleChangelog(mgr))
+		group.Get("/events", handleChangelogEvents(mgr))
 
 		// Phase B.1：跨模块状态事件（熔断 / Key 拉黑恢复）
-		group.GET("/state-events", handleStateEvents(mgr))
-		group.GET("/state-events/stream", handleStateEventsStream(mgr))
+		group.Get("/state-events", handleStateEvents(mgr))
+		group.Get("/state-events/stream", handleStateEventsStream(mgr))
 	}
 }
 
@@ -126,8 +127,8 @@ func RegisterRoutes(router gin.IRouter, mgr *Manager) {
 
 // handleOverview GET /api/health-center/overview
 // 全局汇总：各 HealthState 计数、渠道数、endpoint 数。
-func handleOverview(mgr *Manager) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handleOverview(mgr *Manager) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		allProfiles := mgr.ProfileStore().ListActive()
 
 		stateCounts := map[string]int{
@@ -145,19 +146,19 @@ func handleOverview(mgr *Manager) gin.HandlerFunc {
 			state := string(p.HealthState)
 			stateCounts[state]++
 		}
-
-		c.JSON(http.StatusOK, OverviewResponse{
+		httpbridge.JSON(c, http.StatusOK, OverviewResponse{
 			TotalChannels:  len(channelSet),
 			TotalEndpoints: len(allProfiles),
 			StateCounts:    stateCounts,
 		})
+		return nil
 	}
 }
 
 // handleChannels GET /api/health-center/channels
 // 渠道级聚合列表。
-func handleChannels(mgr *Manager) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func handleChannels(mgr *Manager) fiber.Handler {
+	return func(c fiber.Ctx) error {
 		allProfiles := mgr.ProfileStore().ListActive()
 
 		// 按 channelUID 分组
@@ -178,19 +179,19 @@ func handleChannels(mgr *Manager) gin.HandlerFunc {
 			}
 			items = append(items, item)
 		}
-
-		c.JSON(http.StatusOK, ChannelsResponse{Channels: items})
+		httpbridge.JSON(c, http.StatusOK, ChannelsResponse{Channels: items})
+		return nil
 	}
 }
 
 // handleEndpoints GET /api/health-center/channels/:channelUid/endpoints
 // endpoint 级展开（Key 用 hash 展示，绝不返回明文 key）。
-func handleEndpoints(mgr *Manager) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		channelUID := c.Param("channelUid")
+func handleEndpoints(mgr *Manager) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		channelUID := httpbridge.Param(c, "channelUid")
 		if channelUID == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "channelUid 不能为空"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "channelUid 不能为空"})
+			return nil
 		}
 
 		profiles := mgr.ProfileStore().ListActiveByChannel(channelUID)
@@ -256,22 +257,22 @@ func handleEndpoints(mgr *Manager) gin.HandlerFunc {
 			}
 			endpoints = append(endpoints, item)
 		}
-
-		c.JSON(http.StatusOK, EndpointsResponse{
+		httpbridge.JSON(c, http.StatusOK, EndpointsResponse{
 			ChannelUID: channelUID,
 			Endpoints:  endpoints,
 		})
+		return nil
 	}
 }
 
-func handleRefreshTokenPlanUsage(mgr *Manager) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		endpointUID := strings.TrimSpace(c.Param("endpointUid"))
+func handleRefreshTokenPlanUsage(mgr *Manager) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		endpointUID := strings.TrimSpace(httpbridge.Param(c, "endpointUid"))
 		if endpointUID == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "endpointUid 不能为空"})
-			return
+			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "endpointUid 不能为空"})
+			return nil
 		}
-		usage, cached, err := mgr.RefreshMiniMaxTokenPlanUsage(c.Request.Context(), endpointUID, c.Query("force") == "true")
+		usage, cached, err := mgr.RefreshMiniMaxTokenPlanUsage(httpbridge.Request(c).Context(), endpointUID, httpbridge.Query(c, "force") == "true")
 		if err != nil {
 			status := http.StatusBadGateway
 			if strings.Contains(err.Error(), "不存在") {
@@ -279,10 +280,11 @@ func handleRefreshTokenPlanUsage(mgr *Manager) gin.HandlerFunc {
 			} else if strings.Contains(err.Error(), "不是 MiniMax Token Plan") || strings.Contains(err.Error(), "无法解析") {
 				status = http.StatusBadRequest
 			}
-			c.JSON(status, gin.H{"error": err.Error()})
-			return
+			httpbridge.JSON(c, status, fiber.Map{"error": err.Error()})
+			return nil
 		}
-		c.JSON(http.StatusOK, gin.H{"usage": usage, "cached": cached})
+		httpbridge.JSON(c, http.StatusOK, fiber.Map{"usage": usage, "cached": cached})
+		return nil
 	}
 }
 
