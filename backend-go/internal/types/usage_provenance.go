@@ -52,7 +52,12 @@ func CaptureUsageSource(u *Usage, protocol string, body []byte) {
 	if json.Unmarshal(raw, &object) != nil || object == nil {
 		return
 	}
-	u.Provenance = &UsageProvenance{UsageSource: "provider", Protocol: protocol, RawUsage: SanitizeRawUsage(raw)}
+	clean := SanitizeRawUsage(raw)
+	if len(clean) == 0 {
+		u.Provenance = &UsageProvenance{UsageSource: "unknown", Protocol: protocol, Reason: "raw_usage_limit_exceeded"}
+		return
+	}
+	u.Provenance = &UsageProvenance{UsageSource: "provider", Protocol: protocol, RawUsage: clean}
 }
 
 // SanitizeRawUsage retains metering numbers and structure. Arbitrary upstream
