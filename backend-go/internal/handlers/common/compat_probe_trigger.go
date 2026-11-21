@@ -32,6 +32,12 @@ func SetCompatProbeHook(hook CompatProbeFunc) {
 // 探测会真实消耗一次上游调用，并发请求各自探测既浪费额度又可能写入冲突结论。
 var compatProbeInflight sync.Map
 
+// SwapChannelCompatCacheForTest 为外部协议测试包同时隔离 failover 与路由侧缓存。
+// 仅替换 config 共享入口会遗漏本包在初始化时保存的实例。
+func SwapChannelCompatCacheForTest(replacement *config.ChannelCompatCache) func() {
+	return swapChannelCompatCacheForTest(replacement)
+}
+
 // swapChannelCompatCacheForTest 临时替换全局兼容性记忆，返回还原函数。
 // 仅供测试使用：全局实例带落盘，测试直接写它会在源码树里产生状态文件，
 // 且上一次运行的记忆会影响下一次运行的结果。

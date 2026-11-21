@@ -87,8 +87,8 @@ make deps
 
 说明：
 - `make dev`：使用 Air 热重载
-- `make run`：复制前端构建产物后直接运行
-- `make build`：构建生产二进制到 `dist/`
+- `make run`：通过统一内容缓存校验/构建并嵌入前端，再运行后端
+- `make build`：校验/构建并嵌入前端，再构建生产二进制到仓库根目录 `dist/`
 - `make test`：运行所有 Go 测试
 - `make test-cover`：生成覆盖率报告
 
@@ -163,7 +163,7 @@ make build
 (cd docs && npm ci && npm run build)
 ```
 
-`make build` 已运行前端类型检查和生产构建，并将产物嵌入 Go 服务。仅改某个模块时按影响范围选择检查；没有新修改或失败时不必重复相同构建。CI 另会校验生成的渠道预置是否与源数据一致。
+`make build` 已运行前端类型检查和生产构建，并将产物嵌入 Go 服务。仅改某个模块时按影响范围选择检查；没有新修改或失败时不必重复相同构建。CI 同时运行 Node 脚本回归测试，校验所有共享生成产物（前端预设、后端嵌入 JSON、文档发布分片、索引及校验和）。统一运行 `node scripts/generate-preset-manifest.mjs` 生成，添加 `--check` 可只读校验。
 
 ## 更新模型能力基准数据
 
@@ -240,3 +240,7 @@ make dev
 ```bash
 make build
 ```
+
+### 隔离测试中的兼容性学习状态
+
+协议 handler 测试使用纯内存共享兼容性缓存；需要验证持久化时，应显式使用 `t.TempDir()` 下的路径。不要在源码包下创建或提交 `.config/channel_compat.json`：它是运行时状态，不是测试 fixture。
