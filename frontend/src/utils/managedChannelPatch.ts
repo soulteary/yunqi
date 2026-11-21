@@ -1,6 +1,6 @@
 import type { Channel } from '../services/api'
 import { normalizeMaxGroupMultiplier } from './channelPayload'
-import { EDIT_CHANNEL_PAYLOAD_KEYS } from './editChannelPayload'
+import { ACCOUNT_CHANNEL_FIELDS, EDIT_CHANNEL_PAYLOAD_KEYS, MANAGED_CHANNEL_PATCH_KEYS, PROVIDER_AUTOMATIC_CHANNEL_FIELDS } from './editChannelPayload'
 import { isStructurallyEqual } from './structuralSharing'
 
 function normalizePositiveOrZero(value: unknown): number {
@@ -35,7 +35,7 @@ const CHANNEL_PATCH_NORMALIZERS: Readonly<Record<string, (value: unknown) => unk
 }
 
 /** 账号接口（凭证池/名称/地址）或独立特例（website/remark）已承载的字段，不参与丢弃检测。 */
-const ACCOUNT_BORNE_FIELDS = new Set(['name', 'apiKeys', 'apiKeyConfigs', 'baseUrl', 'baseUrls', 'website', 'remark', 'responsesReasoningFold'])
+const ACCOUNT_BORNE_FIELDS = ACCOUNT_CHANNEL_FIELDS
 
 /**
  * 比较托管账号渠道编辑前后的渠道级字段，返回需要经单卡更新下发的 patch（空对象=无变化）。
@@ -48,14 +48,13 @@ export function buildManagedChannelPatch(
   if (!original) return {}
   const originalRecord = original as unknown as Record<string, unknown>
   const patch: Record<string, unknown> = {}
-  for (const [field, normalize] of Object.entries(CHANNEL_PATCH_NORMALIZERS)) {
-    // 出口策略允许显式 null 清除；未携带字段的旧调用方保留现有策略。
-    if ((field === 'outboundNetwork' || field === 'proxyPreferDirect') && !(field in next)) continue
+  for (const field of managedPatchKeys(original)) {
+    // Missing fields and undefined are always omission, for every field.
+    if (!(field in next) || next[field] === undefined) continue
+    const normalize = CHANNEL_PATCH_NORMALIZERS[field] ?? ((value: unknown) => value)
     const before = normalize(originalRecord[field])
     const after = normalize(next[field])
-    if (!isStructurallyEqual(before, after)) {
-      patch[field] = after
-    }
+    if (!isStructurallyEqual(before, after)) patch[field] = after
   }
   return patch
 }
@@ -73,8 +72,8 @@ export function listDroppedManagedChannelFields(
   const originalRecord = original as unknown as Record<string, unknown>
   const dropped: string[] = []
   for (const key of EDIT_CHANNEL_PAYLOAD_KEYS) {
-    if (ACCOUNT_BORNE_FIELDS.has(key) || key in CHANNEL_PATCH_NORMALIZERS) continue
-    if (!(key in next)) continue
+    if (ACCOUNT_BORNE_FIELDS.has(key) || managedPatchKeys(original).includes(key)) continue
+    if (!(key in next) || next[key] === undefined) continue
     if (!looselyEqual(originalRecord[key], next[key])) {
       dropped.push(key)
     }
@@ -131,4 +130,9 @@ export function buildStagedKeyMultiplierConfigs(
     })
   }
   return staged.length > 0 ? staged : null
+}
+
+function managedPatchKeys(original: Channel): typeof MANAGED_CHANNEL_PATCH_KEYS {
+  const automatic = original.autoManagedKind !== 'generic' && !!(original.providerId || original.autoManagedKind)
+  return automatic ? MANAGED_CHANNEL_PATCH_KEYS.filter(key => !PROVIDER_AUTOMATIC_CHANNEL_FIELDS.has(key)) : MANAGED_CHANNEL_PATCH_KEYS
 }

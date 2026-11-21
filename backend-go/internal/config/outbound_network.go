@@ -33,6 +33,7 @@ func (p *OutboundNetworkPatch) UnmarshalJSON(b []byte) error {
 	p.Set = true
 	return json.Unmarshal(b, &p.Value)
 }
+func (p OutboundNetworkPatch) IsZero() bool                 { return !p.Set }
 func (p OutboundNetworkPatch) MarshalJSON() ([]byte, error) { return json.Marshal(p.Value) }
 func NetworkPatch(c *OutboundNetworkConfig) OutboundNetworkPatch {
 	return OutboundNetworkPatch{Set: true, Value: CloneOutboundNetwork(c)}

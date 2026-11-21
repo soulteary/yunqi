@@ -346,6 +346,7 @@ func (cm *ConfigManager) updateUpstreamCommon(k ChannelKindConfig, index int, up
 // 本函数不处理 baseURL/serviceType 相关逻辑，由调用方提前处理。
 func applyUpstreamUpdateFields(upstream *UpstreamConfig, updates UpstreamUpdate) (bool, error) {
 	var shouldResetMetrics bool
+	applyChannelNullFields(upstream, updates.NullFields)
 	network := upstream.OutboundNetwork
 	proxyURL := upstream.ProxyURL
 	if updates.OutboundNetwork.Set {
