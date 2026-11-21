@@ -1127,6 +1127,7 @@ func TryUpstreamWithAllKeys(
 
 			req, err := buildRequest(c, upstreamCopy, apiKey)
 			if err != nil {
+				_ = recordFinalConversion(c, requestBody, nil, apiType, upstreamCopy.ServiceType)
 				// buildRequest 失败通常是客户端参数问题或本地构建错误
 				// 不应污染熔断统计，直接返回错误
 				RequestLogf(c, "[%s-BuildRequest] 请求构建失败: %v", apiType, err)
@@ -1137,6 +1138,9 @@ func TryUpstreamWithAllKeys(
 			// 该步骤位于 provider 转换之后，因此跨协议路由不会再丢失 effort。
 			if resolvedAttemptTarget != nil {
 				applyResolvedEffortToProviderRequest(req, resolvedAttemptTarget, upstreamCopy, executionKind)
+			}
+			if err := recordFinalConversion(c, requestBody, req, apiType, upstreamCopy.ServiceType); err != nil {
+				return false, "", 0, nil, nil, err
 			}
 			originalReasoningEffort := extractReasoningEffortForLog(requestBody)
 			actualAttemptModel, actualReasoningEffort := extractActualRequestLogDetails(req)
