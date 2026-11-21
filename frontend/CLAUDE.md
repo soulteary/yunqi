@@ -39,6 +39,19 @@ bun run preview   # 预览构建
 
 `api-contract.test.ts` 固定六类渠道请求、历史默认值、可选字段、鉴权和错误解析行为；`__fixtures__/api-methods.json` 记录兼容的公共方法清单。新增或明确变更公共 API 时同步更新契约。
 
+## 根组件控制器
+
+`src/composables/useAppController.ts` 保留 `App.vue` 使用的返回字段，组合 `composables/app/` 中的职责模块；渠道操作、熔断器表单和对话框快捷键仍在原入口。
+
+- `useAppAuth.ts`：保存密钥的自动认证、手动登录、失败锁定、注销，以及认证状态驱动的渠道刷新和连接状态。
+- `useAppNavigation.ts`：导航选项、语言、标题、新用户指引和渠道类型切换后的刷新；路由到渠道类型的同步仍由 ChannelStore 管理。
+- `useAppTheme.ts`：复古主题初始化、明暗模式和系统主题监听，复用原 `useTheme.ts` 的字体设置。
+- `useAppVersion.ts`：启动时版本检查、并发检查保护、更新对话框和 `yunqi-check-version` 事件。
+
+每个模块负责注册和清理自身监听器；入口按主题、版本、导航、认证顺序组合，保持启动时先应用主题、发起版本检查，再自动认证和刷新渠道。认证模块通过参数接收翻译与提示函数，不回调根控制器。
+
+`useAppController.test.ts` 使用真实 Pinia Store 和内存路由验证公开字段、认证与锁定、导航刷新、指引、主题、版本事件及卸载清理。请求和版本服务在测试中替换，不访问真实上游。
+
 ## 主题配置
 
 编辑 `src/plugins/vuetify.ts` 中的 `lightTheme` 和 `darkTheme`。
