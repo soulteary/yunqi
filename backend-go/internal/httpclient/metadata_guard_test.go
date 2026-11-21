@@ -136,7 +136,9 @@ func TestProxyMetadataGuardPreservesRemoteDNSButRejectsKnownTargets(t *testing.T
 
 func TestMetadataRejectionNeverFallsBackToProxy(t *testing.T) {
 	proxyCalls := 0
-	rt := &directFirstRoundTripper{direct: roundTripFunc(func(*http.Request) (*http.Response, error) { return nil, fmt.Errorf("dial blocked: %w", errMetadataDestination) }),
+	rt := &directFirstRoundTripper{direct: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, fmt.Errorf("dial blocked: %w", errMetadataDestination)
+	}),
 		proxied: roundTripFunc(func(*http.Request) (*http.Response, error) { proxyCalls++; return nil, errors.New("unexpected proxy") })}
 	req, _ := http.NewRequest(http.MethodGet, "http://example.invalid/", nil)
 	if _, err := rt.RoundTrip(req); !errors.Is(err, errMetadataDestination) || proxyCalls != 0 {
