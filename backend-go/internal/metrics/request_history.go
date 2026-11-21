@@ -75,7 +75,11 @@ func (s *SQLiteStore) QueryRequestHistory(ctx context.Context, q RequestHistoryQ
 		return page, err
 	}
 	where := []string{"api_type = ?", "timestamp >= ?", "timestamp <= ?", "id <= ?"}
-	args := []any{q.APIType, q.Since.Unix(), q.Until.Unix(), cur.HighID}
+	until := q.Until.Unix()
+	if q.Cursor != "" && cur.Timestamp < until {
+		until = cur.Timestamp
+	}
+	args := []any{q.APIType, q.Since.Unix(), until, cur.HighID}
 	for _, f := range []struct{ column, value string }{{"model", q.Model}, {"channel_uid", q.ChannelUID}, {"correlation_id", q.CorrelationID}} {
 		if f.value != "" {
 			where = append(where, f.column+" = ?")
@@ -83,6 +87,8 @@ func (s *SQLiteStore) QueryRequestHistory(ctx context.Context, q RequestHistoryQ
 		}
 	}
 	if q.Cursor != "" {
+		// SQLite may not infer a scalar seek bound from a tuple comparison
+		// alongside another timestamp range. Make it explicit for deep pages.
 		where = append(where, "(timestamp,id) < (?,?)")
 		args = append(args, cur.Timestamp, cur.ID)
 	}

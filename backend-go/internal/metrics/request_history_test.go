@@ -88,7 +88,7 @@ func TestRequestHistoryCursorAndFilters(t *testing.T) {
 func TestRequestHistoryQueryPlans(t *testing.T) {
 	s := historyTestStore(t)
 	for _, column := range []string{"", "model", "channel_uid", "correlation_id"} {
-		query := "EXPLAIN QUERY PLAN SELECT id FROM request_records WHERE api_type='messages' AND timestamp>=0 AND timestamp<=9999999999 AND id<=99999"
+		query := "EXPLAIN QUERY PLAN SELECT id,timestamp,api_type,model,channel_uid,correlation_id,success,input_tokens,output_tokens FROM request_records WHERE api_type='messages' AND timestamp>=0 AND timestamp<=9999999999 AND id<=99999"
 		if column != "" {
 			query += " AND " + column + "='x'"
 		}
@@ -107,6 +107,7 @@ func TestRequestHistoryQueryPlans(t *testing.T) {
 			plan += d
 		}
 		rows.Close()
+		t.Logf("%s: %s", column, plan)
 		if !strings.Contains(plan, "INDEX idx_") || strings.Contains(plan, "TEMP B-TREE") || strings.Contains(plan, "SCAN request_records") {
 			t.Fatalf("%s: %s", column, plan)
 		}
@@ -137,12 +138,27 @@ func BenchmarkRequestHistoryMillion(b *testing.B) {
 	cur := historyCursor{Timestamp: now - 900000, ID: 900001, HighID: 1000000, Filter: q.fingerprint()}
 	data, _ := json.Marshal(cur)
 	q.Cursor = base64.RawURLEncoding.EncodeToString(data)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		p, err := s.QueryRequestHistory(context.Background(), q)
-		if err != nil {
-			b.Fatal(err)
+
+	b.Run("deep", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			p, err := s.QueryRequestHistory(context.Background(), q)
+			if err != nil {
+				b.Fatal(err)
+			}
+			q.Cursor = p.NextCursor
 		}
-		q.Cursor = p.NextCursor
-	}
+	})
+	b.Run("filtered", func(b *testing.B) {
+		q.Model = "0"
+		q.ChannelUID = "0"
+		q.CorrelationID = "0"
+		q.Cursor = ""
+		for i := 0; i < b.N; i++ {
+			p, err := s.QueryRequestHistory(context.Background(), q)
+			if err != nil {
+				b.Fatal(err)
+			}
+			q.Cursor = p.NextCursor
+		}
+	})
 }
