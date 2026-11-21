@@ -352,6 +352,13 @@ func initSchema(db *sql.DB) error {
 		log.Printf("[SQLite-Migration] schema 升级: v8 -> v9 (添加 correlation_id 列)")
 	}
 
+	// Additive indexes are safe on existing databases and do not reserve a schema version.
+	for _, column := range []string{"model,", "channel_uid,", "correlation_id,"} {
+		name := strings.ReplaceAll(column, ",", "")
+		if _, err := db.Exec("CREATE INDEX IF NOT EXISTS idx_history_" + name + " ON request_records(api_type," + column + "timestamp DESC,id DESC)"); err != nil {
+			return fmt.Errorf("history index: %w", err)
+		}
+	}
 	return nil
 }
 
