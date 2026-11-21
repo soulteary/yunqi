@@ -175,6 +175,10 @@ export class ApiService {
     return this.parseResponseBody(response)
   }
 
+  async getConsoleStatus(): Promise<import('./console-types').ConsoleStatus> {
+    return this.request('/console/status')
+  }
+
   async requestCopilotDeviceCode(proxyUrl?: string): Promise<CopilotDeviceCodeResponse> {
     return this.request('/copilot/oauth/device/code', {
       method: 'POST',

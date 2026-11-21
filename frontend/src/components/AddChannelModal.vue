@@ -154,7 +154,7 @@
                         </v-chip>
                       </div>
 
-                      <!-- 故障转移位置（与 desktop 一致：API Keys 下方开关） -->
+                      <!-- 故障转移位置（API Keys 下方开关） -->
                       <div
                         class="d-flex align-center ga-3 pa-3 rounded-lg placement-card"
                         :class="{ 'placement-card-disabled': isCreatingChannel }"

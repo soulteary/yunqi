@@ -23,7 +23,7 @@ export const useDialogStore = defineStore('dialog', () => {
   const selectedChannelForKey = ref<number>(-1)
   const newApiKey = ref('')
 
-  // 通用确认对话框（替代 window.confirm，兼容 Wails iframe 环境）
+  // 通用确认对话框（替代 window.confirm）
   const showConfirmDialog = ref(false)
   const confirmDialogMessage = ref('')
   const confirmDialogConfirmText = ref('')
@@ -95,7 +95,7 @@ export const useDialogStore = defineStore('dialog', () => {
 
   /**
    * 打开通用确认对话框，返回 Promise<boolean>
-   * 用于替代原生 window.confirm()，避免在 Wails iframe 环境下失效
+   * 用于替代原生 window.confirm()
    */
   function confirm(options: {
     message: string

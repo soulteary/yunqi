@@ -1,4 +1,5 @@
 {
+  "app.tabs.console": "Service & setup",
   "app.auth.verifyingTitle": "Memverifikasi akses",
   "app.auth.verifyingBody": "Mengautentikasi dengan access key yang tersimpan...",
   "app.auth.inputLabel": "Admin access key",

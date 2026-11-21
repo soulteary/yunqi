@@ -66,6 +66,7 @@ export function useAppController() {
     { value: 'subscriptions', labelKey: 'app.tabs.subscriptions', route: '/subscriptions', icon: 'mdi-cash-multiple' },
     { value: 'cockpit', labelKey: 'app.tabs.cockpitOverview', route: '/cockpit', icon: 'mdi-view-dashboard-outline' },
     { value: 'autopilot', labelKey: 'app.tabs.autopilot', route: '/autopilot', icon: 'mdi-steering' },
+    { value: 'console', labelKey: 'app.tabs.console', route: '/console', icon: 'mdi-console' },
     { value: 'cost-report', labelKey: 'app.tabs.costReport', route: '/cost-report', icon: 'mdi-finance' },
   ] as const
 
@@ -75,7 +76,6 @@ export function useAppController() {
       label: t(tab.labelKey),
     }))
   })
-  const isDesktopWebUI = new URLSearchParams(window.location.search).get('ccx_desktop') === '1'
 
   const currentTabLabel = computed(() => {
     return translatedApiTabOptions.value.find(tab => tab.value === channelStore.activeTab)?.label || channelStore.activeTab
@@ -300,11 +300,10 @@ export function useAppController() {
     if (!open) preferencesStore.markGuideSeen()
   })
 
-  // 首次认证成功后自动弹出一次指引（仅独立 WebUI，桌面端内嵌不打扰）
+  // 首次认证成功后自动弹出一次指引
   // 直接 watch authStore（在前文已定义），避免引用尚未声明的 isAuthenticated computed
   watch(() => authStore.isAuthenticated, (authed) => {
-    const isEmbedded = typeof window !== 'undefined' && window.self !== window.top
-    if (authed && !preferencesStore.hasSeenGuide && !isEmbedded) {
+    if (authed && !preferencesStore.hasSeenGuide) {
       showGuide.value = true
     }
   })
@@ -546,9 +545,7 @@ export function useAppController() {
   }
 
   // 处理认证提交
-  const submitAuth = async (options: { countFailures?: boolean; ignoreLockout?: boolean } = {}) => {
-    const countFailures = options.countFailures ?? true
-    const ignoreLockout = options.ignoreLockout ?? false
+  const submitAuth = async () => {
 
     if (!authStore.authKeyInput.trim()) {
       authStore.setAuthError(t('toast.enterAccessKey'))
@@ -556,8 +553,7 @@ export function useAppController() {
     }
 
     // 检查是否被锁定；过期锁定会自动清理，避免显示负数倒计时
-    // 桌面端 iframe 自动注入密钥时忽略前端本地 lockout，但仍会验证 key 是否有效
-    const remainingSeconds = ignoreLockout ? 0 : getAuthLockoutRemainingSeconds()
+    const remainingSeconds = getAuthLockoutRemainingSeconds()
     if (remainingSeconds > 0) {
       authStore.setAuthError(t('toast.tooManyAttemptsSeconds', { seconds: remainingSeconds }))
       return
@@ -591,22 +587,17 @@ export function useAppController() {
     } catch (error) {
       // 仅在明确 401 时计入认证失败；网络/5xx 不计入失败次数，也不清除已保存密钥
       if (error instanceof ApiError && error.status === 401) {
-        if (countFailures) {
-          authStore.incrementAuthAttempts()
+        authStore.incrementAuthAttempts()
 
-          // 记录认证失败(前端日志)
-          console.warn('🔒 认证失败 - 尝试次数:', authStore.authAttempts, '时间:', new Date().toISOString())
+        // 记录认证失败(前端日志)
+        console.warn('🔒 认证失败 - 尝试次数:', authStore.authAttempts, '时间:', new Date().toISOString())
 
-          // 如果尝试次数过多，锁定5分钟
-          if (authStore.authAttempts >= MAX_AUTH_ATTEMPTS) {
-            authStore.setAuthLockout(new Date(Date.now() + 5 * 60 * 1000))
-            authStore.setAuthError(t('toast.tooManyAttempts'))
-          } else {
-            authStore.setAuthError(t('toast.accessKeyInvalidRemaining', { remaining: MAX_AUTH_ATTEMPTS - authStore.authAttempts }))
-          }
+        // 如果尝试次数过多，锁定5分钟
+        if (authStore.authAttempts >= MAX_AUTH_ATTEMPTS) {
+          authStore.setAuthLockout(new Date(Date.now() + 5 * 60 * 1000))
+          authStore.setAuthError(t('toast.tooManyAttempts'))
         } else {
-          // 桌面端 iframe 自动注入密钥时不消耗手动登录尝试次数，避免重复 postMessage 触发本地锁定
-          authStore.setAuthError(t('toast.authInvalid'))
+          authStore.setAuthError(t('toast.accessKeyInvalidRemaining', { remaining: MAX_AUTH_ATTEMPTS - authStore.authAttempts }))
         }
 
         authStore.clearAuth()
@@ -642,7 +633,7 @@ export function useAppController() {
 
   // 版本检查
   const checkVersion = async () => {
-    if (isDesktopWebUI || systemStore.isCheckingVersion) return
+    if (systemStore.isCheckingVersion) return
 
     systemStore.setCheckingVersion(true)
     try {
@@ -698,6 +689,8 @@ export function useAppController() {
   }
   mediaQuery?.addEventListener('change', handlePref)
 
+  const handleVersionCheck = () => { void checkVersion() }
+
   // 初始化
   onMounted(async () => {
     // 初始化复古像素主题
@@ -707,51 +700,8 @@ export function useAppController() {
     // 加载保存的暗色模式偏好（从 PreferencesStore 读取，已自动从 localStorage 恢复）
     setDarkMode(preferencesStore.darkModePreference)
 
-    if (!isDesktopWebUI) {
-      // 版本检查（独立于认证，静默执行）
-      checkVersion()
-
-      // 监听 UpdateDialog 手动触发的版本检查
-      window.addEventListener('ccx-check-version', () => { checkVersion() })
-    }
-
-    const desktopAutoLogin = window.self !== window.top && isDesktopWebUI
-
-    if (desktopAutoLogin) {
-      authStore.clearAuth()
-      authStore.setAutoAuthenticating(false)
-      authStore.setInitialized(true)
-      authStore.setAuthError(t('toast.enterAccessKeyContinue'))
-
-      // 桌面端通过 postMessage 发送密钥，监听直到认证成功
-      const handleDesktopAuth = async (event: MessageEvent) => {
-        const data = event.data as { type?: string; accessKey?: string }
-        if (data?.type !== 'ccx-desktop-auth' || !data.accessKey) return
-
-        authStore.setAuthKeyInput(data.accessKey)
-        await submitAuth({ countFailures: false, ignoreLockout: true })
-        // 认证成功后移除监听器；失败时保留以便桌面端重试
-        if (authStore.apiKey) {
-          window.removeEventListener('message', handleDesktopAuth)
-        }
-      }
-
-      window.addEventListener('message', handleDesktopAuth)
-      return
-    }
-
-    // 桌面端嵌入但 ccx_desktop 参数缺失时，也注册 postMessage 监听器作为后备
-    if (window.self !== window.top) {
-      const handleDesktopAuthFallback = async (event: MessageEvent) => {
-        const data = event.data as { type?: string; accessKey?: string }
-        if (data?.type !== 'ccx-desktop-auth' || !data.accessKey) return
-
-        window.removeEventListener('message', handleDesktopAuthFallback)
-        authStore.setAuthKeyInput(data.accessKey)
-        await submitAuth({ countFailures: false, ignoreLockout: true })
-      }
-      window.addEventListener('message', handleDesktopAuthFallback)
-    }
+    checkVersion()
+    window.addEventListener('ccx-check-version', handleVersionCheck)
 
     // 检查 AuthStore 中是否有保存的密钥
     if (authStore.apiKey) {
@@ -816,6 +766,7 @@ export function useAppController() {
 
   // 在组件卸载时清除定时器和事件监听器
   onUnmounted(() => {
+    window.removeEventListener('ccx-check-version', handleVersionCheck)
     channelStore.stopAutoRefresh()
     mediaQuery?.removeEventListener('change', handlePref)
   })
@@ -835,7 +786,6 @@ export function useAppController() {
     currentLanguageShortLabel,
     translatedApiTabOptions,
     editingChannelType,
-    isDesktopWebUI,
     activeTrafficTitle,
     systemStatusText,
     systemStatusDesc,

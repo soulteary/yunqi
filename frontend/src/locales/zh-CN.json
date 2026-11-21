@@ -1,4 +1,5 @@
 {
+  "app.tabs.console": "服务与接入",
   "app.auth.verifyingTitle": "正在验证访问权限",
   "app.auth.verifyingBody": "使用保存的访问密钥进行身份验证...",
   "app.auth.inputLabel": "管理访问密钥",
