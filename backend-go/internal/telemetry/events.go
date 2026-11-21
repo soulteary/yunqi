@@ -29,10 +29,12 @@ func Event(ctx context.Context, event, outcome string) {
 	default:
 		return
 	}
-	allowed := map[string]bool{"http_error": true, "transport_error": true, "invalid_response": true, "concurrency": true, "channel": true, "scope": true, "completed": true, "incomplete": true, "error": true, "stalled": true, "repetition": true, "canceled": true, "unknown": true}
+	allowed := map[string]bool{"http_error": true, "transport_error": true, "invalid_response": true, "concurrency": true, "channel": true, "scope": true, "completed": true, "failed": true, "incomplete": true, "error": true, "stalled": true, "repetition": true, "canceled": true, "unknown": true}
 	if !allowed[outcome] {
 		outcome = "other"
 	}
+	DiagnosticsFromContext(ctx).Event(event, outcome, "")
+	traceEvent(ctx, event, outcome)
 	r := binding.registry
 	r.mu.Lock()
 	if r.events == nil {

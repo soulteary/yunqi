@@ -142,6 +142,7 @@ GET /api/presets/status
 GET /api/quota/channels
 GET /api/racing/config
 GET /api/reports/cost
+GET /api/reports/request-timeline/:id
 GET /api/reports/requests
 GET /api/responses/channels
 GET /api/responses/channels/:id/auto-status

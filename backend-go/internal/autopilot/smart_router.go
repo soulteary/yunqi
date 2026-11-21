@@ -528,6 +528,7 @@ func (r *SmartRouter) recordDryRunTrace(plan *RoutingPlan, candidatesBefore, can
 
 	profile := plan.RequestProfile
 	r.traceStore.Record(&RoutingDecisionTrace{
+		OTLPTraceID:        profile.OTLPTraceID,
 		SchemaVersion:      2,
 		Source:             "dry_run",
 		RequestKind:        profile.ChannelKind,
@@ -732,6 +733,7 @@ func (r *SmartRouter) executeFilter(
 
 	// 构建 RoutingDecisionTrace
 	trace := &RoutingDecisionTrace{
+		OTLPTraceID:         profile.OTLPTraceID,
 		SchemaVersion:       3,
 		RequestKind:         profile.ChannelKind,
 		TaskClass:           profile.TaskClass,
