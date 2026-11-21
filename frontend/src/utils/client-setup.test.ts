@@ -1,6 +1,32 @@
 import { describe, expect, it } from 'vitest'
+import { spawnSync } from 'node:child_process'
 import { clientConfig, gatewayRoot } from './client-setup'
 describe('browser client setup', () => {
+  it('exports parseable Codex TOML with a Responses provider using the client API key environment', () => {
+    const config = clientConfig('codex', 'https://gateway.example/team/v1/', 'model"with\\escapes')
+    expect(config.filename).toBe('codex-config.toml')
+    // Use Bun's TOML parser, available with the frontend's documented Bun toolchain.
+    // Parsing the exact exported text catches literal \\n separators that substring checks miss.
+    const parsed = spawnSync(
+      'bun',
+      ['--eval', 'process.stdout.write(JSON.stringify(Bun.TOML.parse(await Bun.stdin.text())))'],
+      { input: config.content, encoding: 'utf8' }
+    )
+    expect(parsed.error).toBeUndefined()
+    expect(parsed.status, parsed.stderr).toBe(0)
+    expect(JSON.parse(parsed.stdout)).toEqual({
+      model: 'model"with\\escapes',
+      model_provider: 'ccx',
+      model_providers: {
+        ccx: {
+          name: 'CCX',
+          base_url: 'https://gateway.example/team/v1',
+          wire_api: 'responses',
+          env_key: 'CCX_PROXY_KEY'
+        }
+      }
+    })
+  })
   it('preserves a route prefix and normalizes the API suffix', () => {
     expect(gatewayRoot('https://gateway.example/team/v1/')).toBe('https://gateway.example/team')
     expect(clientConfig('claude', 'https://gateway.example/team', 'sonnet').content).toContain(
