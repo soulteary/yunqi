@@ -118,6 +118,18 @@ Client
 
 失败场景下会执行故障转移，并结合熔断状态和定时恢复逻辑控制重试范围。
 
+### Scheduling precedence
+
+After candidate eligibility checks, the scheduler uses the first matching mechanism:
+
+1. Manual override: a per-user, per-protocol channel sequence with a TTL; an unusable sequence is cleared before falling back.
+2. Promotion: a temporary global preference that may bypass health checks for its first attempt.
+3. Trace affinity: per-user/protocol stickiness that yields to a healthy channel with higher priority.
+4. Channel priority: choose a healthy, active channel that is not circuit-broken, ordered by persisted priority.
+5. Last-resort fallback: after healthy candidates fail, try a candidate with a lower failure rate.
+
+Reordering persists priority; promotion is temporary and global; an override is user-scoped and expires. The authoritative implementation is in `internal/scheduler/`. See the [current Autopilot specification](https://github.com/soulteary/yunqi/blob/main/docs/specs/autopilot.md) for candidate eligibility and endpoint selection.
+
 ### 上下文路由
 
 上下文路由用于解决同一渠道组内不同实际模型上下文窗口不一致的问题。Yunqi 在调度前估算当前请求需要的上下文与输出预算，并结合下游 agent 请求模型的内置 profile 得到最小上下文窗口要求，再按渠道 `ModelMapping` 后的实际模型能力做资格过滤。该步骤只过滤不可用渠道，不改变用户在驾驶舱中设置的渠道顺序。

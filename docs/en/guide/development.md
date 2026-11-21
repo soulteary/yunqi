@@ -106,7 +106,7 @@ bun run type-check
 bun run lint
 ```
 
-If you need to verify pnpm compatibility, you can run `pnpm install`. For daily development, building, and dependency changes, always use Bun.
+Use Bun for frontend installs and upgrades and commit `frontend/bun.lock`; a pnpm compatibility lock is no longer maintained. The documentation site is a separate npm project: install with `cd docs && npm ci` and commit its own `package-lock.json`. Do not generate a root npm lockfile.
 
 ## Windows Environment Tips
 
@@ -129,33 +129,41 @@ Recommended installations:
 - Make
 - Git
 
-## File Change and Reload Rules
+## File changes and reloads
 
-### Automatic Hot-Reload
+- `make dev` uses backend `.air.toml`, watching Go, templates, HTML, YAML, TOML and `.env`. Saves trigger a rebuild after a one-second delay and may restart the development process.
+- `stop_on_error=true` means a failed rebuild does not guarantee that the old process remains running. Hot reload is not a zero-downtime deployment mechanism.
+- Air excludes backend temporary files, embedded frontend files and build output. The frontend development server handles Vue and style updates separately.
+- Channel configuration supports hot reload. Environment changes for a regular service binary require an operator-managed restart; `.env` is watched in Air mode.
+- Automated collaborators must not kill or restart existing services. Use an isolated checkout for verification when source edits could trigger watchers.
 
-- Go source code: Automatic reload under `make dev` / `cd "backend-go" && make dev`
-- Config file: `backend-go/.config/config.json` changes take effect automatically
+If reloads stop working, check the Air executable, working directory, watch/exclude settings and build logs. Identify the owner of a conflicting port and let the operator decide how to handle it; do not force-kill processes or recursively change repository permissions.
 
-### Requires Restart
+## Linting and formatting
 
-- Environment file: `backend-go/.env`
-- Dependency or build config changes
+`frontend/eslint.config.js` uses Flat Config and Vue/TypeScript recommended rules, with formatting conflicts disabled by `eslint-config-prettier`. ESLint does not replace `vue-tsc` type checking.
 
-## Common Verification Commands
+```bash
+(cd frontend && bun run lint)
+(cd frontend && bun run lint:fix)    # Intentionally applies source fixes
+(cd frontend && bun run format)      # Intentionally formats source files
+(cd frontend && bun run type-check)  # Also included in the production build
+```
 
-Before committing changes, at minimum run:
+The configuration file defines the actual rules. Avoid unrelated repository-wide automatic fixes or formatting during troubleshooting.
+
+## Common verification commands
+
+Run from the repository root. Subshells keep later commands in the correct directory:
 
 ```bash
 make build
-cd "backend-go" && make test
-cd "frontend" && bun run build
+(cd backend-go && make test && go vet ./...)
+(cd frontend && bun run lint && bun run test)
+(cd docs && npm ci && npm run build)
 ```
 
-If you only changed backend code, also run:
-
-```bash
-cd "backend-go" && make lint
-```
+`make build` already checks frontend types, builds the production frontend and embeds it into the Go service. Select checks appropriate to the changed modules; do not repeat unchanged builds without a new failure or concern. CI also verifies generated channel presets against their sources.
 
 ## Local Access Points
 

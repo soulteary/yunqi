@@ -15,8 +15,8 @@
 - `frontend/`：Vue 3 + Vite + Vuetify 管理界面。
 - `dist/`：发布构建产物，禁止手动编辑。
 - `.config/`：运行时配置与持久化目录（如 `config.json`、`metrics.db`、`backups/`）。
-- `refs/`：外部参考项目存档，仅供对照，默认只读。
-- 文档入口：`README.md`、`README.zh-CN.md`、`backend-go/README.md`、`docs/guide/architecture.md`、`docs/guide/development.md`、`docs/guide/environment.md`、`docs/guide/release.md`。
+- `archive/`：历史设计、交接和已完成任务，仅作背景；现状以代码和 `docs/specs/` 为准。
+- 文档入口：根 README 保留快速入口，`backend-go/README.md` 保留模块索引；架构、开发、API、环境与发布分别集中在 `docs/guide/architecture.md`、`development.md`、`api.md`、`environment.md`、`release.md`。英文指南位于 `docs/en/guide/`。
 
 ## 构建 / 测试 / 开发命令
 - 全栈开发（推荐）：根目录 `make dev`（前端 `bun run dev` + 后端 `air` 热重载）。
@@ -51,8 +51,9 @@
 
 ## 测试规范
 - 新增/修改后端逻辑尽量补 `_test.go`，优先表驱动 + `httptest`。
-- 前端当前以构建验证为主；如增加复杂逻辑，再补轻量单测。
-- 文档或接口说明调整后，至少验证：`make build`、`cd backend-go && make test`、`cd frontend && bun run build`。
+- 前端修改运行 `bun run lint`、`bun run test` 和 `bun run build`（包含类型检查）；复杂逻辑补相应单测。
+- 文档或接口说明调整后验证根 `make build`、后端 `make test`、前端 lint/test 和文档站 `npm run build`。根构建已包含前端构建，不必无变化重复构建。
+- 前端只使用 `frontend/bun.lock`；文档站单独使用 `docs/package-lock.json`。不维护根 npm 锁文件或前端 pnpm 兼容锁。
 
 ## 安全与配置提示
 - 部署前必须设置强 `PROXY_ACCESS_KEY`；如需分离管理权限，再配置 `ADMIN_ACCESS_KEY`。
@@ -62,4 +63,4 @@
 
 ## Web-only 产品边界
 
-Wails 桌面外壳已移除。唯一前端为 `frontend/`；构建与发布仅面向服务二进制和容器。客户端文件由用户手动合并配置，进程生命周期由部署工具管理。原桌面目录只用于说明旧版数据迁移，不得作为新构建依赖。
+Wails 桌面外壳已移除。唯一前端为 `frontend/`；构建与发布仅面向服务二进制和容器。客户端文件由用户手动合并配置，进程生命周期由部署工具管理。旧版数据迁移说明保留在 `docs/guide/desktop/`，仓库不保留旧桌面源码或构建依赖。

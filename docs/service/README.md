@@ -78,7 +78,7 @@ sudo systemctl start yunqi
 
 ## macOS launchd
 
-适合 macOS 本机后台运行。
+适合 macOS 本机后台运行。原 `yunqi-desktop` Homebrew Cask 已退出维护，不再自动更新桌面 Tap。发布资源可用后，从 GitHub Releases 获取对应架构的服务二进制并校验 SHA256，按组织的软件分发策略安装；当前发布状态见[发布说明](../guide/release.md)。旧版数据迁移见[迁移指南](../guide/desktop/index.md)。
 
 ### 1. 准备文件
 

@@ -51,14 +51,4 @@ See `docs/service/com.yunqi.gateway.plist` for reference.
 
 ## Environment Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PORT` | 3000 | Server port |
-| `ENV` | production | Runtime environment |
-| `PROXY_ACCESS_KEY` | - | Proxy access key (required) |
-| `EXTRA_PROXY_ACCESS_KEYS` | - | Extra proxy access keys (optional, comma-separated; proxy APIs only) |
-| `ADMIN_ACCESS_KEY` | - | Admin console key (optional; required and independent when extra proxy keys are set) |
-| `QUIET_POLLING_LOGS` | true | Suppress polling logs |
-| `MAX_REQUEST_BODY_SIZE_MB` | 50 | Max request body size |
-
-See `ENVIRONMENT.md` in the project root for the full list.
+Configuration is documented in the [environment guide](environment.md). Service templates and Linux/macOS/Windows procedures are in the [service guide](../../service/README.md) (Chinese).

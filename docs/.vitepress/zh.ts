@@ -39,6 +39,7 @@ export const zhConfig: LocaleSpecificConfig<DefaultTheme.Config> = {
           text: '深入',
           items: [
             { text: '架构说明', link: '/guide/architecture' },
+            { text: 'API 与鉴权', link: '/guide/api' },
             { text: 'Benchmark 基准图表', link: '/guide/benchmark' },
             { text: '开发指南', link: '/guide/development' },
             { text: '发布流程', link: '/guide/release' },

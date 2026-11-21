@@ -22,17 +22,7 @@
 
 ## 发布流程
 
-本节为项目维护者提供了版本发布流程概述。贡献者通常不需要直接执行这些步骤。
-
-1.  **准备工作**:
-    *   确保本地 `main` 分支是最新的。
-    *   确认所有计划内的功能和修复已合并。
-    *   运行测试和构建验证：`cd backend-go && make test && cd .. && make build`
-2.  **更新日志**: 更新 `CHANGELOG.md`，新增版本标题，并分类记录变更内容。
-3.  **更新版本号**: 更新根目录 `VERSION` 文件。
-4.  **提交**: 提交 `CHANGELOG.md` 和 `VERSION` 的修改，提交信息格式为 `chore(release): prepare for vX.Y.Z`。
-5.  **创建标签**: 为此次提交创建附注标签 `git tag -a vX.Y.Z -m "Release vX.Y.Z"` 并推送到远程。
-6.  **GitHub Release**: 在 GitHub 上创建 Release，将 `CHANGELOG.md` 中的对应版本内容复制到发布说明中。
+版本与变更只维护根 `VERSION` 和 `CHANGELOG.md`。自动发布当前暂停，恢复条件与维护者操作统一见[发布状态](release.md)，不在本页重复标签或 Release 步骤。提交前检查见[开发指南](development.md#常用验证命令)。
 
 ## 编码规范
 
@@ -68,7 +58,7 @@
 
 **Vue 前端**:
 -   **文件名**: `kebab-case` (例: `api-service.ts`)
--   **Vue 组件名**: `PascalCase` (例: `ChannelCard.vue`)
+-   **Vue 组件名**: `PascalCase` (例: `ChannelStatusBadge.vue`)
 -   **类型/接口名**: `PascalCase`
 -   **函数名**: `camelCase` (例: `getNextApiKey`)
 -   **常量名**: `SCREAMING_SNAKE_CASE` (例: `DEFAULT_CONFIG`)
