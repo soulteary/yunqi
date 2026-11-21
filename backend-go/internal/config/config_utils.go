@@ -1,0 +1,1229 @@
+package config
+
+import (
+	"errors"
+	"fmt"
+	"regexp"
+	"strings"
+	"time"
+
+	"github.com/BenedictKing/ccx/internal/utils"
+)
+
+// ============== 工具函数 ==============
+
+const defaultCopilotBaseURL = "https://api.githubcopilot.com"
+
+// deduplicateStrings 去重字符串切片，保持原始顺序
+func deduplicateStrings(items []string) []string {
+	if len(items) <= 1 {
+		return items
+	}
+	seen := make(map[string]struct{}, len(items))
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		if _, exists := seen[item]; !exists {
+			seen[item] = struct{}{}
+			result = append(result, item)
+		}
+	}
+	return result
+}
+
+func normalizeUpstreamServiceType(serviceType, fallback string) string {
+	trimmed := strings.TrimSpace(serviceType)
+	if trimmed != "" {
+		return trimmed
+	}
+	return fallback
+}
+
+func normalizeAuthHeader(authHeader string) string {
+	return strings.ToLower(strings.TrimSpace(authHeader))
+}
+
+func validateAuthHeader(authHeader string) error {
+	switch normalizeAuthHeader(authHeader) {
+	case "", "auto", "bearer", "x-api-key":
+		return nil
+	default:
+		return fmt.Errorf("authHeader 仅支持 auto、bearer 或 x-api-key，当前为 %s", authHeader)
+	}
+}
+
+func applyAuthHeader(authHeader string) (string, error) {
+	normalized := normalizeAuthHeader(authHeader)
+	if err := validateAuthHeader(normalized); err != nil {
+		return "", err
+	}
+	if normalized == "auto" {
+		return "", nil
+	}
+	return normalized, nil
+}
+
+// deduplicateBaseURLs 去重 BaseURLs，忽略尾部 / 和默认版本前缀差异，保留 # 语义。
+func deduplicateBaseURLs(urls []string, serviceType string) []string {
+	if len(urls) == 0 {
+		return urls
+	}
+	seen := make(map[string]struct{}, len(urls))
+	result := make([]string, 0, len(urls))
+	for _, rawURL := range urls {
+		canonical := utils.CanonicalBaseURL(rawURL, serviceType)
+		if canonical == "" {
+			continue
+		}
+		if _, exists := seen[canonical]; !exists {
+			seen[canonical] = struct{}{}
+			result = append(result, canonical)
+		}
+	}
+	return result
+}
+
+func applyDefaultBaseURL(upstream *UpstreamConfig) {
+	if upstream == nil || upstream.ServiceType != "copilot" || strings.TrimSpace(upstream.BaseURL) != "" || len(upstream.BaseURLs) > 0 {
+		return
+	}
+	upstream.BaseURL = defaultCopilotBaseURL
+}
+
+// shouldAutoDeriveChannelName 判断渠道名称是否应由首个 baseURL 自动派生。
+// 渠道名称统一由首地址生成，不再为托管渠道、模板渠道或历史自定义名称保留例外；
+// 用户自定义语义统一放入 Remark。
+func shouldAutoDeriveChannelName(upstream *UpstreamConfig) bool {
+	return upstream != nil
+}
+
+// channelPrimaryBaseURL 返回渠道当前用于命名的首个 baseURL（优先 BaseURLs[0]，其次 BaseURL）。
+func channelPrimaryBaseURL(upstream *UpstreamConfig) string {
+	if upstream == nil {
+		return ""
+	}
+	if len(upstream.BaseURLs) > 0 {
+		return upstream.BaseURLs[0]
+	}
+	return upstream.BaseURL
+}
+
+// applyAutoDerivedChannelName 在首个 baseURL 发生变化时，将普通或 generic 托管渠道名称重置为派生值。
+// 新建渠道（oldFirst 为空）或用户调整 baseURL 顺序/首地址时触发；
+// 仅变更 AutoManaged 等状态但不改变首地址时保留原名称。
+func applyAutoDerivedChannelName(upstream *UpstreamConfig, oldFirst string) {
+	if !shouldAutoDeriveChannelName(upstream) {
+		return
+	}
+	newFirst := channelPrimaryBaseURL(upstream)
+	if strings.TrimSpace(newFirst) == "" {
+		return
+	}
+	// 仅在首个 baseURL 真正变化时改名，避免 new-api 合并等场景把已有手工名冲掉
+	if strings.TrimSpace(oldFirst) != "" && utils.CanonicalBaseURL(oldFirst, upstream.ServiceType) == utils.CanonicalBaseURL(newFirst, upstream.ServiceType) {
+		return
+	}
+	upstream.Name = utils.DeriveChannelNameFromBaseURL(newFirst)
+}
+
+// uniqueAutoDerivedChannelName 在目标渠道集合内为派生名消解冲突。
+// 同一站点（首 baseURL canonical 相同）的多协议/多渠道允许复用同一派生名（同站合一），
+// 便于用户识别；仅当同名渠道指向不同 baseURL 时才追加 -2/-3... 序号。
+// exclude 为当前渠道自身指针，避免与已存在的自身名称比较。
+func uniqueAutoDerivedChannelName(channels []UpstreamConfig, exclude *UpstreamConfig, base string, selfFirstBaseURL, serviceType string) string {
+	if base == "" {
+		return base
+	}
+	selfCanonical := utils.CanonicalBaseURL(selfFirstBaseURL, serviceType)
+	sameSite := func(ch *UpstreamConfig) bool {
+		if selfCanonical == "" {
+			return false
+		}
+		return utils.CanonicalBaseURL(channelPrimaryBaseURL(ch), ch.ServiceType) == selfCanonical
+	}
+	name := base
+	for i := 2; ; i++ {
+		conflict := false
+		for j := range channels {
+			if exclude != nil && &channels[j] == exclude {
+				continue
+			}
+			if channels[j].Name == name && !sameSite(&channels[j]) {
+				conflict = true
+				break
+			}
+		}
+		if !conflict {
+			return name
+		}
+		name = fmt.Sprintf("%s-%d", base, i)
+	}
+}
+
+// migrateAllChannelNamesConfig 把所有物理渠道名按首个 baseURL 重派生。
+// 旧 Name 若与派生值不同且 Remark 为空，则迁移到 Remark（截断到 10 字符）。
+// 幂等；返回 true 表示发生了写回。
+// migrateAllChannelNamesConfig 把所有物理渠道名按首个 baseURL 重派生。
+// 仅对采用新数据模型的存量配置执行一次：ChannelsV3 或 LogicalChannels 任一存在
+// 即认为是新数据形态，需要对历史自定义名做统一改写。旧格式测试/配置不会被打扰。
+// 旧 Name 若与派生值不同且 Remark 为空，则迁移到 Remark（截断到 10 字符）。
+// 幂等；返回 true 表示发生了写回。
+func migrateAllChannelNamesConfig(cfg *Config) bool {
+	if cfg == nil {
+		return false
+	}
+	if len(cfg.ChannelsV3) == 0 && len(cfg.LogicalChannels) == 0 {
+		return false
+	}
+	changed := false
+	changed = migrateAutoDeriveChannelNamesInSlice(&cfg.Upstream) || changed
+	changed = migrateAutoDeriveChannelNamesInSlice(&cfg.ChatUpstream) || changed
+	changed = migrateAutoDeriveChannelNamesInSlice(&cfg.ResponsesUpstream) || changed
+	changed = migrateAutoDeriveChannelNamesInSlice(&cfg.GeminiUpstream) || changed
+	changed = migrateAutoDeriveChannelNamesInSlice(&cfg.ImagesUpstream) || changed
+	changed = migrateAutoDeriveChannelNamesInSlice(&cfg.VectorsUpstream) || changed
+
+	if changed {
+		byUID := make(map[string]*UpstreamConfig)
+		visit := func(channels []UpstreamConfig) {
+			for i := range channels {
+				uid := strings.TrimSpace(channels[i].LogicalChannelUID)
+				if uid != "" {
+					byUID[uid] = &channels[i]
+				}
+			}
+		}
+		visit(cfg.Upstream)
+		visit(cfg.ChatUpstream)
+		visit(cfg.ResponsesUpstream)
+		visit(cfg.GeminiUpstream)
+		visit(cfg.ImagesUpstream)
+		visit(cfg.VectorsUpstream)
+		logicalNameByUID := make(map[string]string, len(cfg.LogicalChannels))
+		for i := range cfg.LogicalChannels {
+			logical := &cfg.LogicalChannels[i]
+			if up := byUID[logical.LogicalChannelUID]; up != nil {
+				logical.Name = up.Name
+				// 注意：不要把 up.Remark 回填到 logical.Remark。Remark 已是纯用户字段，
+				// “历史名档案”语义废弃；回填会把用户删除的备注从物理渠道残留值
+				// （旧迁移写入的截断旧名）反复复活。
+			}
+			logicalNameByUID[logical.LogicalChannelUID] = logical.Name
+		}
+		// LogicalName 会被 BuildAuthoritativeChannels 优先用作 ChannelsV3.Name；
+		// 必须与刚迁移的物理 Name 同步，否则保存时会把旧逻辑名重新写回权威镜像。
+		syncLogicalNames := func(channels []UpstreamConfig) {
+			for i := range channels {
+				uid := strings.TrimSpace(channels[i].LogicalChannelUID)
+				if name := strings.TrimSpace(logicalNameByUID[uid]); uid != "" && name != "" {
+					channels[i].LogicalName = name
+				}
+			}
+		}
+		syncLogicalNames(cfg.Upstream)
+		syncLogicalNames(cfg.ChatUpstream)
+		syncLogicalNames(cfg.ResponsesUpstream)
+		syncLogicalNames(cfg.GeminiUpstream)
+		syncLogicalNames(cfg.ImagesUpstream)
+		syncLogicalNames(cfg.VectorsUpstream)
+	}
+	return changed
+}
+
+// migrateAutoDeriveChannelNamesInSlice 对单个物理数组执行名称重派生。
+// 迭代顺序即切片顺序，与 uniqueAutoDerivedChannelName 的去重行为协同，
+// 结果对确定输入是确定的。
+func migrateAutoDeriveChannelNamesInSlice(channels *[]UpstreamConfig) bool {
+	if channels == nil || len(*channels) == 0 {
+		return false
+	}
+	changed := false
+	for i := range *channels {
+		up := &(*channels)[i]
+		if !shouldAutoDeriveChannelName(up) {
+			continue
+		}
+		newFirst := channelPrimaryBaseURL(up)
+		if strings.TrimSpace(newFirst) == "" {
+			continue
+		}
+		desired := utils.DeriveChannelNameFromBaseURL(newFirst)
+		resolved := uniqueAutoDerivedChannelName(*channels, up, desired, newFirst, up.ServiceType)
+		if up.Name == resolved {
+			continue
+		}
+		// 只改名，不把旧名写进备注：旧名→备注的保留机制是 2026-08 一次性存量迁移用的
+		// （自定义名→自动派生名过渡期防止语义丢失），迁移完成后该机制只剩副作用——
+		// 用户删除备注后，任何名字漂移（逻辑层同步、地址池调整）再触发迁移都会把
+		// 旧名截断写回空备注，「删了保存再打开又出现」即此循环（09-42 agentrouter 复活根因）。
+		up.Name = resolved
+		changed = true
+	}
+	return changed
+}
+
+// ConfigError 配置错误
+type ConfigError struct {
+	Message string
+	Cause   error
+}
+
+func (e *ConfigError) Error() string {
+	return e.Message
+}
+
+func (e *ConfigError) Unwrap() error {
+	return e.Cause
+}
+
+var (
+	ErrUnsupportedServiceType     = errors.New("unsupported service type")
+	ErrDuplicateChannelName       = errors.New("duplicate channel name")
+	ErrInvalidEmbeddingCapability = errors.New("invalid embedding capability")
+)
+
+// NormalizeReasoningEffortForUpstream 将内部通用 effort 收敛到实际上游协议支持的枚举。
+//
+// CCX 内部使用 off 作为统一的关闭档位；OpenAI Responses / Chat 协议在线上请求中
+// 使用 none。这个转换必须发生在出站边界，避免上游接受 HTTP 请求却返回空响应。
+func NormalizeReasoningEffortForUpstream(upstream *UpstreamConfig, effort string) string {
+	effort = strings.TrimSpace(effort)
+	serviceType := ""
+	if upstream != nil {
+		serviceType = strings.ToLower(strings.TrimSpace(upstream.ServiceType))
+	}
+	if (serviceType == "responses" || serviceType == "copilot" || serviceType == "openai") &&
+		(effort == "off" || effort == "disabled") {
+		effort = "none"
+	}
+	if isMiMoResponsesUpstream(upstream) {
+		switch effort {
+		case "max", "xhigh":
+			return "high"
+		}
+	}
+	return effort
+}
+
+// NormalizeReasoningObjectForUpstream 修正透传请求中上游不支持的 reasoning.effort。
+func NormalizeReasoningObjectForUpstream(req map[string]interface{}, upstream *UpstreamConfig) {
+	if req == nil {
+		return
+	}
+	reasoning, ok := req["reasoning"].(map[string]interface{})
+	if !ok || reasoning == nil {
+		return
+	}
+	effort, _ := reasoning["effort"].(string)
+	if normalized := NormalizeReasoningEffortForUpstream(upstream, effort); normalized != effort {
+		reasoning["effort"] = normalized
+	}
+}
+
+// EffectiveReasoningParamStyle 返回上游实际接受的思考参数形态。
+// 显式配置用于兼容非标准端点；未配置时按物理 ServiceType 推导原生协议。
+func EffectiveReasoningParamStyle(upstream *UpstreamConfig) string {
+	if upstream == nil {
+		return ""
+	}
+	if style := strings.TrimSpace(upstream.ReasoningParamStyle); style != "" {
+		return style
+	}
+	switch strings.ToLower(strings.TrimSpace(upstream.ServiceType)) {
+	case "gemini":
+		return ReasoningParamStyleGemini
+	case "openai":
+		return "reasoning_effort"
+	case "responses", "copilot":
+		return "reasoning"
+	case "claude":
+		return "thinking"
+	default:
+		return ""
+	}
+}
+
+func isMiMoResponsesUpstream(upstream *UpstreamConfig) bool {
+	if upstream == nil || !strings.EqualFold(strings.TrimSpace(upstream.ServiceType), "responses") {
+		return false
+	}
+	if strings.Contains(strings.ToLower(upstream.BaseURL), "xiaomimimo.com") {
+		return true
+	}
+	for _, baseURL := range upstream.BaseURLs {
+		if strings.Contains(strings.ToLower(baseURL), "xiaomimimo.com") {
+			return true
+		}
+	}
+	return false
+}
+
+// ApplyReasoningParamStyle 将统一的 reasoning effort 写成上游要求的参数形态。
+func ApplyReasoningParamStyle(req map[string]interface{}, style string, effort string) {
+	applyReasoningParamStyle(req, style, effort, "")
+}
+
+// ApplyReasoningParamStyleForModel 将统一 effort 写入指定模型的原生参数形态。
+// Claude adaptive 模型使用 thinking.type=adaptive 与 output_config.effort，
+// 其余模型保持既有协议写法。
+func ApplyReasoningParamStyleForModel(req map[string]interface{}, style string, effort string, thinkingMode string) {
+	applyReasoningParamStyle(req, style, effort, thinkingMode)
+}
+
+func applyReasoningParamStyle(req map[string]interface{}, style string, effort string, thinkingMode string) {
+	if req == nil {
+		return
+	}
+
+	switch style {
+	case "thinking":
+		delete(req, "reasoning")
+		delete(req, "reasoning_effort")
+		if effort == "" {
+			return
+		}
+		if effort == "off" || effort == "none" || effort == "disabled" {
+			req["thinking"] = map[string]interface{}{"type": "disabled"}
+			delete(req, "output_config")
+			return
+		}
+		thinking, _ := req["thinking"].(map[string]interface{})
+		if thinking == nil {
+			thinking = make(map[string]interface{})
+		}
+		if strings.TrimSpace(thinkingMode) == "adaptive" {
+			thinking["type"] = "adaptive"
+			delete(thinking, "budget_tokens")
+			delete(thinking, "effort")
+			req["thinking"] = thinking
+			outputConfig, _ := req["output_config"].(map[string]interface{})
+			if outputConfig == nil {
+				outputConfig = make(map[string]interface{})
+			}
+			outputConfig["effort"] = effort
+			req["output_config"] = outputConfig
+			return
+		}
+		thinking["type"] = "enabled"
+		thinking["effort"] = effort
+		delete(thinking, "budget_tokens")
+		req["thinking"] = thinking
+	case "reasoning_effort":
+		delete(req, "reasoning")
+		delete(req, "thinking")
+		if effort != "" {
+			req["reasoning_effort"] = normalizeOpenAIReasoningEffort(effort)
+		}
+	case "reasoning":
+		delete(req, "thinking")
+		delete(req, "reasoning_effort")
+		if effort == "" {
+			return
+		}
+		reasoning, _ := req["reasoning"].(map[string]interface{})
+		if reasoning == nil {
+			reasoning = make(map[string]interface{})
+		}
+		reasoning["effort"] = normalizeOpenAIReasoningEffort(effort)
+		req["reasoning"] = reasoning
+	case ReasoningParamStyleGemini:
+		applyGeminiThinkingConfig(req, effort)
+	default:
+		// 未知或自定义形态由转换器负责；此处保持已生成的协议字段，
+		// 避免把 reasoning_effort/thinking 删除后注入上游不认识的字段。
+		return
+	}
+}
+
+func normalizeOpenAIReasoningEffort(effort string) string {
+	switch strings.ToLower(strings.TrimSpace(effort)) {
+	case "off", "disabled":
+		return "none"
+	default:
+		return strings.TrimSpace(effort)
+	}
+}
+
+// ReasoningParamStyleGemini 是 Gemini 原生协议的思考参数形态标识。
+// Gemini 不使用 thinking / reasoning_effort / reasoning 任一形态，
+// 而是写 generationConfig.thinkingConfig.thinkingLevel。
+const ReasoningParamStyleGemini = "gemini"
+
+// GeminiThinkingLevelForEffort 把统一 EffortLevel 字符串映射为 Gemini 的 thinkingLevel 取值。
+//
+// Gemini 官方 ThinkingLevel 枚举只有 MINIMAL / LOW / MEDIUM / HIGH（REST JSON 用小写），
+// 没有对应 max/xhigh 的档位，因此最高档统一收敛到 "high"。
+// 关闭思考不使用 thinkingLevel，而是走 thinkingBudget=0（仓库内既有的"已关闭"表示），
+// 因此本函数对 off/none 返回 ok=false，由调用方按关闭语义处理。
+// 无法识别的档位返回 ok=false，调用方必须保持请求体原样（fail-open，不注入伪字段）。
+func GeminiThinkingLevelForEffort(effort string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(effort)) {
+	case "minimal", "min":
+		return "minimal", true
+	case "low":
+		return "low", true
+	case "medium", "med", "default":
+		return "medium", true
+	case "high", "xhigh", "max", "ultra":
+		return "high", true
+	default:
+		return "", false
+	}
+}
+
+// isGeminiThinkingDisabledEffort 判断 effort 是否表示"关闭思考"。
+func isGeminiThinkingDisabledEffort(effort string) bool {
+	switch strings.ToLower(strings.TrimSpace(effort)) {
+	case "off", "none", "disabled":
+		return true
+	default:
+		return false
+	}
+}
+
+// applyGeminiThinkingConfig 把 effort 写入 generationConfig.thinkingConfig。
+//
+// 约束：
+//   - thinkingLevel 与 thinkingBudget 互斥，写一个必须清掉另一个（上游会因两者同时出现报错）。
+//   - off/none 用 thinkingBudget=0 表示关闭，与 extractGeminiEffortExplicit 的读路径一致。
+//   - effort 为空或无法映射时整体不落任何字段，请求体保持原样。
+func applyGeminiThinkingConfig(req map[string]interface{}, effort string) {
+	if strings.TrimSpace(effort) == "" {
+		return
+	}
+
+	disabled := isGeminiThinkingDisabledEffort(effort)
+	level, ok := GeminiThinkingLevelForEffort(effort)
+	if !disabled && !ok {
+		// 无法映射到 Gemini 档位：不注入伪字段，交由上游沿用自身默认。
+		return
+	}
+
+	generationConfig, _ := req["generationConfig"].(map[string]interface{})
+	if generationConfig == nil {
+		generationConfig = make(map[string]interface{})
+	}
+	thinkingConfig, _ := generationConfig["thinkingConfig"].(map[string]interface{})
+	if thinkingConfig == nil {
+		thinkingConfig = make(map[string]interface{})
+	}
+
+	if disabled {
+		thinkingConfig["thinkingBudget"] = 0
+		delete(thinkingConfig, "thinkingLevel")
+	} else {
+		thinkingConfig["thinkingLevel"] = level
+		delete(thinkingConfig, "thinkingBudget")
+	}
+
+	generationConfig["thinkingConfig"] = thinkingConfig
+	req["generationConfig"] = generationConfig
+	// 清理裸 thinkingConfig 兼容形态，避免同一请求出现两处冲突配置。
+	delete(req, "thinkingConfig")
+}
+
+func isValidReasoningEffort(reasoning string) bool {
+	switch reasoning {
+	case "", "off", "none", "minimal", "low", "medium", "high", "xhigh", "max":
+		return true
+	default:
+		return false
+	}
+}
+
+// ============== 渠道状态与优先级辅助函数 ==============
+
+// GetChannelStatus 获取渠道状态（带默认值处理）
+func GetChannelStatus(upstream *UpstreamConfig) string {
+	if upstream.Status == "" {
+		return "active"
+	}
+	return upstream.Status
+}
+
+// GetChannelAdminState 获取渠道管理员配置状态。
+func GetChannelAdminState(upstream *UpstreamConfig) string {
+	return GetChannelStatus(upstream)
+}
+
+// GetChannelRuntimeState 获取渠道运行时状态视图（不依赖 metrics，仅反映配置侧可观察状态）。
+func GetChannelRuntimeState(upstream *UpstreamConfig) string {
+	if upstream == nil {
+		return "unknown"
+	}
+	if len(upstream.DisabledAPIKeys) > 0 {
+		return "disabled_keys_present"
+	}
+	if len(upstream.APIKeys) == 0 {
+		return "no_active_keys"
+	}
+	return "ready"
+}
+
+// GetChannelEffectiveState 获取渠道当前有效状态视图。
+func GetChannelEffectiveState(upstream *UpstreamConfig) string {
+	if upstream == nil {
+		return "unknown"
+	}
+	adminState := GetChannelAdminState(upstream)
+	if adminState != "active" {
+		return adminState
+	}
+	if len(upstream.APIKeys) == 0 {
+		return "degraded"
+	}
+	return "active"
+}
+
+// applyChannelStatusTransition 统一维护渠道状态、暂停来源与促销期语义。
+// suspensionSource 仅在目标状态为 suspended 时生效。
+func applyChannelStatusTransition(upstream *UpstreamConfig, status, suspensionSource string) (promotionCleared bool) {
+	if upstream == nil {
+		return false
+	}
+	upstream.Status = status
+	if status == "suspended" {
+		upstream.SuspensionSource = suspensionSource
+		if upstream.PromotionUntil != nil {
+			upstream.PromotionUntil = nil
+			return true
+		}
+		return false
+	}
+	upstream.SuspensionSource = ""
+	return false
+}
+
+// applyAdministrativeChannelStatus 将管理接口的 suspended 明确记为人工暂停。
+func applyAdministrativeChannelStatus(upstream *UpstreamConfig, status string) (promotionCleared bool) {
+	source := ""
+	if status == "suspended" {
+		source = SuspensionSourceManual
+	}
+	return applyChannelStatusTransition(upstream, status, source)
+}
+
+// hasUsableChannelKeys 判断渠道是否至少有一个非空 Key 可用于调度。
+func hasUsableChannelKeys(upstream *UpstreamConfig) bool {
+	if upstream == nil {
+		return false
+	}
+	for _, key := range upstream.APIKeys {
+		if strings.TrimSpace(key) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// resumeAutoNoKeysChannel 只恢复由缺少 Key 自动暂停的渠道。
+func resumeAutoNoKeysChannel(upstream *UpstreamConfig) bool {
+	if upstream == nil || upstream.Status != "suspended" || upstream.SuspensionSource != SuspensionSourceAutoNoKeys || !hasUsableChannelKeys(upstream) {
+		return false
+	}
+	applyChannelStatusTransition(upstream, "active", "")
+	return true
+}
+
+func applySingleKeyReplacementTransition(upstream *UpstreamConfig, newKeys []string) (shouldResetMetrics bool) {
+	if upstream == nil {
+		return false
+	}
+	newKeys = deduplicateStrings(newKeys)
+	singleKeyReplaced := len(upstream.APIKeys) == 1 && len(newKeys) == 1 && upstream.APIKeys[0] != newKeys[0]
+	autoRecovered := upstream.Status == "suspended" && upstream.SuspensionSource == SuspensionSourceAutoNoKeys && len(newKeys) > 0
+	if autoRecovered {
+		applyChannelStatusTransition(upstream, "active", "")
+	}
+	return singleKeyReplaced || autoRecovered
+}
+
+// GetChannelPriority 获取渠道优先级（带默认值处理）
+func GetChannelPriority(upstream *UpstreamConfig, index int) int {
+	if upstream.Priority == 0 {
+		return index
+	}
+	return upstream.Priority
+}
+
+// IsChannelInPromotion 检查渠道是否处于促销期
+func IsChannelInPromotion(upstream *UpstreamConfig) bool {
+	if upstream.PromotionUntil == nil {
+		return false
+	}
+	return time.Now().Before(*upstream.PromotionUntil)
+}
+
+// ============== UpstreamConfig 方法 ==============
+
+// Clone 深拷贝 UpstreamConfig（用于避免并发修改问题）
+// 在多 BaseURL failover 场景下，需要临时修改 BaseURL 字段，
+// 使用深拷贝可避免并发请求之间的竞态条件
+func (u *UpstreamConfig) Clone() *UpstreamConfig {
+	cloned := *u // 浅拷贝
+
+	// 深拷贝切片字段
+	if u.BaseURLs != nil {
+		cloned.BaseURLs = make([]string, len(u.BaseURLs))
+		copy(cloned.BaseURLs, u.BaseURLs)
+	}
+	if u.APIKeys != nil {
+		cloned.APIKeys = make([]string, len(u.APIKeys))
+		copy(cloned.APIKeys, u.APIKeys)
+	}
+	if u.APIKeyConfigs != nil {
+		cloned.APIKeyConfigs = make([]APIKeyConfig, len(u.APIKeyConfigs))
+		for i, cfg := range u.APIKeyConfigs {
+			cloned.APIKeyConfigs[i] = cloneAPIKeyConfig(cfg)
+		}
+	}
+	if u.HistoricalAPIKeys != nil {
+		cloned.HistoricalAPIKeys = make([]string, len(u.HistoricalAPIKeys))
+		copy(cloned.HistoricalAPIKeys, u.HistoricalAPIKeys)
+	}
+	if u.ModelCapabilities != nil {
+		cloned.ModelCapabilities = make(map[string]UpstreamModelCapability, len(u.ModelCapabilities))
+		for k, v := range u.ModelCapabilities {
+			cloned.ModelCapabilities[k] = cloneUpstreamModelCapability(v)
+		}
+	}
+	if u.EmbeddingCapabilities != nil {
+		cloned.EmbeddingCapabilities = make(map[string]EmbeddingCapability, len(u.EmbeddingCapabilities))
+		for k, v := range u.EmbeddingCapabilities {
+			cloned.EmbeddingCapabilities[k] = cloneEmbeddingCapability(v)
+		}
+	}
+	cloned.DefaultCapability = cloneUpstreamModelCapability(u.DefaultCapability)
+	if u.CustomHeaders != nil {
+		cloned.CustomHeaders = make(map[string]string, len(u.CustomHeaders))
+		for k, v := range u.CustomHeaders {
+			cloned.CustomHeaders[k] = v
+		}
+	}
+	if u.CompatSeeds != nil {
+		cloned.CompatSeeds = make(map[string]CompatSeedEntry, len(u.CompatSeeds))
+		for k, v := range u.CompatSeeds {
+			cloned.CompatSeeds[k] = v
+		}
+	}
+	// LearnedCompatTraits 是逐请求注入的运行时状态。虽然当前调用路径下克隆时它总为 nil
+	// （failover 先 Clone 再 SetLearnedCompatTrait，lazy init 会新建 map），但浅拷贝会让
+	// 任何"克隆一个已注入结论的 upstream"的调用方共享同一个 map，并发写入即数据竞争。
+	if u.LearnedCompatTraits != nil {
+		cloned.LearnedCompatTraits = make(map[string]bool, len(u.LearnedCompatTraits))
+		for k, v := range u.LearnedCompatTraits {
+			cloned.LearnedCompatTraits[k] = v
+		}
+	}
+	// LearnedRejectedBetaTokens 同理：slice 浅拷贝共享底层数组会被并发写入截断/追加污染。
+	if u.LearnedRejectedBetaTokens != nil {
+		cloned.LearnedRejectedBetaTokens = make([]string, len(u.LearnedRejectedBetaTokens))
+		copy(cloned.LearnedRejectedBetaTokens, u.LearnedRejectedBetaTokens)
+	}
+	if u.PromotionUntil != nil {
+		t := *u.PromotionUntil
+		cloned.PromotionUntil = &t
+	}
+	if u.SupportedModels != nil {
+		cloned.SupportedModels = make([]string, len(u.SupportedModels))
+		copy(cloned.SupportedModels, u.SupportedModels)
+	}
+	if u.DisabledAPIKeys != nil {
+		cloned.DisabledAPIKeys = make([]DisabledKeyInfo, len(u.DisabledAPIKeys))
+		for i, dk := range u.DisabledAPIKeys {
+			cloned.DisabledAPIKeys[i] = dk
+			if dk.Config != nil {
+				c := cloneAPIKeyConfig(*dk.Config)
+				cloned.DisabledAPIKeys[i].Config = &c
+			}
+		}
+	}
+	if u.DisabledKeyModels != nil {
+		cloned.DisabledKeyModels = make([]DisabledKeyModelInfo, len(u.DisabledKeyModels))
+		copy(cloned.DisabledKeyModels, u.DisabledKeyModels)
+	}
+	if u.DisabledGroupModels != nil {
+		cloned.DisabledGroupModels = make([]DisabledGroupModelInfo, len(u.DisabledGroupModels))
+		copy(cloned.DisabledGroupModels, u.DisabledGroupModels)
+	}
+	if u.AutoBlacklistBalance != nil {
+		v := *u.AutoBlacklistBalance
+		cloned.AutoBlacklistBalance = &v
+	}
+	if u.NormalizeMetadataUserID != nil {
+		v := *u.NormalizeMetadataUserID
+		cloned.NormalizeMetadataUserID = &v
+	}
+	if u.StripBillingHeader != nil {
+		v := *u.StripBillingHeader
+		cloned.StripBillingHeader = &v
+	}
+	if u.CodexToolCompat != nil {
+		v := *u.CodexToolCompat
+		cloned.CodexToolCompat = &v
+	}
+	if u.RateLimitAutoFromHeaders != nil {
+		v := *u.RateLimitAutoFromHeaders
+		cloned.RateLimitAutoFromHeaders = &v
+	}
+	if u.Racing != nil {
+		c := *u.Racing
+		cloned.Racing = &c
+	}
+	cloned.BalanceCheck = cloneChannelBalanceCheckConfig(u.BalanceCheck)
+
+	return &cloned
+}
+
+// ApplyProviderUpstreamDefaults 应用已知 Provider 原生协议所需的运行时默认值。
+func ApplyProviderUpstreamDefaults(providerID string, upstream *UpstreamConfig) {
+	if upstream == nil {
+		return
+	}
+	switch strings.ToLower(strings.TrimSpace(providerID)) {
+	case "glm":
+		if upstream.ServiceType == "openai" {
+			upstream.ReasoningParamStyle = "reasoning_effort"
+			// PassbackReasoningContent 不再是可写字段，其默认值由
+			// shouldPassbackReasoningContentByDefault 按 ProviderID/ServiceType 静态推导。
+		}
+	case "compshare":
+		// Compshare 的 Claude 兼容端点只接受 user/assistant 消息。最新 Claude Code
+		// 会在 messages 中插入 system 角色，因此必须先抽取到顶层 system 字段。
+		if strings.EqualFold(strings.TrimSpace(upstream.ServiceType), "claude") {
+			upstream.NormalizeSystemRoleToTopLevel = true
+		}
+	}
+}
+
+func stripAutoManagedExplicitOverrides(upstream *UpstreamConfig) bool {
+	if upstream == nil || !upstream.AutoManaged || upstream.AutoManagedKind == "generic" {
+		return false
+	}
+	changed := false
+	if upstream.ReasoningParamStyle != "" {
+		upstream.ReasoningParamStyle = ""
+		changed = true
+	}
+	if upstream.FastMode {
+		upstream.FastMode = false
+		changed = true
+	}
+	if len(upstream.CompatSeeds) > 0 {
+		upstream.CompatSeeds = nil
+		changed = true
+	}
+	if upstream.CodexToolCompat != nil {
+		upstream.CodexToolCompat = nil
+		changed = true
+	}
+	if upstream.StripCodexClientTools {
+		upstream.StripCodexClientTools = false
+		changed = true
+	}
+	if upstream.ConvertImageURLToB64JSON {
+		upstream.ConvertImageURLToB64JSON = false
+		changed = true
+	}
+	if upstream.NormalizeMetadataUserID != nil {
+		upstream.NormalizeMetadataUserID = nil
+		changed = true
+	}
+	if upstream.StripBillingHeader != nil {
+		upstream.StripBillingHeader = nil
+		changed = true
+	}
+	if upstream.NormalizeSystemRoleToTopLevel {
+		upstream.NormalizeSystemRoleToTopLevel = false
+		changed = true
+	}
+	if upstream.InjectDummyThoughtSignature {
+		upstream.InjectDummyThoughtSignature = false
+		changed = true
+	}
+	if upstream.StripThoughtSignature {
+		upstream.StripThoughtSignature = false
+		changed = true
+	}
+	if upstream.NoVision {
+		upstream.NoVision = false
+		changed = true
+	}
+	if upstream.HistoricalImageTurnLimit != 0 {
+		upstream.HistoricalImageTurnLimit = 0
+		changed = true
+	}
+	if upstream.CompactModel != "" {
+		upstream.CompactModel = ""
+		changed = true
+	}
+	return changed
+}
+
+// RuntimeUpstreamForAutoManagedProvider 返回自动托管 provider 渠道的运行时视图。
+//
+// 已知 provider 的自动托管渠道不再使用编辑渠道页里的手工兼容开关；
+// 模型选择和能力差异由 Autopilot 的 ModelResolver/EndpointAttemptPolicy 做 request-scoped 决策。
+// 因此这里屏蔽历史版本可能写入配置的旧兼容字段，再恢复 Provider 原生协议默认值。
+func RuntimeUpstreamForAutoManagedProvider(upstream *UpstreamConfig) *UpstreamConfig {
+	if upstream == nil || !upstream.AutoManaged {
+		return upstream
+	}
+
+	runtime := upstream.Clone()
+	stripAutoManagedExplicitOverrides(runtime)
+	if strings.TrimSpace(runtime.ProviderID) != "" {
+		ApplyProviderUpstreamDefaults(runtime.ProviderID, runtime)
+	}
+	return runtime
+}
+
+func applyModelCapabilityUpdates(upstream *UpstreamConfig, updates UpstreamUpdate) {
+	if upstream == nil {
+		return
+	}
+	if updates.ModelCapabilities != nil {
+		upstream.ModelCapabilities = updates.ModelCapabilities
+	}
+	if updates.EmbeddingCapabilities != nil {
+		upstream.EmbeddingCapabilities = updates.EmbeddingCapabilities
+	}
+	if updates.DefaultCapability != nil {
+		upstream.DefaultCapability = *updates.DefaultCapability
+	}
+	if updates.AllowUnknownContext != nil {
+		upstream.AllowUnknownContext = *updates.AllowUnknownContext
+	}
+}
+
+// applyAPIKeyConfigUpdate 根据 UpstreamUpdate 同步 upstream.APIKeyConfigs：
+//   - updates.APIKeyConfigs != nil：以新值为准，按当前 APIKeys 归一化（保留 orphan）；
+//     默认经 mergeAndNormalizeAPIKeyConfigs 做表单合并（托管身份/倍率元数据缺省回填），
+//     SkipAPIKeyConfigMerge=true 时跳过合并直接替换（Key 倍率端点等精确写语义）
+//   - updates.APIKeyConfigs == nil 但 updates.APIKeys != nil：仅按新 APIKeys 重新归一化原有 configs
+//   - 两者都为 nil：不动 APIKeyConfigs
+//
+// 六类渠道 Update 函数共用，避免新增字段时遗漏其中某一处。
+func applyAPIKeyConfigUpdate(upstream *UpstreamConfig, updates UpstreamUpdate) {
+	if updates.APIKeyConfigs != nil {
+		if updates.SkipAPIKeyConfigMerge {
+			upstream.APIKeyConfigs = normalizeAPIKeyConfigs(upstream.APIKeys, updates.APIKeyConfigs)
+		} else {
+			upstream.APIKeyConfigs = mergeAndNormalizeAPIKeyConfigs(upstream.APIKeys, upstream.APIKeyConfigs, updates.APIKeyConfigs)
+		}
+	} else if updates.APIKeys != nil {
+		upstream.APIKeyConfigs = normalizeAPIKeyConfigs(upstream.APIKeys, upstream.APIKeyConfigs)
+	}
+}
+
+func cloneEmbeddingCapability(capability EmbeddingCapability) EmbeddingCapability {
+	if capability.SupportedDimensions != nil {
+		capability.SupportedDimensions = append([]int(nil), capability.SupportedDimensions...)
+	}
+	if capability.Normalized != nil {
+		normalized := *capability.Normalized
+		capability.Normalized = &normalized
+	}
+	return capability
+}
+
+func cloneAPIKeyConfig(cfg APIKeyConfig) APIKeyConfig {
+	if cfg.Enabled != nil {
+		v := *cfg.Enabled
+		cfg.Enabled = &v
+	}
+	if cfg.GroupMultiplier != nil {
+		v := *cfg.GroupMultiplier
+		cfg.GroupMultiplier = &v
+	}
+	if cfg.MaxGroupMultiplier != nil {
+		v := *cfg.MaxGroupMultiplier
+		cfg.MaxGroupMultiplier = &v
+	}
+	if cfg.MultiplierUpdatedAt != nil {
+		v := *cfg.MultiplierUpdatedAt
+		cfg.MultiplierUpdatedAt = &v
+	}
+	if cfg.MultiplierExpiresAt != nil {
+		v := *cfg.MultiplierExpiresAt
+		cfg.MultiplierExpiresAt = &v
+	}
+	if cfg.RateLimitAutoFromHeaders != nil {
+		v := *cfg.RateLimitAutoFromHeaders
+		cfg.RateLimitAutoFromHeaders = &v
+	}
+	if cfg.Models != nil {
+		cfg.Models = append([]string(nil), cfg.Models...)
+	}
+	cfg.ConsumptionPolicy = NormalizeKeyConsumptionPolicy(cfg.ConsumptionPolicy)
+	return cfg
+}
+
+func cloneAgentModelProfile(profile AgentModelProfile) AgentModelProfile {
+	if profile.ReasoningEfforts != nil {
+		profile.ReasoningEfforts = append([]string(nil), profile.ReasoningEfforts...)
+	}
+	return profile
+}
+
+func cloneUpstreamModelCapability(capability UpstreamModelCapability) UpstreamModelCapability {
+	if capability.ReasoningEfforts != nil {
+		capability.ReasoningEfforts = append([]string(nil), capability.ReasoningEfforts...)
+	}
+	if capability.Capabilities != nil {
+		capabilities := make(map[string]bool, len(capability.Capabilities))
+		for key, value := range capability.Capabilities {
+			capabilities[key] = value
+		}
+		capability.Capabilities = capabilities
+	}
+	if capability.Pricing != nil {
+		pricing := *capability.Pricing
+		if capability.Pricing.InputCacheHitPrice != nil {
+			value := *capability.Pricing.InputCacheHitPrice
+			pricing.InputCacheHitPrice = &value
+		}
+		if capability.Pricing.InputCacheMissPrice != nil {
+			value := *capability.Pricing.InputCacheMissPrice
+			pricing.InputCacheMissPrice = &value
+		}
+		if capability.Pricing.OutputPrice != nil {
+			value := *capability.Pricing.OutputPrice
+			pricing.OutputPrice = &value
+		}
+		if capability.Pricing.Tiers != nil {
+			pricing.Tiers = append([]ModelPricingTier(nil), capability.Pricing.Tiers...)
+			for i := range pricing.Tiers {
+				if pricing.Tiers[i].InputCacheHitPrice != nil {
+					value := *pricing.Tiers[i].InputCacheHitPrice
+					pricing.Tiers[i].InputCacheHitPrice = &value
+				}
+				if pricing.Tiers[i].InputCacheMissPrice != nil {
+					value := *pricing.Tiers[i].InputCacheMissPrice
+					pricing.Tiers[i].InputCacheMissPrice = &value
+				}
+				if pricing.Tiers[i].OutputPrice != nil {
+					value := *pricing.Tiers[i].OutputPrice
+					pricing.Tiers[i].OutputPrice = &value
+				}
+			}
+		}
+		capability.Pricing = &pricing
+	}
+	if capability.Sources != nil {
+		capability.Sources = append([]string(nil), capability.Sources...)
+	}
+	if capability.ParamConstraints != nil {
+		constraints := *capability.ParamConstraints
+		if constraints.FixedParams != nil {
+			constraints.FixedParams = append([]string(nil), constraints.FixedParams...)
+		}
+		if constraints.ThinkingFixedValue != nil {
+			thinking := make(map[string]interface{}, len(constraints.ThinkingFixedValue))
+			for k, v := range constraints.ThinkingFixedValue {
+				thinking[k] = v
+			}
+			constraints.ThinkingFixedValue = thinking
+		}
+		capability.ParamConstraints = &constraints
+	}
+	return capability
+}
+
+// SupportsModel 检查渠道是否支持指定模型
+// 空列表表示支持所有模型；支持精确匹配，以及 prefix* / *suffix / *contains* 形式的包含与排除规则。
+func (u *UpstreamConfig) SupportsModel(model string) bool {
+	supported, _ := u.ExplainModelSupport(model)
+	return supported
+}
+
+// ExplainModelSupport 返回渠道是否支持指定模型，以及不支持时的原因。
+func (u *UpstreamConfig) ExplainModelSupport(model string) (bool, string) {
+	if len(u.SupportedModels) == 0 {
+		return true, ""
+	}
+
+	includes, excludes := splitSupportedModelRules(u.SupportedModels)
+	for _, pattern := range excludes {
+		if matchSupportedModelPattern(pattern, model) {
+			return false, "命中排除规则 !" + pattern
+		}
+	}
+	if len(includes) == 0 {
+		return true, ""
+	}
+	for _, pattern := range includes {
+		if matchSupportedModelPattern(pattern, model) {
+			return true, ""
+		}
+	}
+	return false, "未命中包含规则"
+}
+
+func splitSupportedModelRules(rules []string) (includes []string, excludes []string) {
+	includes = make([]string, 0, len(rules))
+	excludes = make([]string, 0, len(rules))
+	for _, rawRule := range rules {
+		// 兼容用户把多条规则用顿号/逗号粘进同一项的情况，先按分隔符拆分
+		for _, rule := range parseSupportedModelInput(rawRule) {
+			if strings.HasPrefix(rule, "!") {
+				pattern := strings.TrimSpace(strings.TrimPrefix(rule, "!"))
+				if strings.HasPrefix(pattern, "!") {
+					continue
+				}
+				if isValidSupportedModelPattern(pattern) {
+					excludes = append(excludes, pattern)
+				}
+				continue
+			}
+			if isValidSupportedModelPattern(rule) {
+				includes = append(includes, rule)
+			}
+		}
+	}
+	return includes, excludes
+}
+
+// supportedModelSeparatorPattern 模型规则分隔符：空白、中文顿号、逗号（中英文）、分号（中英文）、竖线
+var supportedModelSeparatorPattern = regexp.MustCompile(`[\s、,，;；|]+`)
+
+// supportedModelTokenPattern 模型名合法字符集：字母、数字、点、下划线、连字符、冒号、斜杠，外加通配符 * 与排除前缀 !
+var supportedModelTokenPattern = regexp.MustCompile(`^[A-Za-z0-9._:/*!-]+$`)
+
+// parseSupportedModelInput 将原始规则文本按合法分隔符拆分为独立规则，过滤空白项。
+// 例如 "GPT-5*、ada*" -> ["GPT-5*", "ada*"]。
+func parseSupportedModelInput(raw string) []string {
+	parts := supportedModelSeparatorPattern.Split(raw, -1)
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
+}
+
+func isValidSupportedModelPattern(pattern string) bool {
+	trimmed := strings.TrimSpace(pattern)
+	if trimmed == "" {
+		return false
+	}
+	// 仅允许模型名合法字符集；含顿号等非法字符直接拒绝
+	if !supportedModelTokenPattern.MatchString(trimmed) {
+		return false
+	}
+	if strings.Count(trimmed, "!") > 1 {
+		return false
+	}
+	normalized := trimmed
+	if strings.HasPrefix(normalized, "!") {
+		normalized = strings.TrimSpace(strings.TrimPrefix(normalized, "!"))
+	}
+	if normalized == "" || strings.HasPrefix(normalized, "!") {
+		return false
+	}
+	starCount := strings.Count(normalized, "*")
+	if starCount == 0 {
+		return true
+	}
+	if normalized == "*" {
+		return true
+	}
+	if starCount == 1 {
+		return strings.HasPrefix(normalized, "*") || strings.HasSuffix(normalized, "*")
+	}
+	if starCount == 2 {
+		return strings.HasPrefix(normalized, "*") && strings.HasSuffix(normalized, "*") && strings.Trim(normalized, "*") != ""
+	}
+	return false
+}
+
+func matchSupportedModelPattern(pattern, model string) bool {
+	if !isValidSupportedModelPattern(pattern) {
+		return false
+	}
+	if strings.HasPrefix(pattern, "!") {
+		pattern = strings.TrimSpace(strings.TrimPrefix(pattern, "!"))
+	}
+	if pattern == "*" {
+		return true
+	}
+	starCount := strings.Count(pattern, "*")
+	if starCount == 0 {
+		return pattern == model
+	}
+	if strings.HasPrefix(pattern, "*") && strings.HasSuffix(pattern, "*") {
+		return strings.Contains(model, strings.Trim(pattern, "*"))
+	}
+	if strings.HasPrefix(pattern, "*") {
+		return strings.HasSuffix(model, strings.TrimPrefix(pattern, "*"))
+	}
+	if strings.HasSuffix(pattern, "*") {
+		return strings.HasPrefix(model, strings.TrimSuffix(pattern, "*"))
+	}
+	return false
+}
+
+// GetEffectiveBaseURL 获取当前应使用的 BaseURL（纯 failover 模式）
+// 优先使用 BaseURL 字段（支持调用方临时覆盖），否则从 BaseURLs 数组获取
+func (u *UpstreamConfig) GetEffectiveBaseURL() string {
+	// 优先使用 BaseURL（可能被调用方临时设置用于指定本次请求的 URL）
+	if u.BaseURL != "" {
+		return utils.CanonicalBaseURL(u.BaseURL, u.ServiceType)
+	}
+
+	// 回退到 BaseURLs 数组
+	if len(u.BaseURLs) > 0 {
+		return utils.CanonicalBaseURL(u.BaseURLs[0], u.ServiceType)
+	}
+
+	return ""
+}
+
+// GetAllBaseURLs 获取所有 BaseURL（用于延迟测试）
+func (u *UpstreamConfig) GetAllBaseURLs() []string {
+	if len(u.BaseURLs) > 0 {
+		return deduplicateBaseURLs(u.BaseURLs, u.ServiceType)
+	}
+	if u.BaseURL != "" {
+		canonical := utils.CanonicalBaseURL(u.BaseURL, u.ServiceType)
+		if canonical == "" {
+			return nil
+		}
+		return []string{canonical}
+	}
+	return nil
+}
+
+// BoundBaseURLForKey 返回某 API Key 通过 APIKeyConfigs 绑定的上游端点（已归一化）。
+//
+// provider 模板化添加时，不同 plan 的 Key（如 MiMo sk-/tp-）各自绑定成功探测的 baseURL，
+// failover 遍历应仅在绑定端点上尝试该 Key，避免多 baseURL × 多 Key 的无效笛卡尔积。
+//
+// 返回空串表示该 Key 未绑定端点（历史手填渠道 / 自定义模式），调用方应保持原有笛卡尔积行为。
+// 归一化后与 GetAllBaseURLs 的元素同源，便于直接字符串比较。
+func (u *UpstreamConfig) BoundBaseURLForKey(apiKey string) string {
+	for _, cfg := range u.APIKeyConfigs {
+		if cfg.Key == apiKey {
+			if cfg.BaseURL == "" {
+				return ""
+			}
+			return utils.CanonicalBaseURL(cfg.BaseURL, u.ServiceType)
+		}
+	}
+	return ""
+}
+
+// BaseURLsForKey 返回某 API Key 应当探测的 BaseURL 列表。
+//
+// 绑定优先：Key 通过 APIKeyConfigs 绑定端点时，只返回该端点（已归一化），
+// 不参与渠道级 BaseURL 的笛卡尔积，避免混合套餐渠道把 Agent Plan Key 误打到 Coding Plan 入口。
+// 未绑定（历史手填 / 自定义渠道）时回退到 GetAllBaseURLs，保持原有按顺序回退遍历语义。
+//
+// 纯只读：不修改原 UpstreamConfig，避免并发保活任务污染共享配置快照。
+func (u *UpstreamConfig) BaseURLsForKey(apiKey string) []string {
+	if bound := u.BoundBaseURLForKey(apiKey); bound != "" {
+		return []string{bound}
+	}
+	return u.GetAllBaseURLs()
+}

@@ -1,0 +1,1562 @@
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import test from 'node:test'
+
+import {
+  canonicalModelToPattern,
+  compareCanonicalModels,
+  deepsweModelToPattern,
+  detectNewModelCandidates,
+  matchesAnyRegistryPattern,
+  reportUnmappedAgainstRegistry,
+  DEEPSWE_MODEL_MAP,
+  BENCHLM_MODEL_MAP,
+} from './mapper.mjs'
+import {
+  extractBestPerModel as extractDeepSWEBest,
+  toBenchmarkEvidence as toDeepSWEEvidence,
+} from './deepswe.mjs'
+import {
+  extractScoreSelections,
+  radarScoreRatio,
+  scoreCoverageSufficient,
+  extractCostFromStatistics,
+  toBenchmarkEvidence as toDradarEvidence,
+  DRADAR_MODEL_MAP,
+} from './dradar.mjs'
+import { extractProfiles as extractBenchlmProfiles } from './benchlm.mjs'
+import { extractModelInfo, collectUnmappedLitellmKeys, collectMissingMappedKeys, LITELLM_MODEL_MAP } from './litellm.mjs'
+import {
+  extractLlmProfiles as extractAaLlm,
+  extractImageArenaProfiles as extractAaImage,
+  resolveArtificialAnalysisSlug,
+  ARTIFICIAL_ANALYSIS_MODEL_MAP,
+  ARTIFICIAL_ANALYSIS_IMAGE_MODEL_MAP,
+} from './artificialanalysis.mjs'
+import { resolveProxyEnv } from './http.mjs'
+import {
+  generatedArtifactPaths,
+  warnSourceFailures,
+  mergeBenchlmData,
+  mergeDeepsweData,
+  mergeDradarData,
+  mergeLitellmData,
+  mergeArtificialAnalysisLlm,
+  mergeArtificialAnalysisImageArena,
+  validateRegistry,
+} from '../update-benchmark-data.mjs'
+import { presetArtifactPaths } from '../generate-preset-manifest.mjs'
+import { buildBenchmarkVisualizationData } from './visualization.mjs'
+import { renderBenchmarkChart, validateVisualizationData } from '../generate-benchmark-chart.mjs'
+
+function emptyReport() {
+  return {
+    updated: [],
+    added: [],
+    unchanged: [],
+    errors: [],
+    litellmUpdated: [],
+    litellmSkipped: [],
+    aaUpdated: [],
+    aaAdded: [],
+    aaImageArenaUpdated: [],
+    aaImageArenaAdded: [],
+    aaSkipped: false,
+  }
+}
+
+function readJson(relativePath) {
+  return JSON.parse(readFileSync(new URL(relativePath, import.meta.url), 'utf8'))
+}
+
+test('benchmark fetch resolves lowercase proxy env variables', () => {
+  const proxyEnv = resolveProxyEnv({
+    http_proxy: 'http://127.0.0.1:6785',
+    https_proxy: 'http://127.0.0.1:6785',
+  })
+
+  assert.equal(proxyEnv.http_proxy, 'http://127.0.0.1:6785')
+  assert.equal(proxyEnv.https_proxy, 'http://127.0.0.1:6785')
+})
+
+test('benchmark fetch uses ALL_PROXY as a fallback', () => {
+  const proxyEnv = resolveProxyEnv({ ALL_PROXY: 'socks5://127.0.0.1:6785' })
+
+  assert.equal(proxyEnv.http_proxy, 'socks5://127.0.0.1:6785')
+  assert.equal(proxyEnv.https_proxy, 'socks5://127.0.0.1:6785')
+})
+
+test('runtime and published preset registries stay synchronized with the shared source', () => {
+  const source = readJson('../../shared/model-registry/ccx_model_registry.json')
+  const embedded = readJson('../../backend-go/internal/presetstore/embedded/model-registry.json')
+  const published = readJson('../../docs/public/presets/model-registry.json')
+
+  assert.deepEqual(embedded, source)
+  assert.deepEqual(published, source)
+})
+
+test('benchmark updater rolls preset artifacts into its generated output transaction', () => {
+  for (const artifactPath of presetArtifactPaths) {
+    assert.ok(generatedArtifactPaths.includes(artifactPath), `${artifactPath} is not tracked`)
+  }
+})
+
+test('benchmark updater warns but continues when optional sources fail', () => {
+  const warnings = []
+
+  assert.doesNotThrow(() => {
+    warnSourceFailures([
+      { source: 'dradar', error: 'fetch failed' },
+      { source: 'artificial-analysis', error: 'HTTP 401 Unauthorized' },
+    ], message => warnings.push(message))
+  })
+  assert.deepEqual(warnings, [
+    '[warning] benchmark sources failed (dradar, artificial-analysis); continuing with successful sources',
+  ])
+})
+
+test('canonical pattern generation accepts canonical and source model names', () => {
+  const expected = '(?:^|[-/])gpt-5\\.6-sol(?=$|@)'
+  assert.equal(canonicalModelToPattern('gpt-5.6-sol'), expected)
+  assert.equal(deepsweModelToPattern('gpt-5-6-sol'), expected)
+  assert.equal(deepsweModelToPattern('gpt-5.6-sol'), null)
+})
+
+test('new-model detection flags unmapped same-family higher versions only', () => {
+  const modelMap = {
+    'grok-4-5': 'grok-4.5',
+    'grok-4-6': 'grok-4.6',
+    'claude-opus-4-8': 'claude-opus-4-8',
+    'claude-opus-5': 'claude-opus-5',
+    'gpt-5-6-sol': 'gpt-5.6-sol',
+  }
+  const candidates = detectNewModelCandidates(
+    [
+      'grok-4-7',              // 同家族更高版本 → 提示
+      'grok-4-3',              // 同家族更低版本 → 忽略
+      'grok-4-20-beta',        // 十进制营销版本 4.20 = 4.2 < 4.6 → 忽略
+      'grok-4-1-fast',         // 更低版本变体 → 忽略
+      'grok-code-fast-1',      // 家族不同 → 忽略
+      'claude-opus-4-6',       // 低于已映射 4.8 → 忽略
+      'claude-opus-5.5',       // 高于 5 → 提示
+      'gpt-6',                 // 高于 5.6 → 提示
+      'some-unrelated-model',  // 无家族 → 忽略
+    ],
+    modelMap,
+  )
+  assert.deepEqual(
+    candidates.map(c => c.name),
+    ['grok-4-7', 'claude-opus-5.5', 'gpt-6'],
+  )
+  assert.equal(candidates[0].mappedBest, 'grok-4.6')
+  assert.equal(candidates[0].version, '4.7')
+})
+
+test('new-model detection expands provider prefixes and underscore variants', () => {
+  const candidates = detectNewModelCandidates(
+    [
+      'zai/glm-6',                    // provider/ 前缀剥离后命中 glm 家族 → 提示
+      'openrouter/xiaomi/mimo-v3',    // 多级前缀逐段剥离后命中 → 提示
+      'google_grok-4-8',              // provider_ 前缀剥离后命中 → 提示（grok-4-7 已注册，取更高版本）
+      'zai/glm-4',                    // 前缀剥离后版本更低 → 忽略
+      'foo/grok-4-1',                 // 前缀剥离后版本更低 → 忽略
+    ],
+    BENCHLM_MODEL_MAP,
+  )
+  assert.deepEqual(
+    candidates.map(c => c.name),
+    ['zai/glm-6', 'openrouter/xiaomi/mimo-v3', 'google_grok-4-8'],
+  )
+  assert.equal(candidates[0].family, 'glm')
+  assert.equal(candidates[0].version, '6')
+  assert.equal(candidates[0].mappedBest, 'glm-5.3')
+})
+
+test('registry reverse-lookup recognizes known models across naming variants', () => {
+  const patterns = [
+    canonicalModelToPattern('gpt-5.6-sol'),        // 点号 pattern
+    canonicalModelToPattern('claude-opus-5'),      // 含日期快照后缀
+    canonicalModelToPattern('deepseek-v4-pro'),    // 含 -MMDD 别名后缀
+    // grok-4.20 手工注册的 pattern：beta 后缀兼容 + 点号/连字符双形态
+    '(?:^|[-/])grok-4\\.20(?:-beta)?(?=$|@)',
+  ]
+  assert.equal(matchesAnyRegistryPattern('gpt-5-6-sol', patterns), true)   // 连字符 slug
+  assert.equal(matchesAnyRegistryPattern('gpt-5.6-sol', patterns), true)   // 点号 slug
+  assert.equal(matchesAnyRegistryPattern('zai/gpt-5.6-sol', patterns), true) // provider 前缀
+  assert.equal(matchesAnyRegistryPattern('claude-opus-5-20260101', patterns), true) // 日期快照
+  assert.equal(matchesAnyRegistryPattern('deepseek-v4-pro-0813', patterns), true)  // 日期别名
+  assert.equal(matchesAnyRegistryPattern('grok-4-20', patterns), true)     // 连字符 beta 前形态
+  assert.equal(matchesAnyRegistryPattern('grok-4.20', patterns), true)     // 点号形态
+  assert.equal(matchesAnyRegistryPattern('grok-4-20-beta', patterns), true) // beta 后缀
+  assert.equal(matchesAnyRegistryPattern('grok-4-20-0309', patterns), false) // 日期快照不匹配
+  assert.equal(matchesAnyRegistryPattern('claude-mythos-5', patterns), false)      // 全新家族
+  assert.equal(matchesAnyRegistryPattern('grok-5', patterns), false)
+})
+
+test('reportUnmappedAgainstRegistry splits registered-but-unmapped from unrecognized models', () => {
+  const patterns = [
+    canonicalModelToPattern('claude-opus-5'),
+    canonicalModelToPattern('gpt-5.5'),
+    canonicalModelToPattern('claude-mythos-5'),
+  ]
+  // 三种状态：已注册但源映射表缺条目（UNMAPPED，丢分告警）、registry 认识的日期快照（同样 UNMAPPED）、
+  // 全新家族（UNRECOGNIZED，正向 NEW-MODEL 检测无基线，只有反向对照能暴露）
+  const { unmapped, unrecognized } = reportUnmappedAgainstRegistry('test-source', [
+    'claude-mythos-5',
+    'claude-opus-5-20260101',
+    'claude-mythos-6',
+    'grok-5',
+  ], patterns, { mapName: 'TEST_MAP', maxListed: 10 })
+  assert.deepEqual(unmapped.sort(), ['claude-mythos-5', 'claude-opus-5-20260101'])
+  assert.deepEqual(unrecognized.sort(), ['claude-mythos-6', 'grok-5'])
+
+  // 大清单按根家族聚合，claude 家族的 newest 代表应是版本最高的 mythos-6
+  const many = ['claude-3-5-haiku', 'claude-3-7-sonnet-thinking', 'claude-mythos-6']
+  for (let i = 0; i < 25; i++) many.push(`unknown-vendor-model-${i}`)
+  const aggregated = reportUnmappedAgainstRegistry('test-source', many, patterns, { maxListed: 5, maxFamilies: 3 })
+  assert.equal(aggregated.unrecognized.length, 28)
+})
+
+test('new-model detection rejects date snapshots, parameter sizes and legacy names', () => {  const candidates = detectNewModelCandidates(
+    [
+      'gpt-5-2025-08-07',      // 日期快照段值 > 50 → 忽略
+      'grok-4-0709',           // 日期快照 → 忽略
+      'mimo-v2-0206',          // 日期快照 → 忽略
+      'azure/gpt-35-turbo',    // 主版本 35 与 gpt-5.x 非同代 → 忽略
+      'claude-opus-41',        // 主版本 41 非同代 → 忽略
+      'qwen3-32b',             // 参数量段(32b) 落掉后与 mapped qwen3 等版本 → 忽略
+      'Qwen3-235B-A22B',       // 参数量段落掉后等版本 → 忽略
+      'Qwen3.5-397B-A22B',     // 参数量段落掉后 [3,5] > [3] → 提示
+      'gpt-8',                 // 主版本跳两代 → 忽略（安全网只覆盖同代与下一代）
+      'grok-4-8',              // 同代更高版本 → 提示（grok-4-7 已于 2026-09-22 注册，改用 4-8）
+      'grok-4-20-beta',        // 十进制 4.20 = 4.2 < 4.6 → 忽略（营销版本非整数）
+    ],
+    LITELLM_MODEL_MAP,
+  )
+  assert.deepEqual(
+    candidates.map(c => c.name),
+    ['Qwen3.5-397B-A22B', 'grok-4-8'],
+  )
+  assert.equal(candidates[0].version, '3.5')
+})
+
+test('extractProfiles collects unmapped slugs for new-model detection', () => {
+  const doc = {
+    items: [
+      { slug: 'grok-4-5', displayScore: 75, scores: { displayCategoryScores: { coding: 50 } } },
+      { slug: 'grok-4-8', displayScore: 90, scores: { displayCategoryScores: {} } }, // grok-4-7 已注册，样例改用未映射的 4-8
+    ],
+  }
+  const unmapped = []
+  const profiles = extractBenchlmProfiles(doc, BENCHLM_MODEL_MAP, { coding: 'coding' }, unmapped)
+  assert.ok(profiles['grok-4.5'])
+  assert.equal(profiles['grok-4.5'].overallScore, 75)
+  assert.deepEqual(unmapped, ['grok-4-8'])
+  assert.equal(detectNewModelCandidates(unmapped, BENCHLM_MODEL_MAP).length, 1)
+})
+
+test('DeepSWE percentile and cohort use one best row per model', () => {
+  const rows = [
+    { model: 'model-a', pass_at_1: 0.8, reasoning_effort: 'high', n_tasks_attempted: 100 },
+    { model: 'model-a', pass_at_1: 0.7, reasoning_effort: 'low', n_tasks_attempted: 100 },
+    { model: 'model-b', pass_at_1: 0.6, reasoning_effort: 'high', n_tasks_attempted: 100 },
+  ]
+  const best = extractDeepSWEBest({ rows }, { 'model-a': 'a', 'model-b': 'b' })
+  const evidence = toDeepSWEEvidence(best[0], best)
+
+  assert.equal(best.length, 2)
+  assert.equal(evidence.cohortSize, 2)
+  assert.equal(evidence.cohortPercentile, 1)
+  assert.equal(evidence.taskCount, 100)
+})
+
+test('benchmark evidence normalizes missing effort to default', () => {
+  const deepEvidence = toDeepSWEEvidence({
+    deepsweModel: 'model-a',
+    score: 0.5,
+    nTasks: 100,
+    reasoningEffort: null,
+  }, [{ score: 0.5 }])
+  const radarEvidence = toDradarEvidence({
+    sourceModel: 'model-a',
+    effort: null,
+    payload: { score_version: 'radar-bench-v2-150', coverage: 100 },
+    ratio: 0.5,
+  }, [])
+
+  assert.equal(deepEvidence.effort, 'default')
+  assert.equal(radarEvidence.effort, 'default')
+})
+
+test('dradar score selections dedupe across collections and surface unmapped models', () => {
+  const catalog = {
+    unified_pool: { score_url: '/api/v1/radar-bench-score' },
+    collections: [
+      {
+        collection_id: 'deepswe',
+        model_effort_selections: [
+          { model: 'gpt-6.1-sol', effort: 'low' },
+          { model: 'gpt-6.1-sol', effort: 'high' },
+          { model: 'gpt-6.5', effort: 'high' },
+        ],
+      },
+      {
+        collection_id: 'pompeii',
+        model_effort_selections: [
+          { model: 'gpt-6.1-sol', effort: 'low' },
+          { model: 'gpt-6.1-sol', effort: 'high' },
+          { model: 'unrelated-model', effort: 'low' },
+        ],
+      },
+    ],
+  }
+  const { pairs, unmappedModels } = extractScoreSelections(catalog, DRADAR_MODEL_MAP)
+
+  // 跨库并集去重，按 (model, effort) 排序保证请求顺序稳定
+  assert.deepEqual(pairs, [
+    { model: 'gpt-6.1-sol', effort: 'high' },
+    { model: 'gpt-6.1-sol', effort: 'low' },
+    { model: 'gpt-6.5', effort: 'high' },
+    { model: 'unrelated-model', effort: 'low' },
+  ])
+  assert.deepEqual(unmappedModels, ['gpt-6.5', 'unrelated-model'])
+  // gpt-6.5 须高于 DRADAR_MODEL_MAP 中 gpt 族已映射最高版本（现为 gpt-6.1-sol v6.1），
+  // 且主版本同代或仅高一代，否则不会被报为新候选
+  assert.deepEqual(detectNewModelCandidates(unmappedModels, DRADAR_MODEL_MAP).map(c => c.name), ['gpt-6.5'])
+
+  // unified_pool.score_url 漂移即拒绝（防端点语义变化后错拿数据）
+  assert.throws(
+    () => extractScoreSelections({ unified_pool: { score_url: '/api/v1/table' } }, DRADAR_MODEL_MAP),
+    /score_url mismatch/,
+  )
+})
+
+test('dradar radarScoreRatio rescales the 150-point composite to a 0-1 reward ratio', () => {
+  assert.equal(radarScoreRatio({ score: 99.07, score_max: 150 }), 99.07 / 150)
+  // score 缺失（missing_current_result）与非法 score_max 均无比率
+  assert.equal(radarScoreRatio({ score: null, score_max: 150 }), null)
+  assert.equal(radarScoreRatio({ score: 100, score_max: 0 }), null)
+  assert.equal(radarScoreRatio({}), null)
+})
+
+test('dradar task-coverage gate follows official MIN_BENCHMARK_TASK_COVERAGE', () => {
+  // 雷达Bench 口径：coverage/required_tasks >= 0.6 且 score 缺失视为不足
+  assert.equal(scoreCoverageSufficient({ score: 30, score_max: 150, coverage: 3, required_tasks: 5 }), true)   // 3/5 = 0.6
+  assert.equal(scoreCoverageSufficient({ score: 30, score_max: 150, coverage: 2, required_tasks: 5 }), false)  // 2/5 < 0.6
+  assert.equal(scoreCoverageSufficient({ score: null, score_max: 150, coverage: 5, required_tasks: 5 }), false)
+  assert.equal(scoreCoverageSufficient({ score: 30, score_max: 150, coverage: 5, required_tasks: 0 }), false)  // 分母缺失无法判定
+})
+
+test('dradar extractCostFromStatistics reads official api-equivalent cost from score payload', () => {
+  const cost = extractCostFromStatistics({
+    statistics: {
+      metrics: {
+        api_equivalent_usd: { mean: 3.94, known_samples: 94 },
+        elapsed_ms: { mean: 902534.2 },
+      },
+    },
+  })
+  assert.equal(cost.meanCost, 3.94)
+  assert.equal(cost.medianCost, null) // 新端点不提供中位数
+  assert.equal(cost.nRuns, 94)
+  assert.ok(Math.abs(cost.meanDuration - 902.5342) < 1e-3) // ms → sec
+
+  // 缺成本指标（source_evidence_incomplete）时 meanCost=null，nRuns 记已知样本数
+  const missing = extractCostFromStatistics({
+    statistics: { metrics: { api_equivalent_usd: { mean: null, known_samples: 94 } } },
+  })
+  assert.equal(missing.meanCost, null)
+  assert.equal(missing.nRuns, 94)
+  assert.equal(extractCostFromStatistics({}).meanCost, null)
+})
+
+test('dradar cohort size is model count and best-effort percentile drives cohortPercentile', () => {
+  const cohort = [
+    { canonicalModel: 'a', bestRatio: 0.8 },
+    { canonicalModel: 'b', bestRatio: 0.6 },
+  ]
+  const evidence = toDradarEvidence({
+    sourceModel: 'a',
+    canonicalModel: 'a',
+    effort: 'high',
+    payload: { score_version: 'radar-bench-v2-150', coverage: 64 },
+    ratio: 0.66,
+  }, cohort)
+
+  assert.equal(evidence.cohortSize, 2)
+  assert.equal(evidence.cohortPercentile, 0.5)
+  assert.equal(evidence.benchmark, 'codexradar')
+  assert.equal(evidence.benchmarkVersion, 'radar-bench-v2-150')
+  assert.equal(evidence.metric, 'mean_reward')
+  assert.equal(evidence.taskCount, 64)
+  assert.equal(evidence.sourceUrl, 'https://deng.codexradar.com/')
+})
+
+test('dradar toBenchmarkEvidence injects api-equivalent meanCost into costUsd rounded to cents', () => {
+  const entry = {
+    sourceModel: 'dradar-model',
+    canonicalModel: 'canonical-model',
+    effort: 'high',
+    payload: { score_version: 'radar-bench-v2-150', coverage: 64 },
+    ratio: 0.7,
+    cost: { meanCost: 2.506, medianCost: null, nRuns: 3 },
+  }
+
+  const withCost = toDradarEvidence(entry, [{ canonicalModel: 'canonical-model', bestRatio: 0.7 }])
+  assert.equal(withCost.costUsd, 2.51)
+  assert.equal(withCost.effort, 'high')
+
+  // 缺实测成本（source_evidence_incomplete）时 costUsd 不注入（保持 undefined）
+  const withoutCost = toDradarEvidence({ ...entry, cost: { meanCost: null, medianCost: null, nRuns: 94 } }, [])
+  assert.equal(withoutCost.costUsd, undefined)
+  const noCost = toDradarEvidence({ ...entry, cost: undefined }, [])
+  assert.equal(noCost.costUsd, undefined)
+})
+
+test('dradar per-effort evidence carries each effort own coverage count', () => {
+  // 每档证据独立生成（每 (模型,档位) 一份权威 payload），taskCount 取本档 coverage
+  const evidenceFor = coverage => toDradarEvidence({
+    sourceModel: 'hy4-preview',
+    canonicalModel: 'hy4-preview',
+    effort: 'low',
+    payload: { score_version: 'radar-bench-v2-150', coverage },
+    ratio: 0.5,
+  }, [])
+  assert.equal(evidenceFor(1).taskCount, 1)
+  assert.equal(evidenceFor(6).taskCount, 6)
+})
+
+test('mergeDradarData prunes stale codexradar evidence for models the source no longer covers', () => {
+  const registry = {
+    benchmarkProfiles: [
+      {
+        canonicalModel: 'gemini-3.8-flash',
+        patterns: ['gemini-3\\.8-flash'],
+        lane: 'provisional',
+        verifiedAt: '2026-10-01',
+        sources: ['https://deng.codexradar.com/', 'https://deepswe.com/'],
+        sharedResults: 1,
+        comparableCategories: 1,
+        totalCategories: 1,
+        benchmarkEvidence: [
+          { benchmark: 'codexradar', benchmarkVersion: 'v1', domain: 'coding', metric: 'pass_at_1', rawValue: 0.5, effort: 'high', cohortSize: 1, taskCount: 64, selectionBasis: 'per_effort', sourceUrl: 'https://deng.codexradar.com/', capturedAt: '2026-10-01' },
+          // 旧深榜退役前的 codexradar 数据曾借 deepswe benchmark 键落盘，需一并清理
+          { benchmark: 'deepswe', benchmarkVersion: 'codexradar', domain: 'coding', metric: 'pass_at_1', rawValue: 0.4, effort: 'low', cohortSize: 1, taskCount: 64, selectionBasis: 'per_effort', sourceUrl: 'https://deng.codexradar.com/', capturedAt: '2026-09-01' },
+          { benchmark: 'deepswe', benchmarkVersion: 'v1.2', domain: 'coding', metric: 'pass_at_1', rawValue: 0.3, effort: 'high', cohortSize: 1, taskCount: 65, selectionBasis: 'per_effort', sourceUrl: 'https://deepswe.com/', capturedAt: '2026-10-01' },
+        ],
+      },
+      {
+        canonicalModel: 'gpt-6-astra',
+        patterns: ['gpt-6-astra'],
+        lane: 'provisional',
+        verifiedAt: '2026-10-01',
+        sources: [],
+        sharedResults: 1,
+        comparableCategories: 1,
+        totalCategories: 1,
+        benchmarkEvidence: [
+          { benchmark: 'codexradar', benchmarkVersion: 'v1', domain: 'coding', metric: 'pass_at_1', rawValue: 0.7, effort: 'high', cohortSize: 1, taskCount: 64, selectionBasis: 'per_effort', sourceUrl: 'https://deng.codexradar.com/', capturedAt: '2026-10-01' },
+        ],
+      },
+    ],
+  }
+  const freshEvidence = {
+    benchmark: 'codexradar', benchmarkVersion: 'radar-bench-v2-150', sourceModel: 'gpt-6-astra',
+    domain: 'coding', metric: 'mean_reward', rawValue: 0.762, uncertainty: 0, cohortPercentile: 1,
+    taskCount: 64, cohortSize: 1, effort: 'xhigh', selectionBasis: 'per_effort',
+    sourceUrl: 'https://deng.codexradar.com/', capturedAt: '2026-10-21',
+  }
+  const report = emptyReport()
+  mergeDradarData(registry, {
+    'gpt-6-astra': { benchmarkEvidence: [freshEvidence], costData: {}, efforts: {} },
+  }, report, null)
+
+  const pruned = registry.benchmarkProfiles[0]
+  // 未被新数据覆盖的模型：codexradar 行（含借 deepswe 键的旧行）整组移除，deepswe 真源保留
+  assert.deepEqual(pruned.benchmarkEvidence.map(e => [e.benchmark, e.benchmarkVersion]), [['deepswe', 'v1.2']])
+  assert.deepEqual(pruned.sources, ['https://deepswe.com/'])
+  assert.ok(report.updated.some(u => u.canonical === 'gemini-3.8-flash' && u.source === 'dradar-pruned'))
+
+  // 被覆盖的模型：旧 codexradar 证据被新 mean_reward 证据全量替换
+  const kept = registry.benchmarkProfiles[1]
+  assert.equal(kept.benchmarkEvidence.length, 1)
+  assert.equal(kept.benchmarkEvidence[0].metric, 'mean_reward')
+  assert.equal(kept.benchmarkEvidence[0].rawValue, 0.762)
+
+  // --models 过滤时只动目标模型，其余 profile 不剪枝
+  const scoped = {
+    benchmarkProfiles: [{
+      canonicalModel: 'gemini-3.8-flash',
+      patterns: ['gemini-3\\.8-flash'],
+      lane: 'provisional',
+      verifiedAt: '2026-10-01',
+      sources: ['https://deng.codexradar.com/'],
+      sharedResults: 1, comparableCategories: 1, totalCategories: 1,
+      benchmarkEvidence: [
+        { benchmark: 'codexradar', benchmarkVersion: 'v1', domain: 'coding', metric: 'pass_at_1', rawValue: 0.5, effort: 'high', cohortSize: 1, taskCount: 64, selectionBasis: 'per_effort', sourceUrl: 'https://deng.codexradar.com/', capturedAt: '2026-10-01' },
+      ],
+    }],
+  }
+  const scopedReport = emptyReport()
+  mergeDradarData(scoped, { 'gpt-6-astra': { benchmarkEvidence: [freshEvidence], costData: {}, efforts: {} } }, scopedReport, ['gpt-6-astra'])
+  assert.equal(scoped.benchmarkProfiles[0].benchmarkEvidence.length, 1)
+  assert.equal(scopedReport.updated.filter(u => u.source === 'dradar-pruned').length, 0)
+})
+
+test('mergeDradarData removes profiles emptied by pruning instead of leaving zero-evidence stubs', () => {
+  // deepseek-v4-flash-vision 现场：仅有 codexradar 证据，剪枝后零证据零来源；
+  // presetstore 运行时校验不接受零证据占位条目，须整条移除（其他源重收录时自动重建）
+  const registry = {
+    benchmarkProfiles: [
+      {
+        canonicalModel: 'deepseek-v4-flash-vision',
+        patterns: ['deepseek-v4-flash-vision'],
+        lane: 'provisional',
+        verifiedAt: '2026-10-01',
+        sources: ['https://deng.codexradar.com/'],
+        sharedResults: 1, comparableCategories: 1, totalCategories: 1,
+        benchmarkEvidence: [
+          { benchmark: 'codexradar', benchmarkVersion: 'v1', domain: 'coding', metric: 'pass_at_1', rawValue: 0.2, effort: 'high', cohortSize: 1, taskCount: 64, selectionBasis: 'per_effort', sourceUrl: 'https://deng.codexradar.com/', capturedAt: '2026-10-01' },
+        ],
+      },
+      {
+        canonicalModel: 'gpt-6-astra',
+        patterns: ['gpt-6-astra'],
+        lane: 'provisional',
+        verifiedAt: '2026-10-01',
+        sources: [],
+        sharedResults: 1, comparableCategories: 1, totalCategories: 1,
+        benchmarkEvidence: [
+          { benchmark: 'codexradar', benchmarkVersion: 'v1', domain: 'coding', metric: 'pass_at_1', rawValue: 0.7, effort: 'high', cohortSize: 1, taskCount: 64, selectionBasis: 'per_effort', sourceUrl: 'https://deng.codexradar.com/', capturedAt: '2026-10-01' },
+        ],
+      },
+    ],
+  }
+  const freshEvidence = {
+    benchmark: 'codexradar', benchmarkVersion: 'radar-bench-v2-150', sourceModel: 'gpt-6-astra',
+    domain: 'coding', metric: 'mean_reward', rawValue: 0.762, uncertainty: 0, cohortPercentile: 1,
+    taskCount: 64, cohortSize: 1, effort: 'xhigh', selectionBasis: 'per_effort',
+    sourceUrl: 'https://deng.codexradar.com/', capturedAt: '2026-10-21',
+  }
+  const report = emptyReport()
+  mergeDradarData(registry, {
+    'gpt-6-astra': { benchmarkEvidence: [freshEvidence], costData: {}, efforts: {} },
+  }, report, null)
+
+  assert.deepEqual(registry.benchmarkProfiles.map(p => p.canonicalModel), ['gpt-6-astra'])
+  assert.ok(report.updated.some(u => u.canonical === 'deepseek-v4-flash-vision' && u.source === 'dradar-pruned-removed'))
+})
+
+test('LiteLLM keeps missing capabilities unknown and maps function calling to toolCalls', () => {
+  const info = extractModelInfo({
+    source: {
+      max_input_tokens: 100_000,
+      supports_function_calling: true,
+    },
+  }, { source: 'canonical' }).canonical
+
+  assert.equal(info.supports.toolCalls, true)
+  assert.equal(info.supports.vision, undefined)
+  assert.equal(info.supports.reasoning, undefined)
+  assert.equal(Object.hasOwn(info.supports, 'functionCalling'), false)
+})
+
+test('LiteLLM unmapped/missing key collectors feed new-model and stale-mapping detection', () => {
+  const data = {
+    'gpt-5.5': { max_input_tokens: 1 },
+    'zai/gpt-5.7': { max_input_tokens: 1 },
+    'some-unrelated-vendor/model-x': { max_input_tokens: 1 },
+  }
+  const modelMap = { 'gpt-5.5': 'gpt-5.5', 'claude-opus-5': 'claude-opus-5' }
+
+  assert.deepEqual(collectUnmappedLitellmKeys(data, modelMap), ['zai/gpt-5.7', 'some-unrelated-vendor/model-x'])
+  assert.deepEqual(
+    detectNewModelCandidates(collectUnmappedLitellmKeys(data, modelMap), modelMap).map(c => c.name),
+    ['zai/gpt-5.7'],
+  )
+  // 映射表里的 claude-opus-5 在上游数据中不存在 → 失效告警名单
+  assert.deepEqual(collectMissingMappedKeys(data, modelMap), ['claude-opus-5'])
+})
+
+test('LiteLLM preserves explicit zero prices', () => {
+  const info = extractModelInfo({
+    source: {
+      input_cost_per_token: 0,
+      output_cost_per_token: 0,
+      cache_read_input_token_cost: 0,
+    },
+  }, { source: 'canonical' }).canonical
+
+  assert.equal(info.pricing.inputCacheMissPrice, 0)
+  assert.equal(info.pricing.outputPrice, 0)
+  assert.equal(info.pricing.inputCacheHitPrice, 0)
+})
+
+test('LiteLLM normalizes per-million prices to avoid float noise', () => {
+  const info = extractModelInfo({
+    source: {
+      input_cost_per_token: 2e-7,
+      output_cost_per_token: 6.4e-6,
+      cache_read_input_token_cost: 5e-8,
+    },
+  }, { source: 'canonical' }).canonical
+
+  assert.equal(info.pricing.inputCacheMissPrice, 0.2)
+  assert.equal(info.pricing.outputPrice, 6.4)
+  assert.equal(info.pricing.inputCacheHitPrice, 0.05)
+})
+
+test('benchmark merge creates a complete valid profile', () => {
+  const registry = { benchmarkProfiles: [], upstreamCapabilities: [] }
+  mergeDeepsweData(registry, {
+    'gpt-5.6-sol': {
+      deepsweMeta: { deepsweModel: 'gpt-5-6-sol' },
+      benchmarkEvidence: [{
+        benchmark: 'deepswe',
+        benchmarkVersion: 'v1.1',
+        sourceModel: 'gpt-5-6-sol',
+        domain: 'coding',
+        metric: 'pass_at_1',
+        rawValue: 0.8,
+        uncertainty: 0.01,
+        cohortPercentile: 1,
+        taskCount: 100,
+        cohortSize: 4,
+        effort: 'high',
+        selectionBasis: 'best_available_effort',
+        sourceUrl: 'https://deepswe.example/',
+        capturedAt: '2026-07-21',
+      }],
+    },
+  }, emptyReport(), null)
+
+  assert.doesNotThrow(() => validateRegistry(registry))
+  assert.deepEqual(registry.benchmarkProfiles[0].sources, ['https://deepswe.example/'])
+  assert.equal(registry.benchmarkProfiles[0].sharedResults, 4)
+})
+
+test('BenchLM zero comparable categories do not erase valid evidence metadata', () => {
+  const registry = {
+    benchmarkProfiles: [{
+      patterns: ['(?:^|[-/])kimi-k2\\.7-code(?=$|@)'],
+      canonicalModel: 'kimi-k2.7-code',
+      benchmarkEvidence: [{
+        benchmark: 'deepswe',
+        benchmarkVersion: 'v1.1',
+        domain: 'coding',
+        sourceUrl: 'https://deepswe.example/',
+        cohortSize: 16,
+      }],
+      sources: ['https://deepswe.example/'],
+      verifiedAt: '2026-07-21',
+      lane: 'provisional',
+      sharedResults: 16,
+      comparableCategories: 1,
+      totalCategories: 1,
+    }],
+  }
+  mergeBenchlmData(registry, {
+    'kimi-k2.7-code': {
+      overallScore: 55,
+      categoryScores: {},
+      counts: { sharedBenchmarkCount: 18, comparableCategoryCount: 0, totalCategoryCount: 8 },
+      sources: ['https://benchlm.example/compare'],
+    },
+  }, emptyReport(), null)
+
+  const profile = registry.benchmarkProfiles[0]
+  assert.equal(profile.sharedResults, 18)
+  assert.equal(profile.comparableCategories, 1)
+  assert.equal(profile.totalCategories, 8)
+  assert.doesNotThrow(() => validateRegistry(registry))
+})
+
+test('BenchLM mapper can rebuild fresh profiles from raw models doc for DeepSeek variants', () => {
+  const rawDoc = {
+    items: [{
+      slug: 'deepseek-v4-flash-max',
+      url: 'https://benchlm.ai/models/deepseek-v4-flash-max',
+      displayScore: 78,
+      coverage: { trustedBenchmarkCount: 12 },
+      scores: {
+        displayCategoryScores: {
+          Coding: 81,
+          Knowledge: 75,
+        },
+      },
+    }],
+  }
+
+  const profiles = extractBenchlmProfiles(rawDoc, {
+    'deepseek-v4-flash-max': 'deepseek-v4-flash',
+  }, {
+    Coding: 'coding',
+    Knowledge: 'knowledge',
+  })
+
+  assert.equal(profiles['deepseek-v4-flash'].overallScore, 78)
+  assert.equal(profiles['deepseek-v4-flash'].categoryScores.coding, 81)
+  assert.equal(profiles['deepseek-v4-flash'].categoryScores.knowledge, 75)
+  assert.deepEqual(profiles['deepseek-v4-flash'].sources, [
+    'https://benchlm.ai/models/deepseek-v4-flash-max',
+    'https://benchlm.ai/methodology',
+  ])
+})
+
+test('BenchLM extractProfiles falls back to verified displayScore only when public score is null', () => {
+  const rawDoc = {
+    items: [
+      // 有 verified 实测但未排公开总榜（如 deepseek-v4-flash-0731）：回退 verified 分
+      {
+        slug: 'deepseek-v4-flash-0731',
+        displayScore: null,
+        scores: { displayScore: 59, displayCategoryScores: { coding: 53.4 } },
+      },
+      // estimated 模型：顶层有估计分、verified 为 0，不得回退
+      {
+        slug: 'kimi-k3',
+        displayScore: 80.16,
+        scores: { displayScore: 0, displayCategoryScores: {} },
+      },
+      // 顶层与 verified 均无效：保持无总体分
+      {
+        slug: 'muse-spark-1-1',
+        displayScore: null,
+        scores: { displayScore: 0, displayCategoryScores: {} },
+      },
+    ],
+  }
+
+  const profiles = extractBenchlmProfiles(rawDoc, {
+    'deepseek-v4-flash-0731': 'deepseek-v4-flash',
+    'kimi-k3': 'kimi-k3',
+    'muse-spark-1-1': 'muse-spark-1.1',
+  }, { coding: 'coding' })
+
+  assert.equal(profiles['deepseek-v4-flash'].overallScore, 59)
+  assert.equal(profiles['deepseek-v4-flash'].categoryScores.coding, 53.4)
+  assert.equal(profiles['kimi-k3'].overallScore, 80.16)
+  assert.equal(profiles['muse-spark-1.1'].overallScore, null)
+})
+
+test('visualization combines DeepSWE, BenchLM and CodexRadar sources', () => {
+  const evidence = (benchmark, benchmarkVersion, rawValue) => ({
+    benchmark,
+    benchmarkVersion,
+    domain: 'coding',
+    metric: 'pass_at_1',
+    rawValue,
+    effort: 'high',
+  })
+  const visualization = buildBenchmarkVisualizationData({
+    modelMap: { source: 'model' },
+    benchmarkProfiles: { model: { canonicalModel: 'model', benchmarkEvidence: [
+      { benchmark: 'deepswe', benchmarkVersion: 'v1.1', domain: 'coding', metric: 'pass_at_1', rawValue: 0.7, effort: 'high' },
+    ] } },
+    deepsweLeaderboard: { rows: [{
+      model: 'source', reasoning_effort: 'high', pass_at_1: 0.7,
+      mean_cost_usd: 2, median_cost_usd: 1.5,
+    }] },
+    deepsweProfiles: { model: { benchmarkEvidence: [evidence('deepswe', 'v1.1', 0.7)] } },
+    benchlmProfiles: { model: { overallScore: 80, categoryScores: { coding: 75 } } },
+    dradarProfiles: { model: {
+      benchmarkEvidence: [evidence('codexradar', 'v1', 0.6)],
+      efforts: { high: { passRate: 0.6 } },
+      costData: { high: { meanCost: 1, medianCost: 0.8 } },
+    } },
+  })
+
+  assert.deepEqual([...new Set(visualization.data.map(row => row.source))].sort(), ['CodexRadar', 'DeepSWE v1.1'])
+  assert.deepEqual(
+    [...new Set(visualization.comparisons.map(row => row.source))].sort(),
+    ['BenchLM.ai', 'CodexRadar', 'DeepSWE v1.1'],
+  )
+  const validated = validateVisualizationData(visualization)
+  const html = renderBenchmarkChart(validated.rows, validated.comparisons, validated.qualityTiers)
+  const deepsweHighRow = visualization.data.find(row => row.source === 'DeepSWE v1.1' && row.effort === 'high')
+  // 逐档口径：quality_score 直接取本档可靠实测分
+  assert.equal(deepsweHighRow.quality_score, 70)
+  const registryVisualization = buildBenchmarkVisualizationData({
+    benchmarkProfiles: { model: { canonicalModel: 'model', benchmarkEvidence: [
+      { benchmark: 'codexradar', benchmarkVersion: 'codexradar', domain: 'coding', metric: 'pass_at_1', rawValue: 0.7, effort: 'ultra', costUsd: 1.25 },
+    ] } },
+  })
+  assert.equal(registryVisualization.data.length, 1)
+  assert.equal(registryVisualization.data[0].effort, 'ultra')
+  assert.equal(registryVisualization.data[0].quality_score, 70)
+  assert.ok(visualization.qualityTiers.premiumMin >= visualization.qualityTiers.highMin)
+  assert.ok(visualization.qualityTiers.highMin >= visualization.qualityTiers.normalMin)
+  assert.match(html, /多来源能力比较/)
+  assert.match(html, /quality-bands/)
+  assert.match(html, /BenchLM\.ai/)
+})
+
+test('visualization dedupes cost rows preferring live sources over registry backfill', () => {
+  const visualization = buildBenchmarkVisualizationData({
+    // live dradar：精确成本 0.1219（4 位小数）
+    dradarProfiles: { 'deepseek-v4-flash': {
+      efforts: { high: { passRate: 0.422 } },
+      costData: { high: { meanCost: 0.1219, medianCost: 0.1219 } },
+    } },
+    // registry 回填：同 (model|effort|CodexRadar) 的舍入成本行，应被 live 行压掉
+    benchmarkProfiles: { 'deepseek-v4-flash': { canonicalModel: 'deepseek-v4-flash', benchmarkEvidence: [
+      { benchmark: 'codexradar', benchmarkVersion: 'v1', domain: 'coding', metric: 'pass_at_1', rawValue: 0.422, effort: 'high', costUsd: 0.12 },
+      // registry 独有 effort（live 缺席）→ 回填保留
+      { benchmark: 'codexradar', benchmarkVersion: 'v1', domain: 'coding', metric: 'pass_at_1', rawValue: 0.5, effort: 'low', costUsd: 0.3 },
+    ] } },
+  })
+
+  assert.equal(visualization.data.length, 2)
+  const highRow = visualization.data.find(row => row.effort === 'high')
+  assert.equal(highRow.source, 'CodexRadar')
+  assert.equal(highRow.mean_cost, 0.1219)
+  const lowRow = visualization.data.find(row => row.effort === 'low')
+  assert.equal(lowRow.mean_cost, 0.3)
+})
+
+test('quality score is per-effort raw pass rate with model-level calibration retained', () => {
+  const evidence = (rawValue, effort, costUsd) => ({
+    benchmark: 'deepswe',
+    benchmarkVersion: 'v1.1',
+    domain: 'coding',
+    metric: 'pass_at_1',
+    rawValue,
+    effort,
+    costUsd,
+  })
+  const visualization = buildBenchmarkVisualizationData({
+    benchmarkProfiles: {
+      // 低增益模型：low→medium 实测仅 +9.7%，逐档口径下各档只呈现自身实测
+      'low-gain': { canonicalModel: 'low-gain', benchmarkEvidence: [
+        evidence(0.596, 'low', 3.7),
+        evidence(0.654, 'medium', 6),
+      ] },
+      // 高能力模型：仅有 medium 实测
+      strong: { canonicalModel: 'strong', benchmarkEvidence: [
+        evidence(0.689, 'medium', 3.2),
+      ] },
+      // 无 medium：low 与 high 跨越常规档
+      interpolated: { canonicalModel: 'interpolated', benchmarkEvidence: [
+        evidence(0.545, 'low', 1),
+        evidence(0.665, 'high', 3),
+      ] },
+      // 无 medium：全部在常规档一侧
+      'one-side': { canonicalModel: 'one-side', benchmarkEvidence: [
+        evidence(0.607, 'high', 5),
+        evidence(0.67, 'xhigh', 7),
+      ] },
+    },
+  })
+  const rowOf = (model, effort) => visualization.data
+    .find(row => row.model === model && row.effort === effort)
+
+  // 逐档 quality_score = 本档自身实测 pass@1（百分制），同组各档不再共享
+  assert.equal(rowOf('low-gain', 'low').quality_score, 59.6)
+  assert.equal(rowOf('low-gain', 'medium').quality_score, 65.4)
+  assert.equal(rowOf('strong', 'medium').quality_score, 68.9)
+  assert.equal(rowOf('interpolated', 'low').quality_score, 54.5)
+  assert.equal(rowOf('interpolated', 'high').quality_score, 66.5)
+  assert.equal(rowOf('one-side', 'high').quality_score, 60.7)
+  assert.equal(rowOf('one-side', 'xhigh').quality_score, 67)
+
+  // 模型级 medium 对齐校准保留在 model_quality_score：
+  // 有 medium 直接用、跨 medium 插值 60.5、一侧取最近档 60.7
+  assert.equal(rowOf('low-gain', 'low').model_quality_score, 65.4)
+  assert.equal(rowOf('strong', 'medium').model_quality_score, 68.9)
+  assert.equal(rowOf('interpolated', 'low').model_quality_score, 60.5)
+  assert.equal(rowOf('one-side', 'high').model_quality_score, 60.7)
+
+  // 低增益低能力模型的任意档实测分不得高于高能力模型 medium 实测
+  const lowGainMax = Math.max(
+    ...visualization.data.filter(row => row.model === 'low-gain').map(row => row.quality_score),
+  )
+  assert.ok(lowGainMax < rowOf('strong', 'medium').quality_score)
+})
+
+test('small-sample efforts are excluded from calibration and tagged in chart data', () => {
+  const evidence = (rawValue, effort, taskCount, costUsd = 1) => ({
+    benchmark: 'codexradar',
+    benchmarkVersion: 'v1',
+    domain: 'coding',
+    metric: 'pass_at_1',
+    rawValue,
+    effort,
+    taskCount,
+    costUsd,
+  })
+  // hy4-preview 现场：low 1 任务全过 = 100%，max 6 任务 2 过 = 33.3%
+  const noisyEvidence = [
+    evidence(1, 'low', 1, 1.2),
+    evidence(0.333, 'max', 6, 0.8),
+  ]
+  const visualization = buildBenchmarkVisualizationData({
+    benchmarkProfiles: {
+      'noisy-low': { canonicalModel: 'noisy-low', benchmarkEvidence: noisyEvidence },
+      // 对照组：同样分数但任务数充足，low+max 跨 medium 插值 = 83.3
+      'ample-low': { canonicalModel: 'ample-low', benchmarkEvidence: [
+        evidence(1, 'low', 66, 1.2),
+        evidence(0.333, 'max', 6, 0.8),
+      ] },
+      // 全部档位小样本：无可用等效分
+      'all-tiny': { canonicalModel: 'all-tiny', benchmarkEvidence: [
+        evidence(1, 'low', 1, 1.2),
+      ] },
+    },
+    // 比较行从 dradarProfiles 生成
+    dradarProfiles: { 'noisy-low': { benchmarkEvidence: noisyEvidence } },
+  })
+
+  const scoreOf = (model, effort) => visualization.data
+    .find(row => row.model === model && row.effort === effort)?.quality_score
+  // 逐档口径：小样本档自身实测是噪声（1 任务全过=100%），不评定档位 → null；
+  // 可靠档（max 6 任务）保留自身实测分
+  assert.equal(scoreOf('noisy-low', 'low'), null)
+  assert.equal(scoreOf('noisy-low', 'max'), 33.3)
+  assert.equal(scoreOf('ample-low', 'low'), 100)
+  // 全小样本：quality_score 为 null，但行保留在图表数据中（半透明点仅供观察）
+  assert.equal(scoreOf('all-tiny', 'low'), null)
+  const validated = validateVisualizationData(visualization)
+  assert.ok(validated.rows.some(row => row.model === 'all-tiny'))
+  assert.ok(validated.rows.some(row => row.model === 'noisy-low' && row.effort === 'low'))
+  // 成本行与比较行都带任务数，供图表标注小样本
+  assert.equal(visualization.data.find(row => row.model === 'noisy-low' && row.effort === 'low').taskCount, 1)
+  assert.equal(visualization.comparisons.find(row => row.model === 'noisy-low' && row.effort === 'low').taskCount, 1)
+})
+
+test('benchmark chart script carries low-sample marking logic', () => {
+  const html = renderBenchmarkChart([
+    { model: 'm', source: 'CodexRadar', effort: 'low', pass_rate: 1, quality_score: null, mean_cost: 1, median_cost: 1, taskCount: 1 },
+  ], [], null)
+  assert.match(html, /low-sample/)
+  assert.match(html, /isLowSampleRow/)
+  // 档位列与逐档评定逻辑随 HTML 内联分发
+  assert.match(html, /质量档/)
+  assert.match(html, /tierOf/)
+})
+
+test('benchmark chart script carries log/linear x-scale switching', () => {
+  const html = renderBenchmarkChart([
+    { model: 'm', source: 'CodexRadar', effort: 'low', pass_rate: .5, quality_score: 50, mean_cost: .03, median_cost: .03 },
+    { model: 'm', source: 'CodexRadar', effort: 'high', pass_rate: .8, quality_score: 70, mean_cost: 9, median_cost: 9 },
+  ], [], null)
+  // 横轴刻度切换控件随 HTML 内联分发，对数刻度为默认档
+  assert.match(html, /id="scale-control"/)
+  assert.match(html, /data-value="log"[^>]*aria-pressed="true"/)
+  assert.match(html, /data-value="linear"[^>]*aria-pressed="false"/)
+  // 对数 1-2-5 刻度序列、零成本钳制与自适应小数标签随脚本分发
+  assert.match(html, /logTicks/)
+  assert.match(html, /niceLogFloor/)
+  assert.match(html, /costTickLabel/)
+  assert.match(html, /Math\.max\(value, xMin\)/)
+})
+
+test('LiteLLM fills only unknown capabilities', () => {
+  const registry = {
+    upstreamCapabilities: [{
+      patterns: ['(?:^|[-/])model(?=$|@)'],
+      capabilities: { vision: true },
+    }],
+  }
+  mergeLitellmData(registry, {
+    model: { supports: { vision: false, toolCalls: true } },
+  }, emptyReport(), null)
+
+  assert.equal(registry.upstreamCapabilities[0].capabilities.vision, true)
+  assert.equal(registry.upstreamCapabilities[0].capabilities.toolCalls, true)
+})
+
+test('opus-5 is mapped across every benchmark source', () => {
+  // codexradar 例外：雷达Bench v2 只发布 GPT 系模型，opus 不在其列
+  assert.equal(DEEPSWE_MODEL_MAP['claude-opus-5'], 'claude-opus-5')
+  assert.equal(BENCHLM_MODEL_MAP['claude-opus-5'], 'claude-opus-5')
+  assert.equal(LITELLM_MODEL_MAP['claude-opus-5'], 'claude-opus-5')
+  assert.equal(ARTIFICIAL_ANALYSIS_MODEL_MAP['claude-opus-5'], 'claude-opus-5')
+})
+
+test('sonnet-5.5 is mapped across every benchmark source', () => {
+  // codexradar 例外：雷达Bench v2 只发布 GPT 系模型，sonnet 不在其列
+  assert.equal(DEEPSWE_MODEL_MAP['claude-sonnet-5-5'], 'claude-sonnet-5-5')
+  assert.equal(BENCHLM_MODEL_MAP['claude-sonnet-5-5'], 'claude-sonnet-5-5')
+  assert.equal(LITELLM_MODEL_MAP['claude-sonnet-5-5'], 'claude-sonnet-5-5')
+  assert.equal(ARTIFICIAL_ANALYSIS_MODEL_MAP['claude-sonnet-5-5'], 'claude-sonnet-5-5')
+})
+
+
+test('haiku-5.5 maps only in confirmed benchmark sources', () => {
+  assert.equal(BENCHLM_MODEL_MAP['claude-haiku-5-5'], 'claude-haiku-5-5')
+  assert.equal(ARTIFICIAL_ANALYSIS_MODEL_MAP['claude-haiku-5-5'], 'claude-haiku-5-5')
+  assert.equal(DEEPSWE_MODEL_MAP['claude-haiku-5-5'], undefined)
+  assert.equal(DRADAR_MODEL_MAP['claude-haiku-5-5'], undefined)
+  assert.equal(LITELLM_MODEL_MAP['claude-haiku-5-5'], undefined)
+})
+
+test('grok-4.6 / kimi-k2.7-code stay mapped in litellm (2026-08-20 audit regressions)', () => {
+  // litellm：kimi-k2.7-code 裸 key 已从上游移除，grok-4.6 用 xai 官方 key
+  // （dradar 侧 glm/k3/grok/dsh 等条目随雷达Bench v2 GPT-only 收敛退役）
+  assert.equal(LITELLM_MODEL_MAP['cloudflare/@cf/moonshotai/kimi-k2.7-code'], 'kimi-k2.7-code')
+  assert.equal(LITELLM_MODEL_MAP['xai/grok-4.6'], 'grok-4.6')
+})
+
+test('dradar map covers exactly the RadarBench v2 GPT-family lineup', () => {
+  // 雷达Bench v2（2026-10 站点重构）score_selection_catalog 只发布 GPT 系 6 模型；
+  // 其他厂商若重返榜单会经 extractScoreSelections 的 NEW-MODEL 告警路径补映射
+  for (const model of ['gpt-6.1-sol', 'gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-sol', 'gpt-5.6-luna']) {
+    assert.equal(DRADAR_MODEL_MAP[model], model)
+  }
+  // 退役模型与旧深榜厂商条目一律不在新映射
+  assert.equal(DRADAR_MODEL_MAP['gpt-5.5'], undefined)
+  assert.equal(DRADAR_MODEL_MAP['glm-5.3'], undefined)
+  assert.equal(DRADAR_MODEL_MAP['k3'], undefined)
+  assert.equal(DRADAR_MODEL_MAP['dsh-deepseek-v4.1-flash'], undefined)
+})
+
+test('deepswe glm-5.3-flash stays mapped (2026-08-26 release-day regression)', () => {
+  // deepswe UI 渲染成点号 glm-5.3-flash，API 数据 slug 是连字符 glm-5-3-flash；
+  // 映射键必须以 API 原始 slug 为准
+  assert.equal(DEEPSWE_MODEL_MAP['glm-5-3-flash'], 'glm-5.3-flash')
+})
+
+test('benchlm glm-5.3-flash stays mapped (2026-08-29 audit)', () => {
+  assert.equal(BENCHLM_MODEL_MAP['glm-5-3-flash'], 'glm-5.3-flash')
+})
+
+test('compareCanonicalModels orders decimal marketing versions like grok 4.20 (2026-08-29 registration)', () => {
+  // 十进制语义：grok-4.20 = 4.2，落在 4.3 与 4.1 之间；主版本仍是整数比较
+  const grokSeries = ['grok-4.1', 'grok-4.20', 'grok-4.3', 'grok-4.5', 'grok-4.6', 'grok-5']
+  assert.deepEqual([...grokSeries].sort(compareCanonicalModels),
+    ['grok-5', 'grok-4.6', 'grok-4.5', 'grok-4.3', 'grok-4.20', 'grok-4.1'])
+  // 单数字次版本不受影响
+  assert.ok(compareCanonicalModels('gpt-5.6', 'gpt-5.4') < 0)
+  assert.ok(compareCanonicalModels('claude-opus-4.8', 'claude-opus-4.7') < 0)
+  // 回归不变量：除 grok-4.20（新旧语义唯一刻意分歧者）外，其余全部 canonical
+  // 的排序与旧整数语义完全一致——引入小数比较不得扰动任何存量顺序
+  const registry = readJson('../../shared/model-registry/ccx_model_registry.json')
+  const canonicals = registry.benchmarkProfiles
+    .map(p => p.canonicalModel)
+    .filter(model => model !== 'grok-4.20')
+  const oldIntegerCompare = (a, b) => {
+    const parse = s => {
+      const m = String(s).toLowerCase().match(/\d+(?:[.-]\d+)*/)
+      return m ? { family: s.slice(0, m.index).replace(/[-/]+$/, ''), nums: m[0].split(/[.-]/).map(Number) } : { family: s, nums: [] }
+    }
+    const pa = parse(a)
+    const pb = parse(b)
+    if (pa.family !== pb.family) return pa.family.localeCompare(pb.family)
+    const len = Math.max(pa.nums.length, pb.nums.length)
+    for (let i = 0; i < len; i++) {
+      const x = pa.nums[i] ?? 0
+      const y = pb.nums[i] ?? 0
+      if (x !== y) return y - x
+    }
+    return 0
+  }
+  assert.deepEqual(
+    [...canonicals].sort(compareCanonicalModels),
+    [...canonicals].sort(oldIntegerCompare),
+  )
+})
+
+test('grok 4.20 stays mapped in benchlm and AA (2026-08-29 registration)', () => {
+  // benchlm 榜单 slug 带 beta；AA v2 GA slug 无 beta
+  assert.equal(BENCHLM_MODEL_MAP['grok-4-20-beta'], 'grok-4.20')
+  assert.equal(ARTIFICIAL_ANALYSIS_MODEL_MAP['grok-4-20'], 'grok-4.20')
+  // non-reasoning 变体折进同一 canonical，不污染 default 复合指数
+  assert.deepEqual(resolveArtificialAnalysisSlug('grok-4-20-non-reasoning'),
+    { canonical: 'grok-4.20', effort: 'default', selectionBasis: 'non_reasoning' })
+  // 0309 旧快照（$2/$6 定价已过期）与 multi-agent 子形态故意不映射
+  assert.equal(resolveArtificialAnalysisSlug('grok-4-20-0309'), null)
+  assert.equal(resolveArtificialAnalysisSlug('grok-4-20-0309-non-reasoning'), null)
+  assert.equal(BENCHLM_MODEL_MAP['grok-4-20-multi-agent-beta'], undefined)
+  // registry 能力条目 pattern：beta 后缀兼容 + 点号/连字符双形态
+  const registry = readJson('../../shared/model-registry/ccx_model_registry.json')
+  const entry = registry.upstreamCapabilities.find(e => e.displayName === 'Grok 4.20')
+  assert.ok(entry, 'Grok 4.20 capability entry missing')
+  assert.ok(matchesAnyRegistryPattern('grok-4-20-beta', entry.patterns))
+  assert.ok(matchesAnyRegistryPattern('grok-4.20', entry.patterns))
+  assert.equal(entry.contextWindowTokens, 1000000)
+})
+
+test('benchlm dated deepseek variants and gemini-3-6-flash stay mapped (2026-08-23 regressions)', () => {
+  assert.equal(BENCHLM_MODEL_MAP['deepseek-v4-flash-0731'], 'deepseek-v4-flash')
+  assert.equal(BENCHLM_MODEL_MAP['gemini-3-6-flash'], 'gemini-3.6-flash')
+  assert.equal(ARTIFICIAL_ANALYSIS_MODEL_MAP['deepseek-v4-flash'], 'deepseek-v4-flash')
+  assert.equal(ARTIFICIAL_ANALYSIS_MODEL_MAP['deepseek-v4-pro'], 'deepseek-v4-pro')
+})
+
+test('five registered models map in benchlm and AA (2026-08-24 additions)', () => {
+  // registry 能力表已有条目，补分数映射让它们进入候选池
+  assert.equal(BENCHLM_MODEL_MAP['claude-opus-4-6'], 'claude-opus-4-6')
+  assert.equal(BENCHLM_MODEL_MAP['claude-opus-4-7'], 'claude-opus-4-7')
+  assert.equal(BENCHLM_MODEL_MAP['minimax-m2-7'], 'minimax-m2.7')
+  assert.equal(BENCHLM_MODEL_MAP['minimax-m3'], 'minimax-m3')
+  assert.equal(BENCHLM_MODEL_MAP['qwen3-7-max'], 'qwen3.7-max')
+  assert.equal(ARTIFICIAL_ANALYSIS_MODEL_MAP['claude-opus-4-6'], 'claude-opus-4-6')
+  assert.equal(ARTIFICIAL_ANALYSIS_MODEL_MAP['claude-opus-4-7'], 'claude-opus-4-7')
+  assert.equal(ARTIFICIAL_ANALYSIS_MODEL_MAP['minimax-m2-7'], 'minimax-m2.7')
+  assert.equal(ARTIFICIAL_ANALYSIS_MODEL_MAP['minimax-m3'], 'minimax-m3')
+  assert.equal(ARTIFICIAL_ANALYSIS_MODEL_MAP['qwen3-7-max'], 'qwen3.7-max')
+})
+
+test('DeepSeek BenchLM variants fold into canonical flash and pro models', () => {
+  assert.equal(BENCHLM_MODEL_MAP['deepseek-v4-flash'], 'deepseek-v4-flash')
+  assert.equal(BENCHLM_MODEL_MAP['deepseek-v4-flash-base'], 'deepseek-v4-flash')
+  assert.equal(BENCHLM_MODEL_MAP['deepseek-v4-flash-high'], 'deepseek-v4-flash')
+  assert.equal(BENCHLM_MODEL_MAP['deepseek-v4-flash-max'], 'deepseek-v4-flash')
+  assert.equal(BENCHLM_MODEL_MAP['deepseek-v4-pro'], 'deepseek-v4-pro')
+  assert.equal(BENCHLM_MODEL_MAP['deepseek-v4-pro-base'], 'deepseek-v4-pro')
+  assert.equal(BENCHLM_MODEL_MAP['deepseek-v4-pro-high'], 'deepseek-v4-pro')
+  assert.equal(BENCHLM_MODEL_MAP['deepseek-v4-pro-max'], 'deepseek-v4-pro')
+  // 日期后缀别名：部分渠道以 -MMDD 形式发布新版本
+  assert.equal(BENCHLM_MODEL_MAP['deepseek-v4-pro-0813'], 'deepseek-v4-pro')
+})
+
+test('19 registered models map in benchlm (2026-09-02 additions)', () => {
+  // 与 AA 映射表补全同批：这些模型已注册进 registry，但 benchlm 表漏配导致丢数据
+  assert.equal(BENCHLM_MODEL_MAP['claude-opus-4-5'], 'claude-opus-4-5')
+  assert.equal(BENCHLM_MODEL_MAP['claude-sonnet-4-5'], 'claude-sonnet-4-5')
+  assert.equal(BENCHLM_MODEL_MAP['claude-mythos-preview'], 'claude-mythos-preview')
+  assert.equal(BENCHLM_MODEL_MAP['gpt-5-2'], 'gpt-5.2')
+  assert.equal(BENCHLM_MODEL_MAP['gpt-5-2-codex'], 'gpt-5.2-codex')
+  assert.equal(BENCHLM_MODEL_MAP['gpt-5-2-pro'], 'gpt-5.2-pro')
+  assert.equal(BENCHLM_MODEL_MAP['gpt-5-3-codex'], 'gpt-5.3-codex')
+  assert.equal(BENCHLM_MODEL_MAP['gpt-5-4-nano'], 'gpt-5.4-nano')
+  assert.equal(BENCHLM_MODEL_MAP['gpt-5-4-pro'], 'gpt-5.4-pro')
+  assert.equal(BENCHLM_MODEL_MAP['gpt-5-5-pro'], 'gpt-5.5-pro')
+  assert.equal(BENCHLM_MODEL_MAP['glm-5'], 'glm-5')
+  assert.equal(BENCHLM_MODEL_MAP['glm-5-1'], 'glm-5.1')
+  assert.equal(BENCHLM_MODEL_MAP['deepseek-v3-2'], 'deepseek-v3.2')
+  assert.equal(BENCHLM_MODEL_MAP['kimi-k2-5'], 'kimi-k2.5')
+  assert.equal(BENCHLM_MODEL_MAP['longcat-2-0'], 'longcat-2.0')
+  assert.equal(BENCHLM_MODEL_MAP['minimax-m2-5'], 'minimax-m2.5')
+  assert.equal(BENCHLM_MODEL_MAP['qwen3-7-plus'], 'qwen3.7-plus')
+  assert.equal(BENCHLM_MODEL_MAP['qwen3-max'], 'qwen3-max')
+  assert.equal(BENCHLM_MODEL_MAP['step-3-7-flash'], 'step-3.7-flash')
+})
+
+test('DeepSeek canonical model pattern supports dated suffixes', () => {
+  const pattern = canonicalModelToPattern('deepseek-v4-pro')
+  const ok = [
+    'deepseek-v4-pro',
+    'DeepSeek-V4-Pro-0813',
+    'deepseek-v4-pro-2026-08-13',
+    'deepseek-v4-pro-260813',
+    'deepseek-v4-pro-20260813',
+  ]
+  for (const model of ok) {
+    assert.match(model, new RegExp(pattern, 'i'), `${model} should match ${pattern}`)
+  }
+})
+
+test('Qwen canonical model pattern escapes the dot and supports dated suffixes', () => {
+  const pattern = canonicalModelToPattern('qwen3.8-max')
+  const ok = [
+    'qwen3.8-max',
+    'Qwen3.8-Max-0902',
+    'qwen3.8-max-2026-09-02',
+    'qwen3.8-max-260902',
+    'qwen3.8-max-20260902',
+    'dashscope/qwen3.8-max-0902',
+  ]
+  for (const model of ok) {
+    assert.match(model, new RegExp(pattern, 'i'), `${model} should match ${pattern}`)
+  }
+  // 点号已转义：不能把任意字符当作分隔符匹配
+  assert.doesNotMatch('qwen3x8-max', new RegExp(pattern, 'i'))
+})
+
+test('Artificial Analysis LLM extraction yields one evidence per composite index', () => {
+  const models = [
+    { slug: 'claude-opus-5', evaluations: {
+      artificial_analysis_intelligence_index: 92,
+      artificial_analysis_coding_index: 88,
+      artificial_analysis_agentic_index: 80,
+    } },
+    { slug: 'claude-opus-4-8', evaluations: { artificial_analysis_intelligence_index: 77 } },
+    { slug: 'unmapped-foo', evaluations: { artificial_analysis_intelligence_index: 50 } },
+  ]
+  const { profiles, unmappedSlugs } = extractAaLlm(models, 4.1)
+
+  assert.deepEqual(unmappedSlugs, ['unmapped-foo'])
+  const evidence = profiles['claude-opus-5'].benchmarkEvidence
+  assert.equal(evidence.length, 3)
+  assert.deepEqual(evidence.map(e => e.domain).sort(), ['agentic', 'coding', 'overall'])
+  assert.equal(evidence[0].benchmark, 'artificial_analysis')
+  assert.equal(evidence[0].benchmarkVersion, 'v4.1')
+  assert.equal(evidence[0].effort, 'default')
+  assert.equal(evidence[0].selectionBasis, 'composite_index')
+  // composite index 无任务级 raw data，taskCount 用 evaluation 数作代理以满足 schema（v4.3.2 共 10 项）
+  assert.equal(evidence[0].taskCount, 10)
+  // cohort 为数据集中所有有 intelligence_index 的模型（含未映射的，百分位相对全市场）
+  assert.equal(evidence[0].cohortSize, 3)
+  // opus-5 (92) 在 [92, 77, 50] 队列中百分位 = 1.0
+  const overall = evidence.find(e => e.domain === 'overall')
+  assert.equal(overall.rawValue, 92)
+  assert.equal(overall.cohortPercentile, 1)
+  assert.match(overall.sourceUrl, /^https:\/\/artificialanalysis\.ai\/models\/claude-opus-5$/)
+})
+
+test('Artificial Analysis slug resolver folds effort and non-reasoning variants into canonical', () => {
+  // 裸 slug：default 复合指数
+  assert.deepEqual(resolveArtificialAnalysisSlug('claude-opus-5'),
+    { canonical: 'claude-opus-5', effort: 'default', selectionBasis: 'composite_index' })
+  // effort 档位：xhigh/high/medium/low/minimal → best_available_effort
+  assert.deepEqual(resolveArtificialAnalysisSlug('claude-opus-5-xhigh'),
+    { canonical: 'claude-opus-5', effort: 'xhigh', selectionBasis: 'best_available_effort' })
+  assert.deepEqual(resolveArtificialAnalysisSlug('claude-sonnet-5-high'),
+    { canonical: 'claude-sonnet-5', effort: 'high', selectionBasis: 'best_available_effort' })
+  assert.deepEqual(resolveArtificialAnalysisSlug('gpt-5.6-luna-low'),
+    { canonical: 'gpt-5.6-luna', effort: 'low', selectionBasis: 'best_available_effort' })
+  // 点号基名归一（gpt-5.6-luna → gpt-5-6-luna 表项）
+  assert.deepEqual(resolveArtificialAnalysisSlug('gpt-5.6-sol-medium'),
+    { canonical: 'gpt-5.6-sol', effort: 'medium', selectionBasis: 'best_available_effort' })
+  // non-reasoning 变体：default 档 + non_reasoning，不污染 default 复合指数
+  assert.deepEqual(resolveArtificialAnalysisSlug('claude-sonnet-5-non-reasoning'),
+    { canonical: 'claude-sonnet-5', effort: 'default', selectionBasis: 'non_reasoning' })
+  // non-reasoning + low-effort 组合后缀
+  assert.deepEqual(resolveArtificialAnalysisSlug('claude-sonnet-4-6-non-reasoning-low-effort'),
+    { canonical: 'claude-sonnet-4-6', effort: 'default', selectionBasis: 'non_reasoning' })
+  // 新补的精确表项：flash 非 effort 后缀，不剥离，直接命中
+  assert.deepEqual(resolveArtificialAnalysisSlug('glm-5-3-flash'),
+    { canonical: 'glm-5.3-flash', effort: 'default', selectionBasis: 'composite_index' })
+  // deepseek 日期快照（-MMDD）归并到对应基模型
+  assert.deepEqual(resolveArtificialAnalysisSlug('deepseek-v4-flash-0420'),
+    { canonical: 'deepseek-v4-flash', effort: 'default', selectionBasis: 'composite_index' })
+  assert.deepEqual(resolveArtificialAnalysisSlug('deepseek-v4-pro-0424'),
+    { canonical: 'deepseek-v4-pro', effort: 'default', selectionBasis: 'composite_index' })
+  // 剥离后基名仍不在映射表 → null（继续计入 unmappedSlugs）；用虚构型号防止未来真被映射
+  assert.equal(resolveArtificialAnalysisSlug('gpt-5-9-medium'), null)
+  assert.equal(resolveArtificialAnalysisSlug('totally-unknown-xhigh'), null)
+})
+
+test('Artificial Analysis effort variants attach to canonical without clobbering default evidence', () => {
+  const models = [
+    { slug: 'claude-opus-5', evaluations: {
+      artificial_analysis_intelligence_index: 63,
+      artificial_analysis_coding_index: 78,
+      artificial_analysis_agentic_index: 59,
+    } },
+    { slug: 'claude-opus-5-xhigh', evaluations: {
+      artificial_analysis_intelligence_index: 71,
+      artificial_analysis_coding_index: 84,
+      artificial_analysis_agentic_index: 66,
+    } },
+  ]
+  const { profiles, unmappedSlugs } = extractAaLlm(models, 4.1)
+
+  assert.deepEqual(unmappedSlugs, [])
+  const evidence = profiles['claude-opus-5'].benchmarkEvidence
+  // 同一 canonical 下 default 与 xhigh 两档证据并存
+  assert.equal(evidence.length, 6)
+  const byKey = Object.fromEntries(evidence.map(e => [`${e.domain}:${e.effort}`, e]))
+  assert.equal(byKey['overall:default'].rawValue, 63)
+  assert.equal(byKey['overall:default'].selectionBasis, 'composite_index')
+  assert.equal(byKey['overall:xhigh'].rawValue, 71)
+  assert.equal(byKey['overall:xhigh'].selectionBasis, 'best_available_effort')
+  // xhigh 分更高 → cohortPercentile 不低于 default 档（对齐各自 rawValue，而非一律取 default 分）
+  assert.ok(byKey['overall:xhigh'].cohortPercentile >= byKey['overall:default'].cohortPercentile)
+  assert.equal(byKey['coding:xhigh'].rawValue, 84)
+  assert.equal(byKey['agentic:xhigh'].rawValue, 66)
+  // sourceModel/sourceUrl 保留各自真实 slug，便于回溯
+  assert.equal(byKey['overall:xhigh'].sourceModel, 'claude-opus-5-xhigh')
+  assert.match(byKey['overall:xhigh'].sourceUrl, /claude-opus-5-xhigh$/)
+})
+
+test('Artificial Analysis image arena extraction maps Elo', () => {
+  const models = [
+    { slug: 'agnes-image-2.1-flash', elo: 1180, ci_95: 12 },
+    { slug: 'unmapped-img', elo: 900, ci_95: null },
+  ]
+  const { profiles, unmappedSlugs } = extractAaImage(models, ARTIFICIAL_ANALYSIS_IMAGE_MODEL_MAP)
+
+  assert.deepEqual(unmappedSlugs, ['unmapped-img'])
+  assert.equal(profiles['agnes-image-2.1-flash'].elo, 1180)
+  assert.equal(profiles['agnes-image-2.1-flash'].ci95, 12)
+  assert.ok(profiles['agnes-image-2.1-flash'].sources.length > 0)
+})
+
+test('Artificial Analysis LLM merge replaces evidence without clobbering overallScore', () => {
+  const registry = {
+    benchmarkProfiles: [{
+      patterns: ['(?:^|[-/])claude-opus-5(?=$|@)'],
+      canonicalModel: 'claude-opus-5',
+      overallScore: 70,
+      categoryScores: { coding: 60 },
+      benchmarkEvidence: [{
+        benchmark: 'deepswe',
+        benchmarkVersion: 'v1.1',
+        domain: 'coding',
+        sourceUrl: 'https://deepswe.example/',
+        cohortSize: 4,
+      }, {
+        benchmark: 'artificial_analysis',
+        benchmarkVersion: 'v4.0',
+        domain: 'overall',
+        sourceUrl: 'https://artificialanalysis.ai/models/claude-opus-5',
+      }],
+      sources: ['https://deepswe.example/', 'https://artificialanalysis.ai/models/claude-opus-5'],
+      verifiedAt: '2026-07-20',
+      lane: 'provisional',
+      sharedResults: 4,
+      comparableCategories: 1,
+      totalCategories: 1,
+    }],
+  }
+  mergeArtificialAnalysisLlm(registry, {
+    'claude-opus-5': {
+      aaMeta: { slug: 'claude-opus-5' },
+      benchmarkEvidence: [{
+        benchmark: 'artificial_analysis',
+        benchmarkVersion: 'v4.1',
+        sourceModel: 'claude-opus-5',
+        domain: 'overall',
+        metric: 'intelligence_index',
+        rawValue: 92,
+        uncertainty: 0,
+        cohortPercentile: 1,
+        cohortSize: 2,
+        effort: 'default',
+        selectionBasis: 'composite_index',
+        sourceUrl: 'https://artificialanalysis.ai/models/claude-opus-5',
+        capturedAt: '2026-07-25',
+      }],
+    },
+  }, emptyReport(), null)
+
+  const profile = registry.benchmarkProfiles[0]
+  // overallScore/categoryScores 保持 benchlm 原值，未被 AA 覆盖
+  assert.equal(profile.overallScore, 70)
+  assert.equal(profile.categoryScores.coding, 60)
+  // 旧 AA 证据被替换，deepswe 证据保留
+  const aa = profile.benchmarkEvidence.filter(e => e.benchmark === 'artificial_analysis')
+  assert.equal(aa.length, 1)
+  assert.equal(aa[0].benchmarkVersion, 'v4.1')
+  const deep = profile.benchmarkEvidence.filter(e => e.benchmark === 'deepswe')
+  assert.equal(deep.length, 1)
+  assert.doesNotThrow(() => validateRegistry(registry))
+})
+
+test('AA llm merge skips unchanged data and preserves verifiedAt', () => {
+  const makeRegistry = () => ({
+    benchmarkProfiles: [{
+      patterns: ['(?:^|[-/])claude-opus-5(?=$|@)'],
+      canonicalModel: 'claude-opus-5',
+      benchmarkEvidence: [{
+        benchmark: 'artificial_analysis',
+        benchmarkVersion: 'v4.1',
+        sourceModel: 'claude-opus-5',
+        domain: 'overall',
+        metric: 'intelligence_index',
+        rawValue: 92,
+        cohortSize: 2,
+        sourceUrl: 'https://artificialanalysis.ai/models/claude-opus-5',
+        capturedAt: '2026-07-25',
+      }],
+      sources: ['https://artificialanalysis.ai/models/claude-opus-5'],
+      verifiedAt: '2026-07-20',
+      lane: 'provisional',
+      sharedResults: 4,
+      comparableCategories: 1,
+      totalCategories: 1,
+    }],
+  })
+  const aaData = {
+    'claude-opus-5': {
+      aaMeta: { slug: 'claude-opus-5' },
+      benchmarkEvidence: [{
+        benchmark: 'artificial_analysis',
+        benchmarkVersion: 'v4.1',
+        sourceModel: 'claude-opus-5',
+        domain: 'overall',
+        metric: 'intelligence_index',
+        rawValue: 92,
+        cohortSize: 2,
+        sourceUrl: 'https://artificialanalysis.ai/models/claude-opus-5',
+        capturedAt: '2026-07-29',
+      }],
+    },
+  }
+
+  const registry = makeRegistry()
+  const report = emptyReport()
+  mergeArtificialAnalysisLlm(registry, aaData, report, null)
+
+  assert.equal(report.unchanged.length, 1)
+  assert.equal(report.updated.length, 0)
+  const profile = registry.benchmarkProfiles[0]
+  assert.equal(profile.verifiedAt, '2026-07-20')
+  assert.equal(profile.benchmarkEvidence[0].capturedAt, '2026-07-25')
+  assert.doesNotThrow(() => validateRegistry(registry))
+})
+
+test('Artificial Analysis image arena merge builds and updates imageArenaProfiles', () => {
+  const registry = { benchmarkProfiles: [], imageArenaProfiles: [] }
+  mergeArtificialAnalysisImageArena(registry, {
+    'agnes-image-2.1-flash': {
+      canonicalModel: 'agnes-image-2.1-flash',
+      elo: 1180,
+      ci95: 12,
+      sources: ['https://artificialanalysis.ai/leaderboards/image-generation'],
+    },
+  }, emptyReport(), null)
+
+  assert.equal(registry.imageArenaProfiles.length, 1)
+  const arena = registry.imageArenaProfiles[0]
+  assert.equal(arena.canonicalModel, 'agnes-image-2.1-flash')
+  assert.equal(arena.elo, 1180)
+  assert.ok(arena.patterns.length > 0)
+  assert.ok(/^\d{4}-\d{2}-\d{2}$/.test(arena.verifiedAt))
+  assert.doesNotThrow(() => validateRegistry(registry))
+
+  // 更新路径：同 canonical 再次 merge 时替换 elo
+  mergeArtificialAnalysisImageArena(registry, {
+    'agnes-image-2.1-flash': {
+      canonicalModel: 'agnes-image-2.1-flash',
+      elo: 1195,
+      ci95: 10,
+      sources: ['https://artificialanalysis.ai/leaderboards/image-generation'],
+    },
+  }, emptyReport(), null)
+  assert.equal(registry.imageArenaProfiles.length, 1)
+  assert.equal(registry.imageArenaProfiles[0].elo, 1195)
+  assert.doesNotThrow(() => validateRegistry(registry))
+})
+
+test('deepswe merge skips unchanged data and preserves capturedAt/verifiedAt', () => {
+  const registry = { benchmarkProfiles: [], upstreamCapabilities: [] }
+  const evidence = {
+    benchmark: 'deepswe',
+    benchmarkVersion: 'v1.1',
+    sourceModel: 'gpt-5-6-sol',
+    domain: 'coding',
+    metric: 'pass_at_1',
+    rawValue: 0.8,
+    uncertainty: 0.01,
+    cohortPercentile: 1,
+    taskCount: 100,
+    cohortSize: 4,
+    effort: 'high',
+    selectionBasis: 'best_available_effort',
+    sourceUrl: 'https://deepswe.example/',
+    capturedAt: '2026-07-21',
+  }
+  mergeDeepsweData(registry, {
+    'gpt-5.6-sol': {
+      deepsweMeta: { deepsweModel: 'gpt-5-6-sol' },
+      benchmarkEvidence: [evidence],
+    },
+  }, emptyReport(), null)
+  registry.benchmarkProfiles[0].verifiedAt = '2026-07-01'
+
+  // 相同数据（仅 capturedAt 变为新日期）再次 merge：应跳过，日期保持原值
+  const report = emptyReport()
+  mergeDeepsweData(registry, {
+    'gpt-5.6-sol': {
+      deepsweMeta: { deepsweModel: 'gpt-5-6-sol' },
+      benchmarkEvidence: [{ ...evidence, capturedAt: '2026-07-29' }],
+    },
+  }, report, null)
+
+  assert.equal(report.unchanged.length, 1)
+  assert.equal(report.updated.length, 0)
+  const profile = registry.benchmarkProfiles[0]
+  assert.equal(profile.verifiedAt, '2026-07-01')
+  assert.equal(profile.benchmarkEvidence[0].capturedAt, '2026-07-21')
+  assert.doesNotThrow(() => validateRegistry(registry))
+
+  // 数据真正变化（rawValue 不同）时正常更新并刷新 verifiedAt
+  const report2 = emptyReport()
+  mergeDeepsweData(registry, {
+    'gpt-5.6-sol': {
+      deepsweMeta: { deepsweModel: 'gpt-5-6-sol' },
+      benchmarkEvidence: [{ ...evidence, rawValue: 0.85, capturedAt: '2026-07-29' }],
+    },
+  }, report2, null)
+
+  assert.equal(report2.updated.length, 1)
+  assert.equal(registry.benchmarkProfiles[0].benchmarkEvidence[0].rawValue, 0.85)
+  assert.notEqual(registry.benchmarkProfiles[0].verifiedAt, '2026-07-01')
+})
+
+test('deepswe merge treats reordered evidence as unchanged', () => {
+  const makeEvidence = (rawValue) => ({
+    benchmark: 'deepswe',
+    benchmarkVersion: 'v1.1',
+    sourceModel: 'gpt-5-6-sol',
+    domain: 'coding',
+    metric: 'pass_at_1',
+    rawValue,
+    sourceUrl: 'https://deepswe.example/',
+    capturedAt: '2026-07-21',
+  })
+  const registry = { benchmarkProfiles: [], upstreamCapabilities: [] }
+  mergeDeepsweData(registry, {
+    'gpt-5.6-sol': {
+      deepsweMeta: { deepsweModel: 'gpt-5-6-sol' },
+      benchmarkEvidence: [makeEvidence(0.8), makeEvidence(0.6)],
+    },
+  }, emptyReport(), null)
+  registry.benchmarkProfiles[0].verifiedAt = '2026-07-01'
+
+  // 上游返回顺序颠倒但内容相同：应视为未变更
+  const report = emptyReport()
+  mergeDeepsweData(registry, {
+    'gpt-5.6-sol': {
+      deepsweMeta: { deepsweModel: 'gpt-5-6-sol' },
+      benchmarkEvidence: [makeEvidence(0.6), makeEvidence(0.8)],
+    },
+  }, report, null)
+
+  assert.equal(report.unchanged.length, 1)
+  assert.equal(registry.benchmarkProfiles[0].verifiedAt, '2026-07-01')
+})
+
+test('image arena merge skips unchanged elo and preserves verifiedAt', () => {
+  const registry = { benchmarkProfiles: [], imageArenaProfiles: [] }
+  const data = {
+    canonicalModel: 'agnes-image-2.1-flash',
+    elo: 1180,
+    ci95: 12,
+    sources: ['https://artificialanalysis.ai/leaderboards/image-generation'],
+  }
+  mergeArtificialAnalysisImageArena(registry, { 'agnes-image-2.1-flash': data }, emptyReport(), null)
+  registry.imageArenaProfiles[0].verifiedAt = '2026-07-01'
+
+  const report = emptyReport()
+  mergeArtificialAnalysisImageArena(registry, { 'agnes-image-2.1-flash': { ...data } }, report, null)
+
+  assert.equal(report.unchanged.length, 1)
+  assert.equal(report.aaImageArenaUpdated.length, 0)
+  assert.equal(registry.imageArenaProfiles[0].verifiedAt, '2026-07-01')
+  assert.doesNotThrow(() => validateRegistry(registry))
+})
+
+test('visualization includes Artificial Analysis and image arena comparisons', () => {
+  const evidence = (benchmark, rawValue) => ({
+    benchmark,
+    benchmarkVersion: 'v4.1',
+    domain: 'overall',
+    metric: 'intelligence_index',
+    rawValue,
+    effort: 'default',
+  })
+  const visualization = buildBenchmarkVisualizationData({
+    modelMap: { source: 'model' },
+    deepsweProfiles: { model: { benchmarkEvidence: [evidence('deepswe', 0.7)] } },
+    benchlmProfiles: { model: { overallScore: 80, categoryScores: { coding: 75 } } },
+    dradarProfiles: { model: { benchmarkEvidence: [evidence('codexradar', 0.6)], efforts: {} } },
+    artificialAnalysisProfiles: { model: { benchmarkEvidence: [evidence('artificial_analysis', 92)] } },
+    artificialAnalysisImageArena: { 'agnes-image-2.1-flash': { elo: 1180 } },
+  })
+
+  assert.ok(
+    [...new Set(visualization.comparisons.map(row => row.source))].includes('Artificial Analysis'),
+    'comparisons should include Artificial Analysis',
+  )
+  const imgRow = visualization.comparisons.find(r => r.category === 'image_arena')
+  assert.ok(imgRow, 'comparisons should include image_arena rows')
+  assert.equal(imgRow.score, 1180)
+  const validated = validateVisualizationData(visualization)
+  const html = renderBenchmarkChart(validated.rows, validated.comparisons, validated.qualityTiers)
+  assert.match(html, /Artificial Analysis/)
+  assert.match(html, /图像 Arena Elo/)
+})

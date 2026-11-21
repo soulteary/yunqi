@@ -1,0 +1,663 @@
+// Package responses 提供 Responses API 的渠道管理
+package responses
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/BenedictKing/ccx/internal/autopilot"
+	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/BenedictKing/ccx/internal/copilot"
+	handlers "github.com/BenedictKing/ccx/internal/handlers"
+	"github.com/BenedictKing/ccx/internal/handlers/common"
+	"github.com/BenedictKing/ccx/internal/httpclient"
+	"github.com/BenedictKing/ccx/internal/scheduler"
+	"github.com/BenedictKing/ccx/internal/utils"
+	"github.com/gin-gonic/gin"
+)
+
+// GetUpstreams 获取 Responses 上游列表
+func GetUpstreams(cfgManager *config.ConfigManager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cfg := cfgManager.GetConfig()
+
+		upstreams := make([]gin.H, len(cfg.ResponsesUpstream))
+		for i, up := range cfg.ResponsesUpstream {
+			upstreams[i] = common.BuildChannelView(up, i)
+		}
+
+		c.JSON(200, gin.H{
+			"channels": upstreams,
+		})
+	}
+}
+
+// AddUpstream 添加 Responses 上游
+func AddUpstream(cfgManager *config.ConfigManager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			config.UpstreamConfig
+			Placement string `json:"placement"` // 故障转移位置：front（首位）| back（末尾，默认）
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(400, gin.H{"error": err.Error()})
+			return
+		}
+
+		if err := cfgManager.AddResponsesUpstream(req.UpstreamConfig, req.Placement); err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+
+		c.JSON(200, gin.H{"message": "Responses upstream added successfully"})
+	}
+}
+
+// UpdateUpstream 更新 Responses 上游
+func UpdateUpstream(cfgManager *config.ConfigManager, sch *scheduler.ChannelScheduler) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		idStr := c.Param("id")
+		id, err := strconv.Atoi(idStr)
+		if err != nil {
+			c.JSON(400, gin.H{"error": "Invalid upstream ID"})
+			return
+		}
+
+		var updates config.UpstreamUpdate
+		if err := c.ShouldBindJSON(&updates); err != nil {
+			c.JSON(400, gin.H{"error": err.Error()})
+			return
+		}
+
+		oldName := ""
+		if updates.Name != nil {
+			cfg := cfgManager.GetConfig()
+			if id >= 0 && id < len(cfg.ResponsesUpstream) {
+				oldName = cfg.ResponsesUpstream[id].Name
+			}
+		}
+
+		shouldResetMetrics, err := cfgManager.UpdateResponsesUpstream(id, updates)
+		if err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+
+		if updates.Name != nil && oldName != "" && oldName != *updates.Name {
+			if logStore := sch.GetChannelLogStore(scheduler.ChannelKindResponses); logStore != nil {
+				logStore.RenameChannel(oldName, *updates.Name)
+			}
+		}
+
+		// 单 key 更换时重置熔断状态
+		if shouldResetMetrics {
+			sch.ResetChannelMetrics(id, scheduler.ChannelKindResponses)
+		}
+
+		c.JSON(200, gin.H{"message": "Responses upstream updated successfully"})
+	}
+}
+
+// DeleteUpstream 删除 Responses 上游
+func DeleteUpstream(cfgManager *config.ConfigManager, channelScheduler *scheduler.ChannelScheduler) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		idStr := c.Param("id")
+		id, err := strconv.Atoi(idStr)
+		if err != nil {
+			c.JSON(400, gin.H{"error": "Invalid upstream ID"})
+			return
+		}
+
+		removed, err := cfgManager.RemoveResponsesUpstream(id)
+		if err != nil {
+			if strings.Contains(err.Error(), "无效的") {
+				c.JSON(404, gin.H{"error": "Upstream not found"})
+			} else {
+				c.JSON(500, gin.H{"error": err.Error()})
+			}
+			return
+		}
+
+		channelScheduler.DeleteChannelLogs(removed, scheduler.ChannelKindResponses)
+		channelScheduler.DeleteChannelMetrics(removed, scheduler.ChannelKindResponses)
+
+		c.JSON(200, gin.H{"message": "Responses upstream deleted successfully"})
+	}
+}
+
+// AddApiKey 添加 Responses 渠道 API 密钥
+func AddApiKey(cfgManager *config.ConfigManager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		idStr := c.Param("id")
+		id, err := strconv.Atoi(idStr)
+		if err != nil {
+			c.JSON(400, gin.H{"error": "Invalid upstream ID"})
+			return
+		}
+
+		var req struct {
+			APIKey string `json:"apiKey"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(400, gin.H{"error": "Invalid request body"})
+			return
+		}
+
+		if err := cfgManager.AddResponsesAPIKey(id, req.APIKey); err != nil {
+			if strings.Contains(err.Error(), "无效的上游索引") {
+				c.JSON(404, gin.H{"error": "Upstream not found"})
+			} else if strings.Contains(err.Error(), "API密钥已存在") {
+				c.JSON(400, gin.H{"error": "API密钥已存在"})
+			} else {
+				c.JSON(500, gin.H{"error": "Failed to save config"})
+			}
+			return
+		}
+
+		c.JSON(200, gin.H{
+			"message": "API密钥已添加",
+			"success": true,
+		})
+	}
+}
+
+// DeleteApiKey 删除 Responses 渠道 API 密钥
+func DeleteApiKey(cfgManager *config.ConfigManager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		idStr := c.Param("id")
+		id, err := strconv.Atoi(idStr)
+		if err != nil {
+			c.JSON(400, gin.H{"error": "Invalid upstream ID"})
+			return
+		}
+
+		apiKey := c.Param("apiKey")
+		if apiKey == "" {
+			c.JSON(400, gin.H{"error": "API key is required"})
+			return
+		}
+
+		if err := cfgManager.RemoveResponsesAPIKey(id, apiKey); err != nil {
+			if strings.Contains(err.Error(), "无效的上游索引") {
+				c.JSON(404, gin.H{"error": "Upstream not found"})
+			} else if strings.Contains(err.Error(), "API密钥不存在") {
+				c.JSON(404, gin.H{"error": "API key not found"})
+			} else {
+				c.JSON(500, gin.H{"error": "Failed to save config"})
+			}
+			return
+		}
+
+		c.JSON(200, gin.H{
+			"message": "API密钥已删除",
+		})
+	}
+}
+
+// MoveApiKeyToTop 将 Responses 渠道 API 密钥移到最前面
+func MoveApiKeyToTop(cfgManager *config.ConfigManager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, _ := strconv.Atoi(c.Param("id"))
+		apiKey := c.Param("apiKey")
+
+		if err := cfgManager.MoveResponsesAPIKeyToTop(id, apiKey); err != nil {
+			c.JSON(400, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(200, gin.H{"message": "API密钥已置顶"})
+	}
+}
+
+// MoveApiKeyToBottom 将 Responses 渠道 API 密钥移到最后面
+func MoveApiKeyToBottom(cfgManager *config.ConfigManager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, _ := strconv.Atoi(c.Param("id"))
+		apiKey := c.Param("apiKey")
+
+		if err := cfgManager.MoveResponsesAPIKeyToBottom(id, apiKey); err != nil {
+			c.JSON(400, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(200, gin.H{"message": "API密钥已置底"})
+	}
+}
+
+// ReorderChannels 重新排序 Responses 渠道优先级
+func ReorderChannels(cfgManager *config.ConfigManager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			Order      []int `json:"order"`
+			Priorities []int `json:"priorities"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(400, gin.H{"error": "Invalid request body"})
+			return
+		}
+
+		if err := cfgManager.ReorderResponsesUpstreams(req.Order, req.Priorities); err != nil {
+			c.JSON(400, gin.H{"error": err.Error()})
+			return
+		}
+
+		c.JSON(200, gin.H{
+			"success": true,
+			"message": "Responses 渠道优先级已更新",
+		})
+	}
+}
+
+// PingChannel 测试单个 Responses 渠道连通性
+func PingChannel(cfgManager *config.ConfigManager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, err := strconv.Atoi(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid channel ID"})
+			return
+		}
+
+		cfg := cfgManager.GetConfig()
+		if id < 0 || id >= len(cfg.ResponsesUpstream) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Channel not found"})
+			return
+		}
+
+		c.JSON(http.StatusOK, common.PingSingleBaseURLUpstream(cfg.ResponsesUpstream[id], buildPingRequest))
+	}
+}
+
+// PingAllChannels 测试全部 Responses 渠道连通性
+func PingAllChannels(cfgManager *config.ConfigManager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cfg := cfgManager.GetConfig()
+		c.JSON(http.StatusOK, common.PingAllSingleBaseURLUpstreams(cfg.ResponsesUpstream, buildPingRequest, false)["results"])
+	}
+}
+
+func buildPingRequest(upstream config.UpstreamConfig, baseURL string) (*http.Request, error) {
+	var req *http.Request
+	switch upstream.ServiceType {
+	case "claude":
+		req, _ = http.NewRequest(http.MethodOptions, buildMessagesURL(baseURL), nil)
+		if len(upstream.APIKeys) > 0 {
+			if utils.HasAuthenticationHeaderOverride(upstream.AuthHeader) {
+				utils.SetAuthenticationHeaderWithOverride(req.Header, upstream.APIKeys[0], upstream.AuthHeader)
+			} else {
+				utils.SetAuthenticationHeaderWithOverride(req.Header, upstream.APIKeys[0], "x-api-key")
+			}
+			req.Header.Set("anthropic-version", "2023-06-01")
+		}
+	case "gemini":
+		req, _ = http.NewRequest(http.MethodGet, buildGeminiModelsURL(baseURL), nil)
+		if len(upstream.APIKeys) > 0 {
+			if utils.HasAuthenticationHeaderOverride(upstream.AuthHeader) {
+				utils.SetAuthenticationHeaderWithOverride(req.Header, upstream.APIKeys[0], upstream.AuthHeader)
+			} else {
+				req.Header.Set("x-goog-api-key", upstream.APIKeys[0])
+			}
+		}
+	case "copilot":
+		if len(upstream.APIKeys) == 0 {
+			return nil, fmt.Errorf("copilot 渠道缺少 GitHub OAuth token")
+		}
+		copilotToken, copilotBaseURL, err := copilot.ResolveTokenWithProxy(context.Background(), upstream.APIKeys[0], upstream.ProxyURL)
+		if err != nil {
+			return nil, fmt.Errorf("copilot token 交换失败: %w", err)
+		}
+		targetBase := copilotBaseURL
+		if targetBase == "" {
+			targetBase = strings.TrimSuffix(baseURL, "/")
+		}
+		req, _ = http.NewRequest(http.MethodGet, strings.TrimSuffix(targetBase, "/")+"/models", nil)
+		copilot.ApplyRuntimeHeaders(req.Header, copilotToken)
+	default:
+		req, _ = http.NewRequest(http.MethodGet, buildModelsURL(baseURL), nil)
+		if len(upstream.APIKeys) > 0 {
+			utils.SetAuthenticationHeaderWithOverride(req.Header, upstream.APIKeys[0], upstream.AuthHeader)
+		}
+	}
+	return req, nil
+}
+
+// SetChannelStatus 设置 Responses 渠道状态
+func SetChannelStatus(cfgManager *config.ConfigManager) gin.HandlerFunc {
+	adapter := handlers.ChannelStatusConfigManagerFunc(func(index int, status string) error {
+		return cfgManager.SetResponsesChannelStatus(index, status)
+	})
+	return handlers.NamedChannelStatusHandler(adapter, "Responses 渠道状态已更新")
+}
+
+// SetChannelPromotion 设置 Responses 渠道促销期
+func SetChannelPromotion(cfgManager *config.ConfigManager) gin.HandlerFunc {
+	return handlers.SetResponsesChannelPromotion(cfgManager)
+}
+
+// buildEndpointURL 构建带版本前缀的端点 URL
+func buildEndpointURL(baseURL, versionPrefix, endpoint string) string {
+	skipVersionPrefix := strings.HasSuffix(baseURL, "#")
+	if skipVersionPrefix {
+		baseURL = strings.TrimSuffix(baseURL, "#")
+	}
+	baseURL = strings.TrimSuffix(baseURL, "/")
+
+	versionPattern := regexp.MustCompile(`/v\d+[a-z]*$`)
+	hasVersionSuffix := versionPattern.MatchString(baseURL)
+
+	if !hasVersionSuffix && !skipVersionPrefix {
+		baseURL += versionPrefix
+	}
+
+	return baseURL + endpoint
+}
+
+func buildMessagesURL(baseURL string) string {
+	return buildEndpointURL(baseURL, "/v1", "/messages")
+}
+
+func buildGeminiModelsURL(baseURL string) string {
+	return buildEndpointURL(baseURL, "/v1beta", "/models")
+}
+
+// buildModelsURL 构建 models 端点的 URL
+func buildModelsURL(baseURL string) string {
+	if modelsURL, ok := config.ResolveBuiltinModelsURL(baseURL, "openai"); ok {
+		return modelsURL
+	}
+	if strings.Contains(baseURL, "api.githubcopilot.com") {
+		return strings.TrimSuffix(strings.TrimSuffix(baseURL, "#"), "/") + "/models"
+	}
+	return buildEndpointURL(baseURL, "/v1", "/models")
+}
+
+// GetModelsRequest 获取模型列表的请求体
+type GetModelsRequest struct {
+	Key         string   `json:"key"`
+	BaseURL     string   `json:"baseUrl"`
+	BaseURLs    []string `json:"baseUrls"`
+	ServiceType string   `json:"serviceType"`
+	ProxyURL    string   `json:"proxyUrl"`
+	// ProxyPreferDirect 直连优先（nil=未指定，回退渠道配置）；仅在配置了代理时有意义
+	ProxyPreferDirect  *bool             `json:"proxyPreferDirect"`
+	InsecureSkipVerify *bool             `json:"insecureSkipVerify"`
+	CustomHeaders      map[string]string `json:"customHeaders"`
+	AuthHeader         string            `json:"authHeader"`
+	// LearnedClientFingerprint 上游存在客户端指纹校验（保活 L1 等无渠道上下文的
+	// 调用方传入渠道学习到的标记），命中时请求带 Claude Code 客户端伪装头。
+	LearnedClientFingerprint bool `json:"learnedClientFingerprint,omitempty"`
+}
+
+// GetChannelModels 获取指定渠道的模型列表（支持临时 Key）
+func GetChannelModels(cfgManager *config.ConfigManager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// 1. 解析渠道 ID
+		idStr := c.Param("id")
+		id, err := strconv.Atoi(idStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid channel ID"})
+			return
+		}
+
+		// 2. 从请求体读取参数
+		var req GetModelsRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+			return
+		}
+
+		// 3. 获取 baseUrl（优先使用请求体中的临时 baseUrl，用于新增渠道场景）
+		var baseURL string
+		var channelName string
+		var channel *config.UpstreamConfig
+		var serviceType string
+		var insecureSkipVerify bool
+		var proxyURL string
+		var proxyPreferDirect bool
+		var authHeader string
+		var learnedClientFingerprint bool
+
+		if req.BaseURL != "" {
+			// 新增模式：使用临时 baseUrl
+			// SSRF 防护：验证用户提供的 baseURL
+			if err := utils.ValidateBaseURL(req.BaseURL); err != nil {
+				log.Printf("[Responses-Models] SSRF 防护拦截: %v", err)
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("无效的 baseUrl: %v", err)})
+				return
+			}
+			baseURL = req.BaseURL
+			channelName = "临时渠道"
+			serviceType = req.ServiceType
+			insecureSkipVerify = false
+			proxyURL = ""
+			if req.InsecureSkipVerify != nil {
+				insecureSkipVerify = *req.InsecureSkipVerify
+			}
+			if req.ProxyURL != "" {
+				proxyURL = req.ProxyURL
+			}
+			if req.ProxyPreferDirect != nil {
+				proxyPreferDirect = *req.ProxyPreferDirect
+			}
+			authHeader = req.AuthHeader
+			learnedClientFingerprint = req.LearnedClientFingerprint
+			log.Printf("[Responses-Models] 使用临时 baseUrl: %s", baseURL)
+		} else {
+			// 编辑模式：从配置中读取渠道信息
+			cfg := cfgManager.GetConfig()
+			if id < 0 || id >= len(cfg.ResponsesUpstream) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "Channel not found"})
+				return
+			}
+
+			channel = &cfg.ResponsesUpstream[id]
+			baseURL = channel.BaseURL
+			channelName = channel.Name
+			serviceType = channel.ServiceType
+			insecureSkipVerify = channel.InsecureSkipVerify
+			proxyURL = channel.ProxyURL
+			proxyPreferDirect = channel.ProxyPreferDirect
+			authHeader = channel.AuthHeader
+			learnedClientFingerprint = channel.LearnedClientFingerprint || req.LearnedClientFingerprint
+			if req.BaseURL != "" {
+				if err := utils.ValidateBaseURL(req.BaseURL); err != nil {
+					log.Printf("[Responses-Models] SSRF 防护拦截: %v", err)
+					c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("无效的 baseUrl: %v", err)})
+					return
+				}
+				baseURL = req.BaseURL
+			}
+			if req.InsecureSkipVerify != nil {
+				insecureSkipVerify = *req.InsecureSkipVerify
+			}
+			if req.ProxyURL != "" {
+				proxyURL = req.ProxyURL
+			}
+			if req.ProxyPreferDirect != nil {
+				proxyPreferDirect = *req.ProxyPreferDirect
+			}
+			if req.AuthHeader != "" {
+				authHeader = req.AuthHeader
+			}
+		}
+
+		// 4. 验证 API Key
+		apiKey := req.Key
+		if apiKey == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "No API key provided"})
+			return
+		}
+
+		log.Printf("[Responses-Models] 请求模型列表: channel=%s, key=%s", channelName, utils.MaskAPIKey(apiKey))
+
+		// 火山套餐渠道的数据面 /models 不反映套餐清单（/api/coding 返回全量目录、
+		// /api/plan 无此接口），改走管控面套餐模型接口。
+		if volcengineModels, handled, err := autopilot.FetchVolcenginePlanModelsForChannel(c.Request.Context(), cfgManager, channel, baseURL, apiKey); handled {
+			if err != nil {
+				log.Printf("[Responses-Models] 火山套餐模型查询失败: channel=%s, key=%s, error=%v", channelName, utils.MaskAPIKey(apiKey), err)
+				c.JSON(http.StatusBadGateway, gin.H{"error": err.Error(), "statusCode": 502})
+				return
+			}
+			data := make([]gin.H, 0, len(volcengineModels))
+			for _, model := range volcengineModels {
+				data = append(data, gin.H{"id": model})
+			}
+			c.JSON(http.StatusOK, gin.H{"data": data, "statusCode": http.StatusOK})
+			return
+		}
+
+		// 5. 发起请求
+		url := buildModelsURL(baseURL)
+		if serviceType == "copilot" {
+			url = strings.TrimSuffix(strings.TrimSuffix(baseURL, "#"), "/") + "/models"
+		}
+		clientOpts := httpclient.ClientOptions{
+			Timeout:           10 * time.Second,
+			Insecure:          insecureSkipVerify,
+			ProxyURL:          proxyURL,
+			ProxyPreferDirect: proxyPreferDirect,
+		}
+		client := httpclient.GetManager().GetClient(clientOpts)
+		if req.BaseURL != "" && req.ProxyURL != "" {
+			// 新增模式下的临时代理参数高变，不进缓存
+			client = httpclient.GetManager().NewClient(clientOpts)
+		}
+
+		httpReq, err := http.NewRequestWithContext(c.Request.Context(), "GET", url, nil)
+		if err != nil {
+			log.Printf("[Responses-Models] 创建请求失败: channel=%s, url=%s, error=%v", channelName, url, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to create request: %v", err)})
+			return
+		}
+		switch serviceType {
+		case "claude":
+			if utils.HasAuthenticationHeaderOverride(authHeader) {
+				utils.SetAuthenticationHeaderWithOverride(httpReq.Header, apiKey, authHeader)
+			} else {
+				utils.SetAuthenticationHeaderWithOverride(httpReq.Header, apiKey, "x-api-key")
+			}
+			httpReq.Header.Set("anthropic-version", "2023-06-01")
+		case "gemini":
+			if utils.HasAuthenticationHeaderOverride(authHeader) {
+				utils.SetAuthenticationHeaderWithOverride(httpReq.Header, apiKey, authHeader)
+			} else {
+				httpReq.Header.Set("x-goog-api-key", apiKey)
+			}
+		case "copilot":
+			copilotToken, copilotBaseURL, err := copilot.ResolveTokenWithProxy(c.Request.Context(), apiKey, proxyURL)
+			if err != nil {
+				c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("Failed to exchange Copilot token: %v", err)})
+				return
+			}
+			// 使用 token exchange 返回的动态端点覆盖请求 URL
+			if copilotBaseURL != "" {
+				url = strings.TrimRight(copilotBaseURL, "/") + "/models"
+				httpReq, err = http.NewRequestWithContext(c.Request.Context(), "GET", url, nil)
+				if err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to create request: %v", err)})
+					return
+				}
+			}
+			copilot.ApplyRuntimeHeaders(httpReq.Header, copilotToken)
+		default:
+			utils.SetAuthenticationHeaderWithOverride(httpReq.Header, apiKey, authHeader)
+		}
+		// claude 系端点（Anthropic 风格 /v1/models 需 anthropic-version）或已学习
+		// 客户端伪装标记的上游：请求带 Claude Code 探针头，避免被指纹校验拒绝。
+		if serviceType != "copilot" && (serviceType == "claude" || learnedClientFingerprint) {
+			utils.ApplyClaudeCodeProbeHeaders(httpReq.Header, "")
+		}
+		httpReq.Header.Set("Content-Type", "application/json")
+		if serviceType == "copilot" {
+			utils.ApplyCustomHeadersProtected(httpReq.Header, req.CustomHeaders, utils.CopilotProtectedHeaders)
+		} else {
+			utils.ApplyCustomHeaders(httpReq.Header, req.CustomHeaders)
+		}
+
+		resp, err := client.Do(httpReq)
+		if err != nil {
+			log.Printf("[Responses-Models] 请求失败: channel=%s, key=%s, url=%s, error=%v",
+				channelName, utils.MaskAPIKey(apiKey), url, err)
+			c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("Failed to fetch models: %v", err)})
+			return
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if err != nil {
+			log.Printf("[Responses-Models] 读取响应失败: channel=%s, error=%v", channelName, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to read response: %v", err)})
+			return
+		}
+
+		log.Printf("[Responses-Models] 上游响应: channel=%s, key=%s, status=%d, url=%s",
+			channelName, utils.MaskAPIKey(apiKey), resp.StatusCode, url)
+		// 包装上游 401 错误，避免前端误判为管理 API 认证失败
+		if resp.StatusCode == 401 {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":      "上游 API Key 无效",
+				"statusCode": 401,
+				"details":    string(body),
+			})
+			return
+		}
+
+		if resp.StatusCode == http.StatusOK {
+			// 透传上游响应体时注入真实状态码，供前端展示（不再硬编码 200）。
+			body = common.InjectUpstreamStatusCode(body, resp.StatusCode)
+		}
+		c.Data(resp.StatusCode, "application/json", body)
+	}
+}
+
+// DiagnoseCopilotChannel 诊断指定 Copilot 渠道的 GitHub 用户、token exchange 和 /models 可达性。
+func DiagnoseCopilotChannel(cfgManager *config.ConfigManager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, err := strconv.Atoi(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid channel ID"})
+			return
+		}
+		var req struct {
+			AccessToken string `json:"accessToken"`
+		}
+		_ = c.ShouldBindJSON(&req)
+
+		cfg := cfgManager.GetConfig()
+		if id < 0 || id >= len(cfg.ResponsesUpstream) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Channel not found"})
+			return
+		}
+		upstream := cfg.ResponsesUpstream[id]
+		if upstream.ServiceType != "copilot" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Channel is not a copilot channel"})
+			return
+		}
+
+		accessToken := strings.TrimSpace(req.AccessToken)
+		if accessToken == "" && len(upstream.APIKeys) > 0 {
+			accessToken = strings.TrimSpace(upstream.APIKeys[0])
+		}
+		if accessToken == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "No access token provided"})
+			return
+		}
+
+		httpClient := httpclient.GetManager().GetStandardClient(15*time.Second, upstream.InsecureSkipVerify, upstream.ProxyURL)
+		diagnoseResult, err := copilot.Diagnose(c.Request.Context(), httpClient, accessToken, upstream.ProxyURL, upstream.InsecureSkipVerify)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"channelId": id,
+			"name":      upstream.Name,
+			"result":    diagnoseResult,
+		})
+	}
+}

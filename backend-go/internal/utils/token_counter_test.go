@@ -1,0 +1,357 @@
+package utils
+
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+
+	"github.com/BenedictKing/ccx/internal/types"
+)
+
+func TestEstimateTokens(t *testing.T) {
+	tests := []struct {
+		name     string
+		text     string
+		expected int
+	}{
+		{"empty", "", 0},
+		{"english", "Hello world", 3}, // ~11 chars / 3.5 = ~3
+		{"chinese", "你好世界", 2},        // 4 chars / 1.5 = ~2.7 -> 3
+		{"mixed", "Hello 你好", 3},      // 5 other + 2 cjk = ~1.4 + ~1.3 = ~3
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := EstimateTokens(tt.text)
+			// 允许 ±2 的误差
+			if result < tt.expected-2 || result > tt.expected+2 {
+				t.Errorf("EstimateTokens(%q) = %d, want ~%d", tt.text, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestEstimateResponsesRequestTokens(t *testing.T) {
+	tests := []struct {
+		name        string
+		request     map[string]interface{}
+		minExpected int
+	}{
+		{
+			name: "simple_string_input",
+			request: map[string]interface{}{
+				"model": "gpt-4",
+				"input": "Hello, how are you?",
+			},
+			minExpected: 5,
+		},
+		{
+			name: "with_instructions",
+			request: map[string]interface{}{
+				"model":        "gpt-4",
+				"instructions": "You are a helpful assistant.",
+				"input":        "Hello",
+			},
+			minExpected: 8,
+		},
+		{
+			name: "with_array_input",
+			request: map[string]interface{}{
+				"model": "gpt-4",
+				"input": []interface{}{
+					map[string]interface{}{
+						"type":    "message",
+						"role":    "user",
+						"content": "Hello, how are you today?",
+					},
+				},
+			},
+			minExpected: 6,
+		},
+		{
+			name: "with_tools",
+			request: map[string]interface{}{
+				"model": "gpt-4",
+				"input": "Use the tool",
+				"tools": []interface{}{
+					map[string]interface{}{
+						"name":        "search",
+						"description": "Search for information on the web",
+						"input_schema": map[string]interface{}{
+							"type": "object",
+							"properties": map[string]interface{}{
+								"query": map[string]interface{}{
+									"type":        "string",
+									"description": "Search query",
+								},
+							},
+							"required": []string{"query"},
+						},
+					},
+					map[string]interface{}{
+						"name":        "compute",
+						"description": "Compute mathematical expressions",
+						"input_schema": map[string]interface{}{
+							"type": "object",
+							"properties": map[string]interface{}{
+								"expression": map[string]interface{}{
+									"type":        "string",
+									"description": "Mathematical expression to compute",
+								},
+							},
+							"required": []string{"expression"},
+						},
+					},
+				},
+			},
+			minExpected: 50, // 不再是固定 150/tool，现在按实际内容估算
+		},
+		{
+			name: "with_reasoning_summary",
+			request: map[string]interface{}{
+				"model": "gpt-4",
+				"input": []interface{}{
+					map[string]interface{}{
+						"type":    "reasoning",
+						"summary": "I need to think step by step: first understand the problem, then reason through possible solutions, then pick the best one.",
+					},
+				},
+			},
+			minExpected: 20,
+		},
+		{
+			name: "with_encrypted_content",
+			request: map[string]interface{}{
+				"model": "gpt-4",
+				"input": []interface{}{
+					map[string]interface{}{
+						"type":              "compaction",
+						"encrypted_content": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
+					},
+				},
+			},
+			minExpected: 50, // encrypted 保守估算
+		},
+		{
+			name: "with_function_call_history",
+			request: map[string]interface{}{
+				"model": "gpt-4",
+				"input": []interface{}{
+					map[string]interface{}{
+						"type":    "message",
+						"role":    "user",
+						"content": "What's the weather in SF?",
+					},
+					map[string]interface{}{
+						"type":      "function_call",
+						"name":      "get_weather",
+						"arguments": `{"location":"San Francisco","unit":"celsius"}`,
+					},
+					map[string]interface{}{
+						"type":   "function_call_output",
+						"output": `{"condition":"Sunny","temperature":72,"humidity":45}`,
+					},
+				},
+			},
+			minExpected: 30,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bodyBytes, _ := json.Marshal(tt.request)
+			result := EstimateResponsesRequestTokens(bodyBytes)
+			if result < tt.minExpected {
+				t.Errorf("EstimateResponsesRequestTokens() = %d, want >= %d", result, tt.minExpected)
+			}
+		})
+	}
+}
+
+func TestEstimateResponsesOutputTokens(t *testing.T) {
+	tests := []struct {
+		name        string
+		output      interface{}
+		minExpected int
+	}{
+		{
+			name:        "nil_output",
+			output:      nil,
+			minExpected: 0,
+		},
+		{
+			name: "message_with_text",
+			output: []interface{}{
+				map[string]interface{}{
+					"type": "message",
+					"content": []interface{}{
+						map[string]interface{}{
+							"type": "output_text",
+							"text": "Hello, I am doing well!",
+						},
+					},
+				},
+			},
+			minExpected: 5,
+		},
+		{
+			name: "function_call",
+			output: []interface{}{
+				map[string]interface{}{
+					"type":      "function_call",
+					"name":      "search",
+					"arguments": `{"query": "weather"}`,
+				},
+			},
+			minExpected: 5,
+		},
+		{
+			name: "reasoning_with_summary",
+			output: []interface{}{
+				map[string]interface{}{
+					"type": "reasoning",
+					"summary": []interface{}{
+						map[string]interface{}{
+							"type": "summary_text",
+							"text": "This is my reasoning process",
+						},
+					},
+				},
+			},
+			minExpected: 5,
+		},
+		{
+			name: "custom_tool_call",
+			output: []types.ResponsesItem{
+				{
+					Type:  "custom_tool_call",
+					Name:  "list_files",
+					Input: `{"path": "/home/user"}`,
+				},
+			},
+			minExpected: 5,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := EstimateResponsesOutputTokens(tt.output)
+			if result < tt.minExpected {
+				t.Errorf("EstimateResponsesOutputTokens() = %d, want >= %d", result, tt.minExpected)
+			}
+		})
+	}
+}
+
+func TestEstimateResponsesOutputTokensWithTypedItems(t *testing.T) {
+	// 测试 []types.ResponsesItem 类型的直接处理
+	items := []types.ResponsesItem{
+		{
+			Type:    "message",
+			Role:    "assistant",
+			Content: "Hello, I am doing well!",
+		},
+		{
+			Type: "text",
+			Content: []types.ContentBlock{
+				{Type: "output_text", Text: "This is output text"},
+			},
+		},
+	}
+
+	result := EstimateResponsesOutputTokens(items)
+	if result < 5 {
+		t.Errorf("EstimateResponsesOutputTokens([]types.ResponsesItem) = %d, want >= 5", result)
+	}
+}
+
+func TestEstimateRequestTokens(t *testing.T) {
+	tests := []struct {
+		name        string
+		request     map[string]interface{}
+		minExpected int
+	}{
+		{
+			name: "messages_api_request",
+			request: map[string]interface{}{
+				"model":  "claude-3",
+				"system": "You are a helpful assistant.",
+				"messages": []interface{}{
+					map[string]interface{}{
+						"role":    "user",
+						"content": "Hello!",
+					},
+				},
+			},
+			minExpected: 8,
+		},
+		{
+			name: "with_system_array",
+			request: map[string]interface{}{
+				"model": "claude-3",
+				"system": []interface{}{
+					map[string]interface{}{
+						"type": "text",
+						"text": "You are helpful.",
+					},
+				},
+			},
+			minExpected: 4,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bodyBytes, _ := json.Marshal(tt.request)
+			result := EstimateRequestTokens(bodyBytes)
+			if result < tt.minExpected {
+				t.Errorf("EstimateRequestTokens() = %d, want >= %d", result, tt.minExpected)
+			}
+		})
+	}
+}
+
+// TestEstimateResponsesRequestTokens_CountsEncryptedFunctionArgs 验证 Codex
+// namespace 工具的密文分段被计数（密文保守估算法），而非按 0 计。
+func TestEstimateResponsesRequestTokens_CountsEncryptedFunctionArgs(t *testing.T) {
+	longSegment := strings.Repeat("A", 600) // 高熵密文按 ~1.5 字符/token 保守估
+	withEncrypted := map[string]interface{}{
+		"model": "gpt-5.6",
+		"input": []interface{}{
+			map[string]interface{}{
+				"type":                    "function_call",
+				"name":                    "read_item",
+				"call_id":                 "call-1",
+				"encrypted_function_args": []interface{}{longSegment},
+			},
+		},
+	}
+	withoutEncrypted := map[string]interface{}{
+		"model": "gpt-5.6",
+		"input": []interface{}{
+			map[string]interface{}{
+				"type":    "function_call",
+				"name":    "read_item",
+				"call_id": "call-1",
+			},
+		},
+	}
+
+	withTokens := EstimateResponsesRequestTokens(mustMarshalForTokenTest(t, withEncrypted))
+	withoutTokens := EstimateResponsesRequestTokens(mustMarshalForTokenTest(t, withoutEncrypted))
+	if withTokens <= withoutTokens {
+		t.Fatalf("encrypted segments must add tokens: with=%d without=%d", withTokens, withoutTokens)
+	}
+	if delta := withTokens - withoutTokens; delta < 100 {
+		t.Fatalf("600-char opaque segment estimated only %d tokens, want >= 100 (conservative 1.5 chars/token)", delta)
+	}
+}
+
+func mustMarshalForTokenTest(t *testing.T, req map[string]interface{}) []byte {
+	t.Helper()
+	data, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	return data
+}

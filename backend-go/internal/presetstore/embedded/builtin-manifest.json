@@ -1,0 +1,339 @@
+{
+  "schemaVersion": 1,
+  "manifests": [
+    {
+      "baseUrlPattern": "api.anthropic.com",
+      "serviceType": "messages",
+      "planHint": "anthropic_api",
+      "modelIds": [
+        "claude-fable-5",
+        "claude-fable-5-1",
+        "claude-mythos-5",
+        "claude-mythos-5-1",
+        "claude-opus-4-8",
+        "claude-opus-4-7",
+        "claude-opus-4-6",
+        "claude-opus-5-5",
+        "claude-sonnet-5-5",
+        "claude-sonnet-5",
+        "claude-sonnet-4-6",
+        "claude-sonnet-4-5",
+        "claude-opus-4-5",
+        "claude-haiku-5-5",
+        "claude-haiku-4-5"
+      ],
+      "disableProbe": false
+    },
+    {
+      "baseUrlPattern": "api.deepseek.com/anthropic",
+      "serviceType": "messages",
+      "planHint": "deepseek_anthropic",
+      "modelsUrl": "https://api.deepseek.com/models",
+      "modelIds": [
+        "deepseek-flash",
+        "deepseek-v4.1-flash",
+        "deepseek-v4-pro",
+        "deepseek-v4-flash",
+        "deepseek-v4-flash-vision-exp"
+      ],
+      "disableProbe": false
+    },
+    {
+      "baseUrlPattern": "api.deepseek.com",
+      "serviceType": "openai",
+      "planHint": "deepseek_openai",
+      "modelsUrl": "https://api.deepseek.com/models",
+      "modelIds": [
+        "deepseek-flash",
+        "deepseek-v4.1-flash",
+        "deepseek-v4-pro",
+        "deepseek-v4-flash",
+        "deepseek-v4-flash-vision-exp"
+      ],
+      "disableProbe": false
+    },
+    {
+      "baseUrlPattern": "api.xiaomimimo.com/anthropic",
+      "serviceType": "messages",
+      "planHint": "mimo_payg_anthropic",
+      "modelIds": [
+        "mimo-v2.6-pro-ultraspeed",
+        "mimo-v2.6-pro",
+        "mimo-v2.6-flash",
+        "mimo-v2.5-pro",
+        "mimo-v2.5"
+      ],
+      "excludeModelPatterns": [
+        "^mimo-v2\\.5-(?:asr|tts(?:-.+)?)$"
+      ],
+      "disableProbe": true
+    },
+    {
+      "baseUrlPattern": "token-plan-cn.xiaomimimo.com/anthropic",
+      "serviceType": "messages",
+      "planHint": "mimo_token_plan_cn_anthropic",
+      "modelIds": [
+        "mimo-v2.6-pro-ultraspeed",
+        "mimo-v2.6-pro",
+        "mimo-v2.6-flash",
+        "mimo-v2.5-pro",
+        "mimo-v2.5"
+      ],
+      "excludeModelPatterns": [
+        "^mimo-v2\\.5-(?:asr|tts(?:-.+)?)$"
+      ],
+      "disableProbe": true
+    },
+    {
+      "baseUrlPattern": "token-plan-sgp.xiaomimimo.com/anthropic",
+      "serviceType": "messages",
+      "planHint": "mimo_token_plan_sgp_anthropic",
+      "modelIds": [
+        "mimo-v2.6-pro-ultraspeed",
+        "mimo-v2.6-pro",
+        "mimo-v2.6-flash",
+        "mimo-v2.5-pro",
+        "mimo-v2.5"
+      ],
+      "excludeModelPatterns": [
+        "^mimo-v2\\.5-(?:asr|tts(?:-.+)?)$"
+      ],
+      "disableProbe": true
+    },
+    {
+      "baseUrlPattern": "token-plan-ams.xiaomimimo.com/anthropic",
+      "serviceType": "messages",
+      "planHint": "mimo_token_plan_ams_anthropic",
+      "modelIds": [
+        "mimo-v2.6-pro-ultraspeed",
+        "mimo-v2.6-pro",
+        "mimo-v2.6-flash",
+        "mimo-v2.5-pro",
+        "mimo-v2.5"
+      ],
+      "excludeModelPatterns": [
+        "^mimo-v2\\.5-(?:asr|tts(?:-.+)?)$"
+      ],
+      "disableProbe": true
+    },
+    {
+      "baseUrlPattern": "api.xiaomimimo.com/v1",
+      "serviceType": "openai",
+      "planHint": "mimo_payg_openai",
+      "modelIds": [
+        "mimo-v2.6-pro-ultraspeed",
+        "mimo-v2.6-pro",
+        "mimo-v2.6-flash",
+        "mimo-v2.5-pro",
+        "mimo-v2.5"
+      ],
+      "excludeModelPatterns": [
+        "^mimo-v2\\.5-(?:asr|tts(?:-.+)?)$"
+      ],
+      "disableProbe": false
+    },
+    {
+      "baseUrlPattern": "token-plan-cn.xiaomimimo.com/v1",
+      "serviceType": "openai",
+      "planHint": "mimo_token_plan_cn_openai",
+      "modelIds": [
+        "mimo-v2.6-pro-ultraspeed",
+        "mimo-v2.6-pro",
+        "mimo-v2.6-flash",
+        "mimo-v2.5-pro",
+        "mimo-v2.5"
+      ],
+      "excludeModelPatterns": [
+        "^mimo-v2\\.5-(?:asr|tts(?:-.+)?)$"
+      ],
+      "disableProbe": false
+    },
+    {
+      "baseUrlPattern": "token-plan-sgp.xiaomimimo.com/v1",
+      "serviceType": "openai",
+      "planHint": "mimo_token_plan_sgp_openai",
+      "modelIds": [
+        "mimo-v2.6-pro-ultraspeed",
+        "mimo-v2.6-pro",
+        "mimo-v2.6-flash",
+        "mimo-v2.5-pro",
+        "mimo-v2.5"
+      ],
+      "excludeModelPatterns": [
+        "^mimo-v2\\.5-(?:asr|tts(?:-.+)?)$"
+      ],
+      "disableProbe": false
+    },
+    {
+      "baseUrlPattern": "token-plan-ams.xiaomimimo.com/v1",
+      "serviceType": "openai",
+      "planHint": "mimo_token_plan_ams_openai",
+      "modelIds": [
+        "mimo-v2.6-pro-ultraspeed",
+        "mimo-v2.6-pro",
+        "mimo-v2.6-flash",
+        "mimo-v2.5-pro",
+        "mimo-v2.5"
+      ],
+      "excludeModelPatterns": [
+        "^mimo-v2\\.5-(?:asr|tts(?:-.+)?)$"
+      ],
+      "disableProbe": false
+    },
+    {
+      "baseUrlPattern": "api.kimi.com/coding",
+      "serviceType": "messages",
+      "planHint": "kimi_code_anthropic",
+      "modelsUrl": "https://api.kimi.com/coding/v1/models",
+      "modelIds": [
+        "kimi-for-coding"
+      ],
+      "disableProbe": false
+    },
+    {
+      "baseUrlPattern": "api.kimi.com/coding/v1",
+      "serviceType": "openai",
+      "planHint": "kimi_code_openai",
+      "modelsUrl": "https://api.kimi.com/coding/v1/models",
+      "modelIds": [
+        "kimi-for-coding"
+      ],
+      "disableProbe": false
+    },
+    {
+      "baseUrlPattern": "ark.cn-beijing.volces.com/api/plan",
+      "serviceType": "messages",
+      "planHint": "volcengine_plan_anthropic",
+      "modelIds": [
+        "doubao-seed-2.1-turbo",
+        "doubao-seed-2.0-lite",
+        "doubao-seed-2.0-mini",
+        "doubao-seed-evolving",
+        "minimax-m3",
+        "glm-5.3",
+        "glm-latest",
+        "deepseek-v4-flash",
+        "deepseek-v4-pro",
+        "deepseek-v4.1-flash",
+        "kimi-k3",
+        "kimi-k2.7-code",
+        "kimi-k2.8-preview",
+        "glm-5.3-flash"
+      ],
+      "excludeModelPatterns": [
+        "(?:^|[-_/])(?:embedding|seedance|seedream|tts|asr|ocr)(?:[-_.]|$)"
+      ],
+      "disableProbe": true
+    },
+    {
+      "baseUrlPattern": "ark.cn-beijing.volces.com/api/coding",
+      "serviceType": "messages",
+      "planHint": "volcengine_coding_anthropic",
+      "modelIds": [
+        "doubao-seed-2.1-turbo",
+        "doubao-seed-2.0-lite",
+        "minimax-m3",
+        "glm-5.3",
+        "deepseek-v4-flash",
+        "deepseek-v4-pro",
+        "kimi-k2.7-code",
+        "kimi-k2.8-preview",
+        "glm-5.3-flash"
+      ],
+      "excludeModelPatterns": [
+        "(?:^|[-_/])(?:embedding|seedance|seedream|tts|asr|ocr)(?:[-_.]|$)"
+      ],
+      "disableProbe": true
+    },
+    {
+      "baseUrlPattern": "ark.cn-beijing.volces.com/api/plan",
+      "serviceType": "openai",
+      "planHint": "volcengine_plan_openai",
+      "modelIds": [
+        "doubao-seed-2.1-turbo",
+        "doubao-seed-2.0-lite",
+        "doubao-seed-2.0-mini",
+        "doubao-seed-evolving",
+        "minimax-m3",
+        "glm-5.3",
+        "glm-latest",
+        "deepseek-v4-flash",
+        "deepseek-v4-pro",
+        "deepseek-v4.1-flash",
+        "kimi-k3",
+        "kimi-k2.7-code",
+        "kimi-k2.8-preview",
+        "glm-5.3-flash"
+      ],
+      "excludeModelPatterns": [
+        "(?:^|[-_/])(?:embedding|seedance|seedream|tts|asr|ocr)(?:[-_.]|$)"
+      ],
+      "disableProbe": true
+    },
+    {
+      "baseUrlPattern": "ark.cn-beijing.volces.com/api/coding",
+      "serviceType": "openai",
+      "planHint": "volcengine_coding_openai",
+      "modelIds": [
+        "doubao-seed-2.1-turbo",
+        "doubao-seed-2.0-lite",
+        "minimax-m3",
+        "glm-5.3",
+        "deepseek-v4-flash",
+        "deepseek-v4-pro",
+        "kimi-k2.7-code",
+        "kimi-k2.8-preview",
+        "glm-5.3-flash"
+      ],
+      "excludeModelPatterns": [
+        "(?:^|[-_/])(?:embedding|seedance|seedream|tts|asr|ocr)(?:[-_.]|$)"
+      ],
+      "disableProbe": true
+    },
+    {
+      "baseUrlPattern": "ark.cn-beijing.volces.com/api/plan",
+      "serviceType": "responses",
+      "planHint": "volcengine_plan_responses",
+      "modelIds": [
+        "doubao-seed-2.1-turbo",
+        "doubao-seed-2.0-lite",
+        "doubao-seed-2.0-mini",
+        "doubao-seed-evolving",
+        "minimax-m3",
+        "glm-5.3",
+        "glm-latest",
+        "deepseek-v4-flash",
+        "deepseek-v4-pro",
+        "deepseek-v4.1-flash",
+        "kimi-k3",
+        "kimi-k2.7-code",
+        "kimi-k2.8-preview",
+        "glm-5.3-flash"
+      ],
+      "excludeModelPatterns": [
+        "(?:^|[-_/])(?:embedding|seedance|seedream|tts|asr|ocr)(?:[-_.]|$)"
+      ],
+      "disableProbe": true
+    },
+    {
+      "baseUrlPattern": "ark.cn-beijing.volces.com/api/coding",
+      "serviceType": "responses",
+      "planHint": "volcengine_coding_responses",
+      "modelIds": [
+        "doubao-seed-2.1-turbo",
+        "doubao-seed-2.0-lite",
+        "minimax-m3",
+        "glm-5.3",
+        "deepseek-v4-flash",
+        "deepseek-v4-pro",
+        "kimi-k2.7-code",
+        "kimi-k2.8-preview",
+        "glm-5.3-flash"
+      ],
+      "excludeModelPatterns": [
+        "(?:^|[-_/])(?:embedding|seedance|seedream|tts|asr|ocr)(?:[-_.]|$)"
+      ],
+      "disableProbe": true
+    }
+  ]
+}

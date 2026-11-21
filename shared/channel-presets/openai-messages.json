@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "presets": {
+    "gpt-5.5": {
+      "fastMode": true,
+      "textVerbosity": "medium"
+    },
+    "gpt-5.4": {
+      "fastMode": true,
+      "textVerbosity": "medium"
+    }
+  }
+}

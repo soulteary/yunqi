@@ -1,0 +1,760 @@
+<template>
+  <v-dialog :model-value="show" max-width="1030" persistent scrollable @update:model-value="$emit('update:show', $event)">
+    <v-card rounded="lg" class="add-channel-dialog channel-editor-dialog">
+      <!-- 头部 -->
+      <AddChannelHeader
+        :is-editing="isEditing"
+        :channel-type="props.channelType"
+        :channel-name="isManagedProvider ? '' : form.name"
+        :channel-name-hint="''"
+        :identity-name="headerIdentityName"
+        :identity-label="managedIdentityName ? t('channelEditor.managed.providerLabel') : t('channelEditor.basic.name.label')"
+        :identity-icon="managedIdentityName ? 'mdi-domain' : 'mdi-tag'"
+        :hide-capability-actions="true"
+        :no-vision="form.noVision"
+        :header-classes="headerClasses"
+        :avatar-color="avatarColor"
+        :header-icon-style="headerIconStyle"
+        :subtitle-classes="subtitleClasses"
+        :edit-title="t('addChannel.editTitle')"
+        :create-title="t('addChannel.createTitle')"
+        :edit-subtitle="isManagedProvider
+          ? t(isOfficialManagedProvider
+            ? 'channelEditor.managed.editSubtitle'
+            : 'channelEditor.managed.providerEditSubtitle', { provider: managedProviderName })
+          : t('channelEditor.managed.customEditSubtitle')"
+        :create-subtitle="t('addChannel.quickSubtitle')"
+        :vision-tooltip="form.noVision ? t('channelCard.noVision') : t('channelCard.hasVision')"
+        @toggle-no-vision="form.noVision = !form.noVision"
+      />
+
+      <!-- 主体内容 -->
+      <v-card-text class="pa-0 channel-editor-body">
+        <!-- 左侧导航 + 右侧面板 -->
+        <div class="content-row">
+          <!-- 左侧垂直导航 -->
+          <AddChannelSidebarNav
+            :title="t('addChannel.outline')"
+            :sections="sections"
+            :active-section="activeSection"
+            @navigate="scrollToSection"
+          />
+
+          <!-- 右侧内容面板 -->
+          <v-form ref="formRef" class="content-area" @submit.prevent="handleSubmitWithBind">
+            <!-- 基本信息 -->
+            <section :ref="(el: any) => setSectionRef('basic', el)" data-section-id="basic" class="px-6 py-4 scroll-mt-4">
+              <header class="section-header">
+                <v-icon size="20" color="primary">mdi-information-outline</v-icon>
+                <h3 class="section-header-title">{{ t('channelEditor.nav.basic') }}</h3>
+              </header>
+              <!-- hide-base-url 对官方直连与 Provider 模板托管渠道生效：其地址由官方/模板固定；
+                   仅自定义手填地址的自动托管账号需要手工维护 CDN 地址池 -->
+              <BasicInfoSection
+                :form="form"
+                :base-urls-text="baseUrlsText"
+                :expected-request-urls="expectedRequestUrls"
+                :base-url-has-error="baseUrlHasError"
+                :service-type-options="serviceTypeOptions"
+                :hide-service-type="true"
+                :hide-base-url="isManagedProvider || isOfficialManagedProvider"
+                :hide-metadata="true"
+                :hide-remark="false"
+                :managed-account="true"
+                :provider-name="managedProviderName"
+                :website-links="managedProviderWebsiteLinks"
+                :errors="errors"
+                :rules="rules"
+                @update:form="updateForm"
+                @update:base-urls-text="baseUrlsText = $event"
+                @menu-update="onMenuUpdate"
+              />
+              <ProtocolModelAvailability :routes="protocolModelRoutes" :loading="managedModelsLoading" @refreshed="handleProtocolModelsRefreshed" />
+            </section>
+
+            <!-- 身份认证 -->
+            <section :ref="(el: any) => setSectionRef('auth', el)" data-section-id="auth" class="px-6 py-4 scroll-mt-4">
+              <header class="section-header">
+                <v-icon size="20" color="primary">mdi-shield-key-outline</v-icon>
+                <h3 class="section-header-title">{{ t('channelEditor.nav.auth') }}</h3>
+              </header>
+              <ApiKeyManagementSection
+                :api-keys="form.apiKeys"
+                :disabled-keys="visibleDisabledKeys"
+                :disabled-key-models="visibleDisabledKeyModels"
+                :disabled-group-models="visibleDisabledGroupModels"
+                :pending-group-model-disables="pendingGroupModelDisables"
+                :model-options="targetModelOptions"
+                :api-key-configs="form.apiKeyConfigs"
+                :key-models-status="keyModelsStatus"
+                :is-editing="isEditing"
+                :restoring-key="restoringKey"
+                :restoring-key-model="restoringKeyModel"
+                :changing-group-model="changingGroupModel"
+                :removing-key="removingKey"
+                :suspending-key="suspendingKey"
+                :service-type="form.serviceType"
+                :channel-id="props.channel?.index"
+                :channel-uid="props.channel?.channelUid"
+                :channel-kind="props.channelType"
+                :channel-max-group-multiplier="props.channel?.maxGroupMultiplier"
+                :dialog-open="props.show"
+                :proxy-url="form.proxyUrl"
+                :account-uid="props.channel?.accountUid"
+                :provider-id="props.channel?.providerId"
+                @update:api-keys="form.apiKeys = $event"
+                @update:api-key-configs="form.apiKeyConfigs = $event"
+                @update:proxy-url="form.proxyUrl = $event"
+                @restore-key="restoreDisabledKey"
+                @restore-key-model="restoreDisabledKeyModel"
+                @stage-group-model-disable="stageGroupModelDisable"
+                @unstage-group-model-disable="unstageGroupModelDisable"
+                @restore-group-model="restoreDisabledGroupModel"
+                @remove-key="removeDisabledKey"
+                @suspend-key="suspendKey"
+                @resume-key="resumeKey"
+                @ensure-models-loaded="ensureTargetModelsLoaded"
+              />
+            </section>
+
+            <!-- new-api 账号管理 -->
+            <section
+              v-if="isNewApiChannel || isGenericAutoManagedChannel"
+              :ref="(el: any) => setSectionRef('accounts', el)"
+              data-section-id="accounts"
+              class="px-6 py-4 scroll-mt-4"
+            >
+              <NewApiAccountPanel
+                ref="newApiPanelRef"
+                :subscription-uid="props.channel?.subscriptionUid || ''"
+                :channel-name="props.channel?.name"
+                :base-url="props.channel?.baseUrl"
+                :channel-uid="props.channel?.channelUid"
+                :channel-kind="props.channelType"
+                :channel-max-group-multiplier="props.channel?.maxGroupMultiplier"
+                :is-generic="isGenericAutoManagedChannel"
+                :auto-managed-kind="props.channel?.autoManagedKind"
+                :channel-proxy-url="form.proxyUrl"
+                :channel-proxy-prefer-direct="form.proxyPreferDirect"
+                @updated="handleAccountsUpdated"
+              />
+            </section>
+
+            <!-- 自定义参数（代理服务器 + 自定义请求头 + 充值倍率/汇率） -->
+            <section :ref="(el: any) => setSectionRef('custom', el)" data-section-id="custom" class="px-6 py-4 scroll-mt-4">
+              <header class="section-header">
+                <v-icon size="20" color="primary">mdi-tune</v-icon>
+                <h3 class="section-header-title">{{ t('channelEditor.nav.custom') }}</h3>
+              </header>
+              <!-- 代理服务器 -->
+              <v-text-field
+                :model-value="form.proxyUrl"
+                :label="t('channelEditor.transport.proxyUrl.label')"
+                :placeholder="t('channelEditor.transport.proxyUrl.placeholder')"
+                :hint="t('channelEditor.transport.proxyUrl.hint')"
+                persistent-hint
+                prepend-inner-icon="mdi-vpn"
+                variant="outlined"
+                density="comfortable"
+                clearable
+                @update:model-value="updateForm({ proxyUrl: $event ?? '' })"
+              />
+              <!-- 直连优先：卡片式设置行，开启时主题色点亮 -->
+              <div
+                class="proxy-direct-row"
+                :class="{
+                  'proxy-direct-row--on': form.proxyPreferDirect,
+                  'proxy-direct-row--disabled': !form.proxyUrl?.trim(),
+                }"
+              >
+                <v-icon size="20" class="proxy-direct-row-icon">mdi-lan-connect</v-icon>
+                <div class="flex-grow-1">
+                  <div class="text-body-2 font-weight-medium">{{ t('channelEditor.transport.proxyPreferDirect.label') }}</div>
+                  <div class="text-caption text-medium-emphasis">{{ t('channelEditor.transport.proxyPreferDirect.hint') }}</div>
+                </div>
+                <v-switch
+                  :model-value="form.proxyPreferDirect"
+                  color="primary"
+                  density="compact"
+                  hide-details
+                  class="proxy-direct-row-switch"
+                  :disabled="!form.proxyUrl?.trim()"
+                  @update:model-value="updateForm({ proxyPreferDirect: $event })"
+                />
+              </div>
+
+              <!-- 竞速参与：卡片式设置行（参与=可作主触发也可作影子目标）。
+                   后端默认开启：未显式配置（nil）的渠道开关显示为开，仅显式 false 显示为关；
+                   未触碰开关保存时 racing 保持缺省，渠道继续跟随全局/默认值。 -->
+              <div class="proxy-direct-row mt-4" :class="{ 'proxy-direct-row--on': form.racing?.enabled !== false }">
+                <v-icon size="20" class="proxy-direct-row-icon">mdi-flag-checkered</v-icon>
+                <div class="flex-grow-1">
+                  <div class="text-body-2 font-weight-medium">{{ t('channelEditor.transport.racing.label') }}</div>
+                  <div class="text-caption text-medium-emphasis">{{ t('channelEditor.transport.racing.hint') }}</div>
+                </div>
+                <v-switch
+                  :model-value="form.racing?.enabled !== false"
+                  color="primary"
+                  density="compact"
+                  hide-details
+                  class="proxy-direct-row-switch"
+                  @update:model-value="updateForm({ racing: { enabled: $event === true } })"
+                />
+              </div>
+
+              <div class="mt-6">
+                <CustomHeadersSection
+                  :headers="customHeadersArray"
+                  @update:headers="updateCustomHeaders"
+                />
+              </div>
+
+              <!-- 渠道级计费：充值币种/金额 + 渠道币种/到账金额 -->
+              <div class="mt-6">
+                <div class="text-subtitle-2 font-weight-medium mb-1">{{ t('channelEditor.billing.title') }}</div>
+                <div class="text-caption text-medium-emphasis mb-3">{{ t('channelEditor.billing.hint') }}</div>
+                <div class="billing-group-label">{{ t('channelEditor.billing.paymentGroup') }}</div>
+                <v-row dense>
+                  <v-col cols="12" sm="6">
+                    <v-text-field
+                      :model-value="form.channelPaymentCurrency"
+                      :label="t('channelEditor.billing.paymentCurrency.label')"
+                      :hint="t('channelEditor.billing.paymentCurrency.hint')"
+                      persistent-hint
+                      prepend-inner-icon="mdi-cash"
+                      variant="outlined"
+                      density="comfortable"
+                      placeholder="LDC / CNY / USD"
+                      clearable
+                      @update:model-value="updateForm({ channelPaymentCurrency: $event ?? '' })"
+                    />
+                  </v-col>
+                  <v-col cols="12" sm="6">
+                    <v-text-field
+                      :model-value="form.channelPaymentAmount"
+                      :label="t('channelEditor.billing.paymentAmount.label')"
+                      :hint="t('channelEditor.billing.paymentAmount.hint')"
+                      persistent-hint
+                      prepend-inner-icon="mdi-cash-multiple"
+                      variant="outlined"
+                      density="comfortable"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      clearable
+                      @update:model-value="updateForm({ channelPaymentAmount: $event })"
+                    />
+                  </v-col>
+                </v-row>
+                <div class="billing-group-label mt-4">{{ t('channelEditor.billing.creditGroup') }}</div>
+                <v-row dense>
+                  <v-col cols="12" sm="6">
+                    <v-text-field
+                      :model-value="form.channelCreditCurrency"
+                      :label="t('channelEditor.billing.creditCurrency.label')"
+                      :hint="t('channelEditor.billing.creditCurrency.hint')"
+                      persistent-hint
+                      prepend-inner-icon="mdi-currency-usd"
+                      variant="outlined"
+                      density="comfortable"
+                      placeholder="USD"
+                      clearable
+                      @update:model-value="updateForm({ channelCreditCurrency: $event ?? '' })"
+                    />
+                  </v-col>
+                  <v-col cols="12" sm="6">
+                    <v-text-field
+                      :model-value="form.channelCreditAmount"
+                      :label="t('channelEditor.billing.creditAmount.label')"
+                      :hint="t('channelEditor.billing.creditAmount.hint')"
+                      persistent-hint
+                      prepend-inner-icon="mdi-cash-check"
+                      variant="outlined"
+                      density="comfortable"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      clearable
+                      @update:model-value="updateForm({ channelCreditAmount: $event })"
+                    />
+                  </v-col>
+                </v-row>
+                <div class="text-caption text-medium-emphasis mt-1">{{ t('channelEditor.billing.example') }}</div>
+              </div>
+
+              <!-- 渠道级分组倍率安全上限 -->
+              <div class="mt-6">
+                <v-text-field
+                  :model-value="form.maxGroupMultiplier"
+                  :label="t('channelEditor.billing.maxGroupMultiplier.label')"
+                  :hint="t('channelEditor.billing.maxGroupMultiplier.hint')"
+                  persistent-hint
+                  prepend-inner-icon="mdi-shield-half-full"
+                  variant="outlined"
+                  density="comfortable"
+                  type="number"
+                  step="any"
+                  min="0"
+                  clearable
+                  @update:model-value="updateForm({ maxGroupMultiplier: $event })"
+                />
+              </div>
+
+              <!-- 上游余额探测：用渠道 Key 查询上游剩余额度，结果进配额真相参与调度 -->
+              <div class="mt-6">
+                <div class="text-subtitle-2 font-weight-medium mb-1">{{ t('channelEditor.balance.title') }}</div>
+                <div class="text-caption text-medium-emphasis mb-3">{{ t('channelEditor.balance.hint') }}</div>
+                <div class="proxy-direct-row" :class="{ 'proxy-direct-row--on': balanceProbeEnabled }">
+                  <v-icon size="20" class="proxy-direct-row-icon">mdi-wallet-outline</v-icon>
+                  <div class="flex-grow-1">
+                    <div class="text-body-2 font-weight-medium">{{ t('channelEditor.balance.enabled.label') }}</div>
+                    <div class="text-caption text-medium-emphasis">{{ t('channelEditor.balance.enabled.hint') }}</div>
+                  </div>
+                  <v-switch
+                    :model-value="balanceProbeEnabled"
+                    color="primary"
+                    density="compact"
+                    hide-details
+                    class="proxy-direct-row-switch"
+                    @update:model-value="updateBalanceEnabled"
+                  />
+                </div>
+                <template v-if="balanceProbeEnabled">
+                  <v-row dense class="mt-1">
+                    <v-col cols="12" sm="6">
+                      <v-select
+                        :model-value="balanceProbeProvider"
+                        :items="balanceProviderItems"
+                        :label="t('channelEditor.balance.provider.label')"
+                        :hint="t('channelEditor.balance.provider.hint')"
+                        persistent-hint
+                        variant="outlined"
+                        density="comfortable"
+                        @update:model-value="updateBalanceProvider"
+                      />
+                    </v-col>
+                    <v-col cols="12" sm="6">
+                      <v-text-field
+                        :model-value="form.balanceCheck?.intervalMinutes ?? null"
+                        :label="t('channelEditor.balance.interval.label')"
+                        :hint="t('channelEditor.balance.interval.hint')"
+                        persistent-hint
+                        variant="outlined"
+                        density="comfortable"
+                        type="number"
+                        min="30"
+                        step="10"
+                        clearable
+                        @update:model-value="updateBalanceInterval"
+                      />
+                    </v-col>
+                  </v-row>
+                  <v-text-field
+                    v-if="balanceProbeProvider === 'newapi_token'"
+                    :model-value="form.balanceCheck?.quotaPerUnit ?? null"
+                    :label="t('channelEditor.balance.quotaPerUnit.label')"
+                    :hint="t('channelEditor.balance.quotaPerUnit.hint')"
+                    persistent-hint
+                    variant="outlined"
+                    density="comfortable"
+                    type="number"
+                    step="any"
+                    min="1"
+                    clearable
+                    @update:model-value="updateBalanceQuotaPerUnit"
+                  />
+                  <div v-if="balanceProbeProvider === 'newapi_billing'" class="text-caption text-medium-emphasis mt-1">
+                    {{ t('channelEditor.balance.billingCaveat') }}
+                  </div>
+
+                  <!-- 探测结果与手动刷新（仅编辑态：新建渠道保存后再探测） -->
+                  <div v-if="isEditing && props.channel" class="mt-4">
+                    <div class="d-flex align-center mb-1">
+                      <div class="text-caption text-medium-emphasis">{{ t('channelEditor.balance.lastResult') }}</div>
+                      <v-spacer />
+                      <v-tooltip content-class="ccx-tooltip" location="top">
+                        <template #activator="{ props: tooltipProps }">
+                          <v-btn
+                            v-bind="tooltipProps"
+                            icon
+                            size="small"
+                            variant="text"
+                            :loading="balanceChecking"
+                            :disabled="balanceLoading"
+                            @click="triggerBalanceProbe"
+                          >
+                            <v-icon size="18">mdi-refresh</v-icon>
+                          </v-btn>
+                        </template>
+                        {{ t('channelEditor.balance.refresh') }}
+                      </v-tooltip>
+                    </div>
+                    <div v-if="balanceLoading" class="text-caption text-medium-emphasis">{{ t('channelEditor.balance.loading') }}</div>
+                    <template v-else-if="balanceView">
+                      <div v-if="!balanceView.records.length" class="text-caption text-medium-emphasis">
+                        {{ t('channelEditor.balance.noRecords') }}
+                      </div>
+                      <div
+                        v-for="rec in balanceView.records"
+                        :key="rec.keyMask"
+                        class="d-flex align-center text-caption balance-key-row"
+                      >
+                        <span class="text-medium-emphasis balance-key-mask">{{ rec.keyMask }}</span>
+                        <span class="font-weight-medium">
+                          <template v-if="rec.detail.unlimited">{{ t('channelEditor.balance.unlimited') }}</template>
+                          <template v-else-if="rec.detail.remaining != null">
+                            {{ formatBalanceRemaining(rec.detail) }}
+                          </template>
+                          <template v-else>—</template>
+                        </span>
+                        <v-spacer />
+                        <span class="text-medium-emphasis">{{ formatBalanceTime(rec.lastCheckAtMs) }}</span>
+                      </div>
+                      <v-alert
+                        v-for="rec in balanceErrorRecords"
+                        :key="`err-${rec.keyMask}`"
+                        type="error"
+                        variant="tonal"
+                        density="compact"
+                        class="mt-1"
+                      >
+                        {{ rec.keyMask }}: {{ rec.detail.error }}
+                      </v-alert>
+                    </template>
+                  </div>
+                </template>
+              </div>
+            </section>
+          </v-form>
+        </div>
+      </v-card-text>
+
+      <!-- 底部按钮 -->
+      <v-card-actions class="pa-6 pt-2 border-t">
+        <v-spacer />
+        <v-btn variant="outlined" :disabled="submitting" @click="handleCancel">
+          {{ t('app.actions.cancel') }}<span class="shortcut-hint ml-2 text-xs opacity-50">Esc</span>
+        </v-btn>
+        <v-btn
+          color="primary"
+          variant="elevated"
+          :disabled="!isFormValid || submitting"
+          :loading="submitting"
+          @click="handleSubmitWithBind"
+        >
+          {{ t('app.actions.save') }}<span class="shortcut-hint ml-2 text-xs opacity-50">{{ isMac ? '⌘Enter' : 'Ctrl+Enter' }}</span>
+        </v-btn>
+      </v-card-actions>
+    </v-card>
+  </v-dialog>
+</template>
+
+<script setup lang="ts">
+import { computed, ref, watch } from 'vue'
+
+// 子组件导入
+import AddChannelHeader from './edit-channel/AddChannelHeader.vue'
+import AddChannelSidebarNav from './edit-channel/AddChannelSidebarNav.vue'
+import BasicInfoSection from './edit-channel/BasicInfoSection.vue'
+import ProtocolModelAvailability from './edit-channel/ProtocolModelAvailability.vue'
+import ApiKeyManagementSection from './edit-channel/ApiKeyManagementSection.vue'
+import CustomHeadersSection from './edit-channel/CustomHeadersSection.vue'
+import NewApiAccountPanel from './edit-channel/NewApiAccountPanel.vue'
+import { useEditChannelModal, type EditChannelModalEmits, type EditChannelModalProps } from '../composables/useEditChannelModal'
+import { useDialogHotkeys } from '../composables/useDialogHotkeys'
+import { ApiService } from '../services/api'
+import { BALANCE_PROVIDER_VALUES, type Channel, type ChannelBalanceView, type ManagedAccountChannel } from '../services/api-types'
+import { buildNativeProtocolModelRoutes, loadLegacyManagedModelAvailability } from '../utils/channelModelAvailability'
+import { getManagedProviderWebsiteLinks } from '../utils/channelWebsite'
+import { isManagedProviderChannel, isOfficialProviderChannel, managedProviderChannelName, providerDisplayName } from '../utils/providerDisplay'
+import { useChannelStore } from '../stores/channel'
+import { useDialogStore } from '../stores/dialog'
+
+const props = withDefaults(defineProps<EditChannelModalProps>(), {
+  channelType: 'messages',
+})
+
+const emit = defineEmits<EditChannelModalEmits>()
+const channelStore = useChannelStore()
+const dialogStore = useDialogStore()
+const managedProviderName = computed(() => providerDisplayName(props.channel?.providerId))
+const isManagedProvider = computed(() => isManagedProviderChannel(props.channel))
+const isOfficialManagedProvider = computed(() => isOfficialProviderChannel(props.channel))
+const managedProviderWebsiteLinks = computed(() => props.channel ? getManagedProviderWebsiteLinks(props.channel) : [])
+const managedAccountChannels = ref<ManagedAccountChannel[]>([])
+const managedModelsLoading = ref(false)
+const managedAccountsApi = new ApiService()
+let managedModelsRequestId = 0
+
+const protocolModelRoutes = computed(() => {
+  const routes = props.channel?.protocolRoutes ?? []
+  if (!props.channel?.autoManaged || !props.channel.accountUid) return routes
+  return buildNativeProtocolModelRoutes(routes, managedAccountChannels.value)
+})
+
+const reloadManagedModels = async (accountUid: string) => {
+  const requestId = ++managedModelsRequestId
+  managedModelsLoading.value = true
+  try {
+    let accountChannels: ManagedAccountChannel[] = []
+    try {
+      const response = await managedAccountsApi.getManagedAccounts()
+      accountChannels = response.accounts.find(account => account.accountUid === accountUid)?.channels ?? []
+    } catch {
+      // 旧后端或账号接口暂时失败时，继续尝试渠道 models API。
+    }
+    if (requestId !== managedModelsRequestId) return
+    accountChannels = await loadLegacyManagedModelAvailability(
+      managedAccountsApi,
+      props.channel?.protocolRoutes,
+      accountChannels,
+    )
+    if (requestId === managedModelsRequestId) managedAccountChannels.value = accountChannels
+  } finally {
+    if (requestId === managedModelsRequestId) managedModelsLoading.value = false
+  }
+}
+
+const handleProtocolModelsRefreshed = () => {
+  const accountUid = props.channel?.accountUid
+  if (accountUid) void reloadManagedModels(accountUid)
+  // 重新发现可能已为该账号补建了缺失协议的渠道（如 chat/gemini），
+  // 但 props.channel 是打开弹窗时的静态快照，protocolRoutes 不会自动更新。
+  // 这里重新拉取渠道列表，并用刷新后的最新渠道对象替换 editingChannel 快照，
+  // 让 protocolRoutes 反映新落地的路由，"未配置路由" 提示才能正确消失。
+  void refreshEditingChannelAfterRediscovery()
+}
+
+const refreshEditingChannelAfterRediscovery = async () => {
+  const accountUid = props.channel?.accountUid
+  if (!accountUid) return
+  try {
+    await channelStore.refreshChannels()
+  } catch {
+    // 刷新失败时保留旧快照，不阻断后续操作。
+    return
+  }
+  if (!props.show) return
+  const latest = channelStore.unifiedLlmChannelsData.channels.find(
+    channel => channel.accountUid === accountUid,
+  )
+  if (latest) dialogStore.editingChannel = latest
+}
+
+watch(
+  [() => props.show, () => props.channel?.accountUid],
+  async ([show, accountUid]) => {
+    managedModelsRequestId++
+    managedAccountChannels.value = []
+    managedModelsLoading.value = false
+    if (!show || !accountUid) return
+    await reloadManagedModels(accountUid)
+  },
+  { immediate: true },
+)
+
+const {
+  formRef,
+  activeSection,
+  sections,
+  baseUrlHasError,
+  onMenuUpdate,
+  serviceTypeOptions,
+  form,
+  baseUrlsText,
+  keyModelsStatus,
+  errors,
+  rules,
+  isEditing,
+  isMac,
+  targetModelOptions,
+  headerClasses,
+  avatarColor,
+  headerIconStyle,
+  subtitleClasses,
+  isFormValid,
+  restoringKey,
+  submitting,
+  visibleDisabledKeys,
+  expectedRequestUrls,
+  customHeadersArray,
+  updateCustomHeaders,
+  restoreDisabledKey,
+  removingKey,
+  removeDisabledKey,
+  restoringKeyModel,
+  visibleDisabledKeyModels,
+  restoreDisabledKeyModel,
+  changingGroupModel,
+  visibleDisabledGroupModels,
+  restoreDisabledGroupModel,
+  pendingGroupModelDisables,
+  stageGroupModelDisable,
+  unstageGroupModelDisable,
+  suspendingKey,
+  suspendKey,
+  resumeKey,
+  ensureTargetModelsLoaded,
+  updateForm,
+  isAnySelectMenuOpen,
+  suppressDialogEscapeUntil,
+  handleSubmit,
+  handleCancel,
+  scrollToSection,
+  setSectionRef,
+  t,
+} = useEditChannelModal(props, emit)
+
+// 托管渠道的头部身份名：友好名（如"Kimi 官方渠道"），非托管渠道为空串
+const managedIdentityName = computed(() => managedProviderChannelName(props.channel, t))
+
+// 头部身份块：编辑态下所有渠道统一使用——托管渠道用友好名，自定义渠道用渠道名
+const headerIdentityName = computed(() => (props.channel ? managedIdentityName.value || form.name : ''))
+
+// generic 自动托管渠道：autoManaged=true、无 providerId，但尚未绑定 new-api
+const isGenericAutoManagedChannel = computed(() =>
+  !!props.channel?.autoManaged && !props.channel?.providerId && props.channel?.autoManagedKind !== 'new_api'
+)
+
+// new-api 绑定渠道：可通过 autoManagedKind 显式标记，或沿用 originType=relay 向后兼容
+const isNewApiChannel = computed(() =>
+  props.channel?.autoManagedKind === 'new_api' ||
+  (props.channel?.originType === 'relay' && props.channel?.autoManaged && !props.channel?.providerId)
+)
+const handleAccountsUpdated = () => {
+  emit('updated')
+}
+
+// 认证管理面板：主保存时若绑定表单已填写则先执行绑定（绑定失败中止保存，错误显示在面板内）
+const newApiPanelRef = ref<InstanceType<typeof NewApiAccountPanel> | null>(null)
+const handleSubmitWithBind = async () => {
+  const panel = newApiPanelRef.value
+  if (panel?.hasFilledBindForm()) {
+    submitting.value = true
+    let bind
+    try {
+      bind = await panel.maybeBindBeforeSave()
+    } finally {
+      submitting.value = false
+    }
+    if (!bind.ok) {
+      // 绑定失败时用户可能停在其它分区，滚到面板让错误 alert 可见
+      scrollToSection('accounts')
+      return
+    }
+  }
+  await handleSubmit()
+}
+
+// 主保存按钮与 Ctrl/Command+Enter 共用同一条绑定前置链路，
+// 确保快捷键保存不会跳过托管账号绑定。
+useDialogHotkeys(
+  () => props.show,
+  {
+    esc: () => {
+      if (submitting.value) return false
+      if (isAnySelectMenuOpen.value || Date.now() < suppressDialogEscapeUntil.value) return false
+      handleCancel()
+    },
+    confirm: () => { void handleSubmitWithBind() },
+  },
+)
+
+// ── 上游余额探测 ──
+// 解析后开关：显式配置优先；未配置时按后端托管默认（new_api 托管渠道默认开启）。
+const balanceProbeEnabled = computed(() =>
+  form.balanceCheck?.enabled ?? props.channel?.autoManagedKind === 'new_api'
+)
+const balanceProbeProvider = computed(() => form.balanceCheck?.provider || 'auto')
+const balanceProviderItems = BALANCE_PROVIDER_VALUES.map(value => ({
+  title: t(`channelEditor.balance.providerOption.${value}`),
+  value,
+}))
+const balanceErrorRecords = computed(() =>
+  (balanceView.value?.records ?? []).filter(rec => rec.status !== 'ok' && rec.detail.error),
+)
+
+const patchBalanceCheck = (patch: Partial<NonNullable<Channel['balanceCheck']>>) => {
+  updateForm({ balanceCheck: { enabled: true, ...(form.balanceCheck || {}), ...patch } })
+}
+const updateBalanceEnabled = (value: unknown) => {
+  if (value === true) {
+    patchBalanceCheck({ enabled: true })
+  } else {
+    // 显式关闭：保留其余字段，保存后渠道不再探测
+    updateForm({ balanceCheck: { ...(form.balanceCheck || {}), enabled: false } })
+  }
+}
+const updateBalanceProvider = (value: unknown) => {
+  if (typeof value === 'string' && value) patchBalanceCheck({ provider: value })
+}
+const updateBalanceInterval = (value: string | number | null) => {
+  const parsed = Number(value)
+  patchBalanceCheck({ intervalMinutes: Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : undefined })
+}
+const updateBalanceQuotaPerUnit = (value: string | number | null) => {
+  const parsed = Number(value)
+  patchBalanceCheck({ quotaPerUnit: Number.isFinite(parsed) && parsed > 0 ? parsed : undefined })
+}
+
+const balanceApi = new ApiService()
+const balanceView = ref<ChannelBalanceView | null>(null)
+const balanceLoading = ref(false)
+const balanceChecking = ref(false)
+
+const loadBalanceView = async () => {
+  const channel = props.channel
+  if (!channel) return
+  balanceLoading.value = true
+  try {
+    balanceView.value = await balanceApi.getChannelBalance(props.channelType, channel.index)
+  } catch {
+    balanceView.value = null
+  } finally {
+    balanceLoading.value = false
+  }
+}
+
+const triggerBalanceProbe = async () => {
+  const channel = props.channel
+  if (!channel || balanceChecking.value) return
+  balanceChecking.value = true
+  try {
+    await balanceApi.triggerChannelBalanceCheck(props.channelType, channel.index)
+    // 202 异步：探测通常 1-3s 内完成，延迟两轮拉取结果
+    setTimeout(() => { void loadBalanceView() }, 2000)
+    setTimeout(() => { void loadBalanceView() }, 5000)
+  } catch {
+    // 触发失败静默：结果区会在下一轮打开时重新拉取
+  } finally {
+    setTimeout(() => { balanceChecking.value = false }, 1500)
+  }
+}
+
+watch(
+  [() => props.show, () => props.channel?.index],
+  ([show]) => {
+    if (show && props.channel) {
+      balanceView.value = null
+      void loadBalanceView()
+    }
+  },
+  { immediate: true },
+)
+
+const formatBalanceRemaining = (detail: NonNullable<ChannelBalanceView['records'][number]['detail']>): string => {
+  const remaining = detail.remaining ?? 0
+  if (detail.originalUnit === 'credits') {
+    const usd = detail.usd != null ? `$${detail.usd.toFixed(2)}` : ''
+    return usd ? `${remaining.toLocaleString()} (${usd})` : `${remaining.toLocaleString()}`
+  }
+  return `$${remaining.toFixed(2)}`
+}
+
+const formatBalanceTime = (ms: number): string => {
+  if (!ms) return ''
+  return new Date(ms).toLocaleString()
+}
+</script>
+
+<style scoped src="./edit-channel/edit-channel-modal.css"></style>

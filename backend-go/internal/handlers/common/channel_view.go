@@ -1,0 +1,104 @@
+package common
+
+import (
+	"strings"
+
+	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/gin-gonic/gin"
+)
+
+func BuildChannelView(up config.UpstreamConfig, index int) gin.H {
+	status := config.GetChannelStatus(&up)
+	priority := config.GetChannelPriority(&up, index)
+	view := gin.H{
+		"index":                         index,
+		"name":                          up.Name,
+		"accountUid":                    up.AccountUID,
+		"channelUid":                    up.ChannelUID,
+		"providerId":                    up.ProviderID,
+		"serviceType":                   up.ServiceType,
+		"authHeader":                    up.AuthHeader,
+		"baseUrl":                       up.BaseURL,
+		"baseUrls":                      up.BaseURLs,
+		"apiKeys":                       up.APIKeys,
+		"apiKeyConfigs":                 config.NormalizeAPIKeyConfigsForView(up),
+		"description":                   up.Description,
+		"remark":                        up.Remark,
+		"website":                       up.Website,
+		"insecureSkipVerify":            up.InsecureSkipVerify,
+		"modelCapabilities":             up.ModelCapabilities,
+		"embeddingCapabilities":         up.EmbeddingCapabilities,
+		"defaultCapability":             up.DefaultCapability,
+		"allowUnknownContext":           up.AllowUnknownContext,
+		"reasoningParamStyle":           up.ReasoningParamStyle,
+		"textVerbosity":                 up.TextVerbosity,
+		"fastMode":                      up.FastMode,
+		"normalizeNonstandardChatRoles": up.IsNormalizeNonstandardChatRolesEnabled(),
+		"stripCodexClientTools":         up.IsCodexToolCompatEnabled(),
+		"latency":                       nil,
+		"status":                        status,
+		"adminState":                    config.GetChannelAdminState(&up),
+		"effectiveState":                config.GetChannelEffectiveState(&up),
+		"runtimeState":                  config.GetChannelRuntimeState(&up),
+		"priority":                      priority,
+		"promotionUntil":                up.PromotionUntil,
+		"lowQuality":                    up.LowQuality,
+		"customHeaders":                 up.CustomHeaders,
+		"proxyUrl":                      up.ProxyURL,
+		"proxyPreferDirect":             up.ProxyPreferDirect,
+		"supportedModels":               up.SupportedModels,
+		"routePrefix":                   up.RoutePrefix,
+		"disabledApiKeys":               up.DisabledAPIKeys,
+		// Key/分组级模型限制记录：编辑对话框回读展示（"保存后记录消失"即漏登记所致），缺一不可
+		"disabledKeyModels":             up.DisabledKeyModels,
+		"disabledGroupModels":           up.DisabledGroupModels,
+		"autoManaged":                   up.AutoManaged,
+		"autoManagedAt":                 up.AutoManagedAt,
+		"autoManagedKind":               up.AutoManagedKind,
+		"originType":                    up.OriginType,
+		"originTier":                    up.OriginTier,
+		"autoBlacklistBalance":          up.IsAutoBlacklistBalanceEnabled(),
+		"normalizeMetadataUserId":       up.IsNormalizeMetadataUserIDEnabled(),
+		"stripBillingHeader":            up.IsStripBillingHeaderEnabled(),
+		"codexNativeToolPassthrough":    up.IsCodexNativeToolPassthroughEnabled(),
+		"codexToolCompat":               up.IsCodexToolCompatEnabled(),
+		"stripImageGenerationTool":      up.IsStripImageGenerationToolEnabled(),
+		"convertImageUrlToB64Json":      up.ConvertImageURLToB64JSON,
+		"noVision":                      up.NoVision,
+		"historicalImageTurnLimit":      up.HistoricalImageTurnLimit,
+		"passbackReasoningContent":      up.IsPassbackReasoningContentEnabled(),
+		"passbackThinkingBlocks":        up.IsPassbackThinkingBlocksEnabled(),
+		"stripEmptyTextBlocks":          up.IsStripEmptyTextBlocksEnabled(),
+		"normalizeSystemRoleToTopLevel": up.NormalizeSystemRoleToTopLevel,
+		"injectDummyThoughtSignature":   up.InjectDummyThoughtSignature,
+		"stripThoughtSignature":         up.StripThoughtSignature,
+		"requestTimeoutMs":              up.RequestTimeoutMs,
+		"responseHeaderTimeoutMs":       up.ResponseHeaderTimeoutMs,
+		"streamFirstContentTimeoutMs":   up.StreamFirstContentTimeoutMs,
+		"streamInactivityTimeoutMs":     up.StreamInactivityTimeoutMs,
+		"streamToolCallIdleTimeoutMs":   up.StreamToolCallIdleTimeoutMs,
+		"rateLimitRpm":                  up.RateLimitRPM,
+		"rateLimitWindowMinutes":        up.RateLimitWindowMinutes,
+		"rateLimitBurst":                up.RateLimitBurst,
+		"rateLimitMaxConcurrent":        up.RateLimitMaxConcurrent,
+		"rateLimitAutoFromHeaders":      up.IsRateLimitAutoFromHeadersEnabled(),
+		"logicalChannelUid":             up.LogicalChannelUID,
+		"logicalName":                   up.LogicalName,
+		// 渠道级计费与分组倍率：编辑表单从 view 回读，缺登记会导致保存成功但重开丢显示
+		"costMultiplier":         up.CostMultiplier,
+		"maxGroupMultiplier":     up.MaxGroupMultiplier,
+		"channelPaymentCurrency": up.ChannelPaymentCurrency,
+		"channelPaymentAmount":   up.ChannelPaymentAmount,
+		"channelCreditCurrency":  up.ChannelCreditCurrency,
+		"channelCreditAmount":    up.ChannelCreditAmount,
+		// 渠道级上游余额探测配置：编辑表单从 view 回读
+		"balanceCheck": up.BalanceCheck,
+	}
+	for _, keyConfig := range up.APIKeyConfigs {
+		if uid := strings.TrimSpace(keyConfig.SourceSubscriptionUID); uid != "" {
+			view["subscriptionUid"] = uid
+			break
+		}
+	}
+	return view
+}

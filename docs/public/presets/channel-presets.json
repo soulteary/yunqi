@@ -1,0 +1,195 @@
+{
+  "schemaVersion": 1,
+  "claudeMessages": {
+    "schemaVersion": 1,
+    "providers": {
+      "deepseek": {
+        "reasoningParamStyle": "reasoning",
+        "normalizeSystemRoleToTopLevel": true,
+        "normalizeMetadataUserId": true,
+        "stripBillingHeader": true
+      },
+      "mimo": {
+        "reasoningParamStyle": "thinking",
+        "normalizeSystemRoleToTopLevel": true,
+        "rateLimitRpm": 80
+      },
+      "compshare": {
+        "reasoningParamStyle": "reasoning",
+        "normalizeSystemRoleToTopLevel": true
+      },
+      "runapi": {},
+      "unity2": {},
+      "kimi": {
+        "normalizeSystemRoleToTopLevel": true
+      },
+      "glm": {
+        "normalizeSystemRoleToTopLevel": true
+      },
+      "sensenova": {
+        "normalizeSystemRoleToTopLevel": true
+      },
+      "minimax": {
+        "normalizeSystemRoleToTopLevel": true
+      },
+      "dashscope": {
+        "normalizeSystemRoleToTopLevel": true
+      },
+      "opencode-zen": {
+        "serviceType": "openai",
+        "authHeader": "bearer",
+        "reasoningParamStyle": "reasoning",
+        "normalizeSystemRoleToTopLevel": true
+      },
+      "opencode-go": {
+        "serviceType": "openai",
+        "authHeader": "bearer",
+        "reasoningParamStyle": "reasoning",
+        "normalizeSystemRoleToTopLevel": true
+      },
+      "modelscope": {
+        "normalizeSystemRoleToTopLevel": true
+      },
+      "volc-ark": {
+        "reasoningParamStyle": "reasoning",
+        "normalizeSystemRoleToTopLevel": true
+      },
+      "qianfan": {
+        "normalizeSystemRoleToTopLevel": true
+      },
+      "xfyun": {
+        "normalizeSystemRoleToTopLevel": true
+      },
+      "tencent-lkeap": {
+        "normalizeSystemRoleToTopLevel": true
+      },
+      "atomgit": {
+        "reasoningParamStyle": "thinking",
+        "serviceType": "openai",
+        "normalizeSystemRoleToTopLevel": true
+      }
+    }
+  },
+  "openAIChat": {
+    "schemaVersion": 1,
+    "providers": {
+      "deepseek": {
+        "reasoningParamStyle": "reasoning"
+      },
+      "mimo": {
+        "reasoningParamStyle": "thinking",
+        "rateLimitRpm": 80
+      },
+      "compshare": {
+        "reasoningParamStyle": "reasoning"
+      },
+      "runapi": {},
+      "unity2": {},
+      "openrouter": {},
+      "sensenova": {},
+      "modelscope": {},
+      "minimax": {},
+      "dashscope": {},
+      "opencode-zen": {
+        "reasoningParamStyle": "reasoning",
+        "authHeader": "bearer"
+      },
+      "opencode-go": {
+        "reasoningParamStyle": "reasoning",
+        "authHeader": "bearer"
+      },
+      "volc-ark": {},
+      "qianfan": {},
+      "xfyun": {},
+      "atomgit": {
+        "reasoningParamStyle": "thinking"
+      }
+    }
+  },
+  "codexResponses": {
+    "schemaVersion": 1,
+    "providers": {
+      "deepseek": {
+        "reasoningParamStyle": "reasoning",
+        "codexToolCompat": false,
+        "stripCodexClientTools": false
+      },
+      "mimo": {
+        "reasoningParamStyle": "reasoning",
+        "serviceType": "responses",
+        "codexToolCompat": true,
+        "stripCodexClientTools": true,
+        "rateLimitRpm": 80
+      },
+      "compshare": {
+        "reasoningParamStyle": "reasoning",
+        "codexToolCompat": false,
+        "stripCodexClientTools": false
+      },
+      "runapi": {
+        "codexToolCompat": false,
+        "stripCodexClientTools": false
+      },
+      "unity2": {
+        "codexToolCompat": false,
+        "stripCodexClientTools": false
+      },
+      "minimax": {
+        "codexToolCompat": false,
+        "stripCodexClientTools": false
+      },
+      "dashscope": {},
+      "opencode-zen": {
+        "reasoningParamStyle": "reasoning"
+      },
+      "opencode-go": {
+        "reasoningParamStyle": "reasoning"
+      },
+      "kimi": {},
+      "glm": {},
+      "sensenova": {},
+      "openrouter": {
+        "codexToolCompat": false,
+        "stripCodexClientTools": false
+      },
+      "modelscope": {
+        "codexToolCompat": false,
+        "stripCodexClientTools": false
+      },
+      "volc-ark": {
+        "reasoningParamStyle": "reasoning",
+        "codexToolCompat": false,
+        "stripCodexClientTools": false
+      },
+      "qianfan": {},
+      "xfyun": {
+        "serviceType": "responses"
+      },
+      "github-copilot": {
+        "serviceType": "copilot",
+        "baseUrl": "https://api.githubcopilot.com",
+        "codexToolCompat": false,
+        "stripCodexClientTools": false
+      },
+      "atomgit": {
+        "reasoningParamStyle": "thinking",
+        "serviceType": "openai",
+        "codexToolCompat": true,
+        "stripCodexClientTools": true
+      }
+    }
+  },
+  "openAIMessages": {
+    "schemaVersion": 1,
+    "presets": {
+      "gpt-5.5": {
+        "fastMode": true,
+        "textVerbosity": "medium"
+      },
+      "gpt-5.4": {
+        "fastMode": true,
+        "textVerbosity": "medium"
+      }
+    }
+  }
+}

@@ -1,0 +1,305 @@
+package autopilot
+
+import (
+	"testing"
+
+	"github.com/BenedictKing/ccx/internal/config"
+)
+
+// TestNormalizeSavingsScoreGrouped_AFPScopeGroup verifies that AFP candidates
+// within the same scope normalize independently by TotalAFP: cheapest gets 1.0,
+// most expensive gets 0.0. This is the core lever making GLM-5.2 (×0.25 promo)
+// outrank DeepSeek-V4-Pro (no promo) on the volcengine Agent Plan.
+func TestNormalizeSavingsScoreGrouped_AFPScopeGroup(t *testing.T) {
+	scope := "vp_shared"
+	entries := []channelScoreEntry{
+		{
+			ChannelUID:    "ch_glm",
+			EstimatedCost: 7.34, // USD list price, ignored because AFPCost set
+			AFPCost: &CandidateAFPCost{
+				Result: config.AFPCostResult{TotalAFP: 14},
+				Evidence: CostEvidence{
+					Unit:      CostUnitAFP,
+					ScopeID:   scope,
+					Estimated: 14,
+				},
+			},
+		},
+		{
+			ChannelUID:    "ch_dsv4",
+			EstimatedCost: 1.77,
+			AFPCost: &CandidateAFPCost{
+				Result: config.AFPCostResult{TotalAFP: 61},
+				Evidence: CostEvidence{
+					Unit:      CostUnitAFP,
+					ScopeID:   scope,
+					Estimated: 61,
+				},
+			},
+		},
+	}
+
+	savings := normalizeSavingsScoreGrouped(entries)
+	if got := savings["ch_glm"]; got != 1.0 {
+		t.Fatalf("glm (cheapest AFP) SavingsScore = %v, want 1.0", got)
+	}
+	if got := savings["ch_dsv4"]; got != 0.0 {
+		t.Fatalf("deepseek (most expensive AFP) SavingsScore = %v, want 0.0", got)
+	}
+}
+
+// TestNormalizeSavingsScoreGrouped_USDAndAFPIndependent verifies AFP and USD
+// candidates form separate comparability groups: the cheapest in each group
+// gets 1.0, so a USD channel is not penalized for being more expensive than an
+// AFP channel it cannot be compared against.
+func TestNormalizeSavingsScoreGrouped_USDAndAFPIndependent(t *testing.T) {
+	entries := []channelScoreEntry{
+		{
+			ChannelUID:    "ch_afp_cheap",
+			EstimatedCost: 100, // ignored, AFPCost present
+			AFPCost: &CandidateAFPCost{
+				Result:   config.AFPCostResult{TotalAFP: 10},
+				Evidence: CostEvidence{Unit: CostUnitAFP, ScopeID: "vp_a", Estimated: 10},
+			},
+		},
+		{
+			ChannelUID:    "ch_usd_cheap",
+			EstimatedCost: 2.0,
+		},
+		{
+			ChannelUID:    "ch_usd_expensive",
+			EstimatedCost: 8.0,
+		},
+	}
+
+	savings := normalizeSavingsScoreGrouped(entries)
+	// Sole AFP candidate has no peers in its scope → neutral 0.5 (matches
+	// NormalizeSavingsScore single/all-equal semantics). The point of this test
+	// is that USD candidates normalize independently of the AFP candidate's cost.
+	if got := savings["ch_afp_cheap"]; got != 0.5 {
+		t.Fatalf("sole AFP candidate SavingsScore = %v, want 0.5 (no peers)", got)
+	}
+	if got := savings["ch_usd_cheap"]; got != 1.0 {
+		t.Fatalf("cheapest USD SavingsScore = %v, want 1.0", got)
+	}
+	if got := savings["ch_usd_expensive"]; got != 0.0 {
+		t.Fatalf("most expensive USD SavingsScore = %v, want 0.0", got)
+	}
+}
+
+// TestNormalizeSavingsScoreGrouped_NoCostNeutral verifies candidates without
+// any cost evidence (unknown pricing, EstimatedCost<0) get the neutral 0.5.
+func TestNormalizeSavingsScoreGrouped_NoCostNeutral(t *testing.T) {
+	entries := []channelScoreEntry{
+		{ChannelUID: "ch_unknown", EstimatedCost: -1},
+		{ChannelUID: "ch_known", EstimatedCost: 3.0},
+	}
+	savings := normalizeSavingsScoreGrouped(entries)
+	if got := savings["ch_unknown"]; got != 0.5 {
+		t.Fatalf("unknown-cost candidate SavingsScore = %v, want 0.5", got)
+	}
+	if got := savings["ch_known"]; got != 0.5 {
+		t.Fatalf("sole known USD candidate SavingsScore = %v, want 0.5 (no peers)", got)
+	}
+}
+
+// TestNormalizeSavingsScoreGrouped_SameAFPSameCost verifies that when all AFP
+// candidates in a scope share the same TotalAFP, they all get the neutral 0.5
+// (no cost differentiation), matching NormalizeSavingsScore semantics.
+func TestNormalizeSavingsScoreGrouped_SameAFPSameCost(t *testing.T) {
+	entries := []channelScoreEntry{
+		{
+			ChannelUID: "ch_a",
+			AFPCost: &CandidateAFPCost{
+				Result:   config.AFPCostResult{TotalAFP: 20},
+				Evidence: CostEvidence{Unit: CostUnitAFP, ScopeID: "vp_x", Estimated: 20},
+			},
+		},
+		{
+			ChannelUID: "ch_b",
+			AFPCost: &CandidateAFPCost{
+				Result:   config.AFPCostResult{TotalAFP: 20},
+				Evidence: CostEvidence{Unit: CostUnitAFP, ScopeID: "vp_x", Estimated: 20},
+			},
+		},
+	}
+	savings := normalizeSavingsScoreGrouped(entries)
+	if got := savings["ch_a"]; got != 0.5 {
+		t.Fatalf("equal-cost AFP candidate a SavingsScore = %v, want 0.5", got)
+	}
+	if got := savings["ch_b"]; got != 0.5 {
+		t.Fatalf("equal-cost AFP candidate b SavingsScore = %v, want 0.5", got)
+	}
+}
+
+// TestNormalizeSavingsScoreGrouped_CompshareGroup verifies compshare channels
+// normalize by deduction count: lower deduction = cheaper = higher SavingsScore.
+// glm-5.2 (2次) should beat kimi-k2.6 (5次) and deepseek-v4-flash (1次) should beat both.
+func TestNormalizeSavingsScoreGrouped_CompshareGroup(t *testing.T) {
+	entries := []channelScoreEntry{
+		{ChannelUID: "ch_glm", CompshareDeduction: 2, EstimatedCost: -1},       // 2次
+		{ChannelUID: "ch_kimi", CompshareDeduction: 5, EstimatedCost: -1},      // 5次
+		{ChannelUID: "ch_dsv4", CompshareDeduction: 1, EstimatedCost: -1},      // 1次 (最省)
+		{ChannelUID: "ch_unknown", CompshareDeduction: 0, EstimatedCost: 10.0}, // USD 渠道
+		{ChannelUID: "ch_nocost", CompshareDeduction: 0, EstimatedCost: -1},    // 无成本
+	}
+	savings := normalizeSavingsScoreGrouped(entries)
+	// 1次最省 → 1.0
+	if got := savings["ch_dsv4"]; got != 1.0 {
+		t.Fatalf("deepseek-v4-flash (1次) SavingsScore = %v, want 1.0", got)
+	}
+	// 2次 → 中间
+	if got := savings["ch_glm"]; got <= 0 || got >= 1.0 {
+		t.Fatalf("glm-5.2 (2次) SavingsScore = %v, want between 0 and 1", got)
+	}
+	// 5次最贵 → 0.0
+	if got := savings["ch_kimi"]; got != 0.0 {
+		t.Fatalf("kimi-k2.6 (5次) SavingsScore = %v, want 0.0", got)
+	}
+	// USD 独立归一化，不影响 compshare 组
+	if got := savings["ch_unknown"]; got != 0.5 {
+		t.Fatalf("sole USD candidate SavingsScore = %v, want 0.5", got)
+	}
+	if got := savings["ch_nocost"]; got != 0.5 {
+		t.Fatalf("no-cost candidate SavingsScore = %v, want 0.5", got)
+	}
+}
+
+// TestNormalizeSavingsScoreGrouped_CompshareIndependentFromAFP verifies that
+// compshare and AFP candidates normalize independently (different units).
+func TestNormalizeSavingsScoreGrouped_CompshareIndependentFromAFP(t *testing.T) {
+	entries := []channelScoreEntry{
+		{
+			ChannelUID:         "ch_comp_cheap",
+			CompshareDeduction: 1,
+			EstimatedCost:      -1,
+		},
+		{
+			ChannelUID:         "ch_comp_expensive",
+			CompshareDeduction: 6,
+			EstimatedCost:      -1,
+		},
+		{
+			ChannelUID:    "ch_afp",
+			EstimatedCost: -1,
+			AFPCost: &CandidateAFPCost{
+				Result:   config.AFPCostResult{TotalAFP: 50},
+				Evidence: CostEvidence{Unit: CostUnitAFP, ScopeID: "vp_x", Estimated: 50},
+			},
+		},
+	}
+	savings := normalizeSavingsScoreGrouped(entries)
+	// compshare 组
+	if got := savings["ch_comp_cheap"]; got != 1.0 {
+		t.Fatalf("compshare cheapest SavingsScore = %v, want 1.0", got)
+	}
+	if got := savings["ch_comp_expensive"]; got != 0.0 {
+		t.Fatalf("compshare most expensive SavingsScore = %v, want 0.0", got)
+	}
+	// AFP 独立（单候选 → 0.5）
+	if got := savings["ch_afp"]; got != 0.5 {
+		t.Fatalf("sole AFP candidate SavingsScore = %v, want 0.5", got)
+	}
+}
+
+// TestNormalizeSavingsScoreGrouped_DifferentScopes verifies AFP candidates in
+// different scopes normalize within their own scope, never across scopes.
+func TestNormalizeSavingsScoreGrouped_DifferentScopes(t *testing.T) {
+	entries := []channelScoreEntry{
+		{
+			ChannelUID: "ch_scope1_cheap",
+			AFPCost: &CandidateAFPCost{
+				Result:   config.AFPCostResult{TotalAFP: 5},
+				Evidence: CostEvidence{Unit: CostUnitAFP, ScopeID: "vp_1", Estimated: 5},
+			},
+		},
+		{
+			ChannelUID: "ch_scope2_cheap",
+			AFPCost: &CandidateAFPCost{
+				Result:   config.AFPCostResult{TotalAFP: 50},
+				Evidence: CostEvidence{Unit: CostUnitAFP, ScopeID: "vp_2", Estimated: 50},
+			},
+		},
+		{
+			ChannelUID: "ch_scope2_expensive",
+			AFPCost: &CandidateAFPCost{
+				Result:   config.AFPCostResult{TotalAFP: 100},
+				Evidence: CostEvidence{Unit: CostUnitAFP, ScopeID: "vp_2", Estimated: 100},
+			},
+		},
+	}
+	savings := normalizeSavingsScoreGrouped(entries)
+	if got := savings["ch_scope1_cheap"]; got != 0.5 {
+		t.Fatalf("sole scope1 candidate SavingsScore = %v, want 0.5", got)
+	}
+	if got := savings["ch_scope2_cheap"]; got != 1.0 {
+		t.Fatalf("cheapest scope2 SavingsScore = %v, want 1.0", got)
+	}
+	if got := savings["ch_scope2_expensive"]; got != 0.0 {
+		t.Fatalf("most expensive scope2 SavingsScore = %v, want 0.0", got)
+	}
+}
+
+// TestNormalizeSavingsScoreGrouped_AFPCostMissingNeutral verifies that a
+// volcengine candidate whose plan has no price for the model (typically a
+// delisted model) gets the neutral 0.5 instead of joining the USD list-price
+// group. Falling back to USD normalization handed missing-data candidates a
+// near-perfect savings score (the USD group's min/max is dominated by
+// expensive models), so delisted models outranked their in-plan successors.
+func TestNormalizeSavingsScoreGrouped_AFPCostMissingNeutral(t *testing.T) {
+	entries := []channelScoreEntry{
+		{
+			// 已下架模型：火山可比 scope 但套餐无价，仅剩公开牌价。
+			ChannelUID:     "ch_ark_delisted",
+			CandidateKey:   "ch_ark_delisted|kimi-k2.6",
+			EstimatedCost:  4.95,
+			AFPCostMissing: true,
+		},
+		{
+			// 在售模型：套餐价 149，组内与 17/330 归一化。
+			ChannelUID:   "ch_ark_k27",
+			CandidateKey: "ch_ark_k27|kimi-k2.7-code",
+			AFPCost: &CandidateAFPCost{
+				Result:   config.AFPCostResult{TotalAFP: 149},
+				Evidence: CostEvidence{Unit: CostUnitAFP, ScopeID: "vp_ark", Estimated: 149},
+			},
+		},
+		{
+			// 同 scope 最便宜/最贵锚点。
+			ChannelUID:   "ch_ark_lite",
+			CandidateKey: "ch_ark_lite|doubao-lite",
+			AFPCost: &CandidateAFPCost{
+				Result:   config.AFPCostResult{TotalAFP: 17},
+				Evidence: CostEvidence{Unit: CostUnitAFP, ScopeID: "vp_ark", Estimated: 17},
+			},
+		},
+		{
+			ChannelUID:   "ch_ark_k3",
+			CandidateKey: "ch_ark_k3|kimi-k3",
+			AFPCost: &CandidateAFPCost{
+				Result:   config.AFPCostResult{TotalAFP: 330},
+				Evidence: CostEvidence{Unit: CostUnitAFP, ScopeID: "vp_ark", Estimated: 330},
+			},
+		},
+		// USD 组对照：证明 missing 候选没有借牌价组抬高分数。
+		{ChannelUID: "ch_usd_cheap", CandidateKey: "ch_usd_cheap|m", EstimatedCost: 1.35},
+		{ChannelUID: "ch_usd_expensive", CandidateKey: "ch_usd_expensive|m", EstimatedCost: 210},
+	}
+
+	savings := normalizeSavingsScoreGrouped(entries)
+	if got := savings["ch_ark_delisted|kimi-k2.6"]; got != 0.5 {
+		t.Fatalf("delisted (no plan price) SavingsScore = %v, want neutral 0.5", got)
+	}
+	// 149 在 {17,149,330} 内: 1-(149-17)/313 = 0.5783
+	wantK27 := 1.0 - (149.0-17.0)/(330.0-17.0)
+	gotK27 := savings["ch_ark_k27|kimi-k2.7-code"]
+	if diff := gotK27 - wantK27; diff > 1e-9 || diff < -1e-9 {
+		t.Fatalf("k2.7-code SavingsScore = %v, want %v", gotK27, wantK27)
+	}
+	if got := savings["ch_usd_cheap|m"]; got != 1.0 {
+		t.Fatalf("cheapest USD SavingsScore = %v, want 1.0", got)
+	}
+	if got := savings["ch_usd_expensive|m"]; got != 0.0 {
+		t.Fatalf("most expensive USD SavingsScore = %v, want 0.0", got)
+	}
+}

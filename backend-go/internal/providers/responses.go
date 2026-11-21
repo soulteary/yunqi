@@ -1,0 +1,1800 @@
+package providers
+
+import (
+	"bufio"
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"regexp"
+	"sort"
+	"strings"
+
+	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/BenedictKing/ccx/internal/converters"
+	"github.com/BenedictKing/ccx/internal/copilot"
+	"github.com/BenedictKing/ccx/internal/errutil"
+	"github.com/BenedictKing/ccx/internal/session"
+	"github.com/BenedictKing/ccx/internal/types"
+	"github.com/BenedictKing/ccx/internal/utils"
+	"github.com/gin-gonic/gin"
+)
+
+// ResponsesProvider Responses API 提供商
+type ResponsesProvider struct {
+	SessionManager *session.SessionManager
+}
+
+// responsesStreamToolState 保存一个 Responses function_call 的独立流状态。
+// Responses 允许多个工具调用交错输出，不能用单个 currentTool 覆盖前一个调用。
+type responsesStreamToolState struct {
+	key     string
+	id      string
+	name    string
+	index   int
+	args    strings.Builder
+	started bool
+	closed  bool
+}
+
+// ConvertToProviderRequest 将请求转换为上游格式
+func (p *ResponsesProvider) ConvertToProviderRequest(
+	c *gin.Context,
+	upstream *config.UpstreamConfig,
+	apiKey string,
+) (*http.Request, []byte, error) {
+	bodyBytes, err := getRequestBodyBytes(c)
+	if err != nil {
+		return nil, nil, fmt.Errorf("读取请求体失败: %w", err)
+	}
+
+	return p.ConvertBodyToProviderRequest(c, upstream, apiKey, bodyBytes, c.Request.URL.Path)
+}
+
+// ConvertBodyToProviderRequest 将指定 body 转换为上游请求（公共入口，供 compact 等场景复用）
+func (p *ResponsesProvider) ConvertBodyToProviderRequest(
+	c *gin.Context,
+	upstream *config.UpstreamConfig,
+	apiKey string,
+	bodyBytes []byte,
+	requestPath string,
+) (*http.Request, []byte, error) {
+	if p.SessionManager == nil {
+		p.SessionManager = newDefaultSessionManager()
+	}
+
+	providerReq, reqBodyForURL, err := p.buildProviderRequestBody(c, requestPath, bodyBytes, upstream)
+	if err != nil {
+		return nil, bodyBytes, err
+	}
+
+	reqBody, err := utils.MarshalJSONNoEscape(providerReq)
+	if err != nil {
+		return nil, bodyBytes, fmt.Errorf("序列化请求失败: %w", err)
+	}
+
+	targetURL, err := p.buildRequestURL(upstream, reqBodyForURL)
+	if err != nil {
+		return nil, bodyBytes, err
+	}
+
+	requestAPIKey := apiKey
+	if upstream.ServiceType == "copilot" {
+		copilotToken, copilotBaseURL, err := copilot.ResolveTokenWithProxy(c.Request.Context(), apiKey, upstream.ProxyURL)
+		if err != nil {
+			return nil, bodyBytes, fmt.Errorf("获取 GitHub Copilot token 失败: %w", err)
+		}
+		requestAPIKey = copilotToken
+		if copilotBaseURL != "" {
+			targetURL = strings.TrimRight(copilotBaseURL, "/") + "/responses"
+		}
+	}
+
+	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, targetURL, bytes.NewReader(reqBody))
+	if err != nil {
+		return nil, bodyBytes, err
+	}
+
+	req.Header = utils.PrepareUpstreamHeaders(c, req.URL.Host)
+	req.Header.Del("authorization")
+	req.Header.Del("x-api-key")
+	req.Header.Del("x-goog-api-key")
+
+	switch upstream.ServiceType {
+	case "gemini":
+		if utils.HasAuthenticationHeaderOverride(upstream.AuthHeader) {
+			utils.SetAuthenticationHeaderWithOverride(req.Header, requestAPIKey, upstream.AuthHeader)
+		} else {
+			utils.SetGeminiAuthenticationHeader(req.Header, requestAPIKey)
+		}
+	case "claude":
+		utils.SetAuthenticationHeaderWithOverride(req.Header, requestAPIKey, "x-api-key")
+		if utils.HasAuthenticationHeaderOverride(upstream.AuthHeader) {
+			utils.SetAuthenticationHeaderWithOverride(req.Header, requestAPIKey, upstream.AuthHeader)
+		}
+		req.Header.Set("anthropic-version", "2023-06-01")
+	case "copilot":
+		copilot.ApplyRuntimeHeaders(req.Header, requestAPIKey)
+	default:
+		utils.SetAuthenticationHeaderWithOverride(req.Header, requestAPIKey, upstream.AuthHeader)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	if upstream.ServiceType == "copilot" {
+		utils.ApplyCustomHeadersProtected(req.Header, upstream.CustomHeaders, utils.CopilotProtectedHeaders)
+		copilot.ApplyRuntimeHeaders(req.Header, requestAPIKey)
+	} else {
+		utils.ApplyCustomHeaders(req.Header, upstream.CustomHeaders)
+	}
+
+	return req, bodyBytes, nil
+}
+
+func (p *ResponsesProvider) buildProviderRequestBody(c *gin.Context, requestPath string, bodyBytes []byte, upstream *config.UpstreamConfig) (interface{}, []byte, error) {
+	if strings.HasSuffix(requestPath, "/v1/messages") {
+		responsesReq, err := p.buildResponsesRequestFromClaude(c, bodyBytes, upstream)
+		if err != nil {
+			return nil, nil, fmt.Errorf("解析 Claude Messages 请求失败: %w", err)
+		}
+		return responsesReq, bodyBytes, nil
+	}
+
+	var providerReq interface{}
+	converter := converters.NewConverter(upstream.ServiceType)
+
+	if _, ok := converter.(*converters.ResponsesPassthroughConverter); ok {
+		var reqMap map[string]interface{}
+		if err := json.Unmarshal(bodyBytes, &reqMap); err != nil {
+			return nil, nil, fmt.Errorf("透传模式下解析请求失败: %w", err)
+		}
+		hoistCodexAdditionalTools(c, reqMap)
+		normalizeResponsesInputForPassthrough(reqMap)
+		if upstream.IsCodexNativeToolPassthroughEnabled() {
+			convertCodexToolsForPassthrough(reqMap)
+		} else if upstream.IsCodexToolCompatEnabled() {
+			stripCodexClientOnlyTools(reqMap)
+		}
+		if upstream.IsStripImageGenerationToolEnabled() {
+			stripImageGenerationFromTools(reqMap)
+		}
+		if reasoning, hasReasoning := reqMap["reasoning"]; hasReasoning {
+			// 按显式兼容配置或物理上游协议转换客户端原始 reasoning。
+			config.ApplyReasoningParamStyle(reqMap, config.EffectiveReasoningParamStyle(upstream), extractEffortFromReasoning(reasoning))
+		}
+		config.NormalizeReasoningObjectForUpstream(reqMap, upstream)
+		if upstream.TextVerbosity != "" {
+			reqMap["text"] = map[string]interface{}{"verbosity": upstream.TextVerbosity}
+		}
+		if upstream.FastMode {
+			reqMap["service_tier"] = "priority"
+		}
+		providerReq = reqMap
+	} else {
+		// 协议转换路径（responses→chat/claude/gemini）同样收割 additional_tools：
+		// 提升为顶层扁平 tools 后转换器才能带上工具；提升前的原始工具形态经
+		// codex_merged_raw_tools 通道供响应侧 remap 重建 ctx（custom_tool_call 还原）。
+		codexHoisted := false
+		var reqMapHoist map[string]interface{}
+		if err := json.Unmarshal(bodyBytes, &reqMapHoist); err == nil {
+			if harvested, ok := hoistCodexAdditionalTools(c, reqMapHoist); ok {
+				if normalizedBody, err := utils.MarshalJSONNoEscape(reqMapHoist); err == nil {
+					bodyBytes = normalizedBody
+					c.Set("codex_merged_raw_tools", harvested)
+					codexHoisted = true
+				}
+			}
+		}
+
+		var responsesReq types.ResponsesRequest
+		if err := json.Unmarshal(bodyBytes, &responsesReq); err != nil {
+			return nil, nil, fmt.Errorf("解析 Responses 请求失败: %w", err)
+		}
+
+		var (
+			sess *session.Session
+			err  error
+		)
+		if responsesReq.PreviousResponseID != "" {
+			sess, err = p.SessionManager.GetOrCreateSession(responsesReq.PreviousResponseID)
+			if err != nil {
+				return nil, nil, fmt.Errorf("get session failed: %w", err)
+			}
+		} else {
+			sess = &session.Session{}
+		}
+
+		// 跨协议转换必然改变模型语义，Codex 预算提醒数字失真，无条件剔除
+		// （统一语义见 client_budget_reminders.go）
+		if stripped, changed := StripCodexBudgetRemindersFromResponsesInput(responsesReq.Input); changed {
+			responsesReq.Input = stripped
+		}
+		// codexToolCompat applies to Responses -> Chat/Claude/Gemini conversion.
+		// codexNativeToolPassthrough is handled only in the Responses passthrough branch above.
+		// additional_tools 提升（codexHoisted）默认开启，不经渠道开关。
+		if responsesReq.TransformerMetadata == nil {
+			responsesReq.TransformerMetadata = make(map[string]interface{})
+		}
+		responsesReq.TransformerMetadata["codex_tool_compat_enabled"] = upstream.IsCodexToolCompatEnabled() || codexHoisted
+		if codexHoisted {
+			// 提升前 ctx/原始工具形态经 TransformerMetadata 传入转换器，保证
+			// 请求转换与响应 remap 都用带 custom 代理语义的上下文。
+			if ctxVal, ok := c.Get("codex_tool_context"); ok {
+				responsesReq.TransformerMetadata["codex_tool_context"] = ctxVal
+			}
+			if harvested, ok := c.Get("codex_merged_raw_tools"); ok {
+				responsesReq.TransformerMetadata["codex_merged_raw_tools"] = harvested
+			}
+		}
+		responsesReq.RawTools = extractRawToolsFromRequest(bodyBytes)
+		convertedReq, err := converter.ToProviderRequest(sess, &responsesReq)
+		if err != nil {
+			return nil, nil, fmt.Errorf("convert request failed: %w", err)
+		}
+		if c != nil {
+			if ctx, ok := responsesReq.TransformerMetadata["codex_tool_context"]; ok {
+				c.Set("codex_tool_context", ctx)
+			}
+			if tools, ok := responsesReq.TransformerMetadata["codex_merged_raw_tools"]; ok {
+				c.Set("codex_merged_raw_tools", tools)
+			}
+		}
+
+		// converter 可能返回结构体（Gemini）或 map。统一转成 map 后再应用物理协议参数，
+		// 避免仅 map 分支生效导致 reasoning 在部分跨协议路由中静默丢失。
+		convertedBytes, err := utils.MarshalJSONNoEscape(convertedReq)
+		if err != nil {
+			return nil, nil, fmt.Errorf("序列化转换后请求失败: %w", err)
+		}
+		var reqMap map[string]interface{}
+		if err := json.Unmarshal(convertedBytes, &reqMap); err != nil {
+			return nil, nil, fmt.Errorf("解析转换后请求失败: %w", err)
+		}
+		convertedReq = reqMap
+
+		// converter 路径：注入 reasoning/thinking 参数
+		{
+			// 透传客户端原始 reasoning 并按 style 转换
+			var rawReq map[string]interface{}
+			if json.Unmarshal(bodyBytes, &rawReq) == nil {
+				if reasoning, hasReasoning := rawReq["reasoning"]; hasReasoning {
+					config.ApplyReasoningParamStyle(reqMap, config.EffectiveReasoningParamStyle(upstream), extractEffortFromReasoning(reasoning))
+				}
+			}
+			config.NormalizeReasoningObjectForUpstream(reqMap, upstream)
+			if upstream.TextVerbosity != "" {
+				reqMap["text"] = map[string]interface{}{"verbosity": upstream.TextVerbosity}
+			}
+			if upstream.FastMode {
+				reqMap["service_tier"] = "priority"
+			}
+
+			// converter 路径转成 Claude/Messages 风格后，MiMo 等上游同样需要回传 reasoning_content
+			if upstream.IsPassbackReasoningContentEnabled() {
+				if marshaledReq, err := utils.MarshalJSONNoEscape(reqMap); err == nil {
+					var normalized map[string]interface{}
+					if normalizedBytes := convertThinkingToReasoningContent(marshaledReq); json.Unmarshal(normalizedBytes, &normalized) == nil {
+						reqMap = normalized
+						convertedReq = reqMap
+					}
+				}
+			}
+			if upstream.IsStripEmptyTextBlocksEnabled() {
+				if normalized := stripEmptyTextBlocksFromRequestMap(reqMap); normalized != nil {
+					reqMap = normalized
+					convertedReq = reqMap
+				}
+			}
+			if !upstream.IsPassbackThinkingBlocksEnabled() {
+				if normalized := stripThinkingBlocksFromRequestMap(reqMap); normalized != nil {
+					reqMap = normalized
+					convertedReq = reqMap
+				}
+			}
+			if upstream.IsPassbackThinkingBlocksEnabled() {
+				if marshaledReq, err := utils.MarshalJSONNoEscape(reqMap); err == nil {
+					var normalized map[string]interface{}
+					if normalizedBytes := convertReasoningContentToThinkingBlocks(marshaledReq, upstream.IsPassbackReasoningContentEnabled()); json.Unmarshal(normalizedBytes, &normalized) == nil {
+						reqMap = normalized
+						convertedReq = reqMap
+					}
+				}
+			}
+		}
+
+		providerReq = convertedReq
+	}
+
+	if reqMap, ok := providerReq.(map[string]interface{}); ok {
+		if upstream.IsNormalizeNonstandardChatRolesEnabled() {
+			// 用户显式开启的宽泛归一化：所有非标准 role 一律降为 user（既有契约）
+			converters.NormalizeNonstandardChatRolesInRequest(reqMap)
+		} else if upstream.IsDowngradeDeveloperRoleEnabled() {
+			// 自动学习到的窄改写：只把 developer 降为 system，语义损失最小
+			if converters.DowngradeDeveloperRoleToSystem(reqMap) {
+				log.Printf("[Responses-CompatRole] 渠道 %s 已学习到不支持 developer role，降级为 system", upstream.Name)
+			}
+		}
+	}
+	if reqMap, ok := providerReq.(map[string]interface{}); ok {
+		ApplyNativeToolStreaming(reqMap, upstream)
+	}
+
+	return providerReq, bodyBytes, nil
+}
+
+func (p *ResponsesProvider) buildResponsesRequestFromClaude(c *gin.Context, bodyBytes []byte, upstream *config.UpstreamConfig) (map[string]interface{}, error) {
+	var claudeReq types.ClaudeRequest
+	if err := json.Unmarshal(bodyBytes, &claudeReq); err != nil {
+		return nil, err
+	}
+
+	input := make([]map[string]interface{}, 0, len(claudeReq.Messages))
+	for _, msg := range claudeReq.Messages {
+		role := normalizeRole(msg.Role)
+		contentBlocks := make([]map[string]interface{}, 0)
+		flushMessage := func() {
+			if len(contentBlocks) == 0 {
+				return
+			}
+			input = append(input, map[string]interface{}{
+				"type":    "message",
+				"role":    role,
+				"content": contentBlocks,
+			})
+			contentBlocks = make([]map[string]interface{}, 0)
+		}
+		switch content := msg.Content.(type) {
+		case string:
+			if content != "" {
+				contentBlocks = append(contentBlocks, map[string]interface{}{
+					"type": responsesTextContentType(role),
+					"text": content,
+				})
+			}
+		case []interface{}:
+			for _, rawBlock := range content {
+				block, ok := rawBlock.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				switch block["type"] {
+				case "thinking":
+					if thinking, ok := block["thinking"].(string); ok && thinking != "" {
+						flushMessage()
+						input = append(input, map[string]interface{}{
+							"type": "reasoning",
+							"summary": []map[string]interface{}{{
+								"type": "summary_text",
+								"text": thinking,
+							}},
+						})
+					}
+				case "text":
+					if text, ok := block["text"].(string); ok && text != "" {
+						contentBlocks = append(contentBlocks, map[string]interface{}{
+							"type": responsesTextContentType(role),
+							"text": text,
+						})
+					}
+				case "tool_use":
+					flushMessage()
+					arguments, _ := utils.MarshalJSONNoEscape(block["input"])
+					input = append(input, map[string]interface{}{
+						"type":      "function_call",
+						"call_id":   block["id"],
+						"name":      block["name"],
+						"arguments": string(arguments),
+					})
+				case "tool_result":
+					flushMessage()
+					resultText := extractClaudeToolResult(block["content"])
+					input = append(input, map[string]interface{}{
+						"type":    "function_call_output",
+						"call_id": block["tool_use_id"],
+						"output":  resultText,
+					})
+				}
+			}
+		}
+
+		flushMessage()
+	}
+
+	responsesReq := map[string]interface{}{
+		"model":  claudeReq.Model,
+		"input":  input,
+		"stream": claudeReq.Stream,
+	}
+	if instructions := extractResponsesInstructions(claudeReq.System); instructions != "" {
+		responsesReq["instructions"] = instructions
+	}
+	if claudeReq.MaxTokens > 0 {
+		responsesReq["max_output_tokens"] = claudeReq.MaxTokens
+	}
+	if claudeReq.Temperature > 0 {
+		responsesReq["temperature"] = claudeReq.Temperature
+	}
+	if claudeReq.TopP > 0 {
+		responsesReq["top_p"] = claudeReq.TopP
+	}
+	if claudeReq.ToolChoice != nil {
+		responsesReq["tool_choice"] = claudeReq.ToolChoice
+	}
+	if userID, ok := claudeReq.Metadata["user_id"].(string); ok && userID != "" {
+		responsesReq["user"] = userID
+	}
+	if len(claudeReq.Tools) > 0 {
+		tools := make([]map[string]interface{}, 0, len(claudeReq.Tools))
+		for _, tool := range claudeReq.Tools {
+			item := map[string]interface{}{
+				"type":       "function",
+				"name":       tool.Name,
+				"parameters": tool.InputSchema,
+			}
+			if tool.Description != "" {
+				item["description"] = tool.Description
+			}
+			tools = append(tools, item)
+		}
+		responsesReq["tools"] = tools
+		if claudeReq.ParallelToolCalls != nil {
+			responsesReq["parallel_tool_calls"] = *claudeReq.ParallelToolCalls
+		} else {
+			responsesReq["parallel_tool_calls"] = true
+		}
+	}
+	if cacheKey := utils.ExtractUnifiedSessionID(c, bodyBytes); cacheKey != "" {
+		responsesReq["prompt_cache_key"] = cacheKey
+	}
+	return responsesReq, nil
+}
+
+func extractResponsesInstructions(system interface{}) string {
+	arr, ok := system.([]interface{})
+	if !ok || len(arr) == 0 {
+		return extractSystemText(system)
+	}
+
+	// 过滤所有 Claude Code header blocks
+	parts := []string{}
+	for _, item := range arr {
+		obj, ok := item.(map[string]interface{})
+		if !ok || obj["type"] != "text" {
+			continue
+		}
+		if text, ok := obj["text"].(string); ok {
+			if isClaudeCodeSystemHeader(text) {
+				continue // 跳过 Claude Code 注入的 header
+			}
+			parts = append(parts, text)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+func responsesTextContentType(role string) string {
+	if role == "assistant" {
+		return "output_text"
+	}
+	return "input_text"
+}
+
+func extractClaudeToolResult(content interface{}) string {
+	switch v := content.(type) {
+	case string:
+		return v
+	case []interface{}:
+		parts := make([]string, 0, len(v))
+		for _, item := range v {
+			block, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if text, ok := block["text"].(string); ok && text != "" {
+				parts = append(parts, text)
+			}
+		}
+		return strings.Join(parts, "\n")
+	default:
+		bytes, _ := utils.MarshalJSONNoEscape(v)
+		return string(bytes)
+	}
+}
+
+func (p *ResponsesProvider) buildRequestURL(upstream *config.UpstreamConfig, bodyBytes []byte) (string, error) {
+	if upstream.ServiceType == "gemini" {
+		var responsesReq types.ResponsesRequest
+		if err := json.Unmarshal(bodyBytes, &responsesReq); err != nil {
+			return "", fmt.Errorf("解析 Responses 请求失败: %w", err)
+		}
+		model := responsesReq.Model
+		action := "generateContent"
+		if responsesReq.Stream {
+			action = "streamGenerateContent?alt=sse"
+		}
+		baseURL := strings.TrimSuffix(upstream.GetEffectiveBaseURL(), "/")
+		versionPattern := regexp.MustCompile(`/v\d+[a-z]*$`)
+		if !versionPattern.MatchString(baseURL) && !strings.HasSuffix(upstream.BaseURL, "#") {
+			baseURL += "/v1beta"
+		}
+		return fmt.Sprintf("%s/models/%s:%s", baseURL, model, action), nil
+	}
+	return p.buildTargetURL(upstream), nil
+}
+
+// buildTargetURL 根据上游类型构建目标 URL
+func (p *ResponsesProvider) buildTargetURL(upstream *config.UpstreamConfig) string {
+	baseURL := upstream.BaseURL
+	skipVersionPrefix := strings.HasSuffix(baseURL, "#")
+	if skipVersionPrefix {
+		baseURL = strings.TrimSuffix(baseURL, "#")
+	}
+	baseURL = strings.TrimSuffix(baseURL, "/")
+
+	versionPattern := regexp.MustCompile(`/v\d+[a-z]*$`)
+	hasVersionSuffix := versionPattern.MatchString(baseURL)
+
+	var endpoint string
+	switch upstream.ServiceType {
+	case "responses", "copilot":
+		endpoint = "/responses"
+	case "claude":
+		endpoint = "/messages"
+	case "gemini":
+		endpoint = ""
+	default:
+		endpoint = "/chat/completions"
+	}
+
+	if upstream.ServiceType == "copilot" {
+		if baseURL == "" {
+			baseURL = copilot.DefaultAPIBaseURL
+		}
+		return baseURL + endpoint
+	}
+	if endpoint != "" && strings.HasSuffix(strings.ToLower(baseURL), endpoint) {
+		return baseURL
+	}
+	if hasVersionSuffix || skipVersionPrefix {
+		return baseURL + endpoint
+	}
+	return baseURL + "/v1" + endpoint
+}
+
+// ConvertToClaudeResponse 将上游响应转换为 Claude 响应
+func (p *ResponsesProvider) ConvertToClaudeResponse(providerResp *types.ProviderResponse) (*types.ClaudeResponse, error) {
+	var responsesResp map[string]interface{}
+	if err := json.Unmarshal(providerResp.Body, &responsesResp); err != nil {
+		return nil, err
+	}
+
+	claudeResp := &types.ClaudeResponse{
+		ID:      generateID(),
+		Type:    "message",
+		Role:    "assistant",
+		Content: []types.ClaudeContent{},
+	}
+	if model, ok := responsesResp["model"].(string); ok {
+		claudeResp.Model = model
+	}
+
+	if id, ok := responsesResp["id"].(string); ok && id != "" {
+		claudeResp.ID = id
+	}
+
+	if output, ok := responsesResp["output"].([]interface{}); ok {
+		for _, rawItem := range output {
+			item, ok := rawItem.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			switch item["type"] {
+			case "reasoning":
+				if thinking := responsesReasoningText(item); thinking != "" {
+					claudeResp.Content = append(claudeResp.Content, types.ClaudeContent{Type: "thinking", Thinking: thinking})
+				}
+			case "message":
+				if content, ok := item["content"].([]interface{}); ok {
+					for _, rawBlock := range content {
+						block, ok := rawBlock.(map[string]interface{})
+						if !ok {
+							continue
+						}
+						if text, ok := block["text"].(string); ok && text != "" {
+							claudeResp.Content = append(claudeResp.Content, types.ClaudeContent{Type: "text", Text: text})
+						}
+					}
+				}
+			case "function_call":
+				var input interface{}
+				if args, ok := item["arguments"].(string); ok && args != "" {
+					_ = json.Unmarshal([]byte(args), &input)
+				}
+				input = sanitizeClaudeToolInput(toString(item["name"]), input)
+				claudeResp.Content = append(claudeResp.Content, types.ClaudeContent{
+					Type:  "tool_use",
+					ID:    fallbackToolUseID(toString(item["call_id"])),
+					Name:  toString(item["name"]),
+					Input: input,
+				})
+			}
+		}
+	}
+
+	if usageRaw, ok := responsesResp["usage"].(map[string]interface{}); ok {
+		claudeResp.Usage = &types.Usage{}
+		if v, ok := usageRaw["input_tokens"].(float64); ok {
+			claudeResp.Usage.InputTokens = int(v)
+			claudeResp.Usage.PromptTokensTotal = int(v)
+		}
+		if v, ok := usageRaw["output_tokens"].(float64); ok {
+			claudeResp.Usage.OutputTokens = int(v)
+		}
+		if cacheCreation, ok := usageRaw["cache_creation_input_tokens"].(float64); ok {
+			claudeResp.Usage.CacheCreationInputTokens = int(cacheCreation)
+		}
+		if cacheRead, ok := usageRaw["cache_read_input_tokens"].(float64); ok {
+			claudeResp.Usage.CacheReadInputTokens = int(cacheRead)
+		} else {
+			claudeResp.Usage.CacheReadInputTokens = extractResponsesCacheReadTokens(usageRaw)
+		}
+		if cacheCreation5m, ok := usageRaw["cache_creation_5m_input_tokens"].(float64); ok {
+			claudeResp.Usage.CacheCreation5mInputTokens = int(cacheCreation5m)
+		}
+		if cacheCreation1h, ok := usageRaw["cache_creation_1h_input_tokens"].(float64); ok {
+			claudeResp.Usage.CacheCreation1hInputTokens = int(cacheCreation1h)
+		}
+		if cacheTTL, ok := usageRaw["cache_ttl"].(string); ok {
+			claudeResp.Usage.CacheTTL = cacheTTL
+		}
+	}
+
+	hasToolUse := false
+	for _, block := range claudeResp.Content {
+		if block.Type == "tool_use" {
+			hasToolUse = true
+			break
+		}
+	}
+	if hasToolUse {
+		claudeResp.StopReason = "tool_use"
+	} else if status, _ := responsesResp["status"].(string); status == "incomplete" {
+		claudeResp.StopReason = "max_tokens"
+	} else {
+		claudeResp.StopReason = "end_turn"
+	}
+
+	return claudeResp, nil
+}
+
+// ConvertToResponsesResponse 将上游响应转换为 Responses 格式
+func (p *ResponsesProvider) ConvertToResponsesResponse(
+	providerResp *types.ProviderResponse,
+	upstreamType string,
+	sessionID string,
+) (*types.ResponsesResponse, error) {
+	respMap, err := converters.JSONToMap(providerResp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("解析响应失败: %w", err)
+	}
+	// OpenRouter 等上游会把思考文本放在非标准 content 字段，先归一化为规范 summary 形态
+	converters.NormalizeOpenRouterReasoningResponseBody(respMap)
+	converter := converters.NewConverter(upstreamType)
+	return converter.FromProviderResponse(respMap, sessionID)
+}
+
+// HandleStreamResponse 处理流式响应
+func (p *ResponsesProvider) HandleStreamResponse(body io.ReadCloser) (<-chan string, <-chan error, error) {
+	eventChan := make(chan string, 100)
+	errChan := make(chan error, 1)
+
+	go func() {
+		defer close(eventChan)
+		defer errutil.IgnoreDeferred(body.Close)
+
+		scanner := bufio.NewScanner(body)
+		scanner.Buffer(make([]byte, 0, 64*1024), utils.ResponsesSSEScannerMaxBufferSize)
+
+		pendingEventType := ""
+		messageStartSent := false
+		textBlockStarted := false
+		thinkingBlockStarted := false
+		blockIndex := 0 // 下一个可用的 content_block 索引（thinking/text/tool_use 共享）
+		textBlockIndex := -1
+		thinkingBlockIndex := -1
+		toolStates := make(map[string]*responsesStreamToolState)
+		toolKeyByItemID := make(map[string]string)
+		toolKeyByOutputIndex := make(map[int]string)
+		toolStateOrder := make([]*responsesStreamToolState, 0)
+		pendingToolStates := make([]*responsesStreamToolState, 0)
+		toolSequence := 0
+		latestInputTokens := 0
+		latestOutputTokens := 0
+		latestCacheCreationTokens := 0
+		latestCacheReadTokens := 0
+		latestCacheCreation5mTokens := 0
+		latestCacheCreation1hTokens := 0
+		latestCacheTTL := ""
+		latestModel := "" // 上游 response.created/completed 自报的模型名（识别厂商侧隐式重定向）
+		stopReason := "end_turn"
+		emittedAnyConvertedEvent := false
+		unknownEventTypes := map[string]int{}
+
+		emitJSON := func(eventName string, payload map[string]interface{}) {
+			payload["type"] = eventName
+			b, _ := json.Marshal(payload)
+			eventChan <- fmt.Sprintf("event: %s\ndata: %s\n\n", eventName, string(b))
+			emittedAnyConvertedEvent = true
+		}
+
+		ensureMessageStart := func() {
+			if !messageStartSent {
+				eventChan <- buildMessageStartEvent(firstNonEmpty(latestModel, "responses"))
+				messageStartSent = true
+				emittedAnyConvertedEvent = true
+			}
+		}
+
+		// closeOpenContentBlocks 在切换到新内容类型或结束前，闭合已打开的 thinking/text 块。
+		closeOpenContentBlocks := func() {
+			if thinkingBlockStarted {
+				emitJSON("content_block_stop", map[string]interface{}{"index": thinkingBlockIndex})
+				thinkingBlockStarted = false
+			}
+			if textBlockStarted {
+				emitJSON("content_block_stop", map[string]interface{}{"index": textBlockIndex})
+				textBlockStarted = false
+			}
+		}
+
+		responseOutputIndex := func(data map[string]interface{}) (int, bool) {
+			value, ok := data["output_index"].(float64)
+			return int(value), ok
+		}
+
+		responseIdentityValues := func(data map[string]interface{}, item map[string]interface{}) []string {
+			values := []interface{}{data["item_id"], data["call_id"], item["id"], item["call_id"]}
+			identities := make([]string, 0, len(values))
+			seen := make(map[string]struct{}, len(values))
+			for _, value := range values {
+				id := toString(value)
+				if id == "" {
+					continue
+				}
+				if _, exists := seen[id]; exists {
+					continue
+				}
+				seen[id] = struct{}{}
+				identities = append(identities, id)
+			}
+			return identities
+		}
+
+		responseItemID := func(data map[string]interface{}, item map[string]interface{}) string {
+			identities := responseIdentityValues(data, item)
+			if len(identities) > 0 {
+				return identities[0]
+			}
+			return ""
+		}
+
+		responseToolName := func(data map[string]interface{}, item map[string]interface{}) string {
+			if name := toString(item["name"]); name != "" {
+				return name
+			}
+			return toString(data["name"])
+		}
+
+		registerToolStateAliases := func(state *responsesStreamToolState, data map[string]interface{}, item map[string]interface{}) {
+			if state == nil {
+				return
+			}
+			for _, identity := range responseIdentityValues(data, item) {
+				toolKeyByItemID[identity] = state.key
+			}
+			if outputIndex, ok := responseOutputIndex(data); ok {
+				toolKeyByOutputIndex[outputIndex] = state.key
+			}
+		}
+
+		lookupToolState := func(data map[string]interface{}, item map[string]interface{}) *responsesStreamToolState {
+			for _, identity := range responseIdentityValues(data, item) {
+				if key := toolKeyByItemID[identity]; key != "" {
+					return toolStates[key]
+				}
+			}
+			if outputIndex, ok := responseOutputIndex(data); ok {
+				if key := toolKeyByOutputIndex[outputIndex]; key != "" {
+					return toolStates[key]
+				}
+			}
+			return nil
+		}
+
+		latestOpenToolState := func() *responsesStreamToolState {
+			for i := len(toolStateOrder) - 1; i >= 0; i-- {
+				if state := toolStateOrder[i]; state != nil && !state.closed {
+					return state
+				}
+			}
+			return nil
+		}
+
+		onlyOpenToolState := func() *responsesStreamToolState {
+			var only *responsesStreamToolState
+			for _, state := range toolStateOrder {
+				if state == nil || state.closed {
+					continue
+				}
+				if only != nil {
+					return nil
+				}
+				only = state
+			}
+			return only
+		}
+
+		lookupToolStateHeuristic := func(data map[string]interface{}, item map[string]interface{}) *responsesStreamToolState {
+			if state := lookupToolState(data, item); state != nil {
+				return state
+			}
+			if state := onlyOpenToolState(); state != nil {
+				return state
+			}
+			if len(responseIdentityValues(data, item)) == 0 {
+				return latestOpenToolState()
+			}
+			return nil
+		}
+
+		claimPendingToolState := func() *responsesStreamToolState {
+			for i := 0; i < len(pendingToolStates); i++ {
+				state := pendingToolStates[i]
+				pendingToolStates = append(pendingToolStates[:i], pendingToolStates[i+1:]...)
+				if state == nil || state.closed {
+					i--
+					continue
+				}
+				return state
+			}
+			return nil
+		}
+
+		ensureToolBlockStarted := func(state *responsesStreamToolState) {
+			if state == nil || state.started {
+				return
+			}
+			if state.id == "" && state.name == "" {
+				return
+			}
+			if state.id == "" {
+				state.id = fallbackToolUseID(state.name)
+			}
+			if state.index < 0 {
+				state.index = blockIndex
+				blockIndex++
+			}
+			ensureMessageStart()
+			closeOpenContentBlocks()
+			emitJSON("content_block_start", map[string]interface{}{
+				"index": state.index,
+				"content_block": map[string]interface{}{
+					"type": "tool_use",
+					"id":   state.id,
+					"name": state.name,
+				},
+			})
+			state.started = true
+		}
+
+		updateToolStateMetadata := func(state *responsesStreamToolState, data map[string]interface{}, item map[string]interface{}) {
+			if state == nil {
+				return
+			}
+			if name := responseToolName(data, item); name != "" {
+				state.name = name
+			}
+			callID := toString(item["call_id"])
+			if callID == "" {
+				callID = toString(data["call_id"])
+			}
+			if callID != "" {
+				state.id = callID
+			} else if state.id == "" {
+				state.id = responseItemID(data, item)
+				if state.id == "" {
+					state.id = state.name
+				}
+			}
+			registerToolStateAliases(state, data, item)
+			ensureToolBlockStarted(state)
+		}
+
+		startToolState := func(data map[string]interface{}, item map[string]interface{}) *responsesStreamToolState {
+			if state := lookupToolState(data, item); state != nil {
+				updateToolStateMetadata(state, data, item)
+				return state
+			}
+			if state := claimPendingToolState(); state != nil {
+				updateToolStateMetadata(state, data, item)
+				return state
+			}
+
+			itemID := responseItemID(data, item)
+			outputIndex, hasOutputIndex := responseOutputIndex(data)
+			key := itemID
+			if key == "" && hasOutputIndex {
+				key = fmt.Sprintf("output_index:%d", outputIndex)
+			}
+			if key == "" {
+				key = fmt.Sprintf("sequence:%d", toolSequence)
+				toolSequence++
+			}
+			state := &responsesStreamToolState{
+				key:   key,
+				id:    toString(item["call_id"]),
+				name:  responseToolName(data, item),
+				index: -1,
+			}
+			if state.id == "" {
+				state.id = toString(data["call_id"])
+			}
+			if state.id == "" {
+				state.id = toString(item["id"])
+			}
+			if state.id == "" {
+				state.id = state.name
+			}
+			toolStates[key] = state
+			toolStateOrder = append(toolStateOrder, state)
+			registerToolStateAliases(state, data, item)
+			if len(responseIdentityValues(data, item)) == 0 {
+				pendingToolStates = append(pendingToolStates, state)
+			}
+			ensureToolBlockStarted(state)
+			return state
+		}
+
+		closeToolState := func(state *responsesStreamToolState, item map[string]interface{}) {
+			if state == nil || state.closed {
+				return
+			}
+			updateToolStateMetadata(state, nil, item)
+			if !state.started {
+				state.id = fallbackToolUseID(state.id)
+				ensureToolBlockStarted(state)
+			}
+			argsJSON := state.args.String()
+			if strings.TrimSpace(argsJSON) == "" {
+				argsJSON = toString(item["arguments"])
+			}
+			if strings.TrimSpace(argsJSON) == "" {
+				argsJSON = toString(item["input"])
+			}
+			if strings.TrimSpace(argsJSON) == "" {
+				argsJSON = "{}"
+			}
+			argsJSON = sanitizeClaudeToolArgsJSON(state.name, argsJSON)
+			emitJSON("content_block_delta", map[string]interface{}{
+				"index": state.index,
+				"delta": map[string]interface{}{"type": "input_json_delta", "partial_json": argsJSON},
+			})
+			emitJSON("content_block_stop", map[string]interface{}{"index": state.index})
+			state.closed = true
+			stopReason = "tool_use"
+		}
+
+		finalizeCompletedToolStates := func(response map[string]interface{}) {
+			output, _ := response["output"].([]interface{})
+			for _, rawItem := range output {
+				item, ok := rawItem.(map[string]interface{})
+				if !ok || toString(item["type"]) != "function_call" {
+					continue
+				}
+				state := lookupToolStateHeuristic(map[string]interface{}{"item_id": item["id"]}, item)
+				if state == nil {
+					state = startToolState(map[string]interface{}{}, item)
+				}
+				closeToolState(state, item)
+			}
+			pending := make([]*responsesStreamToolState, 0)
+			for _, state := range toolStateOrder {
+				if !state.closed {
+					pending = append(pending, state)
+				}
+			}
+			for _, state := range pending {
+				// 有些上游的 response.completed 只有 status/usage，没有 output 数组；
+				// 这里仍需闭合已累积的工具参数，避免下游收到孤立 content_block_start。
+				closeToolState(state, nil)
+			}
+		}
+
+		// emitClaudeError 把上游错误体转成 Claude 风格的 error 事件，
+		// 使下游 PreflightStreamEvents 的 DetectStreamBlacklistError 能识别认证/余额错误并拉黑 Key，
+		// 同时让空流诊断携带具体错误信息而非笼统的"未收到任何 SSE 事件"。
+		emitClaudeError := func(errType, errMsg, errCode string) {
+			errObj := map[string]interface{}{}
+			if errType != "" {
+				errObj["type"] = errType
+			} else {
+				errObj["type"] = "api_error"
+			}
+			if errMsg != "" {
+				errObj["message"] = errMsg
+			}
+			if errCode != "" {
+				errObj["code"] = errCode
+			}
+			payload := map[string]interface{}{"type": "error", "error": errObj}
+			b, _ := json.Marshal(payload)
+			eventChan <- fmt.Sprintf("event: error\ndata: %s\n\n", string(b))
+			emittedAnyConvertedEvent = true
+		}
+
+		// extractUpstreamError 从 Responses 错误体（顶层 error / response.error / event:error）中提取错误信息。
+		extractUpstreamError := func(data map[string]interface{}) (errType, errMsg, errCode string, ok bool) {
+			candidates := []interface{}{data["error"]}
+			if resp, isMap := data["response"].(map[string]interface{}); isMap {
+				candidates = append(candidates, resp["error"])
+			}
+			for _, cand := range candidates {
+				switch e := cand.(type) {
+				case map[string]interface{}:
+					return toString(e["type"]), toString(e["message"]), toString(e["code"]), true
+				case string:
+					if strings.TrimSpace(e) != "" {
+						return "", e, "", true
+					}
+				}
+			}
+			// 顶层 message（部分 new-api 风格错误）
+			if msg := toString(data["message"]); msg != "" {
+				if dataType := toString(data["type"]); dataType == "error" {
+					return "", msg, toString(data["code"]), true
+				}
+			}
+			return "", "", "", false
+		}
+
+		for scanner.Scan() {
+			line := strings.TrimSpace(normalizeSSEFieldLine(scanner.Text()))
+			if line == "" {
+				continue
+			}
+			if strings.HasPrefix(line, "event: ") {
+				pendingEventType = strings.TrimPrefix(line, "event: ")
+				continue
+			}
+			if !strings.HasPrefix(line, "data: ") {
+				continue
+			}
+
+			payloadStr := strings.TrimPrefix(line, "data: ")
+			if strings.TrimSpace(payloadStr) == "[DONE]" {
+				pendingEventType = ""
+				continue
+			}
+
+			var data map[string]interface{}
+			if err := json.Unmarshal([]byte(payloadStr), &data); err != nil {
+				pendingEventType = ""
+				continue
+			}
+
+			eventType := pendingEventType
+			if eventType == "" {
+				eventType = toString(data["type"])
+			}
+			pendingEventType = ""
+
+			switch eventType {
+			case "response.reasoning_summary_text.delta", "response.reasoning_text.delta":
+				delta := toString(data["delta"])
+				if delta == "" {
+					if t := toString(data["text"]); t != "" {
+						delta = t
+					}
+				}
+				if delta == "" {
+					continue
+				}
+				ensureMessageStart()
+				// reasoning 必须在 text 之前；若已开 text 块则先闭合（异常顺序兜底）
+				if textBlockStarted {
+					emitJSON("content_block_stop", map[string]interface{}{"index": textBlockIndex})
+					textBlockStarted = false
+				}
+				if !thinkingBlockStarted {
+					thinkingBlockIndex = blockIndex
+					blockIndex++
+					emitJSON("content_block_start", map[string]interface{}{
+						"index":         thinkingBlockIndex,
+						"content_block": map[string]interface{}{"type": "thinking", "thinking": ""},
+					})
+					thinkingBlockStarted = true
+				}
+				emitJSON("content_block_delta", map[string]interface{}{
+					"index": thinkingBlockIndex,
+					"delta": map[string]interface{}{"type": "thinking_delta", "thinking": delta},
+				})
+			case "response.output_text.delta":
+				ensureMessageStart()
+				if thinkingBlockStarted {
+					emitJSON("content_block_stop", map[string]interface{}{"index": thinkingBlockIndex})
+					thinkingBlockStarted = false
+				}
+				if !textBlockStarted {
+					textBlockIndex = blockIndex
+					blockIndex++
+					emitJSON("content_block_start", map[string]interface{}{
+						"index":         textBlockIndex,
+						"content_block": map[string]interface{}{"type": "text", "text": ""},
+					})
+					textBlockStarted = true
+				}
+				delta := toString(data["delta"])
+				if delta != "" {
+					emitJSON("content_block_delta", map[string]interface{}{
+						"index": textBlockIndex,
+						"delta": map[string]interface{}{"type": "text_delta", "text": delta},
+					})
+				}
+			case "response.output_item.added":
+				item, _ := data["item"].(map[string]interface{})
+				if toString(item["type"]) != "function_call" {
+					continue
+				}
+				startToolState(data, item)
+			case "response.function_call_arguments.delta":
+				state := lookupToolStateHeuristic(data, nil)
+				if state == nil {
+					state = startToolState(data, nil)
+				}
+				registerToolStateAliases(state, data, nil)
+				state.args.WriteString(toString(data["delta"]))
+			case "response.function_call_arguments.done":
+				item, _ := data["item"].(map[string]interface{})
+				state := lookupToolStateHeuristic(data, item)
+				if state == nil {
+					state = startToolState(data, item)
+				}
+				if args := toString(data["arguments"]); args != "" {
+					state.args.Reset()
+					state.args.WriteString(args)
+				}
+				updateToolStateMetadata(state, data, item)
+				if state.name != "" || state.id != "" {
+					closeToolState(state, item)
+				}
+			case "response.output_item.done":
+				item, _ := data["item"].(map[string]interface{})
+				if toString(item["type"]) == "function_call" {
+					state := lookupToolStateHeuristic(data, item)
+					if state == nil {
+						state = startToolState(data, item)
+					}
+					closeToolState(state, item)
+				}
+			case "response.created", "response.in_progress":
+				// 上游自报模型名（厂商隐式重定向观测）：仅提取记录，不改变流转
+				if response, _ := data["response"].(map[string]interface{}); response != nil {
+					if model, _ := response["model"].(string); model != "" {
+						latestModel = model
+					}
+				}
+			case "response.failed", "response.error", "error":
+				// 上游以 200 + SSE 形式返回错误体（new-api 等常见）。转成 Claude error 事件，
+				// 让下游识别拉黑条件并给出精确诊断，而非被笼统判为空流。
+				if errType, errMsg, errCode, ok := extractUpstreamError(data); ok {
+					emitClaudeError(errType, errMsg, errCode)
+				} else {
+					emitClaudeError("", "upstream returned an error event without details", "")
+				}
+			case "response.completed", "response.incomplete":
+				response, _ := data["response"].(map[string]interface{})
+				if model, _ := response["model"].(string); model != "" {
+					latestModel = model
+				}
+				usage, _ := response["usage"].(map[string]interface{})
+				if v, ok := usage["input_tokens"].(float64); ok {
+					latestInputTokens = int(v)
+				}
+				if v, ok := usage["output_tokens"].(float64); ok {
+					latestOutputTokens = int(v)
+				}
+				if v, ok := usage["cache_creation_input_tokens"].(float64); ok {
+					latestCacheCreationTokens = int(v)
+				}
+				if v, ok := usage["cache_read_input_tokens"].(float64); ok {
+					latestCacheReadTokens = int(v)
+				} else {
+					latestCacheReadTokens = extractResponsesCacheReadTokens(usage)
+				}
+				if v, ok := usage["cache_creation_5m_input_tokens"].(float64); ok {
+					latestCacheCreation5mTokens = int(v)
+				}
+				if v, ok := usage["cache_creation_1h_input_tokens"].(float64); ok {
+					latestCacheCreation1hTokens = int(v)
+				}
+				if v, ok := usage["cache_ttl"].(string); ok {
+					latestCacheTTL = v
+				}
+				status := toString(response["status"])
+				finalizeCompletedToolStates(response)
+				if status == "incomplete" || eventType == "response.incomplete" {
+					stopReason = "max_tokens"
+				}
+				closeOpenContentBlocks()
+				ensureMessageStart()
+				usagePayload := map[string]interface{}{
+					"input_tokens":  latestInputTokens,
+					"output_tokens": latestOutputTokens,
+				}
+				if latestCacheCreationTokens > 0 {
+					usagePayload["cache_creation_input_tokens"] = latestCacheCreationTokens
+				}
+				if latestCacheReadTokens > 0 {
+					usagePayload["cache_read_input_tokens"] = latestCacheReadTokens
+				}
+				if latestCacheCreation5mTokens > 0 {
+					usagePayload["cache_creation_5m_input_tokens"] = latestCacheCreation5mTokens
+				}
+				if latestCacheCreation1hTokens > 0 {
+					usagePayload["cache_creation_1h_input_tokens"] = latestCacheCreation1hTokens
+				}
+				if latestCacheTTL != "" {
+					usagePayload["cache_ttl"] = latestCacheTTL
+				}
+				emitJSON("message_delta", map[string]interface{}{
+					"delta": map[string]interface{}{
+						"stop_reason":   stopReason,
+						"stop_sequence": nil,
+						"stop_details":  nil,
+					},
+					"usage": usagePayload,
+				})
+				emitJSON("message_stop", map[string]interface{}{})
+			default:
+				// 记录未识别事件类型，便于在空流时给出诊断线索。
+				// 已知但无需转换的良性事件（created/in_progress/output_text.done/reasoning_summary_*.{added,done} 等）也会落到这里，
+				// 仅做计数，不影响流转。
+				if eventType != "" {
+					unknownEventTypes[eventType]++
+				}
+			}
+		}
+
+		// 流自然结束但本地未产出任何可转换事件：注入一个 error 事件，
+		// 使下游诊断从"未收到任何 SSE 事件"升级为携带上游事件线索，便于排查上游不兼容问题。
+		if !emittedAnyConvertedEvent && len(unknownEventTypes) > 0 {
+			summary := summarizeUnknownResponsesEvents(unknownEventTypes)
+			emitClaudeError("upstream_unconvertible", "Responses 流仅含无法转换的事件: "+summary, "")
+		}
+
+		if err := scanner.Err(); err != nil {
+			errChan <- err
+		}
+	}()
+
+	return eventChan, errChan, nil
+}
+
+// summarizeUnknownResponsesEvents 把未识别事件类型按出现次数汇总成稳定字符串（用于诊断日志）。
+func summarizeUnknownResponsesEvents(counts map[string]int) string {
+	keys := make([]string, 0, len(counts))
+	for k := range counts {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, fmt.Sprintf("%s×%d", k, counts[k]))
+	}
+	return strings.Join(parts, ", ")
+}
+
+func extractResponsesCacheReadTokens(usage map[string]interface{}) int {
+	if cacheRead, ok := usage["cache_read_input_tokens"].(float64); ok {
+		return int(cacheRead)
+	}
+	inputDetails, ok := usage["input_tokens_details"].(map[string]interface{})
+	if !ok {
+		return 0
+	}
+	if cachedTokens, ok := inputDetails["cached_tokens"].(float64); ok {
+		return int(cachedTokens)
+	}
+	return 0
+}
+
+func responsesReasoningText(item map[string]interface{}) string {
+	return reasoningTextFromRaw(firstNonNil(item["summary"], item["content"]))
+}
+
+func firstNonNil(values ...interface{}) interface{} {
+	for _, value := range values {
+		if value != nil {
+			return value
+		}
+	}
+	return nil
+}
+
+func reasoningTextFromRaw(raw interface{}) string {
+	switch v := raw.(type) {
+	case string:
+		return v
+	case []interface{}:
+		parts := make([]string, 0, len(v))
+		for _, rawPart := range v {
+			if part, ok := rawPart.(map[string]interface{}); ok {
+				if text, ok := part["text"].(string); ok && text != "" {
+					parts = append(parts, text)
+				}
+			}
+		}
+		return strings.Join(parts, "\n")
+	default:
+		return ""
+	}
+}
+
+func toString(v interface{}) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
+}
+
+func stripCodexClientOnlyToolsFromBody(bodyBytes []byte) []byte {
+	var reqMap map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &reqMap); err != nil {
+		return bodyBytes
+	}
+	stripCodexClientOnlyTools(reqMap)
+	updated, err := json.Marshal(reqMap)
+	if err != nil {
+		return bodyBytes
+	}
+	return updated
+}
+
+// stripCodexClientOnlyTools 在 /v1/responses 中剥离仅对官方 Codex 有效的工具条目。
+// Codex CLI 0.130+ 会在 tools 数组里混入字符串简写（如 "exec_command"、"mcp__chrome_devtools__"）
+// 以及 type=namespace/custom/tool_search 等客户端侧约定对象，第三方 Responses 镜像通常不认识，
+// 会直接 400（例如 anyrouter 报 "Missing required parameter: 'tools[15].tools'"）。
+// 这里只保留第三方上游普遍支持的对象型工具（function/tool 等），其它条目连同 tool_choice 一起剥掉。
+func stripCodexClientOnlyTools(reqMap map[string]interface{}) {
+	rawTools, ok := reqMap["tools"].([]interface{})
+	if !ok || len(rawTools) == 0 {
+		return
+	}
+
+	kept := make([]interface{}, 0, len(rawTools))
+	removed := 0
+	for _, item := range rawTools {
+		switch v := item.(type) {
+		case string:
+			removed++
+		case map[string]interface{}:
+			if shouldDropResponsesToolObject(v) {
+				removed++
+				continue
+			}
+			kept = append(kept, v)
+		default:
+			removed++
+		}
+	}
+
+	if removed == 0 {
+		return
+	}
+
+	if len(kept) == 0 {
+		delete(reqMap, "tools")
+		delete(reqMap, "tool_choice")
+		delete(reqMap, "parallel_tool_calls")
+		return
+	}
+	reqMap["tools"] = kept
+	normalizeToolChoiceAfterToolStrip(reqMap, kept)
+}
+
+func stripImageGenerationFromTools(reqMap map[string]interface{}) {
+	rawTools, ok := reqMap["tools"].([]interface{})
+	if !ok || len(rawTools) == 0 {
+		return
+	}
+
+	kept := make([]interface{}, 0, len(rawTools))
+	removed := 0
+	for _, item := range rawTools {
+		if IsImageGenerationToolEntry(item) {
+			removed++
+			continue
+		}
+		kept = append(kept, item)
+	}
+
+	if removed == 0 {
+		return
+	}
+
+	if len(kept) == 0 {
+		delete(reqMap, "tools")
+		delete(reqMap, "tool_choice")
+		delete(reqMap, "parallel_tool_calls")
+		return
+	}
+	reqMap["tools"] = kept
+	normalizeToolChoiceAfterToolStrip(reqMap, kept)
+}
+
+// IsImageGenerationToolEntry 判断工具条目是否属于图片生成能力。
+// 同时覆盖 OpenAI hosted tool、Codex image_gen namespace，以及 namespace
+// 转为 OpenAI function 后的扁平名称，供 Responses/Chat 兼容剥离共用。
+func IsImageGenerationToolEntry(raw interface{}) bool {
+	switch tool := raw.(type) {
+	case string:
+		return isImageGenerationToolName(tool)
+	case map[string]interface{}:
+		toolType := strings.ToLower(strings.TrimSpace(toString(tool["type"])))
+		if toolType == "image_generation" {
+			return true
+		}
+		name := toString(tool["name"])
+		if toolType == "namespace" && strings.EqualFold(strings.TrimSpace(name), "image_gen") {
+			return true
+		}
+		if namespace := toString(tool["namespace"]); strings.EqualFold(strings.TrimSpace(namespace), "image_gen") && isImageGenerationToolName(name) {
+			return true
+		}
+		if toolType == "function" {
+			if isImageGenerationToolName(name) {
+				return true
+			}
+			if function, ok := tool["function"].(map[string]interface{}); ok {
+				functionName := toString(function["name"])
+				if isImageGenerationToolName(functionName) {
+					return true
+				}
+				return strings.EqualFold(strings.TrimSpace(toString(function["namespace"])), "image_gen") && isImageGenerationToolName(functionName)
+			}
+		}
+	}
+	return false
+}
+
+func isImageGenerationToolName(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "image_generation", "image_gen", "imagegen", "image_gen__imagegen":
+		return true
+	default:
+		return false
+	}
+}
+
+// convertCodexToolsForPassthrough 将 Codex 原生工具（custom/namespace/web_search 等）
+// 转换为 OpenAI function 格式，用于透传分支。转换失败时回退到剥离逻辑。
+func convertCodexToolsForPassthrough(reqMap map[string]interface{}) {
+	rawTools, ok := reqMap["tools"].([]interface{})
+	if !ok || len(rawTools) == 0 {
+		return
+	}
+
+	converted := converters.ConvertRawToolsToOpenAI(rawTools)
+	if len(converted) == 0 {
+		stripCodexClientOnlyTools(reqMap)
+		return
+	}
+
+	tools := make([]interface{}, 0, len(converted))
+	for _, t := range converted {
+		tools = append(tools, t)
+	}
+	reqMap["tools"] = tools
+
+	ctx := converters.BuildCodexToolContextFromRaw(rawTools)
+	reqMap["tool_choice"] = converters.ConvertToolChoiceForCodex(reqMap["tool_choice"], ctx)
+}
+
+// hoistCodexAdditionalTools 收割 codex 0.153+ 放在 input[] 的 type=additional_tools
+// 条目里的 namespace/custom 工具，提升为顶层扁平 function tools，并把历史里的
+// custom_tool_call(_output) 与带 namespace 的 function_call 归一为上游可识别的
+// function_call(_output) 形态。第三方 Responses 上游只认顶层 tools，对
+// additional_tools 条目静默忽略，导致 codex 工具调用完全失效（ark 实测）。
+// 仅在顶层 tools 为空时触发（codex 0.153+ 的标配形状），与既有
+// codexNativeToolPassthrough/codexToolCompat 顶层转换互不叠加。
+// 必须先于 normalizeResponsesInputForPassthrough 执行：其无状态配对检查会丢弃
+// 未配对的 function_call_output，custom_tool_call 历史须先完成归一。
+// 返回提升前的原始工具数组（namespace/custom 形态）与是否提升；原始工具供
+// 协议转换路径（responses→chat 等）经 codex_merged_raw_tools 通道重建响应侧
+// remap 上下文——提升后的扁平形态丢了 custom 代理语义，无法还原 custom_tool_call。
+func hoistCodexAdditionalTools(c *gin.Context, reqMap map[string]interface{}) ([]interface{}, bool) {
+	if rawTools, ok := reqMap["tools"].([]interface{}); ok && len(rawTools) > 0 {
+		return nil, false
+	}
+	input, ok := reqMap["input"].([]interface{})
+	if !ok {
+		return nil, false
+	}
+
+	var harvested []interface{}
+	kept := make([]interface{}, 0, len(input))
+	for _, rawItem := range input {
+		item, ok := rawItem.(map[string]interface{})
+		if !ok || toString(item["type"]) != "additional_tools" {
+			kept = append(kept, rawItem)
+			continue
+		}
+		if tools, ok := item["tools"].([]interface{}); ok {
+			harvested = append(harvested, tools...)
+		}
+	}
+	if len(harvested) == 0 {
+		return nil, false
+	}
+
+	ctx := converters.BuildCodexToolContextFromRaw(harvested)
+	hoisted := make([]interface{}, 0, len(harvested))
+	for _, rawTool := range harvested {
+		tool, ok := rawTool.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		switch toString(tool["type"]) {
+		case "namespace":
+			for _, flat := range converters.NamespaceToolsToResponsesFlat(tool, ctx) {
+				hoisted = append(hoisted, flat)
+			}
+		case "function":
+			hoisted = append(hoisted, tool)
+		case "custom":
+			name := toString(tool["name"])
+			if name == "" {
+				continue
+			}
+			hoisted = append(hoisted, converters.CustomProxyToolResponsesFlat(name, toString(tool["description"])))
+		}
+	}
+	if len(hoisted) == 0 {
+		return nil, false
+	}
+
+	for i, rawItem := range kept {
+		item, ok := rawItem.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		switch toString(item["type"]) {
+		case "custom_tool_call":
+			upstreamName, argsJSON := converters.BuildCustomToolCallHistoryArguments(ctx, toString(item["name"]), toString(item["input"]))
+			item["type"] = "function_call"
+			item["name"] = upstreamName
+			delete(item, "input")
+			item["arguments"] = argsJSON
+			kept[i] = item
+		case "custom_tool_call_output":
+			item["type"] = "function_call_output"
+			kept[i] = item
+		case "function_call":
+			namespace := toString(item["namespace"])
+			if namespace == "" {
+				continue
+			}
+			if flat, ok := ctx.UpstreamNameForNamespaceCall(namespace, toString(item["name"])); ok {
+				item["name"] = flat
+				delete(item, "namespace")
+				kept[i] = item
+			}
+		}
+	}
+
+	reqMap["input"] = kept
+	reqMap["tools"] = hoisted
+	reqMap["tool_choice"] = converters.ConvertToolChoiceForCodex(reqMap["tool_choice"], ctx)
+	c.Set("codex_tool_context", ctx)
+	c.Set("codex_additional_tools_hoisted", true)
+	return harvested, true
+}
+
+func normalizeToolChoiceAfterToolStrip(reqMap map[string]interface{}, keptTools []interface{}) {
+	choice, ok := reqMap["tool_choice"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	choiceName := extractToolChoiceName(choice)
+	if choiceName == "" {
+		return
+	}
+	if hasToolName(keptTools, choiceName) {
+		return
+	}
+	reqMap["tool_choice"] = "auto"
+}
+
+func extractToolChoiceName(choice map[string]interface{}) string {
+	if name := toString(choice["name"]); name != "" {
+		return name
+	}
+	function, ok := choice["function"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	return toString(function["name"])
+}
+
+func hasToolName(tools []interface{}, name string) bool {
+	for _, raw := range tools {
+		tool, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if toolName := toString(tool["name"]); toolName == name {
+			return true
+		}
+		function, ok := tool["function"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if functionName := toString(function["name"]); functionName == name {
+			return true
+		}
+	}
+	return false
+}
+
+// shouldDropResponsesToolObject 判断对象型工具条目是否为 Codex 客户端专属。
+// 仅识别明确的客户端约定类型，未知类型保守保留，避免误伤上游自定义扩展。
+func shouldDropResponsesToolObject(tool map[string]interface{}) bool {
+	toolType := strings.ToLower(toString(tool["type"]))
+	switch toolType {
+	case "namespace", "custom", "local_shell", "computer_use", "tool_search":
+		return true
+	}
+	return false
+}
+
+func normalizeResponsesInputForPassthrough(reqMap map[string]interface{}) {
+	delete(reqMap, "internal_chat_message_metadata_passthrough")
+	delete(reqMap, "transformer_metadata")
+
+	input, ok := reqMap["input"].([]interface{})
+	if !ok {
+		return
+	}
+
+	stateless := toString(reqMap["previous_response_id"]) == ""
+	if stateless {
+		input = normalizeStatelessResponsesToolHistory(input)
+		reqMap["input"] = input
+	}
+
+	for _, rawItem := range input {
+		item, ok := rawItem.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		stripResponsesClientOnlyInputMetadata(item)
+		delete(item, "status")
+
+		if toString(item["type"]) != "message" {
+			continue
+		}
+
+		role := normalizeRole(toString(item["role"]))
+		targetTextType := responsesTextContentType(role)
+		content, ok := item["content"].([]interface{})
+		if !ok {
+			continue
+		}
+
+		for _, rawBlock := range content {
+			block, ok := rawBlock.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			blockType := toString(block["type"])
+			if blockType == "input_text" || blockType == "output_text" {
+				block["type"] = targetTextType
+			}
+		}
+	}
+}
+
+func stripResponsesClientOnlyInputMetadata(item map[string]interface{}) {
+	delete(item, "internal_chat_message_metadata_passthrough")
+	delete(item, "additional_tools")
+}
+
+func normalizeStatelessResponsesToolHistory(input []interface{}) []interface{} {
+	knownCalls := make(map[string]struct{}, len(input))
+	for _, rawItem := range input {
+		item, ok := rawItem.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if toString(item["type"]) == "function_call" {
+			if id := toString(item["call_id"]); id != "" {
+				knownCalls[id] = struct{}{}
+			}
+		}
+	}
+
+	normalized := make([]interface{}, 0, len(input))
+	for _, rawItem := range input {
+		item, ok := rawItem.(map[string]interface{})
+		if !ok {
+			normalized = append(normalized, rawItem)
+			continue
+		}
+
+		switch toString(item["type"]) {
+		case "function_call":
+			normalized = append(normalized, rawItem)
+		case "function_call_output":
+			callID := toString(item["call_id"])
+			if _, paired := knownCalls[callID]; paired {
+				normalized = append(normalized, rawItem)
+			} else {
+				normalized = append(normalized, responsesToolHistoryMessage("user", formatFunctionCallOutputHistory(item)))
+			}
+		default:
+			normalized = append(normalized, rawItem)
+		}
+	}
+	return normalized
+}
+
+func responsesToolHistoryMessage(role, text string) map[string]interface{} {
+	return map[string]interface{}{
+		"type": "message",
+		"role": role,
+		"content": []interface{}{
+			map[string]interface{}{
+				"type": responsesTextContentType(role),
+				"text": text,
+			},
+		},
+	}
+}
+
+func formatFunctionCallOutputHistory(item map[string]interface{}) string {
+	callID := toString(item["call_id"])
+	output := toString(item["output"])
+	if output == "" && item["output"] != nil {
+		if outputJSON, err := json.Marshal(item["output"]); err == nil {
+			output = string(outputJSON)
+		}
+	}
+	if callID != "" {
+		return fmt.Sprintf("Function call output (%s): %s", callID, output)
+	}
+	return fmt.Sprintf("Function call output: %s", output)
+}
+
+func extractEffortFromReasoning(reasoning interface{}) string {
+	switch v := reasoning.(type) {
+	case map[string]interface{}:
+		if effort, ok := v["effort"].(string); ok {
+			return effort
+		}
+	case string:
+		return v
+	}
+	return ""
+}
+
+func extractRawToolsFromRequest(bodyBytes []byte) []interface{} {
+	var reqMap map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &reqMap); err != nil {
+		return nil
+	}
+	rawTools, _ := reqMap["tools"].([]interface{})
+	return rawTools
+}

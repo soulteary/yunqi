@@ -1,0 +1,1011 @@
+// Package common 提供 handlers 模块的公共功能
+package common
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptrace"
+	"regexp"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/BenedictKing/ccx/internal/httpclient"
+	"github.com/BenedictKing/ccx/internal/logger"
+	"github.com/BenedictKing/ccx/internal/metrics"
+	"github.com/BenedictKing/ccx/internal/utils"
+	"github.com/gin-gonic/gin"
+)
+
+const MaxUpstreamResponseLogBytes = 1024 * 1024
+
+// logToFile 向日志文件写入一行（原始格式）。
+// 所有请求/响应日志都通过此函数写入文件，确保文件始终包含完整日志。
+func logToFile(format string, args ...interface{}) {
+	logger.RawFileLog().Printf(format, args...)
+}
+
+func logToConsole(format string, args ...interface{}) {
+	logger.ConsoleLog().Printf(format, args...)
+}
+
+type LimitedLogBuffer struct {
+	buf       bytes.Buffer
+	limit     int
+	truncated bool
+	total     int
+}
+
+func NewLimitedLogBuffer(limit int) *LimitedLogBuffer {
+	if limit <= 0 {
+		limit = MaxUpstreamResponseLogBytes
+	}
+	return &LimitedLogBuffer{limit: limit}
+}
+
+func (b *LimitedLogBuffer) Write(p []byte) (int, error) {
+	if b == nil {
+		return len(p), nil
+	}
+	b.total += len(p)
+	remaining := b.limit - b.buf.Len()
+	if remaining <= 0 {
+		b.truncated = true
+		return len(p), nil
+	}
+	if len(p) > remaining {
+		b.buf.Write(p[:remaining])
+		b.truncated = true
+		return len(p), nil
+	}
+	b.buf.Write(p)
+	return len(p), nil
+}
+
+func (b *LimitedLogBuffer) WriteString(s string) (int, error) {
+	return b.Write([]byte(s))
+}
+
+func (b *LimitedLogBuffer) Len() int {
+	if b == nil {
+		return 0
+	}
+	return b.buf.Len()
+}
+
+func (b *LimitedLogBuffer) Bytes() []byte {
+	if b == nil {
+		return nil
+	}
+	return b.buf.Bytes()
+}
+
+func (b *LimitedLogBuffer) String() string {
+	if b == nil {
+		return ""
+	}
+	result := b.buf.String()
+	if b.truncated {
+		result += fmt.Sprintf("\n...[truncated upstream stream log at %d/%d bytes]", b.limit, b.total)
+	}
+	return result
+}
+
+// RequestLifecycleTrace 用于记录上游 HTTP 请求生命周期关键节点。
+type RequestLifecycleTrace struct {
+	OnConnected         func()
+	OnFirstResponseByte func()
+}
+
+// ReadRequestBody 读取并验证请求体大小
+// 返回: (bodyBytes, error)
+// 如果请求体过大，会自动返回 413 错误并排空剩余数据
+func ReadRequestBody(c *gin.Context, maxBodySize int64) ([]byte, error) {
+	limitedReader := io.LimitReader(c.Request.Body, maxBodySize+1)
+	bodyBytes, err := io.ReadAll(limitedReader)
+	if err != nil {
+		c.JSON(400, gin.H{"error": "Failed to read request body"})
+		return nil, err
+	}
+
+	if int64(len(bodyBytes)) > maxBodySize {
+		_, _ =
+			// 排空剩余请求体，避免 keep-alive 连接污染
+			io.Copy(io.Discard, c.Request.Body)
+		c.JSON(413, gin.H{"error": fmt.Sprintf("Request body too large, maximum size is %d MB", maxBodySize/1024/1024)})
+		return nil, fmt.Errorf("request body too large")
+	}
+
+	if encoding := c.Request.Header.Get("Content-Encoding"); encoding != "" {
+		decompressed, decompressErr := utils.DecompressBytesByEncoding(bodyBytes, encoding)
+		if decompressErr != nil {
+			c.JSON(400, gin.H{"error": fmt.Sprintf("Failed to decompress request body: %v", decompressErr)})
+			return nil, decompressErr
+		}
+		bodyBytes = decompressed
+		c.Request.Header.Del("Content-Encoding")
+		if int64(len(bodyBytes)) > maxBodySize {
+			c.JSON(413, gin.H{"error": fmt.Sprintf("Request body too large after decompression, maximum size is %d MB", maxBodySize/1024/1024)})
+			return nil, fmt.Errorf("request body too large after decompression")
+		}
+	}
+
+	// 恢复请求体供后续使用
+	c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+	return bodyBytes, nil
+}
+
+// RestoreRequestBody 恢复请求体供后续使用
+func RestoreRequestBody(c *gin.Context, bodyBytes []byte) {
+	c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+}
+
+// GetEffectiveRequestBody 返回 context 中缓存的最新请求体（key: requestBodyBytes）。
+// failover 在每次尝试前会把规范化、历史图片裁剪后的 body 写入该 key，
+// 因此绕过 provider 直接构建请求的 handler（chat/gemini）应使用本函数获取实际生效 body，
+// 而非闭包捕获的原始 bodyBytes。读取失败时回退到 fallback。
+func GetEffectiveRequestBody(c *gin.Context, fallback []byte) []byte {
+	if c == nil {
+		return fallback
+	}
+	if cached, ok := c.Get("requestBodyBytes"); ok {
+		if body, ok := cached.([]byte); ok && body != nil {
+			return body
+		}
+	}
+	return fallback
+}
+
+// PassthroughResponse 直接将上游响应转发给客户端，不在内存中整包缓存。
+func PassthroughResponse(c *gin.Context, resp *http.Response) error {
+	utils.ForwardResponseHeaders(resp.Header, c.Writer)
+	utils.ForwardContentType(resp.Header, c.Writer)
+	c.Status(resp.StatusCode)
+	_, err := io.Copy(c.Writer, resp.Body)
+	return err
+}
+
+// PassthroughJSONResponse 在透传响应给客户端的同时，用流式 Decoder 尝试解析 JSON。
+// 解析失败时会继续排空剩余响应体，确保客户端仍收到完整响应。
+func PassthroughJSONResponse(c *gin.Context, resp *http.Response, target interface{}) error {
+	if target == nil {
+		return PassthroughResponse(c, resp)
+	}
+
+	utils.ForwardResponseHeaders(resp.Header, c.Writer)
+	utils.ForwardContentType(resp.Header, c.Writer)
+	c.Status(resp.StatusCode)
+
+	tee := io.TeeReader(resp.Body, c.Writer)
+	decoder := json.NewDecoder(tee)
+	if err := decoder.Decode(target); err != nil {
+		if _, copyErr := io.Copy(c.Writer, resp.Body); copyErr != nil {
+			return copyErr
+		}
+		return err
+	}
+
+	_, err := io.Copy(c.Writer, resp.Body)
+	return err
+}
+
+func LogUpstreamResponseHeaders(c *gin.Context, resp *http.Response, envCfg *config.EnvConfig, apiType string) {
+	if !envCfg.EnableResponseLogs || !envCfg.IsDevelopment() || resp == nil {
+		return
+	}
+
+	respHeaders := make(map[string]string)
+	for key, values := range resp.Header {
+		if len(values) > 0 {
+			respHeaders[key] = values[0]
+		}
+	}
+	respHeadersJSON, _ := json.MarshalIndent(respHeaders, "", "  ")
+	requestLogToConsole(c, "[%s-Response] 响应头:\n%s", apiType, string(respHeadersJSON))
+	rawHeadersJSON, _ := json.Marshal(respHeaders)
+	requestLogToFile(c, "[%s-Response] 响应头:\n%s", apiType, string(rawHeadersJSON))
+}
+
+func LogUpstreamResponseBody(c *gin.Context, bodyBytes []byte, envCfg *config.EnvConfig, apiType string) {
+	if !envCfg.EnableResponseLogs || !envCfg.IsDevelopment() {
+		return
+	}
+	if shouldOmitBodyForLog(apiType) {
+		requestLogToConsole(c, "[%s-Response] 响应体: [omitted for vectors]", apiType)
+		requestLogToFile(c, "[%s-Response] 响应体: [omitted for vectors]", apiType)
+		return
+	}
+
+	requestLogToConsole(c, "[%s-Response] 响应体:\n%s", apiType, utils.FormatJSONBytesForLog(bodyBytes, consoleJSONTextLimit))
+	requestLogToFile(c, "[%s-Response] 响应体:\n%s", apiType, utils.FormatJSONBytesRaw(bodyBytes))
+}
+
+func LogUpstreamResponse(c *gin.Context, resp *http.Response, bodyBytes []byte, envCfg *config.EnvConfig, apiType string) {
+	LogUpstreamResponseHeaders(c, resp, envCfg, apiType)
+	LogUpstreamResponseBody(c, bodyBytes, envCfg, apiType)
+}
+
+// SendRequest 发送 HTTP 请求到上游
+// isStream: 是否为流式请求（流式请求使用无超时客户端）
+// apiType: 接口类型（Messages/Responses/Gemini），用于日志标签前缀
+func SendRequest(req *http.Request, upstream *config.UpstreamConfig, envCfg *config.EnvConfig, isStream bool, apiType string) (*http.Response, error) {
+	return SendRequestWithLifecycleTrace(req, upstream, envCfg, isStream, apiType, nil)
+}
+
+// SendRequestWithLifecycleTrace 发送 HTTP 请求到上游，并可记录连接取得与首个响应字节时间。
+func SendRequestWithLifecycleTrace(req *http.Request, upstream *config.UpstreamConfig, envCfg *config.EnvConfig, isStream bool, apiType string, lifecycleTrace *RequestLifecycleTrace) (*http.Response, error) {
+	clientManager := httpclient.GetManager()
+
+	var client *http.Client
+	globalRequestTimeout := config.GetRuntimeRequestTimeoutMs(envCfg.RequestTimeout)
+	globalResponseHeaderTimeout := config.GetRuntimeResponseHeaderTimeoutMs(envCfg.ResponseHeaderTimeout * 1000)
+	responseHeaderTimeout := time.Duration(upstream.GetEffectiveResponseHeaderTimeoutMs(globalResponseHeaderTimeout)) * time.Millisecond
+	if isStream {
+		client = clientManager.GetClient(httpclient.ClientOptions{
+			Stream:                true,
+			ResponseHeaderTimeout: responseHeaderTimeout,
+			Insecure:              upstream.InsecureSkipVerify,
+			ProxyURL:              upstream.ProxyURL,
+			ProxyPreferDirect:     upstream.ProxyPreferDirect,
+		})
+	} else {
+		timeout := time.Duration(upstream.GetEffectiveRequestTimeoutMs(globalRequestTimeout)) * time.Millisecond
+		client = clientManager.GetClient(httpclient.ClientOptions{
+			Timeout:               timeout,
+			ResponseHeaderTimeout: responseHeaderTimeout,
+			Insecure:              upstream.InsecureSkipVerify,
+			ProxyURL:              upstream.ProxyURL,
+			ProxyPreferDirect:     upstream.ProxyPreferDirect,
+		})
+	}
+
+	if upstream.InsecureSkipVerify && envCfg.EnableRequestLogs {
+		requestLogToConsoleFromRequest(req, "[%s-Request-TLS] 警告: 正在跳过对 %s 的TLS证书验证", apiType, req.URL.String())
+		requestLogToFileFromRequest(req, "[%s-Request-TLS] 警告: 正在跳过对 %s 的TLS证书验证", apiType, req.URL.String())
+	}
+
+	if envCfg.EnableRequestLogs {
+		requestLogToConsoleFromRequest(req, "[%s-Request-URL] 实际请求URL: %s", apiType, req.URL.String())
+		requestLogToConsoleFromRequest(req, "[%s-Request-Method] 请求方法: %s", apiType, req.Method)
+		requestLogToFileFromRequest(req, "[%s-Request-URL] 实际请求URL: %s", apiType, req.URL.String())
+		requestLogToFileFromRequest(req, "[%s-Request-Method] 请求方法: %s", apiType, req.Method)
+		if upstream.ProxyURL != "" {
+			redactedProxyURL := utils.RedactURLCredentials(upstream.ProxyURL)
+			requestLogToConsoleFromRequest(req, "[%s-Request-Proxy] 使用代理: %s", apiType, redactedProxyURL)
+			requestLogToFileFromRequest(req, "[%s-Request-Proxy] 使用代理: %s", apiType, redactedProxyURL)
+		}
+		if envCfg.IsDevelopment() {
+			logRequestDetails(req, envCfg, apiType)
+		}
+	}
+
+	req = withLifecycleTrace(req, lifecycleTrace)
+	return client.Do(req)
+}
+
+func withLifecycleTrace(req *http.Request, lifecycleTrace *RequestLifecycleTrace) *http.Request {
+	if lifecycleTrace == nil || (lifecycleTrace.OnConnected == nil && lifecycleTrace.OnFirstResponseByte == nil) {
+		return req
+	}
+
+	trace := &httptrace.ClientTrace{
+		GotConn: func(_ httptrace.GotConnInfo) {
+			if lifecycleTrace.OnConnected != nil {
+				lifecycleTrace.OnConnected()
+			}
+		},
+		GotFirstResponseByte: func() {
+			if lifecycleTrace.OnFirstResponseByte != nil {
+				lifecycleTrace.OnFirstResponseByte()
+			}
+		},
+	}
+	return req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
+}
+
+// logRequestDetails 记录请求详情（仅开发模式）
+// apiType: 接口类型（Messages/Responses/Gemini），用于日志标签前缀
+func logRequestDetails(req *http.Request, envCfg *config.EnvConfig, apiType string) {
+	// 对请求头做敏感信息脱敏
+	reqHeaders := make(map[string]string)
+	for key, values := range req.Header {
+		if len(values) > 0 {
+			reqHeaders[key] = values[0]
+		}
+	}
+	maskedReqHeaders := utils.MaskSensitiveHeaders(reqHeaders)
+	reqHeadersJSON, _ := json.MarshalIndent(maskedReqHeaders, "", "  ")
+	requestLogToConsoleFromRequest(req, "[%s-Request-Headers] 实际请求头:\n%s", apiType, string(reqHeadersJSON))
+	rawReqHeadersJSON, _ := json.Marshal(maskedReqHeaders)
+	requestLogToFileFromRequest(req, "[%s-Request-Headers] 实际请求头:\n%s", apiType, string(rawReqHeadersJSON))
+
+	if req.Body != nil {
+		contentType := req.Header.Get("Content-Type")
+		if shouldOmitBodyForLog(apiType) {
+			requestLogToConsoleFromRequest(req, "[%s-Request-Body] 实际请求体: [omitted for vectors]", apiType)
+			requestLogToFileFromRequest(req, "[%s-Request-Body] 实际请求体: [omitted for vectors]", apiType)
+			return
+		}
+		if strings.HasPrefix(strings.ToLower(contentType), "multipart/form-data") {
+			requestLogToConsoleFromRequest(req, "[%s-Request-Body] 实际请求体: [multipart/form-data omitted]", apiType)
+			requestLogToFileFromRequest(req, "[%s-Request-Body] 实际请求体: [multipart/form-data omitted]", apiType)
+			return
+		}
+		bodyBytes, err := io.ReadAll(req.Body)
+		if err == nil {
+			req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+			requestLogToConsoleFromRequest(req, "[%s-Request-Body] 实际请求体:\n%s", apiType, MaskForLog(utils.FormatJSONBytesForLog(bodyBytes, consoleJSONTextLimit)))
+			requestLogToFileFromRequest(req, "[%s-Request-Body] 实际请求体:\n%s", apiType, MaskForLog(utils.FormatJSONBytesRaw(bodyBytes)))
+		}
+	}
+}
+
+// LogOriginalRequest 记录原始请求信息
+func LogOriginalRequest(c *gin.Context, bodyBytes []byte, envCfg *config.EnvConfig, apiType string) {
+	if !envCfg.EnableRequestLogs {
+		return
+	}
+
+	requestLogToConsole(c, "[Request-Receive] 收到%s请求: %s %s", apiType, c.Request.Method, c.Request.URL.Path)
+	requestLogToFile(c, "[Request-Receive] 收到%s请求: %s %s", apiType, c.Request.Method, c.Request.URL.Path)
+
+	if envCfg.IsDevelopment() {
+		contentType := c.GetHeader("Content-Type")
+		if shouldOmitBodyForLog(apiType) {
+			requestLogToConsole(c, "[Request-OriginalBody] 原始请求体: [omitted for vectors]")
+			requestLogToFile(c, "[Request-OriginalBody] 原始请求体: [omitted for vectors]")
+		} else if strings.HasPrefix(strings.ToLower(contentType), "multipart/form-data") {
+			requestLogToConsole(c, "[Request-OriginalBody] 原始请求体: [multipart/form-data omitted]")
+			requestLogToFile(c, "[Request-OriginalBody] 原始请求体: [multipart/form-data omitted]")
+		} else {
+			requestLogToConsole(c, "[Request-OriginalBody] 原始请求体:\n%s", MaskForLog(utils.FormatJSONBytesForLog(bodyBytes, consoleJSONTextLimit)))
+			requestLogToFile(c, "[Request-OriginalBody] 原始请求体:\n%s", MaskForLog(utils.FormatJSONBytesRaw(bodyBytes)))
+		}
+
+		sanitizedHeaders := make(map[string]string)
+		for key, values := range c.Request.Header {
+			if len(values) > 0 {
+				sanitizedHeaders[key] = values[0]
+			}
+		}
+		maskedHeaders := utils.MaskSensitiveHeaders(sanitizedHeaders)
+		headersJSON, _ := json.MarshalIndent(maskedHeaders, "", "  ")
+		requestLogToConsole(c, "[Request-OriginalHeaders] 原始请求头:\n%s", string(headersJSON))
+		rawHeadersJSON, _ := json.Marshal(maskedHeaders)
+		requestLogToFile(c, "[Request-OriginalHeaders] 原始请求头:\n%s", string(rawHeadersJSON))
+	}
+}
+
+func shouldOmitBodyForLog(apiType string) bool {
+	return strings.EqualFold(apiType, "Vectors")
+}
+
+// AreAllKeysSuspended 检查渠道的所有 Key 是否都处于熔断状态
+// 用于判断是否需要启用强制探测模式
+func AreAllKeysSuspended(metricsManager *metrics.MetricsManager, baseURL string, apiKeys []string, serviceType string) bool {
+	if len(apiKeys) == 0 {
+		return false
+	}
+
+	for _, apiKey := range apiKeys {
+		if !metricsManager.ShouldSuspendKey(baseURL, apiKey, serviceType) {
+			return false
+		}
+	}
+	return true
+}
+
+// RemoveEmptySignatures 移除请求体中 messages[*].content[*].signature 的空值
+// 用于预防 Claude API 返回 400 错误
+// 仅处理已知路径：messages 数组中各消息的 content 数组中的 signature 字段
+// enableLog: 是否输出日志（由 envCfg.EnableRequestLogs 控制）
+// apiType: 接口类型（Messages/Responses/Gemini），用于日志标签前缀
+func RemoveEmptySignatures(bodyBytes []byte, enableLog bool, apiType string) ([]byte, bool) {
+	return RemoveEmptySignaturesWithContext(nil, bodyBytes, enableLog, apiType)
+}
+
+func RemoveEmptySignaturesWithContext(c *gin.Context, bodyBytes []byte, enableLog bool, apiType string) ([]byte, bool) {
+	decoder := json.NewDecoder(bytes.NewReader(bodyBytes))
+	decoder.UseNumber() // 保留数字精度
+
+	var data map[string]interface{}
+	if err := decoder.Decode(&data); err != nil {
+		return bodyBytes, false
+	}
+
+	modified, removedCount := removeEmptySignaturesInMessages(data)
+	if !modified {
+		return bodyBytes, false
+	}
+
+	if enableLog && removedCount > 0 {
+		RequestLogf(c, "[%s-Preprocess] 已移除 %d 个空 signature 字段", apiType, removedCount)
+	}
+
+	// 使用 Encoder 并禁用 HTML 转义，保持原始格式
+	newBytes, err := utils.MarshalJSONNoEscape(data)
+	if err != nil {
+		return bodyBytes, false
+	}
+	return newBytes, true
+}
+
+// removeEmptySignaturesInMessages 仅处理 messages[*].content[*].signature 路径
+// 返回 (是否有修改, 移除的字段数)
+func removeEmptySignaturesInMessages(data map[string]interface{}) (bool, int) {
+	modified := false
+	removedCount := 0
+
+	messages, ok := data["messages"].([]interface{})
+	if !ok {
+		return false, 0
+	}
+
+	for _, msg := range messages {
+		msgMap, ok := msg.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		content, ok := msgMap["content"].([]interface{})
+		if !ok {
+			continue
+		}
+
+		for _, block := range content {
+			blockMap, ok := block.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			blockType, _ := blockMap["type"].(string)
+			if blockType == "thinking" {
+				continue
+			}
+
+			if sig, exists := blockMap["signature"]; exists {
+				if sig == nil {
+					delete(blockMap, "signature")
+					modified = true
+					removedCount++
+				} else if str, isStr := sig.(string); isStr && str == "" {
+					delete(blockMap, "signature")
+					modified = true
+					removedCount++
+				}
+			}
+		}
+	}
+
+	return modified, removedCount
+}
+
+// SanitizeMalformedThinkingBlocks 清理 messages[*].content[*] 中的 thinking 相关字段
+// 策略：
+//  1. 仅移除畸形的 type=thinking 内容块（避免上游严格校验导致 400）
+//  2. 保留合法的 thinking 内容块（兼容 Claude extended thinking 回传）
+//     对 signature 为空/null 的合法 thinking，仅删除 signature 字段，不删除思考内容
+//  3. 移除非 thinking 块里的残留 thinking 字段
+//
+// 返回 (新字节, 是否修改)
+func SanitizeMalformedThinkingBlocks(bodyBytes []byte, enableLog bool, apiType string) ([]byte, bool) {
+	return SanitizeMalformedThinkingBlocksWithContext(nil, bodyBytes, enableLog, apiType)
+}
+
+func SanitizeMalformedThinkingBlocksWithContext(c *gin.Context, bodyBytes []byte, enableLog bool, apiType string) ([]byte, bool) {
+	decoder := json.NewDecoder(bytes.NewReader(bodyBytes))
+	decoder.UseNumber() // 保留数字精度
+
+	var data map[string]interface{}
+	if err := decoder.Decode(&data); err != nil {
+		return bodyBytes, false
+	}
+
+	modified, removedBlocks, removedMsgs := sanitizeMalformedThinkingBlocksInMessages(data)
+	if !modified {
+		return bodyBytes, false
+	}
+
+	if enableLog {
+		if removedMsgs > 0 {
+			RequestLogf(c, "[%s-Preprocess] 已移除 %d 个 thinking 内容块，并删除 %d 条清理后 content 为空的 assistant 消息", apiType, removedBlocks, removedMsgs)
+		} else {
+			RequestLogf(c, "[%s-Preprocess] 已移除 %d 个 thinking 内容块", apiType, removedBlocks)
+		}
+	}
+
+	newBytes, err := utils.MarshalJSONNoEscape(data)
+	if err != nil {
+		return bodyBytes, false
+	}
+	return newBytes, true
+}
+
+func sanitizeMalformedThinkingBlocksInMessages(data map[string]interface{}) (bool, int, int) {
+	messages, ok := data["messages"].([]interface{})
+	if !ok {
+		return false, 0, 0
+	}
+
+	modified := false
+	removedBlocks := 0
+	removedMsgs := 0
+	sanitizedMessages := make([]interface{}, 0, len(messages))
+
+	for _, msg := range messages {
+		msgMap, ok := msg.(map[string]interface{})
+		if !ok {
+			sanitizedMessages = append(sanitizedMessages, msg)
+			continue
+		}
+
+		role, _ := msgMap["role"].(string)
+
+		switch content := msgMap["content"].(type) {
+		case []interface{}:
+			newContent := make([]interface{}, 0, len(content))
+			removedInCurrentMessage := 0
+			messageModified := false
+
+			for _, block := range content {
+				blockMap, ok := block.(map[string]interface{})
+				if !ok {
+					newContent = append(newContent, block)
+					continue
+				}
+
+				blockModified, removeBlock := sanitizeThinkingInContentBlock(blockMap)
+				if blockModified {
+					modified = true
+					messageModified = true
+				}
+				if removeBlock {
+					removedBlocks++
+					removedInCurrentMessage++
+					continue
+				}
+				newContent = append(newContent, blockMap)
+			}
+
+			if messageModified {
+				msgMap["content"] = newContent
+			}
+
+			if removedInCurrentMessage > 0 && len(newContent) == 0 && role == "assistant" {
+				removedMsgs++
+				msgMap["content"] = []interface{}{} // 保留消息骨架，清空 content，不删整条消息
+			}
+
+		case map[string]interface{}:
+			blockModified, removeBlock := sanitizeThinkingInContentBlock(content)
+			if blockModified {
+				modified = true
+			}
+			if removeBlock {
+				removedBlocks++
+				if role == "assistant" {
+					removedMsgs++
+					continue
+				}
+				msgMap["content"] = []interface{}{}
+			} else if blockModified {
+				msgMap["content"] = content
+			}
+		}
+
+		sanitizedMessages = append(sanitizedMessages, msgMap)
+	}
+
+	if modified {
+		data["messages"] = sanitizedMessages
+	}
+
+	return modified, removedBlocks, removedMsgs
+}
+
+func sanitizeThinkingInContentBlock(block map[string]interface{}) (modified bool, removeBlock bool) {
+	blockType, _ := block["type"].(string)
+	if blockType == "thinking" {
+		// 仅移除畸形 thinking block：
+		// - 缺少 thinking 字段
+		// - thinking 不是非空字符串
+		thinking, hasThinking := block["thinking"]
+		if !hasThinking {
+			return true, true
+		}
+		thinkingText, ok := thinking.(string)
+		if !ok || strings.TrimSpace(thinkingText) == "" {
+			return true, true
+		}
+
+		// signature 为空/null 不应删除整块 thinking（否则会丢失真实可回传思考）；
+		// 只删除无效 signature 字段，保留 thinking 内容。
+		if sig, exists := block["signature"]; exists {
+			if sig == nil {
+				delete(block, "signature")
+				return true, false
+			}
+			if str, isStr := sig.(string); isStr && strings.TrimSpace(str) == "" {
+				delete(block, "signature")
+				return true, false
+			}
+		}
+
+		// 保留合法 thinking block（无 signature 或非空 signature 透传）
+		return false, false
+	}
+
+	if _, hasThinking := block["thinking"]; hasThinking {
+		// 非 thinking block 里的 thinking 字段对上游无意义且可能触发校验错误，直接移除
+		delete(block, "thinking")
+		return true, false
+	}
+
+	return false, false
+}
+
+// NormalizeMetadataUserID 规范化 metadata.user_id 字段
+// Claude Code v2.1.78 将 user_id 从扁平字符串改为 JSON 对象字符串:
+//
+//	v2.1.77: "user_{device_id}_account_{uuid}_session_{sid}"
+//	v2.1.78: '{"device_id":"...","account_uuid":"...","session_id":"..."}'
+//
+// 部分上游（如 anyrouter）对 user_id 做严格校验，不接受 JSON 对象格式。
+// 此函数检测并转换为扁平字符串格式，确保上游兼容性。
+func NormalizeMetadataUserID(bodyBytes []byte) []byte {
+	decoder := json.NewDecoder(bytes.NewReader(bodyBytes))
+	decoder.UseNumber() // 保留数字精度
+
+	var data map[string]interface{}
+	if err := decoder.Decode(&data); err != nil {
+		return bodyBytes
+	}
+
+	metadata, ok := data["metadata"].(map[string]interface{})
+	if !ok {
+		return bodyBytes
+	}
+
+	userID, ok := metadata["user_id"].(string)
+	if !ok || userID == "" {
+		return bodyBytes
+	}
+
+	// 检测是否为 JSON 对象格式
+	if !strings.HasPrefix(userID, "{") {
+		return bodyBytes
+	}
+
+	// 尝试解析为通用 JSON 对象
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(userID), &parsed); err != nil {
+		return bodyBytes
+	}
+
+	// 如果是空对象，不改写
+	if len(parsed) == 0 {
+		return bodyBytes
+	}
+
+	// 动态拼接为 key_value 格式
+	var parts []string
+	// 优先处理 Claude Code 标准字段顺序
+	if deviceID, ok := parsed["device_id"].(string); ok && deviceID != "" {
+		parts = append(parts, "user_"+deviceID)
+		if accountUUID, ok := parsed["account_uuid"].(string); ok && accountUUID != "" {
+			parts = append(parts, "account_"+accountUUID)
+		}
+		if sessionID, ok := parsed["session_id"].(string); ok && sessionID != "" {
+			parts = append(parts, "session_"+sessionID)
+		}
+	} else {
+		// 非 Claude Code 格式，按字母序拼接所有字段
+		keys := make([]string, 0, len(parsed))
+		for k := range parsed {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			if v, ok := parsed[k].(string); ok && v != "" {
+				parts = append(parts, k+"_"+v)
+			}
+		}
+	}
+
+	// 如果没有有效字段，不改写
+	if len(parts) == 0 {
+		return bodyBytes
+	}
+
+	flatUserID := strings.Join(parts, "_")
+	metadata["user_id"] = flatUserID
+
+	newBytes, err := utils.MarshalJSONNoEscape(data)
+	if err != nil {
+		return bodyBytes
+	}
+	return newBytes
+}
+
+// Deprecated: 使用 utils.ExtractUnifiedSessionID 替代。
+// ExtractUserID 从请求体中提取 user_id（用于 Messages API）
+func ExtractUserID(bodyBytes []byte) string {
+	var req struct {
+		Metadata struct {
+			UserID string `json:"user_id"`
+		} `json:"metadata"`
+	}
+	if err := json.Unmarshal(bodyBytes, &req); err == nil {
+		return req.Metadata.UserID
+	}
+	return ""
+}
+
+// Deprecated: 使用 utils.ExtractUnifiedSessionID 替代。
+// ExtractConversationID 从请求中提取对话标识（用于 Responses API）
+func ExtractConversationID(c *gin.Context, bodyBytes []byte) string {
+	return utils.ExtractUnifiedSessionID(c, bodyBytes)
+}
+
+// billingHeaderPattern 匹配完整的 billing header 行
+var billingHeaderPattern = regexp.MustCompile(`^x-anthropic-billing-header:.*$`)
+
+// isBillingHeaderBlock 判断是否为 billing header block
+// 使用 x-anthropic-billing-header: 前缀或 cch= 参数作为识别条件
+func isBillingHeaderBlock(text string) bool {
+	return billingHeaderPattern.MatchString(text) || strings.Contains(text, "cch=")
+}
+
+// RemoveBillingHeaders 移除请求体 system 数组中的 billing header
+// 当 StripBillingHeader=true 时，移除整个 billing header block（不仅是 cch= 参数）
+// enableLog: 是否输出日志（由 envCfg.EnableRequestLogs 控制）
+// apiType: 接口类型（Messages/Responses/Gemini），用于日志标签前缀
+func RemoveBillingHeaders(bodyBytes []byte, enableLog bool, apiType string) ([]byte, bool) {
+	return RemoveBillingHeadersWithContext(nil, bodyBytes, enableLog, apiType)
+}
+
+func RemoveBillingHeadersWithContext(c *gin.Context, bodyBytes []byte, enableLog bool, apiType string) ([]byte, bool) {
+	decoder := json.NewDecoder(bytes.NewReader(bodyBytes))
+	decoder.UseNumber() // 保留数字精度
+
+	var data map[string]interface{}
+	if err := decoder.Decode(&data); err != nil {
+		return bodyBytes, false
+	}
+
+	systemArr, ok := data["system"].([]interface{})
+	if !ok || len(systemArr) == 0 {
+		return bodyBytes, false
+	}
+
+	modified := false
+	newSystemArr := make([]interface{}, 0, len(systemArr))
+	for _, item := range systemArr {
+		itemMap, ok := item.(map[string]interface{})
+		if !ok {
+			newSystemArr = append(newSystemArr, item)
+			continue
+		}
+
+		text, ok := itemMap["text"].(string)
+		if !ok {
+			newSystemArr = append(newSystemArr, item)
+			continue
+		}
+
+		// 检查是否为 billing header block
+		if isBillingHeaderBlock(text) {
+			// 移除整个 billing header block
+			modified = true
+			if enableLog {
+				RequestLogf(c, "[%s-Preprocess] 已移除 system 中的 billing header block", apiType)
+			}
+			continue // 跳过此 block
+		}
+
+		// 非 billing header block，保留
+		newSystemArr = append(newSystemArr, item)
+	}
+
+	if !modified {
+		return bodyBytes, false
+	}
+
+	// 更新 system 数组
+	data["system"] = newSystemArr
+
+	newBytes, err := utils.MarshalJSONNoEscape(data)
+	if err != nil {
+		return bodyBytes, false
+	}
+	return newBytes, true
+}
+
+// totalTokensBlockPrefix 标识 harness 每轮注入的 token 计数提醒块
+// （"<total_tokens>N tokens left</total_tokens>"，常附带 output-style 提醒文本）。
+const totalTokensBlockPrefix = "<total_tokens>"
+
+// DeduplicateTotalTokensSystemBlocks 清理 system 数组中重复累积的 total_tokens 块：
+// 某些 harness 每轮注入一份新的且不清理旧的，长会话会累积数百份重复块，
+// 白白消耗上下文预算并撑破上游窗口。保留最后一份（最新计数与 style 提醒仍生效），
+// 移除其余；被删块携带 cache_control 而保留块没有时，把 cache_control 转移给
+// 前一个保留块，尽量保住 prompt caching 断点。
+func DeduplicateTotalTokensSystemBlocks(c *gin.Context, bodyBytes []byte, enableLog bool, apiType string) ([]byte, bool) {
+	decoder := json.NewDecoder(bytes.NewReader(bodyBytes))
+	decoder.UseNumber() // 保留数字精度
+
+	var data map[string]interface{}
+	if err := decoder.Decode(&data); err != nil {
+		return bodyBytes, false
+	}
+
+	systemArr, ok := data["system"].([]interface{})
+	if !ok || len(systemArr) == 0 {
+		return bodyBytes, false
+	}
+
+	isTokenBlock := func(item interface{}) bool {
+		itemMap, ok := item.(map[string]interface{})
+		if !ok {
+			return false
+		}
+		text, ok := itemMap["text"].(string)
+		return ok && strings.HasPrefix(strings.TrimSpace(text), totalTokensBlockPrefix)
+	}
+
+	// 定位所有重复块；少于 2 份无需处理
+	lastTokenIdx := -1
+	tokenCount := 0
+	for i, item := range systemArr {
+		if isTokenBlock(item) {
+			lastTokenIdx = i
+			tokenCount++
+		}
+	}
+	if tokenCount < 2 {
+		return bodyBytes, false
+	}
+
+	removed := 0
+	var orphanCacheControl interface{}
+	newSystemArr := make([]interface{}, 0, len(systemArr)-(tokenCount-1))
+	for i, item := range systemArr {
+		if isTokenBlock(item) && i != lastTokenIdx {
+			removed++
+			if orphanCacheControl == nil {
+				if itemMap, ok := item.(map[string]interface{}); ok {
+					if cc, exists := itemMap["cache_control"]; exists {
+						orphanCacheControl = cc
+					}
+				}
+			}
+			continue
+		}
+		newSystemArr = append(newSystemArr, item)
+	}
+
+	// 保留块自己没有 cache_control 时，继承被删块的缓存断点
+	if orphanCacheControl != nil && lastTokenIdx >= 0 {
+		if keepMap, ok := systemArr[lastTokenIdx].(map[string]interface{}); ok {
+			if _, exists := keepMap["cache_control"]; !exists {
+				keepMap["cache_control"] = orphanCacheControl
+			}
+		}
+	}
+
+	if enableLog {
+		RequestLogf(c, "[%s-Preprocess] 已去重 system 中的 total_tokens 块: 移除 %d 份重复", apiType, removed)
+	}
+	data["system"] = newSystemArr
+
+	newBytes, err := utils.MarshalJSONNoEscape(data)
+	if err != nil {
+		return bodyBytes, false
+	}
+	return newBytes, true
+}
+
+// DeduplicateIdenticalSystemBlocks 清理 system 数组中「完全相同的重复 text 块」：
+// 部分 harness 每轮把同一条 output-style/规则提醒追加进 system 且不清理旧份
+// （无 <total_tokens> 前缀，DeduplicateTotalTokensSystemBlocks 扫不到），
+// 长会话累积数十份逐字相同的块，白白消耗上下文预算。保留最后一份
+// （harness 当前活跃注入位，常携带 cache_control 断点），移除其余；
+// 被删块携带 cache_control 而保留块没有时转移断点（同 total_tokens 去重语义）。
+// 完全相同（TrimSpace 后逐字相等）才处理：唯一块、内容不同的块与空文本永不触碰。
+func DeduplicateIdenticalSystemBlocks(c *gin.Context, bodyBytes []byte, enableLog bool, apiType string) ([]byte, bool) {
+	decoder := json.NewDecoder(bytes.NewReader(bodyBytes))
+	decoder.UseNumber() // 保留数字精度
+
+	var data map[string]interface{}
+	if err := decoder.Decode(&data); err != nil {
+		return bodyBytes, false
+	}
+
+	systemArr, ok := data["system"].([]interface{})
+	if !ok || len(systemArr) == 0 {
+		return bodyBytes, false
+	}
+
+	blockText := func(item interface{}) (string, bool) {
+		itemMap, ok := item.(map[string]interface{})
+		if !ok {
+			return "", false
+		}
+		text, ok := itemMap["text"].(string)
+		if !ok {
+			return "", false
+		}
+		trimmed := strings.TrimSpace(text)
+		return trimmed, trimmed != ""
+	}
+
+	// 统计各文本出现的次数与最后位置；只处理出现 ≥2 次的文本。
+	lastIdx := make(map[string]int)
+	counts := make(map[string]int)
+	for i, item := range systemArr {
+		if text, ok := blockText(item); ok {
+			lastIdx[text] = i
+			counts[text]++
+		}
+	}
+	duplicated := false
+	for _, n := range counts {
+		if n >= 2 {
+			duplicated = true
+			break
+		}
+	}
+	if !duplicated {
+		return bodyBytes, false
+	}
+
+	removed := 0
+	orphanCacheControl := make(map[string]interface{})
+	newSystemArr := make([]interface{}, 0, len(systemArr))
+	for i, item := range systemArr {
+		text, isText := blockText(item)
+		if !isText || counts[text] < 2 || i == lastIdx[text] {
+			newSystemArr = append(newSystemArr, item)
+			continue
+		}
+		removed++
+		if _, seen := orphanCacheControl[text]; !seen {
+			if itemMap, ok := item.(map[string]interface{}); ok {
+				if cc, exists := itemMap["cache_control"]; exists {
+					orphanCacheControl[text] = cc
+				}
+			}
+		}
+	}
+
+	// 保留块自己没有 cache_control 时，继承同文本被删块的缓存断点
+	for text, i := range lastIdx {
+		if counts[text] < 2 {
+			continue
+		}
+		cc, has := orphanCacheControl[text]
+		if !has {
+			continue
+		}
+		if keepMap, ok := systemArr[i].(map[string]interface{}); ok {
+			if _, exists := keepMap["cache_control"]; !exists {
+				keepMap["cache_control"] = cc
+			}
+		}
+	}
+
+	if enableLog {
+		RequestLogf(c, "[%s-Preprocess] 已去重 system 中的重复 text 块: 移除 %d 份", apiType, removed)
+	}
+	data["system"] = newSystemArr
+
+	newBytes, err := utils.MarshalJSONNoEscape(data)
+	if err != nil {
+		return bodyBytes, false
+	}
+	return newBytes, true
+}

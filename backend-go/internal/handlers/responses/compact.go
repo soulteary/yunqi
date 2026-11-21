@@ -1,0 +1,382 @@
+// Package responses 提供 Responses API 的处理器
+package responses
+
+import (
+	"bytes"
+	"encoding/json"
+	"io"
+	"net/http"
+	"regexp"
+	"strings"
+	"time"
+
+	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/BenedictKing/ccx/internal/errutil"
+	"github.com/BenedictKing/ccx/internal/handlers/common"
+	"github.com/BenedictKing/ccx/internal/metrics"
+	"github.com/BenedictKing/ccx/internal/middleware"
+	"github.com/BenedictKing/ccx/internal/scheduler"
+	"github.com/BenedictKing/ccx/internal/session"
+	"github.com/BenedictKing/ccx/internal/types"
+	"github.com/BenedictKing/ccx/internal/utils"
+	"github.com/gin-gonic/gin"
+)
+
+// compactError 封装 compact 请求错误
+type compactError struct {
+	status         int
+	body           []byte
+	shouldFailover bool
+	err            error
+}
+
+func (e *compactError) errorInfo() string {
+	if e == nil {
+		return ""
+	}
+	if len(e.body) > 0 {
+		return strings.TrimSpace(string(e.body))
+	}
+	if e.err != nil {
+		return e.err.Error()
+	}
+	if e.status != 0 {
+		return http.StatusText(e.status)
+	}
+	return ""
+}
+
+// CompactHandler Responses API compact 端点处理器
+// POST /v1/responses/compact - 压缩对话上下文，用于长期代理工作流
+func CompactHandler(
+	envCfg *config.EnvConfig,
+	cfgManager *config.ConfigManager,
+	sessionManager *session.SessionManager,
+	channelScheduler *scheduler.ChannelScheduler,
+) gin.HandlerFunc {
+	return gin.HandlerFunc(func(c *gin.Context) {
+		// 认证
+		middleware.ProxyAuthMiddleware(envCfg)(c)
+		if c.IsAborted() {
+			return
+		}
+
+		// 读取请求体
+		maxBodySize := envCfg.MaxRequestBodySize
+		bodyBytes, err := common.ReadRequestBody(c, maxBodySize)
+		if err != nil {
+			return
+		}
+
+		// 提取对话标识用于 Trace 亲和性
+		userID := utils.ExtractUnifiedSessionID(c, bodyBytes)
+		var compactReq types.ResponsesRequest
+		if len(bodyBytes) > 0 {
+			_ = json.Unmarshal(bodyBytes, &compactReq)
+		}
+		common.SetRequestLogContext(c, userID, countResponsesUserMessages(compactReq.Input))
+		common.AttachAutopilotRequestProfile(c, scheduler.ChannelKindResponses, extractCompactRequestModel(bodyBytes), "summarize", userID, bodyBytes, 0)
+
+		// 检查是否为多渠道模式
+		isMultiChannel := channelScheduler.IsMultiChannelMode(scheduler.ChannelKindResponses)
+
+		if isMultiChannel {
+			handleMultiChannelCompact(c, envCfg, cfgManager, channelScheduler, sessionManager, bodyBytes, userID)
+		} else {
+			handleSingleChannelCompact(c, envCfg, cfgManager, channelScheduler, sessionManager, bodyBytes)
+		}
+	})
+}
+
+// handleSingleChannelCompact 单渠道 compact 请求（带 key 轮转）
+func handleSingleChannelCompact(
+	c *gin.Context,
+	envCfg *config.EnvConfig,
+	cfgManager *config.ConfigManager,
+	channelScheduler *scheduler.ChannelScheduler,
+	sessionManager *session.SessionManager,
+	bodyBytes []byte,
+) {
+	upstream, channelIndex, err := cfgManager.GetCurrentResponsesUpstreamWithIndex()
+	if err != nil {
+		c.JSON(503, gin.H{"error": "未配置任何 Responses 渠道"})
+		return
+	}
+
+	if len(upstream.APIKeys) == 0 {
+		c.JSON(503, gin.H{"error": "当前渠道未配置 API 密钥"})
+		return
+	}
+
+	requestModel := extractCompactRequestModel(bodyBytes)
+	channelLogStore := channelScheduler.GetChannelLogStore(scheduler.ChannelKindResponses)
+	metricsServiceType := scheduler.NormalizedMetricsServiceType(scheduler.ChannelKindResponses, upstream.ServiceType)
+
+	// Key 轮转：尝试所有可用 key
+	failedKeys := make(map[string]bool)
+
+	for attempt := 0; attempt < len(upstream.APIKeys); attempt++ {
+		apiKey, err := cfgManager.GetNextResponsesAPIKey(upstream, failedKeys)
+		if err != nil {
+			break
+		}
+
+		attemptStart := time.Now()
+		success, compactErr := tryCompactWithKey(c, upstream, apiKey, bodyBytes, envCfg, cfgManager, sessionManager)
+		metricsKey := metrics.GenerateMetricsIdentityKey(upstream.BaseURL, apiKey, metricsServiceType)
+		if success {
+			common.RecordChannelLog(channelLogStore, metricsKey, channelIndex, requestModel, "", http.StatusOK, time.Since(attemptStart).Milliseconds(), true, apiKey, upstream.BaseURL, "", "Responses", attempt > 0, upstream.Name)
+			channelScheduler.RecordSuccessWithUsage(upstream.BaseURL, apiKey, metricsServiceType, requestModel, nil, scheduler.ChannelKindResponses)
+			return
+		}
+
+		if compactErr != nil {
+			if compactErr.shouldFailover {
+				failedKeys[apiKey] = true
+				cfgManager.MarkKeyAsFailed(apiKey, "Responses")
+				channelScheduler.RecordFailure(upstream.BaseURL, apiKey, metricsServiceType, requestModel, scheduler.ChannelKindResponses)
+				common.RecordChannelLog(channelLogStore, metricsKey, channelIndex, requestModel, "", compactErr.status, time.Since(attemptStart).Milliseconds(), false, apiKey, upstream.BaseURL, compactErr.errorInfo(), "Responses", attempt > 0, upstream.Name)
+				continue
+			}
+			// 非故障转移错误，直接返回
+			common.RecordChannelLog(channelLogStore, metricsKey, channelIndex, requestModel, "", compactErr.status, time.Since(attemptStart).Milliseconds(), false, apiKey, upstream.BaseURL, compactErr.errorInfo(), "Responses", attempt > 0, upstream.Name)
+			c.Data(compactErr.status, "application/json", compactErr.body)
+			return
+		}
+	}
+
+	// 所有 key 都失败
+	c.JSON(503, gin.H{
+		"type": "error",
+		"error": gin.H{
+			"type":    "service_unavailable",
+			"message": "All upstream channels are currently unavailable",
+		},
+	})
+}
+
+// handleMultiChannelCompact 多渠道 compact 请求（带故障转移和亲和性）
+func handleMultiChannelCompact(
+	c *gin.Context,
+	envCfg *config.EnvConfig,
+	cfgManager *config.ConfigManager,
+	channelScheduler *scheduler.ChannelScheduler,
+	sessionManager *session.SessionManager,
+	bodyBytes []byte,
+	userID string,
+) {
+	failedChannels := make(map[int]bool)
+	maxAttempts := channelScheduler.GetActiveChannelCount(scheduler.ChannelKindResponses)
+	requestModel := extractCompactRequestModel(bodyBytes)
+	channelLogStore := channelScheduler.GetChannelLogStore(scheduler.ChannelKindResponses)
+
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		selection, err := channelScheduler.SelectChannel(c.Request.Context(), userID, failedChannels, scheduler.ChannelKindResponses, requestModel, c.Param("routePrefix"), c.GetHeader("X-Channel"))
+		if err != nil {
+			break
+		}
+
+		upstream := selection.Upstream
+		channelIndex := selection.ChannelIndex
+
+		// 每个渠道尝试所有 key
+		success, successKey, _ := tryCompactChannelWithAllKeys(c, upstream, channelIndex, requestModel, cfgManager, channelScheduler, channelLogStore, bodyBytes, envCfg, sessionManager)
+		if success {
+			// 只有真正成功的请求才设置 Trace 亲和
+			if successKey != "" {
+				channelScheduler.SetTraceAffinity(userID, channelIndex, scheduler.ChannelKindResponses)
+				channelName := ""
+				if upstream != nil {
+					channelName = upstream.Name
+				}
+				channelScheduler.TrackConversation(scheduler.ChannelKindResponses, userID, requestModel, channelIndex, channelName, "", "", 0, "", common.AgentContextFromGin(c))
+			}
+			return
+		}
+
+		failedChannels[channelIndex] = true
+	}
+
+	// 所有渠道都失败
+	c.JSON(503, gin.H{
+		"type": "error",
+		"error": gin.H{
+			"type":    "service_unavailable",
+			"message": "All upstream channels are currently unavailable",
+		},
+	})
+}
+
+// tryCompactChannelWithAllKeys 尝试渠道的所有 key
+func tryCompactChannelWithAllKeys(
+	c *gin.Context,
+	upstream *config.UpstreamConfig,
+	channelIndex int,
+	requestModel string,
+	cfgManager *config.ConfigManager,
+	channelScheduler *scheduler.ChannelScheduler,
+	channelLogStore *metrics.ChannelLogStore,
+	bodyBytes []byte,
+	envCfg *config.EnvConfig,
+	sessionManager *session.SessionManager,
+) (bool, string, *compactError) {
+	if len(upstream.APIKeys) == 0 {
+		return false, "", nil
+	}
+
+	metricsServiceType := scheduler.NormalizedMetricsServiceType(scheduler.ChannelKindResponses, upstream.ServiceType)
+	metricsManager := channelScheduler.GetResponsesMetricsManager()
+
+	failedKeys := make(map[string]bool)
+	probeAcquired := make(map[string]bool)
+	var lastErr *compactError
+
+	for attempt := 0; attempt < len(upstream.APIKeys); attempt++ {
+		apiKey, err := cfgManager.GetNextResponsesAPIKey(upstream, failedKeys)
+		if err != nil {
+			break
+		}
+
+		// 检查熔断状态
+		circuitState := metricsManager.GetKeyCircuitState(upstream.BaseURL, apiKey, metricsServiceType)
+		if circuitState == metrics.CircuitStateOpen {
+			failedKeys[apiKey] = true
+			common.RequestLogf(c, "[Compact-Circuit] 跳过 open 状态中的 Key: %s", utils.MaskAPIKey(apiKey))
+			continue
+		}
+		if circuitState == metrics.CircuitStateHalfOpen {
+			probeKey := upstream.BaseURL + "|" + apiKey
+			if !metricsManager.TryAcquireProbe(upstream.BaseURL, apiKey, metricsServiceType) {
+				failedKeys[apiKey] = true
+				common.RequestLogf(c, "[Compact-Circuit] 跳过 half-open 探针已占用的 Key: %s", utils.MaskAPIKey(apiKey))
+				continue
+			}
+			probeAcquired[probeKey] = true
+			common.RequestLogf(c, "[Compact-Circuit] 使用 half-open 探针 Key: %s", utils.MaskAPIKey(apiKey))
+		}
+
+		attemptStart := time.Now()
+		success, compactErr := tryCompactWithKey(c, upstream, apiKey, bodyBytes, envCfg, cfgManager, sessionManager)
+		metricsKey := metrics.GenerateMetricsIdentityKey(upstream.BaseURL, apiKey, metricsServiceType)
+
+		if success {
+			common.RecordChannelLog(channelLogStore, metricsKey, channelIndex, requestModel, "", http.StatusOK, time.Since(attemptStart).Milliseconds(), true, apiKey, upstream.BaseURL, "", "Responses", attempt > 0, upstream.Name)
+			channelScheduler.RecordSuccessWithUsage(upstream.BaseURL, apiKey, metricsServiceType, requestModel, nil, scheduler.ChannelKindResponses)
+			// 释放探针
+			probeKey := upstream.BaseURL + "|" + apiKey
+			if probeAcquired[probeKey] {
+				metricsManager.ReleaseProbe(upstream.BaseURL, apiKey, metricsServiceType)
+				delete(probeAcquired, probeKey)
+			}
+			return true, apiKey, nil
+		}
+
+		if compactErr != nil {
+			lastErr = compactErr
+			if compactErr.shouldFailover {
+				failedKeys[apiKey] = true
+				cfgManager.MarkKeyAsFailed(apiKey, "Responses")
+				channelScheduler.RecordFailure(upstream.BaseURL, apiKey, metricsServiceType, requestModel, scheduler.ChannelKindResponses)
+				common.RecordChannelLog(channelLogStore, metricsKey, channelIndex, requestModel, "", compactErr.status, time.Since(attemptStart).Milliseconds(), false, apiKey, upstream.BaseURL, compactErr.errorInfo(), "Responses", attempt > 0, upstream.Name)
+				// 释放探针
+				probeKey := upstream.BaseURL + "|" + apiKey
+				if probeAcquired[probeKey] {
+					metricsManager.ReleaseProbe(upstream.BaseURL, apiKey, metricsServiceType)
+					delete(probeAcquired, probeKey)
+				}
+				continue
+			}
+			// 非故障转移错误，返回但标记渠道成功（请求已处理）
+			common.RecordChannelLog(channelLogStore, metricsKey, channelIndex, requestModel, "", compactErr.status, time.Since(attemptStart).Milliseconds(), false, apiKey, upstream.BaseURL, compactErr.errorInfo(), "Responses", attempt > 0, upstream.Name)
+			// 释放探针
+			probeKey := upstream.BaseURL + "|" + apiKey
+			if probeAcquired[probeKey] {
+				metricsManager.ReleaseProbe(upstream.BaseURL, apiKey, metricsServiceType)
+				delete(probeAcquired, probeKey)
+			}
+			c.Data(compactErr.status, "application/json", compactErr.body)
+			return true, "", nil
+		}
+	}
+
+	return false, "", lastErr
+}
+
+// tryCompactWithKey 使用单个 key 尝试 compact 请求
+func tryCompactWithKey(
+	c *gin.Context,
+	upstream *config.UpstreamConfig,
+	apiKey string,
+	bodyBytes []byte,
+	envCfg *config.EnvConfig,
+	cfgManager *config.ConfigManager,
+	sessionManager *session.SessionManager,
+) (bool, *compactError) {
+	// 非 responses 类型上游走本地 compact
+	if needsLocalCompact(upstream) {
+		return tryLocalCompactWithKey(c, upstream, apiKey, bodyBytes, envCfg, cfgManager, sessionManager)
+	}
+
+	targetURL := buildCompactURL(upstream)
+	req, err := http.NewRequestWithContext(c.Request.Context(), "POST", targetURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return false, &compactError{status: 500, body: []byte(`{"error":"创建请求失败"}`), shouldFailover: true, err: err}
+	}
+
+	req.Header = utils.PrepareUpstreamHeaders(c, req.URL.Host)
+	req.Header.Del("authorization")
+	req.Header.Del("x-api-key")
+	utils.SetAuthenticationHeaderWithOverride(req.Header, apiKey, upstream.AuthHeader)
+	req.Header.Set("Content-Type", "application/json")
+	utils.ApplyCustomHeaders(req.Header, upstream.CustomHeaders)
+	req = common.WithRequestLogContext(req, c)
+
+	resp, err := common.SendRequest(req, upstream, envCfg, false, "Responses")
+	if err != nil {
+		common.RequestLogf(c, "[Compact-Local] 原生 compact 请求失败，回退本地 compact: %v", err)
+		return tryLocalCompactWithKey(c, upstream, apiKey, bodyBytes, envCfg, cfgManager, sessionManager)
+	}
+	defer errutil.IgnoreDeferred(resp.Body.Close)
+
+	respBody, _ := io.ReadAll(resp.Body)
+	respBody = utils.DecompressGzipIfNeeded(resp, respBody)
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		common.RequestLogf(c, "[Compact-Local] 原生 compact 失败，回退本地 compact: status=%d", resp.StatusCode)
+		localSuccess, localErr := tryLocalCompactWithKey(c, upstream, apiKey, bodyBytes, envCfg, cfgManager, sessionManager)
+		if localSuccess || localErr != nil {
+			return localSuccess, localErr
+		}
+
+		shouldFailover, _ := common.ShouldRetryWithNextKeyWithLogTag(resp.StatusCode, respBody, "Responses", common.RequestLogTag(c))
+		return false, &compactError{status: resp.StatusCode, body: respBody, shouldFailover: shouldFailover}
+	}
+
+	// 成功。原生 compact 返回也规范化为单个 message item，避免 reasoning item 破坏 Codex compaction v2 解析。
+	respBody = normalizeCompactResponseBody(respBody)
+	utils.ForwardResponseHeaders(resp.Header, c.Writer)
+	c.Data(resp.StatusCode, "application/json", respBody)
+	return true, nil
+}
+
+func extractCompactRequestModel(bodyBytes []byte) string {
+	if len(bodyBytes) == 0 {
+		return ""
+	}
+
+	var req types.ResponsesRequest
+	if err := json.Unmarshal(bodyBytes, &req); err != nil {
+		return ""
+	}
+	return req.Model
+}
+
+// buildCompactURL 构建 compact 端点 URL
+func buildCompactURL(upstream *config.UpstreamConfig) string {
+	baseURL := strings.TrimSuffix(upstream.BaseURL, "/")
+	versionPattern := regexp.MustCompile(`/v\d+[a-z]*$`)
+	if versionPattern.MatchString(baseURL) {
+		return baseURL + "/responses/compact"
+	}
+	return baseURL + "/v1/responses/compact"
+}

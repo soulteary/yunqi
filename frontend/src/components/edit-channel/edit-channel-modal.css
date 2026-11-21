@@ -1,0 +1,134 @@
+/* 渠道编辑对话框使用视口自适应高度，确保底部操作按钮始终可见 */
+.channel-editor-dialog {
+  max-height: min(820px, calc(100vh - 48px));
+}
+
+.channel-editor-body {
+  height: min(600px, calc(100vh - 220px));
+  min-height: 360px;
+}
+
+/* 暗色模式彩色按钮：深色文字，保证对比度 */
+:deep(.v-theme--dark .v-btn.v-btn--variant-elevated.v-btn--color-primary),
+:deep(.v-theme--dark .v-btn.v-btn--variant-elevated.v-btn--color-secondary),
+:deep(.v-theme--dark .v-btn.v-btn--variant-flat.v-btn--color-success) {
+  color: #1e1b4b !important;
+}
+
+:deep(.v-theme--dark .v-btn.v-btn--variant-elevated.v-btn--color-primary) {
+  background-color: rgba(129, 140, 248, 0.92) !important;
+}
+
+:deep(.v-theme--dark .v-btn.v-btn--variant-elevated.v-btn--color-secondary) {
+  background-color: rgba(167, 139, 250, 0.92) !important;
+}
+
+:deep(.v-theme--dark .v-btn.v-btn--variant-flat.v-btn--color-success) {
+  background-color: rgba(52, 211, 153, 0.92) !important;
+}
+
+/* 字段 hint 默认 60% 不透明度偏淡，加深一档保证扫读可读；错误信息保持 error 色 */
+.channel-editor-dialog :deep(.v-messages__message) {
+  color: rgba(var(--v-theme-on-surface), 0.72);
+}
+
+.channel-editor-dialog :deep(.v-text-field--error .v-messages__message) {
+  color: rgb(var(--v-theme-error));
+}
+
+/* 垂直导航布局 */
+.content-row {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+}
+
+.content-area {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+/* 内容区宽度 = 对话框(1030) − 侧栏(190)，与此上限对齐后头/尾/正文右缘齐平、无右侧留白 */
+.content-area > section {
+  max-width: 840px;
+}
+
+/* 分区小节标题：与左侧导航锚点一一对应 */
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.section-header-title {
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+/* 分区之间的分隔线，最后一个分区除外 */
+.content-area > section:not(:last-child) {
+  border-bottom: 1px solid rgba(var(--v-border-color), 0.12);
+}
+
+/* 计费分组的“充值 / 渠道到账”小标签 */
+.billing-group-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: rgba(var(--v-theme-on-surface), 0.55);
+  margin-bottom: 8px;
+}
+
+/* 直连优先设置行：卡片化开关，开启时以主题色点亮，未配置代理时整体弱化 */
+.proxy-direct-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 10px 16px;
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.18);
+  border-radius: 0 !important; /* 复古像素主题全局强制直角 */
+  transition: background-color 0.2s ease, border-color 0.2s ease, opacity 0.2s ease;
+}
+
+.proxy-direct-row--on:not(.proxy-direct-row--disabled) {
+  background-color: rgba(var(--v-theme-primary), 0.06);
+  border-color: rgba(var(--v-theme-primary), 0.32);
+}
+
+.proxy-direct-row--disabled {
+  opacity: 0.55;
+}
+
+.proxy-direct-row-icon {
+  flex: none;
+  color: rgba(var(--v-theme-on-surface), 0.45);
+}
+
+.proxy-direct-row--on:not(.proxy-direct-row--disabled) .proxy-direct-row-icon {
+  color: rgb(var(--v-theme-primary));
+}
+
+.proxy-direct-row-switch {
+  flex: none;
+}
+
+@media (max-width: 960px) {
+  .content-row {
+    flex-direction: column;
+  }
+}
+
+/* 上游余额探测结果行：key 掩码 + 余额 + 时间 */
+.balance-key-row {
+  padding: 2px 0;
+  gap: 8px;
+}
+
+.balance-key-mask {
+  min-width: 88px;
+}

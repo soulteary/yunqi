@@ -1,0 +1,3096 @@
+package config
+
+import (
+	"fmt"
+	"log"
+	"slices"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/BenedictKing/ccx/internal/eventbus"
+	"github.com/BenedictKing/ccx/internal/statelog"
+	"github.com/BenedictKing/ccx/internal/utils"
+	"github.com/fsnotify/fsnotify"
+)
+
+// ============== 核心类型定义 ==============
+
+// UpstreamConfig 上游配置
+type UpstreamConfig struct {
+	// AccountUID 自动托管账号的稳定身份。一个 provider 账号下的多协议渠道共享该值。
+	AccountUID string `json:"accountUid,omitempty"`
+	// ChannelUID 渠道稳定身份标识，创建后不因渠道重排、改名、API Key 变更而改变。
+	// 用于画像表主键、健康证据归档等需要跨配置变更持久追踪的场景。
+	// 加载旧配置时由 ConfigManager 自动补齐并持久化，格式为 "ch_" + 12 位 hex。
+	ChannelUID            string                             `json:"channelUid,omitempty"`
+	BaseURL               string                             `json:"baseUrl"`
+	BaseURLs              []string                           `json:"baseUrls,omitempty"` // 多 BaseURL 支持（failover 模式）
+	APIKeys               []string                           `json:"apiKeys"`
+	APIKeyConfigs         []APIKeyConfig                     `json:"apiKeyConfigs,omitempty"`       // API Key 附加配置（限速、权重、配额组等），通过 Key 关联 APIKeys
+	HistoricalAPIKeys     []string                           `json:"historicalApiKeys,omitempty"`   // 历史 API Key（用于统计聚合，换 Key 后保留旧 Key 的统计数据）
+	DisabledAPIKeys       []DisabledKeyInfo                  `json:"disabledApiKeys,omitempty"`     // 被禁用的 API Key（持久化；额度类可定时恢复）
+	DisabledKeyModels     []DisabledKeyModelInfo             `json:"disabledKeyModels,omitempty"`   // 被限制的 (Key,模型) 组合（持久化，定时自动恢复）
+	DisabledGroupModels   []DisabledGroupModelInfo           `json:"disabledGroupModels,omitempty"` // 人工禁用的 (配额组,模型) 组合（持久化，不自动恢复）
+	ServiceType           string                             `json:"serviceType"`                   // gemini, openai, claude
+	AuthHeader            string                             `json:"authHeader,omitempty"`          // 认证头覆盖：auto(空)/bearer/x-api-key
+	ProviderID            string                             `json:"providerId,omitempty"`          // 来源 provider 模板 ID（如 mimo/deepseek），模板化添加时写入，用于回溯与预设引用
+	Name                  string                             `json:"name,omitempty"`
+	Remark                string                             `json:"remark,omitempty"`
+	Description           string                             `json:"description,omitempty"`
+	Website               string                             `json:"website,omitempty"`
+	InsecureSkipVerify    bool                               `json:"insecureSkipVerify,omitempty"`
+	ModelCapabilities     map[string]UpstreamModelCapability `json:"modelCapabilities,omitempty"` // 实际模型能力覆盖，key 支持模型通配符
+	EmbeddingCapabilities map[string]EmbeddingCapability     `json:"embeddingCapabilities,omitempty"`
+	DefaultCapability     UpstreamModelCapability            `json:"defaultCapability,omitempty"`   // 渠道默认实际模型能力
+	AllowUnknownContext   bool                               `json:"allowUnknownContext,omitempty"` // 大上下文请求是否允许落到未知能力渠道
+	ReasoningParamStyle   string                             `json:"reasoningParamStyle,omitempty"`
+	TextVerbosity         string                             `json:"textVerbosity,omitempty"`
+	FastMode              bool                               `json:"fastMode,omitempty"`
+	// Codex 工具兼容开关（此项保持既有手工配置语义，不在本次自学习范围内：
+	// 无可靠上游报错信号可用于错误驱动学习，见 compat_signal.go 的判断依据）。
+	CodexToolCompat *bool `json:"codexToolCompat,omitempty"`
+	// Deprecated: 使用 codexToolCompat；保留旧字段仅用于配置读取和旧前端写入兼容。
+	StripCodexClientTools bool `json:"stripCodexClientTools,omitempty"`
+	// Images 响应兼容：当客户端请求 b64_json 而上游只返回 URL 时，下载并转换为 b64_json（默认 false）
+	ConvertImageURLToB64JSON bool `json:"convertImageUrlToB64Json,omitempty"`
+	// 多渠道调度相关字段
+	Priority         int        `json:"priority"`                   // 渠道优先级（数字越小优先级越高，默认按索引）
+	Status           string     `json:"status"`                     // 渠道状态：active（正常）, suspended（暂停）, disabled（备用池）
+	SuspensionSource string     `json:"suspensionSource,omitempty"` // 暂停来源：manual（人工）, auto_no_keys（缺少可用 Key）
+	PromotionUntil   *time.Time `json:"promotionUntil,omitempty"`   // 促销期截止时间，在此期间内优先使用此渠道（忽略trace亲和）
+	LowQuality       bool       `json:"lowQuality,omitempty"`       // 低质量渠道标记：启用后强制本地估算 token，偏差>5%时使用本地值
+	// 自动拉黑开关
+	AutoBlacklistBalance *bool `json:"autoBlacklistBalance,omitempty"` // 余额不足时自动拉黑 Key（默认 true）
+	// Claude Messages metadata.user_id 规范化开关
+	NormalizeMetadataUserID *bool `json:"normalizeMetadataUserId,omitempty"` // 规范化 metadata.user_id（默认 true）
+	// Messages 渠道级移除 billing header：转发前从 system 数组移除 x-anthropic-billing-header block（默认按域名推断）
+	StripBillingHeader *bool `json:"stripBillingHeader,omitempty"`
+	// Claude 协议 system 角色兼容
+	NormalizeSystemRoleToTopLevel bool `json:"normalizeSystemRoleToTopLevel,omitempty"` // 将 messages 中的 system 角色抽取回顶层 system 字段（针对 Opus 4.8 / Fable 5 等新客户端将 system 作为消息 role 发送，兼容仅支持 user/assistant role 的旧 Claude 上游）
+	// Gemini 特定配置
+	InjectDummyThoughtSignature bool `json:"injectDummyThoughtSignature,omitempty"` // 给空 thought_signature 注入 dummy 值（兼容 x666.me 等要求必须有该字段的 API）
+	StripThoughtSignature       bool `json:"stripThoughtSignature,omitempty"`       // 移除 thought_signature 字段（兼容旧版 Gemini API）
+	// LearnedCompatTraits 运行时字段：本次请求应生效的兼容性学习结论。
+	// 由 failover 在发送前按 渠道-Key-模型 查询 ChannelCompatCache 并注入到当次请求所用的
+	// upstream 副本上，provider 构造请求时读取；不持久化到 config.json，不暴露给前端配置。
+	// key 为 CompatTrait 字符串（跨包引用不方便用 CompatTrait 类型做 map key 的字面量，
+	// 用字符串保持和 CompatSeeds 一致的存储形态）。
+	LearnedCompatTraits map[string]bool `json:"-"`
+	// LearnedRejectedBetaTokens 运行时字段：本次请求应从 anthropic-beta header 中剥离的
+	// 被拒 token 名列表。仅 TraitUnsupportedBetaHeader trait 学到时由 failover 注入；
+	// provider 在构造请求时按 token 粒度剥离。与 LearnedCompatTraits 平行：前者是 bool 三态，
+	// 本字段承载 token 名集合（证据提取失败的 trait 不会学习，天然不存在"有 trait 无 token"）。
+	LearnedRejectedBetaTokens []string `json:"-"`
+	// CompatSeeds 历史手工兼容配置降级而来的一次性低置信度提示。
+	//
+	// 六个兼容性开关（developer role 降级、图片工具剥离、Codex 原生工具透传、空文本块剥离、
+	// reasoning_content/thinking 回传）已从本结构体整体移除：管理面板不再提供编辑入口，
+	// 渠道更新接口也不再接受手工写入，完全交由运行时自动学习决定。
+	//
+	// 老配置文件里残留的历史手工值不代表可信的长期事实——当初可能就设错，也可能上游后来有了
+	// 新情况已不适用，因此不当作"用户意图"永久保留，而是一次性迁移为带 CompatSeedTTL 有效期的
+	// 种子：只在学习结论出现前提供一点参考，过期或学到真实结论后都会让位。
+	//
+	// 与学习记忆（ChannelCompatCache）的区别：种子存在配置文件里、渠道级、TTL 14 天；
+	// 学习记忆是独立的运行时缓存、渠道-Key-模型级、TTL 24 小时。二者不能混存。
+	CompatSeeds map[string]CompatSeedEntry `json:"compatSeeds,omitempty"`
+	// 自定义请求头
+	CustomHeaders map[string]string `json:"customHeaders,omitempty"` // 自定义请求头（覆盖或添加到上游请求）
+	// 渠道级代理
+	ProxyURL string `json:"proxyUrl,omitempty"` // HTTP/HTTPS/SOCKS5 代理地址
+	// ProxyPreferDirect 直连优先：配置了代理时先直连，直连失败（网络错误或命中回退
+	// 状态码 451/403，如上游地域封锁）时自动改用代理重放该请求。false=始终走代理（默认，旧行为）。
+	ProxyPreferDirect bool `json:"proxyPreferDirect,omitempty"`
+	// LearnedClientFingerprint 由发现/探活流程自动学习：该上游的 models/探测端点存在
+	// 客户端指纹校验（裸请求 401/403，带 Claude Code 客户端伪装头可通过）。
+	// 学习后该渠道的探测、拉模型、保活请求首发即带客户端伪装头，不再裸试。
+	LearnedClientFingerprint bool `json:"learnedClientFingerprint,omitempty"`
+	// 渠道级请求超时
+	RequestTimeoutMs        int `json:"requestTimeoutMs,omitempty"`        // 非流式上游请求超时时间（毫秒，0=继承全局 REQUEST_TIMEOUT）
+	ResponseHeaderTimeoutMs int `json:"responseHeaderTimeoutMs,omitempty"` // 等待上游 HTTP 响应头超时（毫秒，0=继承全局 RESPONSE_HEADER_TIMEOUT）
+	// 流式健康检测渠道覆盖（0=继承全局，-1=禁用，正数=覆盖全局）
+	StreamFirstContentTimeoutMs int `json:"streamFirstContentTimeoutMs,omitempty"` // HTTP 200 后首个有效内容等待超时
+	StreamInactivityTimeoutMs   int `json:"streamInactivityTimeoutMs,omitempty"`   // 首字后连续性确认窗口
+	StreamToolCallIdleTimeoutMs int `json:"streamToolCallIdleTimeoutMs,omitempty"` // 工具调用空闲超时
+	// 模型白名单
+	SupportedModels []string `json:"supportedModels,omitempty"` // 支持的模型白名单（空=全部）；支持精确匹配，以及 prefix* / *suffix / *contains* 形式的包含与排除规则（排除用 ! 前缀）
+	// 路由前缀
+	RoutePrefix string `json:"routePrefix,omitempty"` // 路由前缀（如 "kimi"），客户端可通过 /:routePrefix/v1/messages 访问
+	// 主动限速配置（渠道级，默认 0=不限）
+	RateLimitRPM             int   `json:"rateLimitRpm,omitempty"`             // 每分钟请求数上限（0=不限）
+	RateLimitWindowMinutes   int   `json:"rateLimitWindowMinutes,omitempty"`   // 滑动窗口时长（秒，0=默认60秒；JSON 字段名保留为兼容旧配置）
+	RateLimitBurst           int   `json:"rateLimitBurst,omitempty"`           // 已废弃，保留仅为兼容性
+	RateLimitMaxConcurrent   int   `json:"rateLimitMaxConcurrent,omitempty"`   // 最大并发上游请求数（0=不限）
+	RateLimitAutoFromHeaders *bool `json:"rateLimitAutoFromHeaders,omitempty"` // 自动从上游响应头解析限流信息并动态调速（默认 false）
+
+	// 渠道级计费覆盖（均留空=不参与有效成本核算，保持现状）
+	// CostMultiplier 充值倍率：EffectiveCostUSD = ListCostUSD × CostMultiplier（乘法），渠道级简化覆盖。
+	CostMultiplier *float64 `json:"costMultiplier,omitempty"` // 充值倍率（1=原价，0.5=五折，2=加价）
+	// 充值→渠道到账换算（覆盖全局汇率图，四者需同时配置才生效）：
+	// 用户以 ChannelPaymentCurrency 充值 ChannelPaymentAmount，渠道按 ChannelCreditCurrency 到账 ChannelCreditAmount。
+	// 例：20 LDC = 1 USD → Payment=20/PaymentCurrency=LDC，Credit=1/CreditCurrency=USD。
+	// 有效成本 = 列表成本(渠道币种) × (Payment/Credit)，再经全局汇率图折算为 USD。
+	ChannelPaymentCurrency string   `json:"channelPaymentCurrency,omitempty"` // 充值币种（如 LDC/CNY/USD）
+	ChannelPaymentAmount   *float64 `json:"channelPaymentAmount,omitempty"`   // 充值金额
+	ChannelCreditCurrency  string   `json:"channelCreditCurrency,omitempty"`  // 渠道显示/计价币种（如 USD）
+	ChannelCreditAmount    *float64 `json:"channelCreditAmount,omitempty"`    // 渠道到账金额
+
+	// MaxGroupMultiplier 渠道级分组倍率安全上限：本渠道 Key 声明的 GroupMultiplier
+	// 超过该值时自动退出调度（倍率回落后自动恢复）。nil=不启用闸门，Key 倍率仅用于成本折算。
+	// 这是唯一运行时真源；Key 级同名字段已废弃（存量数据加载期迁移到此处后清空）。
+	MaxGroupMultiplier *float64 `json:"maxGroupMultiplier,omitempty"` // 最高分组倍率上限（如 1=不超过标准倍率）
+
+	// Vision 能力配置
+	NoVision bool `json:"noVision,omitempty"` // 整个渠道不支持图片输入
+	// 历史图片轮次限制
+	HistoricalImageTurnLimit int `json:"historicalImageTurnLimit,omitempty"` // 超过此轮次的历史图片替换为占位符（0=不限制，2-10=限制轮次）
+	// Compact 专用模型配置
+	CompactModel string `json:"compactModel,omitempty"` // 本地 compact 时使用的上游模型名（不经过 modelMapping，为空则使用原始请求的模型）
+	// AutoManaged 自动托管标记
+	AutoManaged   bool       `json:"autoManaged,omitempty"`   // 渠道是否由自动托管流程创建
+	AutoManagedAt *time.Time `json:"autoManagedAt,omitempty"` // 自动托管设置时间
+	// AutoManagedKind 托管子类型，用于区分"已托管但未绑定上游套餐"和"已完成 new-api 绑定"等状态。
+	// "" | "generic" | "new_api"
+	AutoManagedKind string `json:"autoManagedKind,omitempty"`
+	// autoManagedExplicitFalse 标记 JSON 中曾显式出现 "autoManaged":false 的渠道。
+	// 加载时短暂记录，用于区分"显式手动渠道"与"未设置 autoManaged 的历史渠道"，
+	// 避免 ensureAutoManagedKind 把前者误升级为 generic。不持久化。
+	autoManagedExplicitFalse bool `json:"-"`
+	// Autopilot 来源信任分类（设计 §3.2.1，仅用于隐私/治理展示和同分 tie-breaker，不参与质量推导）
+	// OriginType: official_api | official_token_plan | relay | community | local_runtime | unknown
+	// OriginTier: first | second | third | local | unknown
+	// 加载旧配置时由 ConfigManager 自动补齐为 "unknown"（不做任何基于 URL/名称的猜测推断）。
+	OriginType string `json:"originType,omitempty"`
+	OriginTier string `json:"originTier,omitempty"`
+	// 用户自定义标签（自由文本，与受限枚举 PoolTag 完全独立）。
+	// Tags 只做用户侧组织/筛选，不接入任何调度逻辑。
+	Tags []string `json:"tags,omitempty"`
+	// 渠道级保活验证配置（可选，nil 时继承全局与 OriginTier 分档默认）
+	HealthCheck *ChannelHealthCheckConfig `json:"healthCheck,omitempty"`
+	// 渠道级竞速参与配置（可选，nil 时继承全局；关闭=既不做主触发也不做影子目标）
+	Racing *ChannelRacingConfig `json:"racing,omitempty"`
+	// 渠道级上游余额探测配置（可选，nil 时继承全局与托管类型默认；见 balance_check.go）
+	BalanceCheck *ChannelBalanceCheckConfig `json:"balanceCheck,omitempty"`
+	// LogicalChannelUID 是该物理渠道所属逻辑渠道的稳定身份。
+	// 六个物理数组仍是运行时存储；本字段是非权威指针，加载旧配置时由 ConfigManager
+	// 自动回填，逻辑渠道 CRUD 也使用它保持各协议物理路由同步。空值表示旧数据。
+	LogicalChannelUID string `json:"logicalChannelUid,omitempty"`
+	// LogicalName 是该物理渠道所属逻辑渠道的用户可见名称。
+	// 跟随 LogicalChannel.Name 写入；旧数据加载后由归组回填统一刷新。空值表示旧数据。
+	LogicalName string `json:"logicalName,omitempty"`
+}
+
+// ChannelPlacementFront 表示新渠道放置到故障转移序列首位。
+const ChannelPlacementFront = "front"
+
+// 渠道暂停来源。只有 auto_no_keys 可在凭证恢复后自动激活。
+const (
+	SuspensionSourceManual     = "manual"
+	SuspensionSourceAutoNoKeys = "auto_no_keys"
+)
+
+// assignChannelPriority 为新增渠道分配 Priority（数字越小越优先，0 表示未显式配置）。
+// placement 为 "front" 时：已显式排序（Priority>0）的现有渠道整体后移一位，新渠道取 1；
+// 其他情况（含空串）：调用方显式指定的 Priority（>0）保持不变，
+// 否则取当前最大 Priority + 1，即追加到故障转移序列末尾。
+func assignChannelPriority(channels []UpstreamConfig, upstream *UpstreamConfig, placement string) {
+	if placement == ChannelPlacementFront {
+		for i := range channels {
+			if channels[i].Priority > 0 {
+				channels[i].Priority++
+			}
+		}
+		upstream.Priority = 1
+		return
+	}
+	if upstream.Priority > 0 {
+		return
+	}
+	maxPriority := 0
+	for _, ch := range channels {
+		if ch.Priority > maxPriority {
+			maxPriority = ch.Priority
+		}
+	}
+	upstream.Priority = maxPriority + 1
+}
+
+// resolvePlacement 从可变参数中提取 placement，缺省为空串（按 "back" 处理）。
+func resolvePlacement(placements []string) string {
+	if len(placements) > 0 {
+		return placements[0]
+	}
+	return ""
+}
+
+// resolveReorderPriorities 计算重排序要写入的优先级值：
+// 缺省按位次 1..N；调用方传入显式值（统一 LLM 视图按全局位次提交，
+// 保证跨协议分组按最小 priority 还原顺序时尺度一致）时按显式值写入。
+func resolveReorderPriorities(order []int, priorities ...[]int) ([]int, error) {
+	values := make([]int, len(order))
+	if len(priorities) == 0 || priorities[0] == nil {
+		for i := range values {
+			values[i] = i + 1
+		}
+		return values, nil
+	}
+	explicit := priorities[0]
+	if len(explicit) != len(order) {
+		return nil, fmt.Errorf("优先级数组长度 (%d) 与排序数组长度 (%d) 不一致", len(explicit), len(order))
+	}
+	for i, p := range explicit {
+		if p <= 0 {
+			return nil, fmt.Errorf("无效的优先级值: %d", p)
+		}
+		values[i] = p
+	}
+	return values, nil
+}
+
+// KeyConsumptionPolicy 描述 Key 的消耗策略，与成本倍率正交。
+type KeyConsumptionPolicy string
+
+const (
+	// KeyConsumptionNormal 常规 Key，保持历史行为。
+	KeyConsumptionNormal KeyConsumptionPolicy = "normal"
+	// KeyConsumptionOpportunistic 机会性 Key：优先消耗且易失效，启用快速衰减。
+	KeyConsumptionOpportunistic KeyConsumptionPolicy = "opportunistic"
+)
+
+// IsKeyConsumptionPolicyValid 判断给定值是否为已知的消耗策略。
+func IsKeyConsumptionPolicyValid(policy KeyConsumptionPolicy) bool {
+	switch policy {
+	case "", KeyConsumptionNormal, KeyConsumptionOpportunistic:
+		return true
+	default:
+		return false
+	}
+}
+
+// NormalizeKeyConsumptionPolicy 将空值或未知值规范化为 normal；已知值原样返回。
+func NormalizeKeyConsumptionPolicy(policy KeyConsumptionPolicy) KeyConsumptionPolicy {
+	if IsKeyConsumptionPolicyValid(policy) {
+		if policy == "" {
+			return KeyConsumptionNormal
+		}
+		return policy
+	}
+	return KeyConsumptionNormal
+}
+
+// APIKeyConfig 描述单个 API Key 的附加调度配置。
+type APIKeyConfig struct {
+	Key string `json:"key,omitempty"`
+	// KeyUID 是密钥生命周期内不可变的稳定身份，轮换明文 Key 时必须保留。
+	KeyUID        string `json:"keyUid,omitempty"`
+	CredentialUID string `json:"credentialUid,omitempty"`
+	Name          string `json:"name,omitempty"`
+	// BaseURL 该 Key 绑定的上游端点。非空时 failover 遍历仅在此 baseURL 上尝试该 Key，
+	// 避免 provider 模板化添加场景下不同 plan 的 Key（如 MiMo sk-/tp-）与多 baseURL 产生无效笛卡尔积组合。
+	// 为空时保持原有笛卡尔积行为（向后兼容，历史手填渠道不受影响）。
+	BaseURL    string `json:"baseUrl,omitempty"`
+	Enabled    *bool  `json:"enabled,omitempty"`
+	QuotaGroup string `json:"quotaGroup,omitempty"`
+	// GroupMultiplier 是该 Key 所属上游分组的成本倍率（成本折算与调度偏好使用）。
+	// 是否允许参与调度由渠道级 UpstreamConfig.MaxGroupMultiplier 统一判定（nil=不启用闸门）。
+	GroupMultiplier *float64 `json:"groupMultiplier,omitempty"`
+	// MaxGroupMultiplier 已废弃：上限统一为渠道级 UpstreamConfig.MaxGroupMultiplier。
+	// 字段仅为兼容读取旧配置保留；加载期 ensureChannelGroupMultiplierLimits 会把存量值
+	// 聚合提升到渠道级后清空，运行时不再参与任何判定。
+	MaxGroupMultiplier *float64 `json:"maxGroupMultiplier,omitempty"`
+	// ConsumptionPolicy Key 级消耗策略：normal（常规）或 opportunistic（机会性优先消耗）。
+	ConsumptionPolicy        KeyConsumptionPolicy `json:"consumptionPolicy,omitempty"`
+	MultiplierSource         string               `json:"multiplierSource,omitempty"` // manual | new_api | provider
+	MultiplierUpdatedAt      *time.Time           `json:"multiplierUpdatedAt,omitempty"`
+	MultiplierExpiresAt      *time.Time           `json:"multiplierExpiresAt,omitempty"`
+	MultiplierSyncStatus     string               `json:"multiplierSyncStatus,omitempty"` // fresh | stale | over_limit | sync_error | relink_required | manual
+	MultiplierSyncError      string               `json:"multiplierSyncError,omitempty"`
+	SourceSubscriptionUID    string               `json:"sourceSubscriptionUid,omitempty"`
+	SourceRemoteTokenID      int64                `json:"sourceRemoteTokenId,omitempty"`
+	RateLimitRPM             int                  `json:"rateLimitRpm,omitempty"`
+	RateLimitWindowMinutes   int                  `json:"rateLimitWindowMinutes,omitempty"` // 滑动窗口时长（秒；JSON 字段名保留为兼容旧配置）
+	RateLimitMaxConcurrent   int                  `json:"rateLimitMaxConcurrent,omitempty"`
+	RateLimitAutoFromHeaders *bool                `json:"rateLimitAutoFromHeaders,omitempty"`
+	Weight                   int                  `json:"weight,omitempty"`
+	Models                   []string             `json:"models,omitempty"`
+}
+
+// ManagedAccountConfig 是自动托管 provider 的账号级持久化根。
+type ManagedAccountConfig struct {
+	AccountUID  string                     `json:"accountUid"`
+	ProviderID  string                     `json:"providerId"`
+	Name        string                     `json:"name,omitempty"`
+	Credentials []ManagedAccountCredential `json:"credentials"`
+}
+
+type ManagedAccountCredential struct {
+	CredentialUID       string                      `json:"credentialUid"`
+	APIKey              string                      `json:"apiKey"`
+	VolcengineAccessKey *VolcengineAccessKeyPair    `json:"volcengineAccessKey,omitempty"`
+	MiMoConsole         *MiMoConsoleCredential      `json:"mimoConsole,omitempty"`
+	CompshareConsole    *CompshareConsoleCredential `json:"compshareConsole,omitempty"`
+	KimiConsole         *KimiConsoleCredential      `json:"kimiConsole,omitempty"`
+}
+
+// KimiConsoleCredential 保存 Kimi Web 会话令牌与最近一次 Kimi Code 套餐快照。
+// AccessToken 属于敏感凭证，只能持久化，管理 API 不得回显。
+type KimiConsoleCredential struct {
+	AccessToken string                `json:"accessToken"`
+	Usage       KimiCodeUsageSnapshot `json:"usage"`
+}
+
+// KimiCodeUsageSnapshot 汇总 Kimi Code 额度和会员订阅统计。
+type KimiCodeUsageSnapshot struct {
+	WeeklyUsage         KimiCodeQuotaWindow  `json:"weeklyUsage"`
+	TotalQuota          KimiCodeQuotaWindow  `json:"totalQuota"`
+	RateLimits          []KimiCodeRateLimit  `json:"rateLimits,omitempty"`
+	CodeFiveHour        *KimiCodeRatioWindow `json:"codeFiveHour,omitempty"`
+	CodeSevenDay        *KimiCodeRatioWindow `json:"codeSevenDay,omitempty"`
+	SubscriptionBalance *KimiCodeBalance     `json:"subscriptionBalance,omitempty"`
+	GiftBalances        []KimiCodeBalance    `json:"giftBalances,omitempty"`
+	BoosterWallets      []KimiBoosterWallet  `json:"boosterWallets,omitempty"`
+	ValidatedAt         time.Time            `json:"validatedAt"`
+}
+
+// KimiCodeQuotaWindow 是 GetUsages 返回的精确额度窗口。
+type KimiCodeQuotaWindow struct {
+	Used      int64  `json:"used"`
+	Limit     int64  `json:"limit"`
+	Remaining int64  `json:"remaining"`
+	ResetTime string `json:"resetTime,omitempty"`
+}
+
+type KimiCodeRateLimit struct {
+	WindowSeconds int64               `json:"windowSeconds"`
+	Usage         KimiCodeQuotaWindow `json:"usage"`
+}
+
+// KimiCodeRatioWindow 是 GetSubscriptionStats 返回的比例窗口，Ratio 表示已用比例。
+type KimiCodeRatioWindow struct {
+	Ratio     float64 `json:"ratio"`
+	Enabled   bool    `json:"enabled"`
+	ResetTime string  `json:"resetTime,omitempty"`
+}
+
+type KimiCodeBalance struct {
+	Feature           string  `json:"feature,omitempty"`
+	Type              string  `json:"type,omitempty"`
+	Unit              string  `json:"unit,omitempty"`
+	AmountUsedRatio   float64 `json:"amountUsedRatio"`
+	KimiCodeUsedRatio float64 `json:"kimiCodeUsedRatio"`
+	ExpireTime        string  `json:"expireTime,omitempty"`
+}
+
+// KimiCodeMoney 是 GetSubscriptionStats 返回的金额字段，单位为分。
+type KimiCodeMoney struct {
+	Currency     string `json:"currency,omitempty"`
+	PriceInCents int64  `json:"priceInCents"`
+}
+
+// KimiBoosterWallet 是 Kimi 额度加油包（按量计费余额钱包）快照。
+type KimiBoosterWallet struct {
+	ID                 string        `json:"id,omitempty"`
+	Status             string        `json:"status,omitempty"`
+	AllowTopup         bool          `json:"allowTopup"`
+	MoneyLeft          KimiCodeMoney `json:"moneyLeft"`
+	MoneyTotal         KimiCodeMoney `json:"moneyTotal"`
+	MonthlyChargeLimit KimiCodeMoney `json:"monthlyChargeLimit"`
+	MonthlyUsed        KimiCodeMoney `json:"monthlyUsed"`
+}
+
+// VolcengineAccessKeyPair 是火山云管控面签名凭证，用于 Agent/Coding Plan 识别与模型发现。
+// SecretAccessKey 与推理 API Key 一样只持久化在 0600 配置文件中，管理 API 不得回显。
+type VolcengineAccessKeyPair struct {
+	AccessKeyID     string               `json:"accessKeyId"`
+	SecretAccessKey string               `json:"secretAccessKey"`
+	Plan            string               `json:"plan,omitempty"`
+	PlanTier        string               `json:"planTier,omitempty"`
+	PlanStatus      string               `json:"planStatus,omitempty"`
+	Usage           *VolcenginePlanUsage `json:"usage,omitempty"`
+	// Plans 是多套餐桶快照（personal/team × agent/coding）：各桶独立探测、
+	// 独立记录错误，团队版结果不覆盖个人版。Plan/Usage 继续指向选定的主桶，
+	// 供既有消费链（模型清单、稀疏 L2 预算、恢复）无感兼容。
+	Plans []VolcenginePlanBucket `json:"plans,omitempty"`
+}
+
+// VolcenginePlanBucket 是火山套餐单桶快照：{agent_plan|coding_plan} × {personal|team}。
+// 团队版桶携带席位绑定信息；Error 独立记录该桶探测/用量失败，不阻断其它桶。
+type VolcenginePlanBucket struct {
+	Product string               `json:"product"`
+	Edition string               `json:"edition"`
+	SeatID  string               `json:"seatId,omitempty"`
+	Tier    string               `json:"tier,omitempty"`
+	Status  string               `json:"status,omitempty"`
+	Usage   *VolcenginePlanUsage `json:"usage,omitempty"`
+	Error   string               `json:"error,omitempty"`
+}
+
+// VolcenginePlanUsageWindow 描述火山套餐单个时间窗口的用量。
+// Agent Plan 返回 Quota+Used（可算余量）；Coding Plan 仅返回 UsedPercent。
+type VolcenginePlanUsageWindow struct {
+	Quota       float64  `json:"quota,omitempty"`
+	Used        float64  `json:"used"`
+	UsedPercent *float64 `json:"usedPercent,omitempty"`
+	ResetTime   int64    `json:"resetTime,omitempty"`
+}
+
+// VolcenginePlanUsage 是火山套餐用量快照。
+// Agent Plan 填充 FiveHour/Daily/Weekly/Monthly（含 Quota）；
+// Coding Plan 填充 FiveHour(=session)/Weekly/Monthly（仅 UsedPercent）。
+type VolcenginePlanUsage struct {
+	FiveHour  *VolcenginePlanUsageWindow `json:"fiveHour,omitempty"`
+	Daily     *VolcenginePlanUsageWindow `json:"daily,omitempty"`
+	Weekly    *VolcenginePlanUsageWindow `json:"weekly,omitempty"`
+	Monthly   *VolcenginePlanUsageWindow `json:"monthly,omitempty"`
+	FetchedAt time.Time                  `json:"fetchedAt"`
+	Error     string                     `json:"error,omitempty"`
+}
+
+// MiMoConsoleCredential 保存 MiMo 控制台登录态与最近一次套餐用量快照。
+// Cookie 属于敏感凭证，只能持久化，管理 API 不得回显。
+type MiMoConsoleCredential struct {
+	Cookie           string                  `json:"cookie"`
+	PlanCode         string                  `json:"planCode,omitempty"`
+	PlanName         string                  `json:"planName,omitempty"`
+	CurrentPeriodEnd string                  `json:"currentPeriodEnd,omitempty"`
+	Expired          bool                    `json:"expired,omitempty"`
+	MonthUsage       MiMoTokenPlanUsageQuota `json:"monthUsage"`
+	CurrentUsage     MiMoTokenPlanUsageQuota `json:"currentUsage"`
+	ValidatedAt      time.Time               `json:"validatedAt"`
+}
+
+type MiMoTokenPlanUsageQuota struct {
+	Used        int64   `json:"used"`
+	Limit       int64   `json:"limit"`
+	UsedPercent float64 `json:"usedPercent"`
+}
+
+// CompshareConsoleCredential 保存优云智算控制台登录态与最近一次套餐用量快照。
+// Cookie 属于敏感凭证，只能持久化，管理 API 不得回显。
+type CompshareConsoleCredential struct {
+	Cookie           string                   `json:"cookie"`
+	UserPlanCode     string                   `json:"userPlanCode,omitempty"`
+	PlanCode         string                   `json:"planCode,omitempty"`
+	PlanName         string                   `json:"planName,omitempty"`
+	DisplayName      string                   `json:"displayName,omitempty"`
+	Status           int                      `json:"status"`
+	ConcurrencyLimit int64                    `json:"concurrencyLimit,omitempty"`
+	IsTeam           bool                     `json:"isTeam,omitempty"`
+	ExpireAt         int64                    `json:"expireAt,omitempty"`
+	FiveHourUsage    CompsharePlanUsageWindow `json:"fiveHourUsage"`
+	WeeklyUsage      CompsharePlanUsageWindow `json:"weeklyUsage"`
+	MonthlyUsage     CompsharePlanUsageWindow `json:"monthlyUsage"`
+	ValidatedAt      time.Time                `json:"validatedAt"`
+}
+
+type CompsharePlanUsageWindow struct {
+	Used        int64 `json:"used"`
+	Limit       int64 `json:"limit"`
+	UpdatedAt   int64 `json:"updatedAt,omitempty"`
+	NextResetAt int64 `json:"nextResetAt,omitempty"`
+}
+
+// CredentialUIDForKey 返回账号内 API Key 的稳定凭证身份。
+func (u *UpstreamConfig) CredentialUIDForKey(apiKey string) string {
+	for _, keyConfig := range u.APIKeyConfigs {
+		if keyConfig.Key == apiKey && keyConfig.CredentialUID != "" {
+			return keyConfig.CredentialUID
+		}
+	}
+	if u.AccountUID == "" || apiKey == "" {
+		return ""
+	}
+	return GenerateCredentialUID(u.AccountUID, apiKey)
+}
+
+// DisabledKeyInfo 被拉黑的 API Key 信息
+type DisabledKeyInfo struct {
+	Key        string        `json:"key"`
+	Reason     string        `json:"reason"`              // "authentication_error" / "permission_error" / "insufficient_balance" / "insufficient_quota"
+	Message    string        `json:"message"`             // 原始错误信息
+	DisabledAt string        `json:"disabledAt"`          // ISO8601 时间戳
+	RecoverAt  string        `json:"recoverAt,omitempty"` // 自动恢复时间（可选）
+	Config     *APIKeyConfig `json:"config,omitempty"`    // 拉黑前的 key 配置快照，restore 时恢复
+}
+
+// DisabledKeyModelInfo 被限制的 (Key, 模型) 组合信息。
+// 用于 model_not_found 等"该 Key 在此渠道下缺少特定模型"的场景：
+// 仅限制该 Key 对该模型的路由，不影响该 Key 的其他模型，也不阻断 failover。
+type DisabledKeyModelInfo struct {
+	Key        string `json:"key"`
+	Model      string `json:"model"`      // 触发限制的模型（redirectedModel）
+	Reason     string `json:"reason"`     // "model_not_found" / "image_generation_not_enabled"
+	Message    string `json:"message"`    // 原始错误信息摘要
+	DisabledAt string `json:"disabledAt"` // RFC3339 时间戳
+	RecoverAt  string `json:"recoverAt"`  // RFC3339 自动恢复时间（默认 +1h）
+}
+
+// DisabledGroupModelInfo 记录人工禁用的配额组模型组合。
+// QuotaGroup 非空时，当前渠道内所有同组 Key 动态共享该限制；为空时仅限制 Key。
+type DisabledGroupModelInfo struct {
+	QuotaGroup string `json:"quotaGroup,omitempty"`
+	Key        string `json:"key,omitempty"`
+	Model      string `json:"model"`
+	DisabledAt string `json:"disabledAt"`
+}
+
+// RateLimitWindowSeconds 返回限速器实际使用的窗口秒数。
+// JSON 字段名仍为 rateLimitWindowMinutes，仅用于兼容既有 API 和配置文件。
+func RateLimitWindowSeconds(value int) int {
+	if value > 0 {
+		return value
+	}
+	return 0
+}
+
+// AgentModelProfile 描述下游 agent 模型的上下文管理语义。
+type AgentModelProfile struct {
+	ContextWindowTokens    int      `json:"contextWindowTokens,omitempty"`
+	MaxContextWindowTokens int      `json:"maxContextWindowTokens,omitempty"`
+	EffectiveContextRatio  float64  `json:"effectiveContextRatio,omitempty"`
+	AutoCompactRatio       float64  `json:"autoCompactRatio,omitempty"`
+	AutoCompactThreshold   int      `json:"autoCompactThreshold,omitempty"`
+	MaxOutputTokens        int      `json:"maxOutputTokens,omitempty"`
+	TruncationMode         string   `json:"truncationMode,omitempty"`
+	TruncationLimit        int      `json:"truncationLimit,omitempty"`
+	ReasoningEfforts       []string `json:"reasoningEfforts,omitempty"`
+	SupportsPriorityTier   bool     `json:"supportsPriorityTier,omitempty"`
+	DisplayName            string   `json:"displayName,omitempty"`
+}
+
+// UpstreamModelCapability 描述实际发送给上游的模型能力。
+type UpstreamModelCapability struct {
+	ContextWindowTokens int `json:"contextWindowTokens,omitempty"` // CCX 路由使用的可承载输入窗口；若来源是总上下文窗口，应在能力数据层预先扣除输出预留
+	// ContextWindowTiers 是该模型已知的能力分段阶梯（升序、去重），承载"同一模型在野外
+	// 同时存在多档窗口且随时间上移"的事实：如 GPT-5.6 的 [272K, 372K, 1.05M]（272K/372K
+	// 是 Codex 目录窗口，1.05M 是原生 API 窗口）。contextWindowTokens 是路由默认信任的
+	// 保守声明；tiers 末位是已知最大可试探上限——注册表滞后时，溢出逃生阀仍可按最高档
+	// 对同模型候选发起试探，成功后由学习层棘轮上调。单元素 tiers（或留空）表示该模型
+	// 发布后窗口不再扩展，不做向上试探。
+	ContextWindowTiers      []int           `json:"contextWindowTiers,omitempty"`
+	MaxOutputTokens         int             `json:"maxOutputTokens,omitempty"`
+	DefaultOutputTokens     int             `json:"defaultOutputTokens,omitempty"`
+	RecommendedOutputTokens int             `json:"recommendedOutputTokens,omitempty"`
+	ThinkingMode            string          `json:"thinkingMode,omitempty"`
+	ReasoningEfforts        []string        `json:"reasoningEfforts,omitempty"`
+	Provider                string          `json:"provider,omitempty"`
+	DisplayName             string          `json:"displayName,omitempty"`
+	Description             string          `json:"description,omitempty"`
+	Capabilities            map[string]bool `json:"capabilities,omitempty"`
+	Pricing                 *ModelPricing   `json:"pricing,omitempty"`
+	Sources                 []string        `json:"sources,omitempty"`
+	// ParamConstraints 厂商文档已明确公布的请求参数硬约束（如 Kimi K3/K2.7-code/K2.6 的
+	// temperature/top_p 固定值不可改）。随 model-registry 走 presetstore 的定期刷新链路，
+	// 不需要重新编译发版；应用逻辑见 internal/handlers/common/compat_param_constraints.go。
+	ParamConstraints *ModelParamConstraints `json:"paramConstraints,omitempty"`
+}
+
+// MaxKnownWindowTokens 返回该模型已知（含试探档）的最大输入窗口。
+// 无分段数据时与 ContextWindowTokens 一致，即不允许向声明窗口之上试探。
+func (c UpstreamModelCapability) MaxKnownWindowTokens() int {
+	known := c.ContextWindowTokens
+	for _, tier := range c.ContextWindowTiers {
+		if tier > known {
+			known = tier
+		}
+	}
+	return known
+}
+
+// ModelParamConstraints 描述单个模型在请求参数上的厂商级硬约束。
+// 与 ChannelCompatCache 的错误驱动学习互补：这里是文档已知、无需先失败一次即可规避的约束。
+type ModelParamConstraints struct {
+	// FixedParams 值被厂商固定、传入其他值即报错的采样参数名（如 "temperature"）。
+	// 命中时直接从请求体删除，上游使用自身默认值，语义无损。
+	FixedParams []string `json:"fixedParams,omitempty"`
+	// ToolChoiceRequiredUnsupported 为 true 时，tool_choice:"required" 会被降级为 "auto"
+	// （保留"可调工具"、丢弃"强制"，是语义损失最小的降级）。
+	ToolChoiceRequiredUnsupported bool `json:"toolChoiceRequiredUnsupported,omitempty"`
+	// ThinkingFixedValue 非空时，thinking 参数只接受此固定值（如
+	// {"type":"enabled","keep":"all"}），其余取值会被归一化为该值。
+	ThinkingFixedValue map[string]interface{} `json:"thinkingFixedValue,omitempty"`
+}
+
+// ModelBenchmarkProfile 描述规范模型在独立基准中的能力上界证据。
+// 该结构只用于 Autopilot 软评分，不参与模型支持、上下文或协议能力等硬过滤。
+type ModelBenchmarkProfile struct {
+	CanonicalModel       string                   `json:"canonicalModel"`
+	OverallScore         float64                  `json:"overallScore,omitempty"`   // 0-100，仅用于展示
+	CategoryScores       map[string]float64       `json:"categoryScores,omitempty"` // 0-100，保留来源领域向量
+	BenchmarkEvidence    []ModelBenchmarkEvidence `json:"benchmarkEvidence,omitempty"`
+	Sources              []string                 `json:"sources,omitempty"`
+	VerifiedAt           string                   `json:"verifiedAt,omitempty"` // YYYY-MM-DD
+	Lane                 string                   `json:"lane,omitempty"`       // provisional | verified
+	SharedResults        int                      `json:"sharedResults,omitempty"`
+	ComparableCategories int                      `json:"comparableCategories,omitempty"`
+	TotalCategories      int                      `json:"totalCategories,omitempty"`
+}
+
+// ModelBenchmarkEvidence 保存单个基准观测，避免将特定 harness 的原始指标误作通用能力分。
+// CohortPercentile 在固定 cohort 内从原始指标派生，供 Autopilot 做有界的相对软修正。
+type ModelBenchmarkEvidence struct {
+	Benchmark        string   `json:"benchmark"`
+	BenchmarkVersion string   `json:"benchmarkVersion"`
+	SourceModel      string   `json:"sourceModel"`
+	Domain           string   `json:"domain"`
+	Metric           string   `json:"metric"`
+	RawValue         float64  `json:"rawValue"`
+	Uncertainty      float64  `json:"uncertainty,omitempty"`
+	CohortPercentile float64  `json:"cohortPercentile"`
+	TaskCount        int      `json:"taskCount"`
+	CohortSize       int      `json:"cohortSize"`
+	Effort           string   `json:"effort"`
+	SelectionBasis   string   `json:"selectionBasis"`
+	SourceURL        string   `json:"sourceUrl"`
+	CapturedAt       string   `json:"capturedAt"`
+	CostUSD          *float64 `json:"costUsd,omitempty"`
+}
+
+type EmbeddingCapability struct {
+	EmbeddingSpaceID    string `json:"embeddingSpaceId,omitempty"`
+	Dimensions          int    `json:"dimensions,omitempty"`
+	SupportedDimensions []int  `json:"supportedDimensions,omitempty"`
+	Normalized          *bool  `json:"normalized,omitempty"`
+}
+
+// ModelPricing 描述模型公开计费信息，单位与币种由 unit/currency 标明。
+type ModelPricing struct {
+	Unit                string             `json:"unit,omitempty"`
+	Currency            string             `json:"currency,omitempty"`
+	InputCacheHitPrice  *float64           `json:"inputCacheHitPrice,omitempty"`
+	InputCacheMissPrice *float64           `json:"inputCacheMissPrice,omitempty"`
+	OutputPrice         *float64           `json:"outputPrice,omitempty"`
+	Tiers               []ModelPricingTier `json:"tiers,omitempty"`
+}
+
+// ModelPricingTier 描述按输入 token 规模区分的模型阶梯计费。
+type ModelPricingTier struct {
+	Label               string   `json:"label,omitempty"`
+	InputTokensAbove    int      `json:"inputTokensAbove,omitempty"`
+	InputTokensUpTo     int      `json:"inputTokensUpTo,omitempty"`
+	InputCacheHitPrice  *float64 `json:"inputCacheHitPrice,omitempty"`
+	InputCacheMissPrice *float64 `json:"inputCacheMissPrice,omitempty"`
+	OutputPrice         *float64 `json:"outputPrice,omitempty"`
+}
+
+// ContextRoutingConfig 控制上下文路由过滤。
+type ContextRoutingConfig struct {
+	Enabled                    *bool `json:"enabled,omitempty"`
+	DefaultOutputReserveTokens int   `json:"defaultOutputReserveTokens,omitempty"`
+	UnknownSafeWindowTokens    int   `json:"unknownSafeWindowTokens,omitempty"`
+}
+
+const (
+	ThinkingCacheDefaultTTLHours = 48
+	ThinkingCacheMinTTLHours     = 1
+	ThinkingCacheMaxTTLHours     = 24 * 30
+)
+
+// ThinkingCacheConfig 控制 Claude thinking 回填缓存。
+type ThinkingCacheConfig struct {
+	TTLHours int `json:"ttlHours,omitempty"`
+}
+
+func NormalizeThinkingCacheTTLHours(value int) int {
+	if value == 0 {
+		return ThinkingCacheDefaultTTLHours
+	}
+	if value < ThinkingCacheMinTTLHours {
+		return ThinkingCacheMinTTLHours
+	}
+	if value > ThinkingCacheMaxTTLHours {
+		return ThinkingCacheMaxTTLHours
+	}
+	return value
+}
+
+func (c ThinkingCacheConfig) EffectiveTTLHours() int {
+	return NormalizeThinkingCacheTTLHours(c.TTLHours)
+}
+
+func (c ThinkingCacheConfig) EffectiveTTL() time.Duration {
+	return time.Duration(c.EffectiveTTLHours()) * time.Hour
+}
+
+// IsAutoRecoverableDisabledReason 判断是否属于可自动恢复的拉黑原因。
+func normalizeAPIKeyConfigs(apiKeys []string, configs []APIKeyConfig) []APIKeyConfig {
+	keys := deduplicateStrings(apiKeys)
+	if len(keys) == 0 && len(configs) == 0 {
+		return nil
+	}
+
+	byKey := make(map[string]APIKeyConfig, len(configs))
+	uidOnly := make([]APIKeyConfig, 0)
+	uidOnlySeen := make(map[string]bool)
+	keyUIDOnly := make([]APIKeyConfig, 0)
+	keyUIDOnlySeen := make(map[string]bool)
+	for _, cfg := range configs {
+		key := strings.TrimSpace(cfg.Key)
+		cfg.Name = strings.TrimSpace(cfg.Name)
+		cfg.QuotaGroup = strings.TrimSpace(cfg.QuotaGroup)
+		cfg.KeyUID = strings.TrimSpace(cfg.KeyUID)
+		cfg.CredentialUID = strings.TrimSpace(cfg.CredentialUID)
+		if key == "" {
+			switch {
+			case cfg.CredentialUID != "" && !uidOnlySeen[cfg.CredentialUID]:
+				cfg.Key = ""
+				uidOnly = append(uidOnly, cfg)
+				uidOnlySeen[cfg.CredentialUID] = true
+			case cfg.KeyUID != "" && !keyUIDOnlySeen[cfg.KeyUID]:
+				cfg.Key = ""
+				keyUIDOnly = append(keyUIDOnly, cfg)
+				keyUIDOnlySeen[cfg.KeyUID] = true
+			}
+			continue
+		}
+		cfg.Key = key
+		byKey[key] = cfg
+	}
+
+	normalized := make([]APIKeyConfig, 0, len(keys)+len(uidOnly)+len(keyUIDOnly))
+	boundUIDs := make(map[string]bool, len(configs))
+	boundKeyUIDs := make(map[string]bool, len(configs))
+	for _, key := range keys {
+		if cfg, ok := byKey[key]; ok {
+			normalized = append(normalized, cfg)
+			if cfg.CredentialUID != "" {
+				boundUIDs[cfg.CredentialUID] = true
+			}
+			if cfg.KeyUID != "" {
+				boundKeyUIDs[cfg.KeyUID] = true
+			}
+		} else {
+			normalized = append(normalized, APIKeyConfig{Key: key})
+		}
+		delete(byKey, key)
+	}
+	// 保留已知但不在 active APIKeys 中的 key 配置，避免 blacklist/restore 丢失 quota/rpm 语义。
+	for _, cfg := range byKey {
+		normalized = append(normalized, cfg)
+		if cfg.CredentialUID != "" {
+			boundUIDs[cfg.CredentialUID] = true
+		}
+		if cfg.KeyUID != "" {
+			boundKeyUIDs[cfg.KeyUID] = true
+		}
+	}
+	// 托管渠道持久化时会剥离明文 Key，仅留下 CredentialUID/KeyUID。运行时混入新 Key 后仍须
+	// 保留这些 legacy 绑定，后续补水/同步才能找回账号凭证池中的旧凭证。
+	for _, cfg := range uidOnly {
+		if !boundUIDs[cfg.CredentialUID] {
+			normalized = append(normalized, cfg)
+		}
+	}
+	for _, cfg := range keyUIDOnly {
+		if !boundKeyUIDs[cfg.KeyUID] {
+			normalized = append(normalized, cfg)
+		}
+	}
+	return normalized
+}
+
+// mergeAndNormalizeAPIKeyConfigs 以 existing 为基底、把 incoming 逐条合并上去（按 KeyUID /
+// CredentialUID / Key 定位），未提及的 Key 配置保持原样。
+// 渠道编辑保存只下发变更 Key 的 trimmed 配置（托管渠道单卡补发仅带定位+倍率字段），
+// 若按 incoming 重建整份列表，其余 Key 的倍率/限额/凭证绑定会被静默清空。
+func mergeAndNormalizeAPIKeyConfigs(apiKeys []string, existing []APIKeyConfig, incoming []APIKeyConfig) []APIKeyConfig {
+	merged := make([]APIKeyConfig, 0, len(existing)+len(incoming))
+	merged = append(merged, existing...)
+	for _, next := range incoming {
+		if target := findExistingAPIKeyConfig(merged, next); target != nil {
+			*target = mergeAPIKeyConfig(target, next)
+			continue
+		}
+		merged = append(merged, next)
+	}
+	return normalizeAPIKeyConfigs(apiKeys, merged)
+}
+
+func findExistingAPIKeyConfig(existing []APIKeyConfig, incoming APIKeyConfig) *APIKeyConfig {
+	incomingKeyUID := strings.TrimSpace(incoming.KeyUID)
+	incomingCredentialUID := strings.TrimSpace(incoming.CredentialUID)
+	incomingKey := strings.TrimSpace(incoming.Key)
+	for i := range existing {
+		candidate := &existing[i]
+		if incomingKeyUID != "" && strings.TrimSpace(candidate.KeyUID) == incomingKeyUID {
+			return candidate
+		}
+	}
+	for i := range existing {
+		candidate := &existing[i]
+		if incomingCredentialUID != "" && strings.TrimSpace(candidate.CredentialUID) == incomingCredentialUID {
+			return candidate
+		}
+	}
+	for i := range existing {
+		candidate := &existing[i]
+		if incomingKey != "" && strings.TrimSpace(candidate.Key) == incomingKey {
+			return candidate
+		}
+	}
+	return nil
+}
+
+func mergeAPIKeyConfig(existing *APIKeyConfig, incoming APIKeyConfig) APIKeyConfig {
+	if existing == nil {
+		return incoming
+	}
+	merged := incoming
+	if strings.TrimSpace(merged.KeyUID) == "" {
+		merged.KeyUID = existing.KeyUID
+	}
+	if strings.TrimSpace(merged.CredentialUID) == "" {
+		merged.CredentialUID = existing.CredentialUID
+	}
+	if strings.TrimSpace(merged.Key) == "" {
+		merged.Key = existing.Key
+	}
+	// SourceSubscriptionUID/SourceRemoteTokenID 是 new_api 同步写入的托管身份字段，
+	// 客户端表单不携带；existing 由同步管理（MultiplierSource=new_api）时缺省回填，
+	// 避免编辑保存切断渠道与订阅的关联。非托管 key 的显式清空（脱离同步管理）不受影响。
+	if strings.EqualFold(strings.TrimSpace(existing.MultiplierSource), "new_api") {
+		if strings.TrimSpace(merged.SourceSubscriptionUID) == "" {
+			merged.SourceSubscriptionUID = existing.SourceSubscriptionUID
+		}
+		if merged.SourceRemoteTokenID == 0 {
+			merged.SourceRemoteTokenID = existing.SourceRemoteTokenID
+		}
+	}
+	// 上游未显式携带 ConsumptionPolicy 时保留本地用户意图（new-api 同步、跨协议合并均适用）。
+	if merged.ConsumptionPolicy == "" {
+		merged.ConsumptionPolicy = existing.ConsumptionPolicy
+	}
+	// 倍率核心元数据由 Key 倍率编辑端点/同步服务管理，渠道编辑表单只是旧快照。
+	// incoming 未携带（零值）时保留 existing，否则渠道编辑保存会把内嵌编辑刚落盘的
+	// 倍率静默覆盖丢失（与备注复活同款「外层表单旧快照覆盖」模式）。
+	// 渠道编辑没有清空倍率的显式入口；Key 倍率端点的显式清除走 SkipAPIKeyConfigMerge
+	// 绕过本合并，不受回填影响。展示性字段（时间戳/SyncError）不回填：同步路径
+	// 会显式写空串/nil，回填会导致旧错误与过期时间残留。
+	if merged.GroupMultiplier == nil {
+		merged.GroupMultiplier = existing.GroupMultiplier
+	}
+	if strings.TrimSpace(merged.MultiplierSource) == "" {
+		merged.MultiplierSource = existing.MultiplierSource
+	}
+	if strings.TrimSpace(merged.MultiplierSyncStatus) == "" {
+		merged.MultiplierSyncStatus = existing.MultiplierSyncStatus
+	}
+	return merged
+}
+
+// NormalizeAPIKeyConfigsForView 按 apiKeys 顺序返回规范化后的 Key 附加配置。
+// 注意：返回切片可能共享 upstream.APIKeyConfigs 的底层存储；调用方不应在可能并发修改上游配置的场景下使用。
+func NormalizeAPIKeyConfigsForView(upstream UpstreamConfig) []APIKeyConfig {
+	full := normalizeAPIKeyConfigs(upstream.APIKeys, upstream.APIKeyConfigs)
+	out := make([]APIKeyConfig, 0, len(full))
+	for _, cfg := range full {
+		cfg.ConsumptionPolicy = NormalizeKeyConsumptionPolicy(cfg.ConsumptionPolicy)
+		if IsAPIKeyConfigEffective(cfg) {
+			out = append(out, cfg)
+		}
+	}
+	return out
+}
+
+// IsAPIKeyConfigEffective 判断 key 配置是否包含有效运行时语义，避免 view 层把默认空白配置一并返回。
+func IsAPIKeyConfigEffective(cfg APIKeyConfig) bool {
+	if cfg.Enabled != nil {
+		return true
+	}
+	if strings.TrimSpace(cfg.Name) != "" || strings.TrimSpace(cfg.QuotaGroup) != "" ||
+		strings.TrimSpace(cfg.KeyUID) != "" || strings.TrimSpace(cfg.CredentialUID) != "" {
+		return true
+	}
+	if cfg.GroupMultiplier != nil || cfg.MaxGroupMultiplier != nil ||
+		strings.TrimSpace(cfg.MultiplierSource) != "" || strings.TrimSpace(cfg.MultiplierSyncStatus) != "" ||
+		cfg.MultiplierUpdatedAt != nil || cfg.MultiplierExpiresAt != nil || strings.TrimSpace(cfg.MultiplierSyncError) != "" ||
+		strings.TrimSpace(cfg.SourceSubscriptionUID) != "" || cfg.SourceRemoteTokenID != 0 {
+		return true
+	}
+	if cfg.RateLimitRPM > 0 || cfg.RateLimitWindowMinutes > 0 || cfg.RateLimitMaxConcurrent > 0 {
+		return true
+	}
+	if cfg.RateLimitAutoFromHeaders != nil {
+		return true
+	}
+	if cfg.Weight > 0 || len(cfg.Models) > 0 {
+		return true
+	}
+	// 显式配置了非默认消耗策略时保留该配置条目。
+	if cfg.ConsumptionPolicy != "" && cfg.ConsumptionPolicy != KeyConsumptionNormal {
+		return true
+	}
+	return false
+}
+
+// shouldPersistAPIKeyConfig 判断清除 Enabled 后是否仍需保留内部凭证或端点绑定。
+// CredentialUID/BaseURL 不属于管理视图字段，但不能随暂停状态一起删除。
+func shouldPersistAPIKeyConfig(cfg APIKeyConfig) bool {
+	cfg.ConsumptionPolicy = NormalizeKeyConsumptionPolicy(cfg.ConsumptionPolicy)
+	return IsAPIKeyConfigEffective(cfg) ||
+		strings.TrimSpace(cfg.KeyUID) != "" ||
+		strings.TrimSpace(cfg.CredentialUID) != "" ||
+		strings.TrimSpace(cfg.BaseURL) != ""
+}
+
+// restoreAPIKeyConfig 将已保存的 key 配置合并回 configs 列表，或用默认值补齐。
+func restoreAPIKeyConfig(configs []APIKeyConfig, key string, saved *APIKeyConfig) []APIKeyConfig {
+	if saved != nil {
+		found := false
+		for i, cfg := range configs {
+			if cfg.Key == key {
+				configs[i] = *saved
+				configs[i].Key = key
+				found = true
+				break
+			}
+		}
+		if !found {
+			copyCfg := *saved
+			copyCfg.Key = key
+			configs = append(configs, copyCfg)
+		}
+		return configs
+	}
+	return normalizeAPIKeyConfigs([]string{key}, configs)
+}
+
+func IsAutoRecoverableDisabledReason(reason string) bool {
+	reason = strings.ToLower(strings.TrimSpace(reason))
+	switch reason {
+	case "insufficient_balance", "insufficient_quota", "billing_error", "quota":
+		return true
+	default:
+		return false
+	}
+}
+
+// IsAutoBlacklistBalanceEnabled 检查余额不足自动拉黑是否启用（默认 true）
+func (u *UpstreamConfig) IsAutoBlacklistBalanceEnabled() bool {
+	if u.AutoBlacklistBalance == nil {
+		return true
+	}
+	return *u.AutoBlacklistBalance
+}
+
+// IsKeyDisabledNow 判断 API Key 当前是否处于整 Key 禁用期内。
+// RecoverAt 为空表示必须手动恢复；已到期的自动恢复记录不再阻断请求。
+func (u *UpstreamConfig) IsKeyDisabledNow(apiKey string, now time.Time) bool {
+	if apiKey == "" || len(u.DisabledAPIKeys) == 0 {
+		return false
+	}
+	for _, disabled := range u.DisabledAPIKeys {
+		if disabled.Key != apiKey {
+			continue
+		}
+		if disabled.RecoverAt == "" {
+			return true
+		}
+		recoverAt, err := time.Parse(time.RFC3339, disabled.RecoverAt)
+		if err != nil {
+			return true
+		}
+		if now.Before(recoverAt) {
+			return true
+		}
+	}
+	return false
+}
+
+// IsKeyModelDisabledNow 判断 (apiKey, model) 组合当前是否处于限制期内。
+// 纯只读方法，供 keypool 候选过滤与 ConfigManager 复用，避免反向依赖。
+// RecoverAt 为空或已到期视为不再限制。model 比较大小写不敏感。
+func (u *UpstreamConfig) IsKeyModelDisabledNow(apiKey, model string, now time.Time) bool {
+	if apiKey == "" || model == "" || len(u.DisabledKeyModels) == 0 {
+		return false
+	}
+	model = strings.ToLower(strings.TrimSpace(model))
+	for _, dm := range u.DisabledKeyModels {
+		if dm.Key != apiKey || strings.ToLower(strings.TrimSpace(dm.Model)) != model {
+			continue
+		}
+		if dm.RecoverAt == "" {
+			return true
+		}
+		recoverAt, err := time.Parse(time.RFC3339, dm.RecoverAt)
+		if err != nil {
+			return true // 无法解析恢复时间时保守视为仍受限
+		}
+		return now.Before(recoverAt)
+	}
+	return false
+}
+
+// IsGroupModelDisabled 判断人工分组模型限制是否作用于指定 Key。
+// 非空 quotaGroup 按当前分组动态生效；空分组只匹配记录中的目标 Key。
+func (u *UpstreamConfig) IsGroupModelDisabled(apiKey, quotaGroup, model string) bool {
+	apiKey = strings.TrimSpace(apiKey)
+	quotaGroup = strings.TrimSpace(quotaGroup)
+	model = strings.ToLower(strings.TrimSpace(model))
+	if apiKey == "" || model == "" || len(u.DisabledGroupModels) == 0 {
+		return false
+	}
+	for _, dm := range u.DisabledGroupModels {
+		if strings.ToLower(strings.TrimSpace(dm.Model)) != model {
+			continue
+		}
+		disabledGroup := strings.TrimSpace(dm.QuotaGroup)
+		if quotaGroup != "" && disabledGroup == quotaGroup {
+			return true
+		}
+		if quotaGroup == "" && disabledGroup == "" && strings.TrimSpace(dm.Key) == apiKey {
+			return true
+		}
+	}
+	return false
+}
+
+// IsNormalizeMetadataUserIDEnabled 检查 metadata.user_id 规范化是否启用（默认 true）
+func (u *UpstreamConfig) IsNormalizeMetadataUserIDEnabled() bool {
+	if u.NormalizeMetadataUserID == nil {
+		return true
+	}
+	return *u.NormalizeMetadataUserID
+}
+
+// IsStripBillingHeaderEnabled 检查是否移除 billing header block（默认：按域名推断）。
+func (u *UpstreamConfig) IsStripBillingHeaderEnabled() bool {
+	if u.StripBillingHeader != nil {
+		return *u.StripBillingHeader
+	}
+	return shouldStripBillingHeaderByDefault(u)
+}
+
+// requiresAnthropicBillingHeader 判断 base URL 是否需要 x-anthropic-billing-header。
+// Anthropic 官方 API（api.anthropic.com）需要这行 header 进行计费归属，返回 true；
+// 第三方代理、自建网关、本地模型等不需要，返回 false（且 cch= 每次变化会打穿上游 prompt 缓存前缀）。
+// 只精确匹配主域名，子域名（如 proxy.api.anthropic.com）视为第三方；端口号不影响判断。
+func requiresAnthropicBillingHeader(baseURL string) bool {
+	s := strings.ToLower(strings.TrimSpace(baseURL))
+	if idx := strings.Index(s, "://"); idx >= 0 {
+		s = s[idx+3:]
+	}
+	s = strings.TrimRight(s, "/")
+	host := s
+	if i := strings.Index(s, "/"); i >= 0 {
+		host = s[:i]
+	}
+	// 去掉端口号（如 api.anthropic.com:443），避免官方域名被误判为第三方
+	if i := strings.LastIndex(host, ":"); i >= 0 {
+		host = host[:i]
+	}
+	return host == "api.anthropic.com"
+}
+
+// shouldStripBillingHeaderByDefault 判断该渠道是否应默认剔除 Claude Code billing header。
+// 遍历渠道所有 BaseURL：只有全部均需要 billing header 时才保留；
+// 只要有一个 URL 不需要（第三方域名），则默认剔除。
+// 用户显式设置 StripBillingHeader 时（非 nil），以用户配置为准，本函数不被调用。
+func shouldStripBillingHeaderByDefault(upstream *UpstreamConfig) bool {
+	if upstream == nil {
+		return true
+	}
+	urls := []string{upstream.BaseURL}
+	urls = append(urls, upstream.BaseURLs...)
+	for _, u := range urls {
+		if !requiresAnthropicBillingHeader(u) {
+			return true
+		}
+	}
+	return false
+}
+
+// IsCodexToolCompatEnabled 检查 Codex 工具兼容是否启用（默认 false）。
+func (u *UpstreamConfig) IsCodexToolCompatEnabled() bool {
+	if u.CodexToolCompat != nil {
+		return *u.CodexToolCompat
+	}
+	return u.StripCodexClientTools
+}
+
+// IsRateLimitAutoFromHeadersEnabled 检查是否自动从上游响应头解析限流信息（默认 true）。
+func (u *UpstreamConfig) IsRateLimitAutoFromHeadersEnabled() bool {
+	if u.RateLimitAutoFromHeaders != nil {
+		return *u.RateLimitAutoFromHeaders
+	}
+	return true
+}
+
+// 六个兼容性开关（developer role 降级、图片工具剥离、Codex 原生工具透传、空文本块剥离、
+// reasoning_content/thinking 回传）完全由运行时自动学习驱动：学习结论 > 种子 > 静态默认。
+// 没有对应的手工配置字段，管理面板不提供编辑入口，渠道更新接口不接受手工写入。
+// 学习结论存在 LearnedCompatTraits（本次请求专用，failover 发送前查 ChannelCompatCache 注入）。
+
+// IsDowngradeDeveloperRoleEnabled 检查是否需要把 developer role 降级为 system。
+// 该开关没有静态默认（未学到时不降级）：用户想手工处理非标准 role 时用 NormalizeNonstandardChatRoles。
+func (u *UpstreamConfig) IsDowngradeDeveloperRoleEnabled() bool {
+	return resolveCompatSwitch(u.learnedCompatTrait(TraitDowngradeDeveloperRole), nil, false)
+}
+
+// BoolPtr 返回指向给定布尔值的指针，用于显式设置三态开关。
+func BoolPtr(v bool) *bool {
+	return &v
+}
+
+// CompatSeedTTL 历史手工配置降级为种子后的有效期。
+//
+// 种子不是"用户意图"，只是一条一次性、低置信度的初始提示：老配置里的手工值可能当初就设错，
+// 也可能上游后来有了新情况已不再适用。过期后完全不再参与判断，交给学习结论与静态默认重新判断，
+// 避免过时的历史判断无限期地干扰后续学习。
+const CompatSeedTTL = 14 * 24 * time.Hour
+
+// CompatSeedEntry 一条带有效期的兼容性种子。
+type CompatSeedEntry struct {
+	Enabled   bool      `json:"enabled"`
+	ExpiresAt time.Time `json:"expiresAt"`
+}
+
+// resolveCompatSwitch 按 学习结论 > 种子 > 静态默认 合成最终生效值。
+//
+// 不再有"用户当前显式设置"这一档：兼容性开关已完全收归运行时自动决策，管理面板不再提供
+// 手工编辑入口，渠道更新接口也不接受这几个字段的写入。learned/seed 传 nil 表示该层无结论。
+func resolveCompatSwitch(learned *bool, seed *bool, staticDefault bool) bool {
+	if learned != nil {
+		return *learned
+	}
+	if seed != nil {
+		return *seed
+	}
+	return staticDefault
+}
+
+// compatSeed 读取该 trait 的种子值；未设置或已过期时返回 nil。
+func (u *UpstreamConfig) compatSeed(trait CompatTrait) *bool {
+	if len(u.CompatSeeds) == 0 {
+		return nil
+	}
+	entry, ok := u.CompatSeeds[string(trait)]
+	if !ok || time.Now().After(entry.ExpiresAt) {
+		return nil
+	}
+	v := entry.Enabled
+	return &v
+}
+
+// SetCompatSeed 写入一条带有效期的种子（供配置迁移使用）。
+func (u *UpstreamConfig) SetCompatSeed(trait CompatTrait, enabled bool) {
+	if u.CompatSeeds == nil {
+		u.CompatSeeds = make(map[string]CompatSeedEntry, 1)
+	}
+	u.CompatSeeds[string(trait)] = CompatSeedEntry{Enabled: enabled, ExpiresAt: time.Now().Add(CompatSeedTTL)}
+}
+
+// learnedCompatTrait 读取本次请求已注入的学习结论；未注入时返回 nil。
+func (u *UpstreamConfig) learnedCompatTrait(trait CompatTrait) *bool {
+	if len(u.LearnedCompatTraits) == 0 {
+		return nil
+	}
+	if v, ok := u.LearnedCompatTraits[string(trait)]; ok {
+		return &v
+	}
+	return nil
+}
+
+// SetLearnedCompatTrait 供 failover 在发送前注入本次请求应生效的学习结论。
+// 只作用于当次请求所用的 upstream 副本，不落盘、不影响其他并发请求。
+func (u *UpstreamConfig) SetLearnedCompatTrait(trait CompatTrait, enabled bool) {
+	if u.LearnedCompatTraits == nil {
+		u.LearnedCompatTraits = make(map[string]bool, 1)
+	}
+	u.LearnedCompatTraits[string(trait)] = enabled
+}
+
+// 以下五个兼容性开关同样完全由运行时自动学习驱动（学习结论 > 种子 > 静态默认），没有对应的
+// UpstreamConfig 字段：管理面板不提供编辑入口，渠道更新接口不接受手工写入。
+// 学习结论从 u.LearnedCompatTraits 读取，由 failover 按 渠道-Key-模型 查询
+// ChannelCompatCache 后注入到当次请求所用的 upstream 副本上。
+
+// IsStripImageGenerationToolEnabled 检查是否移除 image_generation 与 Codex image_gen 工具。
+func (u *UpstreamConfig) IsStripImageGenerationToolEnabled() bool {
+	return resolveCompatSwitch(u.learnedCompatTrait(TraitStripImageGenTool), u.compatSeed(TraitStripImageGenTool), false)
+}
+
+// IsNormalizeNonstandardChatRolesEnabled 检查是否将非标准 Chat role 改写为 user（默认 false）。
+func (u *UpstreamConfig) IsNormalizeNonstandardChatRolesEnabled() bool {
+	return resolveCompatSwitch(u.learnedCompatTrait(TraitNormalizeNonstandardChatRoles), u.compatSeed(TraitNormalizeNonstandardChatRoles), false)
+}
+
+// IsCodexNativeToolPassthroughEnabled 检查是否将 Codex 原生工具转为 OpenAI function（默认 false）。
+func (u *UpstreamConfig) IsCodexNativeToolPassthroughEnabled() bool {
+	return resolveCompatSwitch(u.learnedCompatTrait(TraitCodexNativeToolPassthrough), u.compatSeed(TraitCodexNativeToolPassthrough), false)
+}
+
+// IsStripEmptyTextBlocksEnabled 检查是否剥离空 text content block（默认 false）。
+func (u *UpstreamConfig) IsStripEmptyTextBlocksEnabled() bool {
+	return resolveCompatSwitch(u.learnedCompatTrait(TraitStripEmptyTextBlocks), u.compatSeed(TraitStripEmptyTextBlocks), false)
+}
+
+// IsPassbackReasoningContentEnabled 检查是否将 thinking 转为 reasoning_content 回传。
+func (u *UpstreamConfig) IsPassbackReasoningContentEnabled() bool {
+	return resolveCompatSwitch(u.learnedCompatTrait(TraitPassbackReasoningContent), u.compatSeed(TraitPassbackReasoningContent), shouldPassbackReasoningContentByDefault(u))
+}
+
+// IsUnsupportedBetaHeaderEnabled 检查是否需要在 anthropic-beta header 中按 token 粒度
+// 剥离上游拒绝的 beta token。
+//
+// 无种子（不接 CompatSeeds）：anthropic-beta token 兼容性是协议级事实，由错误驱动学习
+// 自动收敛。改写动作在 providers/claude.go 的 stripUnsupportedBetaHeaderTokens 内执行，
+// 被拒 token 名从 u.LearnedRejectedBetaTokens 读取。
+func (u *UpstreamConfig) IsUnsupportedBetaHeaderEnabled() bool {
+	return resolveCompatSwitch(u.learnedCompatTrait(TraitUnsupportedBetaHeader), nil, false)
+}
+
+// SetLearnedRejectedBetaTokens 供 failover 注入本次请求应剥离的被拒 anthropic-beta token 名。
+// 只作用于当次请求所用的 upstream 副本，不落盘、不影响其他并发请求。
+func (u *UpstreamConfig) SetLearnedRejectedBetaTokens(tokens []string) {
+	u.LearnedRejectedBetaTokens = tokens
+}
+
+// GetLearnedRejectedBetaTokens 返回本次请求应剥离的被拒 anthropic-beta token 名。
+// 返回 nil 表示本次请求未学到任何被拒 token（fail-open）。
+func (u *UpstreamConfig) GetLearnedRejectedBetaTokens() []string {
+	return u.LearnedRejectedBetaTokens
+}
+
+// shouldPassbackReasoningContentByDefault 已知厂商真相：GLM 的 OpenAI 兼容协议要求把
+// thinking 块转为 reasoning_content 回传。这是厂商协议事实，不是猜测也不会过期，
+// 因此直接算作静态默认，不走 14 天种子这条给"可能出错的历史手工值"用的临时通道。
+func shouldPassbackReasoningContentByDefault(upstream *UpstreamConfig) bool {
+	if upstream == nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(upstream.ProviderID), "glm") &&
+		strings.EqualFold(strings.TrimSpace(upstream.ServiceType), "openai")
+}
+
+// IsPassbackThinkingBlocksEnabled 检查是否回传 content[].thinking（默认 false）。
+func (u *UpstreamConfig) IsPassbackThinkingBlocksEnabled() bool {
+	return resolveCompatSwitch(u.learnedCompatTrait(TraitPassbackThinkingBlocks), u.compatSeed(TraitPassbackThinkingBlocks), false)
+}
+
+// GetEffectiveRequestTimeoutMs 返回渠道生效的非流式上游请求超时时间（毫秒）。
+func (u *UpstreamConfig) GetEffectiveRequestTimeoutMs(fallbackMs int) int {
+	if u.RequestTimeoutMs > 0 {
+		if u.RequestTimeoutMs > MaxRequestTimeoutMs {
+			return MaxRequestTimeoutMs
+		}
+		return u.RequestTimeoutMs
+	}
+	return fallbackMs
+}
+
+// GetEffectiveResponseHeaderTimeoutMs 返回渠道生效的等待上游响应头超时时间（毫秒）。
+func (u *UpstreamConfig) GetEffectiveResponseHeaderTimeoutMs(fallbackMs int) int {
+	if u.ResponseHeaderTimeoutMs > 0 {
+		if u.ResponseHeaderTimeoutMs > MaxResponseHeaderTimeoutMs {
+			return MaxResponseHeaderTimeoutMs
+		}
+		return u.ResponseHeaderTimeoutMs
+	}
+	return fallbackMs
+}
+
+// UpstreamUpdate 用于部分更新 UpstreamConfig
+type UpstreamUpdate struct {
+	Name                     *string                            `json:"name"`
+	ServiceType              *string                            `json:"serviceType"`
+	AuthHeader               *string                            `json:"authHeader"`
+	BaseURL                  *string                            `json:"baseUrl"`
+	BaseURLs                 []string                           `json:"baseUrls"`
+	APIKeys                  []string                           `json:"apiKeys"`
+	APIKeyConfigs            []APIKeyConfig                     `json:"apiKeyConfigs"`
+	Remark                   *string                            `json:"remark"`
+	Description              *string                            `json:"description"`
+	Website                  *string                            `json:"website"`
+	InsecureSkipVerify       *bool                              `json:"insecureSkipVerify"`
+	ModelCapabilities        map[string]UpstreamModelCapability `json:"modelCapabilities"`
+	EmbeddingCapabilities    map[string]EmbeddingCapability     `json:"embeddingCapabilities"`
+	DefaultCapability        *UpstreamModelCapability           `json:"defaultCapability"`
+	AllowUnknownContext      *bool                              `json:"allowUnknownContext"`
+	ReasoningParamStyle      *string                            `json:"reasoningParamStyle"`
+	TextVerbosity            *string                            `json:"textVerbosity"`
+	FastMode                 *bool                              `json:"fastMode"`
+	CodexToolCompat          *bool                              `json:"codexToolCompat"`
+	StripCodexClientTools    *bool                              `json:"stripCodexClientTools"`
+	ConvertImageURLToB64JSON *bool                              `json:"convertImageUrlToB64Json"`
+	// 渠道级竞速参与配置（nil=继承全局）
+	Racing *ChannelRacingConfig `json:"racing"`
+	// 渠道级上游余额探测配置（nil=不修改）
+	BalanceCheck *ChannelBalanceCheckConfig `json:"balanceCheck"`
+	// 多渠道调度相关字段
+	Priority                *int       `json:"priority"`
+	Status                  *string    `json:"status"`
+	PromotionUntil          *time.Time `json:"promotionUntil"`
+	LowQuality              *bool      `json:"lowQuality"`
+	AutoBlacklistBalance    *bool      `json:"autoBlacklistBalance"`
+	NormalizeMetadataUserID *bool      `json:"normalizeMetadataUserId"`
+	StripBillingHeader      *bool      `json:"stripBillingHeader"`
+	// Claude 协议 system 角色兼容
+	NormalizeSystemRoleToTopLevel *bool `json:"normalizeSystemRoleToTopLevel"`
+	// Gemini 特定配置
+	InjectDummyThoughtSignature *bool `json:"injectDummyThoughtSignature"`
+	StripThoughtSignature       *bool `json:"stripThoughtSignature"`
+	// 自定义请求头
+	CustomHeaders map[string]string `json:"customHeaders"`
+	// 渠道级代理
+	ProxyURL *string `json:"proxyUrl"`
+	// ProxyPreferDirect 直连优先（nil=不修改）；仅在配置了代理时有意义
+	ProxyPreferDirect *bool `json:"proxyPreferDirect"`
+	// 客户端伪装学习标记（由发现流程回写；nil=不修改）
+	LearnedClientFingerprint *bool `json:"learnedClientFingerprint"`
+	// 渠道级请求超时
+	RequestTimeoutMs        *int `json:"requestTimeoutMs"`
+	ResponseHeaderTimeoutMs *int `json:"responseHeaderTimeoutMs"`
+	// 流式健康检测渠道覆盖（0=继承全局，-1=禁用，正数=覆盖全局）
+	StreamFirstContentTimeoutMs *int `json:"streamFirstContentTimeoutMs"`
+	StreamInactivityTimeoutMs   *int `json:"streamInactivityTimeoutMs"`
+	StreamToolCallIdleTimeoutMs *int `json:"streamToolCallIdleTimeoutMs"`
+	// 模型白名单
+	SupportedModels []string `json:"supportedModels"` // 支持的模型白名单（空=全部）；支持精确匹配，以及 prefix* / *suffix / *contains* 形式的包含与排除规则（排除用 ! 前缀）
+	// 路由前缀
+	RoutePrefix *string `json:"routePrefix"` // 路由前缀（如 "kimi"）
+	// 主动限速配置（渠道级，默认 0=不限）
+	RateLimitRPM             *int  `json:"rateLimitRpm"`
+	RateLimitWindowMinutes   *int  `json:"rateLimitWindowMinutes"`
+	RateLimitBurst           *int  `json:"rateLimitBurst"`
+	RateLimitMaxConcurrent   *int  `json:"rateLimitMaxConcurrent"`
+	RateLimitAutoFromHeaders *bool `json:"rateLimitAutoFromHeaders"`
+
+	// 渠道级计费覆盖（nil=不修改）
+	CostMultiplier         *float64 `json:"costMultiplier"`         // 充值倍率（EffectiveCost = ListCost × 倍率）
+	ChannelPaymentCurrency *string  `json:"channelPaymentCurrency"` // 充值币种
+	ChannelPaymentAmount   *float64 `json:"channelPaymentAmount"`   // 充值金额
+	ChannelCreditCurrency  *string  `json:"channelCreditCurrency"`  // 渠道计价币种
+	ChannelCreditAmount    *float64 `json:"channelCreditAmount"`    // 渠道到账金额
+	// 渠道级分组倍率上限（nil=不修改；0=清除即不启用闸门）
+	MaxGroupMultiplier *float64 `json:"maxGroupMultiplier"` // 最高分组倍率上限
+
+	// Vision 能力配置
+	NoVision *bool `json:"noVision"`
+	// 历史图片轮次限制（0=不限制，2-10=限制轮次）
+	HistoricalImageTurnLimit *int `json:"historicalImageTurnLimit"`
+	// 自动托管字段
+	AutoManaged     *bool      `json:"autoManaged"`
+	AutoManagedAt   *time.Time `json:"autoManagedAt"`
+	AutoManagedKind *string    `json:"autoManagedKind"`
+	// 用户自定义标签（nil=不修改，空切片=清空标签）
+	Tags []string `json:"tags"`
+	// SkipAPIKeyConfigMerge 为 true 时 APIKeyConfigs 直接归一化替换、不做表单合并
+	// （mergeAPIKeyConfig 的托管身份/倍率回填），供 Key 倍率端点等「精确写」语义使用。
+	// JSON 不暴露：只允许服务端内部构造。
+	SkipAPIKeyConfigMerge bool `json:"-"`
+}
+
+// Config 配置结构
+// CircuitBreakerConfig 熔断器运行时配置（所有字段可选，nil 使用默认值）
+type CircuitBreakerConfig struct {
+	WindowSize                   *int     `json:"windowSize,omitempty"`
+	FailureThreshold             *float64 `json:"failureThreshold,omitempty"`
+	ConsecutiveFailuresThreshold *int     `json:"consecutiveFailuresThreshold,omitempty"`
+	// 上游请求生命周期全局默认参数
+	RequestTimeoutMs        *int `json:"requestTimeoutMs,omitempty"`        // 非流式上游请求超时（ms，范围 1000-300000）
+	ResponseHeaderTimeoutMs *int `json:"responseHeaderTimeoutMs,omitempty"` // 等待上游 HTTP 响应头超时（ms，范围 1000-300000）
+	// 流式健康检测全局默认参数
+	StreamFirstContentTimeoutMs *int `json:"streamFirstContentTimeoutMs,omitempty"` // HTTP 200 后首个有效内容等待超时（ms，范围 5000-300000）
+	StreamInactivityTimeoutMs   *int `json:"streamInactivityTimeoutMs,omitempty"`   // 首字后连续性确认窗口（ms，范围 1000-180000）
+	StreamToolCallIdleTimeoutMs *int `json:"streamToolCallIdleTimeoutMs,omitempty"` // 工具调用空闲超时（ms，范围 30000-300000）
+}
+
+type Config struct {
+	ManagedAccounts []ManagedAccountConfig `json:"managedAccounts,omitempty"`
+	Upstream        []UpstreamConfig       `json:"upstream,omitempty"`
+	CurrentUpstream int                    `json:"currentUpstream,omitempty"` // 已废弃：旧格式兼容用
+
+	// Responses 接口专用配置（独立于 /v1/messages）
+	ResponsesUpstream        []UpstreamConfig `json:"responsesUpstream,omitempty"`
+	CurrentResponsesUpstream int              `json:"currentResponsesUpstream,omitempty"` // 已废弃：旧格式兼容用
+
+	// Gemini 接口专用配置（独立于 /v1/messages 和 /v1/responses）
+	GeminiUpstream []UpstreamConfig `json:"geminiUpstream,omitempty"`
+
+	// Chat Completions 接口专用配置（OpenAI /v1/chat/completions 兼容）
+	ChatUpstream []UpstreamConfig `json:"chatUpstream,omitempty"`
+
+	// Images 接口专用配置（OpenAI /v1/images/generations 兼容）
+	ImagesUpstream []UpstreamConfig `json:"imagesUpstream,omitempty"`
+
+	// Vectors 接口专用配置（OpenAI /v1/embeddings 兼容）
+	VectorsUpstream []UpstreamConfig `json:"vectorsUpstream,omitempty"`
+
+	// 上下文路由配置与全局能力覆盖。
+	ContextRouting            ContextRoutingConfig               `json:"contextRouting,omitempty"`
+	AgentModelProfiles        map[string]AgentModelProfile       `json:"agentModelProfiles,omitempty"`
+	UpstreamModelCapabilities map[string]UpstreamModelCapability `json:"upstreamModelCapabilities,omitempty"`
+
+	// 移除计费头中的 cch= 参数：兼容旧全局配置读取；新语义已下沉到渠道级字段
+	StripBillingHeader bool `json:"stripBillingHeader,omitempty"`
+
+	// 驾驶舱 override 默认有效期（分钟，1-1440；0 或未设置时使用环境变量 OVERRIDE_TTL_MINUTES）
+	OverrideTTLMinutes int `json:"overrideTtlMinutes,omitempty"`
+
+	// Claude thinking 回填缓存配置
+	ThinkingCache ThinkingCacheConfig `json:"thinkingCache,omitempty"`
+
+	// AutopilotRouting 智能路由全局配置（§9.1）。
+	// 对应 config.json 的 "autopilot" 字段，缺失时使用 DefaultAutopilotRoutingConfig()。
+	// 热重载生效：文件变更后自动 reload，autopilot Manager 通过 RegisterOnConfigChange 回调感知。
+	AutopilotRouting AutopilotRoutingConfig `json:"autopilot,omitempty"`
+
+	// 熔断器运行时配置（可选，nil 使用环境变量或代码默认值）
+	CircuitBreaker *CircuitBreakerConfig `json:"circuitBreaker,omitempty"`
+
+	// 调度软增强配置（可选，nil 时各项默认启用）。热重载生效：
+	// promptAffinityFallback 匿名请求内容指纹亲和回退；keyAutoWeight per-key 滑窗自动权重。
+	Scheduler *SchedulerConfig `json:"scheduler,omitempty"`
+
+	// 渠道保活验证全局配置（可选，nil 使用默认值）
+	HealthCheck *GlobalHealthCheckConfig `json:"healthCheck,omitempty"`
+
+	// 上游余额探测全局配置（可选，nil 时 new_api 托管渠道默认开启、其余默认关闭）
+	BalanceCheck *GlobalBalanceCheckConfig `json:"balanceCheck,omitempty"`
+
+	// 竞速（影子请求）全局配置（可选，nil 默认关闭；行为参数由策略表自动推导）
+	Racing *GlobalRacingConfig `json:"racing,omitempty"`
+
+	// LogicalChannels 逻辑渠道列表（管理面运行时聚合视图）。
+	// C 阶段起纯 V3 配置不再重复落盘本字段；保存时元数据写入 ChannelsV3，加载后
+	// 再恢复本视图。仍兼容旧文件中携带 logicalChannels 的双写形态。
+	LogicalChannels []LogicalChannel `json:"logicalChannels,omitempty"`
+	// LogicalChannelSchemaVersion 逻辑渠道配置 schema 版本。
+	// 首次引入版本为 1；非 1 时 ConfigManager 会触发一次重建以保证字段完整。
+	LogicalChannelSchemaVersion int `json:"logicalChannelSchemaVersion,omitempty"`
+	// Channels 是"渠道→key→endpoint→模型"粒度的非权威镜像（Channel Data Model v2）。
+	// 六个 Upstream* 数组仍是运行时权威；本字段由 RebuildChannels 在落盘前从数组合成，
+	// 供前端与后续阶段消费。不含明文 key（仅 KeyMask）。详见 docs/specs/channel-data-model-v2.md。
+	Channels []ChannelView `json:"channels,omitempty"`
+	// ChannelCapabilities 是跨账号共享的协议+模型认知（按 CapabilityUID 排序），与 Channels 同步重建。
+	ChannelCapabilities []EndpointCapability `json:"channelCapabilities,omitempty"`
+	// ChannelSchemaVersion Channels 镜像 schema 版本。
+	ChannelSchemaVersion int `json:"channelSchemaVersion,omitempty"`
+	// ChannelsV3 是"渠道多协议聚合"的**无损权威形态**（每协议成员携带完整 UpstreamConfig）。
+	// 落盘前由 BuildAuthoritativeChannels 从六数组合成（已脱敏），可通过 ApplyAuthoritativeChannels
+	// 无损还原六数组。Phase 3b 起持久化此形态作为权威候选；六数组仍是当前运行时权威，
+	// 直到 Phase 3c 把消费者切换完毕。详见 docs/specs/channel-data-model-v2.md。
+	ChannelsV3 []ChannelV3 `json:"channelsV3,omitempty"`
+	// ChannelAuthoritativeVersion ChannelsV3 权威形态 schema 版本。
+	ChannelAuthoritativeVersion int `json:"channelAuthoritativeVersion,omitempty"`
+}
+
+// FailedKey 失败密钥记录
+type FailedKey struct {
+	Timestamp    time.Time
+	FailureCount int
+}
+
+// ConfigManager 配置管理器
+type ConfigManager struct {
+	mu                    sync.RWMutex
+	config                Config
+	configFile            string
+	backupDir             string
+	watcher               *fsnotify.Watcher
+	failedKeysCache       map[string]*FailedKey
+	keyRecoveryTime       time.Duration
+	maxFailureCount       int
+	stopChan              chan struct{} // 用于通知 goroutine 停止
+	reloadCh              chan struct{} // 配置文件变化信号，由 watcher 发送、单独 goroutine 消费
+	closeOnce             sync.Once     // 确保 Close 只执行一次
+	backgroundWG          sync.WaitGroup
+	configChangeCallbacks []func(Config)
+
+	// selfWriteSum 记录最后一次自身保存的文件摘要；watcher 重载前比对，
+	// 一致则跳过（内存已是最新，重载只会让迁移逻辑改写运行时状态）。
+	selfWriteMu  sync.Mutex
+	selfWriteSum string
+
+	// eventBus 跨模块事件总线（Phase B.1，可选）。未注入时 Key/config 事件不发。
+	eventBus atomic.Pointer[eventbus.Bus]
+}
+
+// failedKeyCacheKey 构造 FailedKeysCache 的复合键（apiType:apiKey）
+func failedKeyCacheKey(apiType, apiKey string) string {
+	return apiType + ":" + apiKey
+}
+
+// ============== 核心共享方法 ==============
+
+// GetConfig 获取配置（返回深拷贝，确保并发安全）
+func (cm *ConfigManager) GetConfig() Config {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	// 深拷贝整个 Config 结构体
+	cloned := cm.config
+	if cm.config.ManagedAccounts != nil {
+		cloned.ManagedAccounts = make([]ManagedAccountConfig, len(cm.config.ManagedAccounts))
+		for i, account := range cm.config.ManagedAccounts {
+			cloned.ManagedAccounts[i] = account
+			cloned.ManagedAccounts[i].Credentials = make([]ManagedAccountCredential, len(account.Credentials))
+			for j, credential := range account.Credentials {
+				cloned.ManagedAccounts[i].Credentials[j] = credential
+				if credential.VolcengineAccessKey != nil {
+					pair := *credential.VolcengineAccessKey
+					cloned.ManagedAccounts[i].Credentials[j].VolcengineAccessKey = &pair
+				}
+				if credential.MiMoConsole != nil {
+					console := *credential.MiMoConsole
+					cloned.ManagedAccounts[i].Credentials[j].MiMoConsole = &console
+				}
+				if credential.CompshareConsole != nil {
+					console := *credential.CompshareConsole
+					cloned.ManagedAccounts[i].Credentials[j].CompshareConsole = &console
+				}
+				if credential.KimiConsole != nil {
+					cloned.ManagedAccounts[i].Credentials[j].KimiConsole = cloneKimiConsoleCredential(credential.KimiConsole)
+				}
+			}
+		}
+	}
+
+	// 深拷贝 Upstream slice
+	if cm.config.Upstream != nil {
+		cloned.Upstream = make([]UpstreamConfig, len(cm.config.Upstream))
+		for i := range cm.config.Upstream {
+			cloned.Upstream[i] = *cm.config.Upstream[i].Clone()
+		}
+	}
+
+	// 深拷贝 ResponsesUpstream slice
+	if cm.config.ResponsesUpstream != nil {
+		cloned.ResponsesUpstream = make([]UpstreamConfig, len(cm.config.ResponsesUpstream))
+		for i := range cm.config.ResponsesUpstream {
+			cloned.ResponsesUpstream[i] = *cm.config.ResponsesUpstream[i].Clone()
+		}
+	}
+
+	// 深拷贝 GeminiUpstream slice
+	if cm.config.GeminiUpstream != nil {
+		cloned.GeminiUpstream = make([]UpstreamConfig, len(cm.config.GeminiUpstream))
+		for i := range cm.config.GeminiUpstream {
+			cloned.GeminiUpstream[i] = *cm.config.GeminiUpstream[i].Clone()
+		}
+	}
+
+	// 深拷贝 ChatUpstream slice
+	if len(cm.config.ChatUpstream) > 0 {
+		cloned.ChatUpstream = make([]UpstreamConfig, len(cm.config.ChatUpstream))
+		for i := range cm.config.ChatUpstream {
+			cloned.ChatUpstream[i] = *cm.config.ChatUpstream[i].Clone()
+		}
+	}
+
+	// 深拷贝 ImagesUpstream slice
+	if len(cm.config.ImagesUpstream) > 0 {
+		cloned.ImagesUpstream = make([]UpstreamConfig, len(cm.config.ImagesUpstream))
+		for i := range cm.config.ImagesUpstream {
+			cloned.ImagesUpstream[i] = *cm.config.ImagesUpstream[i].Clone()
+		}
+	}
+
+	// 深拷贝 VectorsUpstream slice
+	if len(cm.config.VectorsUpstream) > 0 {
+		cloned.VectorsUpstream = make([]UpstreamConfig, len(cm.config.VectorsUpstream))
+		for i := range cm.config.VectorsUpstream {
+			cloned.VectorsUpstream[i] = *cm.config.VectorsUpstream[i].Clone()
+		}
+	}
+
+	if cm.config.ContextRouting.Enabled != nil {
+		v := *cm.config.ContextRouting.Enabled
+		cloned.ContextRouting.Enabled = &v
+	}
+	if cm.config.AgentModelProfiles != nil {
+		cloned.AgentModelProfiles = make(map[string]AgentModelProfile, len(cm.config.AgentModelProfiles))
+		for k, v := range cm.config.AgentModelProfiles {
+			cloned.AgentModelProfiles[k] = cloneAgentModelProfile(v)
+		}
+	}
+	if cm.config.UpstreamModelCapabilities != nil {
+		cloned.UpstreamModelCapabilities = make(map[string]UpstreamModelCapability, len(cm.config.UpstreamModelCapabilities))
+		for k, v := range cm.config.UpstreamModelCapabilities {
+			cloned.UpstreamModelCapabilities[k] = cloneUpstreamModelCapability(v)
+		}
+	}
+
+	// 深拷贝 CircuitBreaker 指针字段
+	if cm.config.CircuitBreaker != nil {
+		cb := *cm.config.CircuitBreaker
+		cloned.CircuitBreaker = &cb
+	}
+
+	// 深拷贝 BalanceCheck 指针字段（含渠道级配置内嵌的 Enabled 指针）
+	if cm.config.BalanceCheck != nil {
+		g := *cm.config.BalanceCheck
+		if cm.config.BalanceCheck.Enabled != nil {
+			v := *cm.config.BalanceCheck.Enabled
+			g.Enabled = &v
+		}
+		cloned.BalanceCheck = &g
+	}
+
+	// 深拷贝 AutopilotRouting（map 字段需要独立分配）
+	cloned.AutopilotRouting = cm.config.AutopilotRouting.deepCopy()
+	applyAutopilotEnvOverrides(&cloned.AutopilotRouting)
+
+	// 深拷贝 LogicalChannels（独立切片 + 每个 entry 复制，避免外部修改串到内存）
+	if len(cm.config.LogicalChannels) > 0 {
+		cloned.LogicalChannels = make([]LogicalChannel, len(cm.config.LogicalChannels))
+		copy(cloned.LogicalChannels, cm.config.LogicalChannels)
+		for i := range cloned.LogicalChannels {
+			if cm.config.LogicalChannels[i].Settings != nil {
+				settings := *cm.config.LogicalChannels[i].Settings
+				cloned.LogicalChannels[i].Settings = &settings
+				if settings.CustomHeaders != nil {
+					cloned.LogicalChannels[i].Settings.CustomHeaders = cloneStringMap(settings.CustomHeaders)
+				}
+				cloned.LogicalChannels[i].Settings.Racing = cloneRacing(settings.Racing)
+			}
+			if len(cm.config.LogicalChannels[i].BaseURLs) > 0 {
+				cloned.LogicalChannels[i].BaseURLs = append([]string(nil), cm.config.LogicalChannels[i].BaseURLs...)
+			}
+			if len(cm.config.LogicalChannels[i].Protocols) > 0 {
+				cloned.LogicalChannels[i].Protocols = append([]LogicalChannelProtocol(nil), cm.config.LogicalChannels[i].Protocols...)
+			}
+			if len(cm.config.LogicalChannels[i].Tags) > 0 {
+				cloned.LogicalChannels[i].Tags = append([]string(nil), cm.config.LogicalChannels[i].Tags...)
+			}
+		}
+	}
+	cloned.LogicalChannelSchemaVersion = cm.config.LogicalChannelSchemaVersion
+
+	return cloned
+}
+
+// GetUpstreamByIndex 返回指定协议与索引对应的渠道深拷贝。
+// 相比 GetConfig，它只克隆一个 UpstreamConfig，适合调度热路径中的单渠道读取。
+func (cm *ConfigManager) GetUpstreamByIndex(apiType string, index int) *UpstreamConfig {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	upstreams := cm.getUpstreamSliceLocked(apiType)
+	if upstreams == nil || index < 0 || index >= len(*upstreams) {
+		return nil
+	}
+	return (*upstreams)[index].Clone()
+}
+
+// ChannelUIDByIndex 只读返回指定协议与索引的 ChannelUID（不克隆渠道）。
+// 供热路径在写入路由身份时补齐稳定身份用：index 会随渠道增删重排，UID 不会。
+func (cm *ConfigManager) ChannelUIDByIndex(apiType string, index int) string {
+	if cm == nil {
+		return ""
+	}
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	upstreams := cm.getUpstreamSliceLocked(apiType)
+	if upstreams == nil || index < 0 || index >= len(*upstreams) {
+		return ""
+	}
+	return (*upstreams)[index].ChannelUID
+}
+
+// GetUpstreamByUID 返回 ChannelUID 对应渠道的深拷贝（语义同 GetUpstreamByIndex）。
+// apiType 非空时限定在该协议内查找；为空时跨六类协议查找。未命中返回 nil。
+func (cm *ConfigManager) GetUpstreamByUID(apiType, uid string) *UpstreamConfig {
+	uid = strings.TrimSpace(uid)
+	if cm == nil || uid == "" {
+		return nil
+	}
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	if strings.TrimSpace(apiType) != "" {
+		upstreams := cm.getUpstreamSliceLocked(apiType)
+		if upstreams == nil {
+			return nil
+		}
+		for i := range *upstreams {
+			if (*upstreams)[i].ChannelUID == uid {
+				return (*upstreams)[i].Clone()
+			}
+		}
+		return nil
+	}
+	_, upstream, ok := cm.findUpstreamByUIDLocked(uid)
+	if !ok {
+		return nil
+	}
+	return upstream.Clone()
+}
+
+// UpstreamModelCapabilitiesSnapshot 返回全局上游模型能力表的深拷贝快照。
+// 语义等价于 GetConfig().UpstreamModelCapabilities，但只克隆这一张表（百来条小结构），
+// 不克隆六个 upstream 数组与 autopilot 配置——调度热路径每个 attempt 都要读它，
+// 整份 GetConfig() 深拷贝纯属浪费。
+func (cm *ConfigManager) UpstreamModelCapabilitiesSnapshot() map[string]UpstreamModelCapability {
+	if cm == nil {
+		return nil
+	}
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	if cm.config.UpstreamModelCapabilities == nil {
+		return nil
+	}
+	cloned := make(map[string]UpstreamModelCapability, len(cm.config.UpstreamModelCapabilities))
+	for key, capability := range cm.config.UpstreamModelCapabilities {
+		cloned[key] = cloneUpstreamModelCapability(capability)
+	}
+	return cloned
+}
+
+// GetNextAPIKey 获取下一个 API 密钥（纯 failover 模式）
+// apiType: 接口类型（Messages/Responses/Gemini），用于日志标签前缀
+func (cm *ConfigManager) GetNextAPIKey(upstream *UpstreamConfig, failedKeys map[string]bool, apiType string) (string, error) {
+	if len(upstream.APIKeys) == 0 {
+		return "", fmt.Errorf("上游 %s 没有可用的API密钥", upstream.Name)
+	}
+
+	// 筛选可用密钥：排除持久禁用、本次请求失败和内存冷却中的密钥。
+	now := time.Now()
+	availableKeys := []string{}
+	for _, key := range upstream.APIKeys {
+		if !failedKeys[key] && !upstream.IsKeyDisabledNow(key, now) && upstream.IsAPIKeyGroupMultiplierAllowed(key) && !cm.isKeyFailed(key, apiType) {
+			availableKeys = append(availableKeys, key)
+		}
+	}
+
+	if len(availableKeys) == 0 {
+		// 如果所有密钥都失效，尝试选择失败时间最早的密钥（恢复尝试）
+		var oldestFailedKey string
+		oldestTime := now
+
+		cm.mu.RLock()
+		for _, key := range upstream.APIKeys {
+			if !failedKeys[key] && !upstream.IsKeyDisabledNow(key, now) && upstream.IsAPIKeyGroupMultiplierAllowed(key) { // 排除本次请求失败、持久禁用或超过成本上限的密钥
+				cacheKey := failedKeyCacheKey(apiType, key)
+				if failure, exists := cm.failedKeysCache[cacheKey]; exists {
+					if failure.Timestamp.Before(oldestTime) {
+						oldestTime = failure.Timestamp
+						oldestFailedKey = key
+					}
+				}
+			}
+		}
+		cm.mu.RUnlock()
+
+		if oldestFailedKey != "" {
+			log.Printf("[%s-Key] 警告: 所有密钥都失效，尝试最早失败的密钥: %s", apiType, utils.MaskAPIKey(oldestFailedKey))
+			return oldestFailedKey, nil
+		}
+
+		return "", fmt.Errorf("上游 %s 的所有API密钥都暂时不可用", upstream.Name)
+	}
+
+	// 纯 failover：按优先级顺序选择第一个可用密钥
+	selectedKey := availableKeys[0]
+	// 获取该密钥在原始列表中的索引
+	keyIndex := 0
+	for i, key := range upstream.APIKeys {
+		if key == selectedKey {
+			keyIndex = i + 1
+			break
+		}
+	}
+	log.Printf("[%s-Key] 故障转移选择密钥 %s (%d/%d)", apiType, utils.MaskAPIKey(selectedKey), keyIndex, len(upstream.APIKeys))
+	return selectedKey, nil
+}
+
+// GetAdminAPIKey 获取管理/探测场景下的 API 密钥。
+// 优先使用活跃 APIKeys；若活跃密钥不可用，则临时借用 DisabledAPIKeys 中的密钥。
+// 返回值 fallback=true 表示本次借用了已拉黑密钥。
+func (cm *ConfigManager) GetAdminAPIKey(upstream *UpstreamConfig, failedKeys map[string]bool, apiType string) (apiKey string, fallback bool, err error) {
+	apiKey, err = cm.GetNextAPIKey(upstream, failedKeys, apiType)
+	if err == nil {
+		return apiKey, false, nil
+	}
+
+	for _, disabledKey := range upstream.DisabledAPIKeys {
+		if failedKeys[disabledKey.Key] {
+			continue
+		}
+		// 已拉黑密钥的配置挂在 DisabledAPIKeys[].Config（不在 APIKeyConfigs），
+		// 直接按渠道级上限判定，避免方法内查不到配置而误放行。
+		if disabledKey.Config != nil &&
+			!EvaluateAPIKeyMultiplierEligibility(*disabledKey.Config, upstream.MaxGroupMultiplier, time.Now()).Eligible {
+			continue
+		}
+		log.Printf("[%s-Key] 警告: 活跃密钥不可用，临时借用已拉黑密钥用于管理操作: %s", apiType, utils.MaskAPIKey(disabledKey.Key))
+		return disabledKey.Key, true, nil
+	}
+
+	return "", false, err
+}
+
+// MarkKeyAsFailed 标记密钥失败
+// apiType: 接口类型（Messages/Responses/Gemini/Chat），用于日志标签前缀和缓存键隔离
+func (cm *ConfigManager) MarkKeyAsFailed(apiKey string, apiType string) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	cacheKey := failedKeyCacheKey(apiType, apiKey)
+	if failure, exists := cm.failedKeysCache[cacheKey]; exists {
+		failure.FailureCount++
+		failure.Timestamp = time.Now()
+	} else {
+		cm.failedKeysCache[cacheKey] = &FailedKey{
+			Timestamp:    time.Now(),
+			FailureCount: 1,
+		}
+	}
+
+	failure := cm.failedKeysCache[cacheKey]
+	recoveryTime := cm.keyRecoveryTime
+	if failure.FailureCount > cm.maxFailureCount {
+		recoveryTime = cm.keyRecoveryTime * 2
+	}
+
+	log.Printf("[%s-Key] 标记API密钥失败: %s (失败次数: %d, 恢复时间: %v)",
+		apiType, utils.MaskAPIKey(apiKey), failure.FailureCount, recoveryTime)
+}
+
+// isKeyFailed 检查密钥是否失败
+func (cm *ConfigManager) isKeyFailed(apiKey, apiType string) bool {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	cacheKey := failedKeyCacheKey(apiType, apiKey)
+	failure, exists := cm.failedKeysCache[cacheKey]
+	if !exists {
+		return false
+	}
+
+	recoveryTime := cm.keyRecoveryTime
+	if failure.FailureCount > cm.maxFailureCount {
+		recoveryTime = cm.keyRecoveryTime * 2
+	}
+
+	return time.Since(failure.Timestamp) < recoveryTime
+}
+
+// IsKeyFailed 检查 Key 是否在冷却期（公开方法）
+func (cm *ConfigManager) IsKeyFailed(apiKey, apiType string) bool {
+	return cm.isKeyFailed(apiKey, apiType)
+}
+
+// clearFailedKeysForUpstream 清理指定渠道的所有失败 key 记录
+// 当渠道被删除时调用，避免内存泄漏和冷却状态残留
+// apiType: 接口类型（Messages/Responses/Gemini/Chat），用于日志标签前缀和缓存键隔离
+func (cm *ConfigManager) clearFailedKeysForUpstream(upstream *UpstreamConfig, apiType string) {
+	for _, key := range upstream.APIKeys {
+		cacheKey := failedKeyCacheKey(apiType, key)
+		if _, exists := cm.failedKeysCache[cacheKey]; exists {
+			delete(cm.failedKeysCache, cacheKey)
+			log.Printf("[%s-Key] 已清理被删除渠道 %s 的失败密钥记录: %s", apiType, upstream.Name, utils.MaskAPIKey(key))
+		}
+	}
+}
+
+// removeDisabledKeyModelsForKey 移除指定 Key 的所有 (Key,模型) 组合限制。
+// 用于 Key 重新加入渠道时清理其历史模型限制。调用方需持有锁。
+func removeDisabledKeyModelsForKey(upstream *UpstreamConfig, apiKey string) {
+	if len(upstream.DisabledKeyModels) == 0 {
+		return
+	}
+	newList := make([]DisabledKeyModelInfo, 0, len(upstream.DisabledKeyModels))
+	for _, dm := range upstream.DisabledKeyModels {
+		if dm.Key != apiKey {
+			newList = append(newList, dm)
+		}
+	}
+	upstream.DisabledKeyModels = newList
+}
+
+// removeDisabledKeyEntryLocked 从拉黑列表移除指定 Key 及其 (Key,模型) 组合限制与内存失败记录，返回是否发生移除。
+// 用于直接删除已拉黑（不在活跃列表中）的 Key。调用方需持有锁。
+func (cm *ConfigManager) removeDisabledKeyEntryLocked(upstream *UpstreamConfig, apiType, apiKey string) bool {
+	for i, dk := range upstream.DisabledAPIKeys {
+		if dk.Key == apiKey {
+			upstream.DisabledAPIKeys = append(upstream.DisabledAPIKeys[:i], upstream.DisabledAPIKeys[i+1:]...)
+			removeDisabledKeyModelsForKey(upstream, apiKey)
+			delete(cm.failedKeysCache, failedKeyCacheKey(apiType, apiKey))
+			return true
+		}
+	}
+	return false
+}
+
+// cleanupExpiredFailures 清理过期的失败记录
+func (cm *ConfigManager) cleanupExpiredFailures() {
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-cm.stopChan:
+			return
+		case <-ticker.C:
+			cm.mu.Lock()
+			now := time.Now()
+			for key, failure := range cm.failedKeysCache {
+				recoveryTime := cm.keyRecoveryTime
+				if failure.FailureCount > cm.maxFailureCount {
+					recoveryTime = cm.keyRecoveryTime * 2
+				}
+
+				if now.Sub(failure.Timestamp) > recoveryTime {
+					delete(cm.failedKeysCache, key)
+					log.Printf("[Config-Key] API密钥 %s 已从失败列表中恢复", utils.MaskAPIKey(key))
+				}
+			}
+			cm.mu.Unlock()
+		}
+	}
+}
+
+// ============== HistoricalImageTurnLimit 相关方法 ==============
+
+// 历史图片轮次限制约束：
+//   - 0 表示不限制
+//   - 大于 0 时有效值范围为 2-10
+const (
+	HistoricalImageTurnLimitMin = 2
+	HistoricalImageTurnLimitMax = 10
+)
+
+// NormalizeChannelHistoricalImageTurnLimit 归一化渠道级历史图片轮次限制。
+//   - limit <= 0 → 0（表示该渠道不裁剪历史图片）
+//   - 0 < limit < 2 → 最低值 2
+//   - 2 <= limit <= 10 → 原值
+//   - limit > 10 → 最高值 10
+func NormalizeChannelHistoricalImageTurnLimit(limit int) int {
+	if limit <= 0 {
+		return 0
+	}
+	if limit < HistoricalImageTurnLimitMin {
+		return HistoricalImageTurnLimitMin
+	}
+	if limit > HistoricalImageTurnLimitMax {
+		return HistoricalImageTurnLimitMax
+	}
+	return limit
+}
+
+// SetOverrideTTLMinutes 设置驾驶舱 override 默认有效期（分钟）
+func (cm *ConfigManager) SetOverrideTTLMinutes(minutes int) error {
+	cm.mu.Lock()
+
+	// 标准化为界面提供的固定选项，不合适的值使用默认 30 分钟
+	// 有效选项：-1（永不恢复）, 15, 30, 60, 120, 240, 480, 720, 1440 分钟
+	validOptions := []int{-1, 15, 30, 60, 120, 240, 480, 720, 1440}
+	normalized := 30 // 默认 30 分钟
+	for _, option := range validOptions {
+		if minutes == option {
+			normalized = minutes
+			break
+		}
+	}
+
+	cm.config.OverrideTTLMinutes = normalized
+
+	if err := cm.saveConfigLocked(cm.config); err != nil {
+		cm.mu.Unlock()
+		return err
+	}
+
+	if normalized == -1 {
+		log.Printf("[Config-OverrideTTL] 驾驶舱 override 默认有效期已设置为永不恢复")
+	} else {
+		if minutes != normalized {
+			log.Printf("[Config-OverrideTTL] 驾驶舱 override 默认有效期已标准化为 %d 分钟（原值: %d）", normalized, minutes)
+		} else {
+			log.Printf("[Config-OverrideTTL] 驾驶舱 override 默认有效期已设置为 %d 分钟", normalized)
+		}
+	}
+
+	cm.fireConfigChangeCallbacks()
+	return nil
+}
+
+// ============== API Key 拉黑相关方法 ==============
+
+// applyKeyBlacklistLocked 在单个 upstream 上执行拉黑变更（不落盘、不发事件）。
+// 返回是否实际发生变更（target 无此 key 且未被禁用时返回 false，保持原早退语义）。
+// apiType 仅用于日志标签。
+func applyKeyBlacklistLocked(upstream *UpstreamConfig, apiKey, reason, message, recoverAt, apiType string) bool {
+	wasActive := slices.Contains(upstream.APIKeys, apiKey)
+	wasDisabled := slices.ContainsFunc(upstream.DisabledAPIKeys, func(disabled DisabledKeyInfo) bool {
+		return disabled.Key == apiKey
+	})
+	if !wasActive && !wasDisabled {
+		return false
+	}
+
+	// 在移除活跃 Key 前保存附加配置；重复拉黑时沿用已有快照。
+	var disabledCfg *APIKeyConfig
+	for _, cfg := range upstream.APIKeyConfigs {
+		if cfg.Key == apiKey {
+			copyCfg := cloneAPIKeyConfig(cfg)
+			disabledCfg = &copyCfg
+			break
+		}
+	}
+	if disabledCfg == nil {
+		for _, disabled := range upstream.DisabledAPIKeys {
+			if disabled.Key == apiKey && disabled.Config != nil {
+				copyCfg := cloneAPIKeyConfig(*disabled.Config)
+				disabledCfg = &copyCfg
+				break
+			}
+		}
+	}
+
+	upstream.APIKeys = slices.DeleteFunc(upstream.APIKeys, func(key string) bool {
+		return key == apiKey
+	})
+	upstream.APIKeyConfigs = normalizeAPIKeyConfigs(upstream.APIKeys, upstream.APIKeyConfigs)
+
+	// 同一 Key 只保留一条禁用记录；再次命中时刷新原因和恢复时间。
+	now := time.Now()
+	disabledAt := now.Format(time.RFC3339)
+	resolvedRecoverAt := ""
+	if IsAutoRecoverableDisabledReason(reason) {
+		resolvedRecoverAt = now.Add(time.Hour).Format(time.RFC3339)
+		if strings.TrimSpace(recoverAt) == "" {
+			recoverAt = utils.ExtractQuotaRecoverAt(message)
+		}
+		if explicit, err := time.Parse(time.RFC3339, strings.TrimSpace(recoverAt)); err == nil && explicit.After(now) {
+			resolvedRecoverAt = explicit.Format(time.RFC3339)
+		}
+	}
+	refreshed := DisabledKeyInfo{
+		Key:        apiKey,
+		Reason:     reason,
+		Message:    message,
+		DisabledAt: disabledAt,
+		RecoverAt:  resolvedRecoverAt,
+		Config:     disabledCfg,
+	}
+	disabledKeys := make([]DisabledKeyInfo, 0, len(upstream.DisabledAPIKeys)+1)
+	disabledKeys = append(disabledKeys, refreshed)
+	for _, disabled := range upstream.DisabledAPIKeys {
+		if disabled.Key != apiKey {
+			disabledKeys = append(disabledKeys, disabled)
+		}
+	}
+	upstream.DisabledAPIKeys = disabledKeys
+
+	if !slices.Contains(upstream.HistoricalAPIKeys, apiKey) {
+		upstream.HistoricalAPIKeys = append(upstream.HistoricalAPIKeys, apiKey)
+	}
+
+	fromState := "active"
+	if !wasActive {
+		fromState = "disabled"
+	}
+	log.Printf("[%s-Blacklist] Key %s 禁用记录已更新 (原因: %s, 渠道: %s, 剩余Key: %d)",
+		apiType, utils.MaskAPIKey(apiKey), reason, upstream.Name, len(upstream.APIKeys))
+	statelog.LogStateTransition(apiType+"-Blacklist", "key", utils.MaskAPIKey(apiKey), fromState, "disabled", reason, "channel="+upstream.Name)
+	if len(upstream.APIKeys) == 0 {
+		log.Printf("[%s-Blacklist] 警告: 渠道 %s 的所有 Key 都已被拉黑！", apiType, upstream.Name)
+	}
+	return true
+}
+
+// keySibling 是与目标渠道共享同一凭证、需级联拉黑的兄弟物理渠道。
+type keySibling struct {
+	upstream *UpstreamConfig
+	apiType  string
+}
+
+// siblingUpstreamsForKeyLocked 返回与 target 属于同一逻辑渠道/账号、且当前持有 apiKey 的兄弟渠道。
+//
+// 语义：同一明文 key 是同一凭证，在一个协议入口鉴权失败/被拉黑，其在同账号其它协议入口
+// 同样不可用。仅按 LogicalChannelUID 或 AccountUID 判定同源，避免误伤同 key 的无关渠道。
+func (cm *ConfigManager) siblingUpstreamsForKeyLocked(target *UpstreamConfig, apiKey string) []keySibling {
+	logicalUID := strings.TrimSpace(target.LogicalChannelUID)
+	accountUID := strings.TrimSpace(target.AccountUID)
+	if logicalUID == "" && accountUID == "" {
+		return nil
+	}
+	groups := []struct {
+		apiType string
+		arr     *[]UpstreamConfig
+	}{
+		{"Messages", &cm.config.Upstream},
+		{"Chat", &cm.config.ChatUpstream},
+		{"Responses", &cm.config.ResponsesUpstream},
+		{"Gemini", &cm.config.GeminiUpstream},
+		{"Images", &cm.config.ImagesUpstream},
+		{"Vectors", &cm.config.VectorsUpstream},
+	}
+	out := make([]keySibling, 0)
+	for _, g := range groups {
+		for i := range *g.arr {
+			u := &(*g.arr)[i]
+			if u == target {
+				continue
+			}
+			sameLogical := logicalUID != "" && strings.TrimSpace(u.LogicalChannelUID) == logicalUID
+			sameAccount := accountUID != "" && strings.TrimSpace(u.AccountUID) == accountUID
+			if !sameLogical && !sameAccount {
+				continue
+			}
+			if !containsPlainKey(u, apiKey) {
+				continue
+			}
+			out = append(out, keySibling{upstream: u, apiType: g.apiType})
+		}
+	}
+	return out
+}
+
+// containsPlainKey 判断 upstream 是否正持有该明文 key（活跃或已禁用）。
+func containsPlainKey(u *UpstreamConfig, apiKey string) bool {
+	if slices.Contains(u.APIKeys, apiKey) {
+		return true
+	}
+	return slices.ContainsFunc(u.DisabledAPIKeys, func(d DisabledKeyInfo) bool { return d.Key == apiKey })
+}
+
+// BlacklistKey 将指定 Key 从活跃列表移到拉黑列表（持久化）
+// apiType: Messages/Responses/Gemini/Chat，用于定位 upstream slice
+// channelIndex: 渠道在 upstream slice 中的索引
+func (cm *ConfigManager) BlacklistKey(apiType string, channelIndex int, apiKey string, reason string, message string) error {
+	return cm.BlacklistKeyWithRecoverAt(apiType, channelIndex, apiKey, reason, message, "")
+}
+
+// BlacklistKeyWithRecoverAt 将指定 Key 禁用到上游明确给出的恢复时间。
+// recoverAt 必须为未来的 RFC3339 时间；为空、无效或已过期时沿用原因级默认策略。
+func (cm *ConfigManager) BlacklistKeyWithRecoverAt(apiType string, channelIndex int, apiKey string, reason string, message string, recoverAt string) error {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	upstreams := cm.getUpstreamSliceLocked(apiType)
+	if upstreams == nil || channelIndex < 0 || channelIndex >= len(*upstreams) {
+		return fmt.Errorf("无效的渠道索引: %s[%d]", apiType, channelIndex)
+	}
+
+	upstream := &(*upstreams)[channelIndex]
+
+	if !applyKeyBlacklistLocked(upstream, apiKey, reason, message, recoverAt, apiType) {
+		return nil
+	}
+
+	// Phase 1/#8：同一明文 key 是同一凭证，级联拉黑同账号/同逻辑渠道下其它协议入口的相同 key。
+	siblings := cm.siblingUpstreamsForKeyLocked(upstream, apiKey)
+	for _, sib := range siblings {
+		if applyKeyBlacklistLocked(sib.upstream, apiKey, reason, message, recoverAt, sib.apiType) {
+			log.Printf("[%s-Blacklist] 级联拉黑同源渠道 %s 的相同 key %s", sib.apiType, sib.upstream.Name, utils.MaskAPIKey(apiKey))
+		}
+	}
+
+	if err := cm.saveConfigLocked(cm.config); err != nil {
+		return err
+	}
+	payload := map[string]any{}
+	if recoverAt != "" {
+		payload["recoverAt"] = recoverAt
+	}
+	cm.publishKeyEvent(eventbus.TypeKeyBlacklisted, upstream.ChannelUID, apiType, apiKey, reason, message, payload)
+	for _, sib := range siblings {
+		cm.publishKeyEvent(eventbus.TypeKeyBlacklisted, sib.upstream.ChannelUID, sib.apiType, apiKey, reason, message, payload)
+	}
+	return nil
+}
+
+// ============== 熔断器运行时配置 ==============
+
+// GetCircuitBreakerConfig 获取熔断器运行时配置
+func (cm *ConfigManager) GetCircuitBreakerConfig() CircuitBreakerConfig {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+	if cm.config.CircuitBreaker == nil {
+		return CircuitBreakerConfig{}
+	}
+	return *cm.config.CircuitBreaker
+}
+
+// SetCircuitBreakerConfig 更新熔断器运行时配置（partial update，nil 字段不覆盖）
+func (cm *ConfigManager) SetCircuitBreakerConfig(update CircuitBreakerConfig) error {
+	cm.mu.Lock()
+
+	if cm.config.CircuitBreaker == nil {
+		cm.config.CircuitBreaker = &CircuitBreakerConfig{}
+	}
+	cb := cm.config.CircuitBreaker
+	if update.WindowSize != nil {
+		v := *update.WindowSize
+		if v < 3 {
+			v = 3
+		} else if v > 100 {
+			v = 100
+		}
+		cb.WindowSize = &v
+	}
+	if update.FailureThreshold != nil {
+		v := *update.FailureThreshold
+		if v < 0.01 {
+			v = 0.01
+		} else if v > 1.0 {
+			v = 1.0
+		}
+		cb.FailureThreshold = &v
+	}
+	if update.ConsecutiveFailuresThreshold != nil {
+		v := *update.ConsecutiveFailuresThreshold
+		if v < 1 {
+			v = 1
+		} else if v > 100 {
+			v = 100
+		}
+		cb.ConsecutiveFailuresThreshold = &v
+	}
+	if update.RequestTimeoutMs != nil {
+		v := clampInt(*update.RequestTimeoutMs, MinRequestTimeoutMs, MaxRequestTimeoutMs)
+		cb.RequestTimeoutMs = &v
+	}
+	if update.ResponseHeaderTimeoutMs != nil {
+		v := clampInt(*update.ResponseHeaderTimeoutMs, MinResponseHeaderTimeoutMs, MaxResponseHeaderTimeoutMs)
+		cb.ResponseHeaderTimeoutMs = &v
+	}
+	if update.StreamFirstContentTimeoutMs != nil {
+		v := *update.StreamFirstContentTimeoutMs
+		if v < 5000 {
+			v = 5000
+		} else if v > 300000 {
+			v = 300000
+		}
+		cb.StreamFirstContentTimeoutMs = &v
+	}
+	if update.StreamInactivityTimeoutMs != nil {
+		v := *update.StreamInactivityTimeoutMs
+		if v < 1000 {
+			v = 1000
+		} else if v > 180000 {
+			v = 180000
+		}
+		cb.StreamInactivityTimeoutMs = &v
+	}
+	if update.StreamToolCallIdleTimeoutMs != nil {
+		v := *update.StreamToolCallIdleTimeoutMs
+		if v < 30000 {
+			v = 30000
+		} else if v > 300000 {
+			v = 300000
+		}
+		cb.StreamToolCallIdleTimeoutMs = &v
+	}
+
+	if err := cm.saveConfigLocked(cm.config); err != nil {
+		cm.mu.Unlock()
+		return err
+	}
+
+	log.Printf("[Config-CircuitBreaker] 熔断器配置已更新")
+	cm.fireConfigChangeCallbacks()
+	return nil
+}
+
+// RegisterOnConfigChange 注册配置变更回调（在 loadConfig / Set 成功后触发）
+func (cm *ConfigManager) RegisterOnConfigChange(fn func(Config)) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	cm.configChangeCallbacks = append(cm.configChangeCallbacks, fn)
+}
+
+// SetEventBus 注入跨模块事件总线（Phase B.1）。可选依赖：未注入时 Key/config 事件不发。
+// 并发安全。
+func (cm *ConfigManager) SetEventBus(bus *eventbus.Bus) {
+	if cm == nil {
+		return
+	}
+	cm.eventBus.Store(bus)
+}
+
+// publishKeyEvent 发布 Key 状态变更事件。bus 为 nil 时为空操作。
+// 调用方应在 saveConfigLocked 返回后调用，Subject 为 channelUID 便于前端分组。
+func (cm *ConfigManager) publishKeyEvent(evType, channelUID, channelKind, apiKey, reason, message string, payload map[string]any) {
+	bus := cm.eventBus.Load()
+	if bus == nil {
+		return
+	}
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	payload["keyMask"] = utils.MaskAPIKey(apiKey)
+	bus.Publish(eventbus.Event{
+		Type:        evType,
+		Scope:       eventbus.ScopeConfig,
+		Subject:     channelUID,
+		ChannelKind: channelKind,
+		Cause:       reason,
+		Payload:     payload,
+	})
+}
+
+// publishUpstreamChangeIfChanged（Phase B.2）比对 saveConfigLocked 落盘前后的 6 类渠道
+// slice 长度，任意变化发 upstream_changed；bus 为 nil 时为空操作。
+// 不深入字段：精细 diff 由前端按需拉 GET /api/health-center/channels 校验。
+func (cm *ConfigManager) publishUpstreamChangeIfChanged(before *Config) {
+	bus := cm.eventBus.Load()
+	if bus == nil || before == nil {
+		return
+	}
+	after := cm.config
+	changed := false
+	check := func(a, b []UpstreamConfig) bool {
+		if len(a) != len(b) {
+			return true
+		}
+		for i := range a {
+			if a[i].ChannelUID != b[i].ChannelUID || a[i].Status != b[i].Status {
+				return true
+			}
+		}
+		return false
+	}
+	if check(before.Upstream, after.Upstream) ||
+		check(before.ChatUpstream, after.ChatUpstream) ||
+		check(before.ResponsesUpstream, after.ResponsesUpstream) ||
+		check(before.GeminiUpstream, after.GeminiUpstream) ||
+		check(before.ImagesUpstream, after.ImagesUpstream) ||
+		check(before.VectorsUpstream, after.VectorsUpstream) {
+		changed = true
+	}
+	if !changed {
+		return
+	}
+	bus.Publish(eventbus.Event{
+		Type:    eventbus.TypeUpstreamChanged,
+		Scope:   eventbus.ScopeConfig,
+		Subject: "config",
+		Payload: map[string]any{
+			"messages":  len(after.Upstream),
+			"chat":      len(after.ChatUpstream),
+			"responses": len(after.ResponsesUpstream),
+			"gemini":    len(after.GeminiUpstream),
+			"images":    len(after.ImagesUpstream),
+			"vectors":   len(after.VectorsUpstream),
+		},
+	})
+}
+
+// publishConfigReloaded（Phase B.2）loadConfig 末尾发布 config_reloaded。
+func (cm *ConfigManager) publishConfigReloaded(before *Config) {
+	bus := cm.eventBus.Load()
+	if bus == nil {
+		return
+	}
+	payload := map[string]any{}
+	if before != nil {
+		payload["priorChannelCount"] = len(before.Upstream) + len(before.ChatUpstream) +
+			len(before.ResponsesUpstream) + len(before.GeminiUpstream) +
+			len(before.ImagesUpstream) + len(before.VectorsUpstream)
+	}
+	after := cm.config
+	payload["channelCount"] = len(after.Upstream) + len(after.ChatUpstream) +
+		len(after.ResponsesUpstream) + len(after.GeminiUpstream) +
+		len(after.ImagesUpstream) + len(after.VectorsUpstream)
+	payload["logicalChannelCount"] = len(after.LogicalChannels)
+	bus.Publish(eventbus.Event{
+		Type:    eventbus.TypeConfigReloaded,
+		Scope:   eventbus.ScopeConfig,
+		Subject: "config",
+		Payload: payload,
+	})
+}
+
+// publishLogicalChannelRebuilt（Phase B.2）由 RebuildLogicalChannels 末尾调用。
+func (cm *ConfigManager) publishLogicalChannelRebuilt() {
+	bus := cm.eventBus.Load()
+	if bus == nil {
+		return
+	}
+	bus.Publish(eventbus.Event{
+		Type:    eventbus.TypeLogicalChannelRebuilt,
+		Scope:   eventbus.ScopeConfig,
+		Subject: "config",
+		Payload: map[string]any{
+			"logicalChannelCount": len(cm.config.LogicalChannels),
+		},
+	})
+}
+
+// fireConfigChangeCallbacks 在锁外通知所有已注册的回调
+// 调用方需已持有 cm.mu，本方法会在内部释放锁
+// fireConfigChangeCallbacks 在锁外异步通知所有已注册的回调
+// 调用方需已持有 cm.mu，本方法会在内部释放锁
+func (cm *ConfigManager) fireConfigChangeCallbacks() {
+	snapshot := cm.config.deepCopy()
+	applyAutopilotEnvOverrides(&snapshot.AutopilotRouting)
+	callbacks := cm.configChangeCallbacks
+	cm.mu.Unlock()
+	// 异步执行回调，避免回调中触发配置写操作导致重入死锁
+	if len(callbacks) > 0 {
+		go func() {
+			for _, fn := range callbacks {
+				fn(snapshot)
+			}
+		}()
+	}
+}
+
+// RestoreKey 将指定 Key 从拉黑列表恢复到活跃列表（持久化）
+func (cm *ConfigManager) RestoreKey(apiType string, channelIndex int, apiKey string) error {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	upstreams := cm.getUpstreamSliceLocked(apiType)
+	if upstreams == nil || channelIndex < 0 || channelIndex >= len(*upstreams) {
+		return fmt.Errorf("无效的渠道索引: %s[%d]", apiType, channelIndex)
+	}
+
+	upstream := &(*upstreams)[channelIndex]
+
+	// 查找并移除
+	disabledIdx := -1
+	for i, dk := range upstream.DisabledAPIKeys {
+		if dk.Key == apiKey {
+			disabledIdx = i
+			break
+		}
+	}
+	if disabledIdx == -1 {
+		return fmt.Errorf("key %s 不在拉黑列表中", utils.MaskAPIKey(apiKey))
+	}
+
+	savedCfg := upstream.DisabledAPIKeys[disabledIdx].Config
+	upstream.DisabledAPIKeys = append(upstream.DisabledAPIKeys[:disabledIdx], upstream.DisabledAPIKeys[disabledIdx+1:]...)
+	if !slices.Contains(upstream.APIKeys, apiKey) {
+		upstream.APIKeys = append(upstream.APIKeys, apiKey)
+	}
+	upstream.APIKeyConfigs = restoreAPIKeyConfig(upstream.APIKeyConfigs, apiKey, savedCfg)
+
+	// 从 HistoricalAPIKeys 移除，避免 active∩historical 重复导致统计重复计数
+	upstream.HistoricalAPIKeys = slices.DeleteFunc(upstream.HistoricalAPIKeys, func(k string) bool {
+		return k == apiKey
+	})
+
+	// 清除内存中的失败记录
+	cacheKey := failedKeyCacheKey(apiType, apiKey)
+	delete(cm.failedKeysCache, cacheKey)
+
+	log.Printf("[%s-Blacklist] Key %s 已恢复 (渠道: %s)", apiType, utils.MaskAPIKey(apiKey), upstream.Name)
+	statelog.LogStateTransition(apiType+"-Blacklist", "key", utils.MaskAPIKey(apiKey), "disabled", "active", "manual_restore", "channel="+upstream.Name)
+
+	if err := cm.saveConfigLocked(cm.config); err != nil {
+		return err
+	}
+	cm.publishKeyEvent(eventbus.TypeKeyRestored, upstream.ChannelUID, apiType, apiKey, "manual_restore", "", nil)
+	return nil
+}
+
+// SuspendKey 手动暂停指定 API Key（设置 Enabled=false，不移出 APIKeys 列表）
+// apiType: Messages/Responses/Gemini/Chat/Images/Vectors
+// channelIndex: 渠道在 upstream slice 中的索引
+func (cm *ConfigManager) SuspendKey(apiType string, channelIndex int, apiKey string) error {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	upstreams := cm.getUpstreamSliceLocked(apiType)
+	if upstreams == nil || channelIndex < 0 || channelIndex >= len(*upstreams) {
+		return fmt.Errorf("无效的渠道索引: %s[%d]", apiType, channelIndex)
+	}
+
+	upstream := &(*upstreams)[channelIndex]
+
+	// Key 必须在活跃列表中
+	if !slices.Contains(upstream.APIKeys, apiKey) {
+		return fmt.Errorf("key %s 不在活跃列表中", utils.MaskAPIKey(apiKey))
+	}
+
+	disabled := false
+	upstream.APIKeyConfigs = normalizeAPIKeyConfigs(upstream.APIKeys, upstream.APIKeyConfigs)
+	for i, cfg := range upstream.APIKeyConfigs {
+		if cfg.Key == apiKey {
+			upstream.APIKeyConfigs[i].Enabled = &disabled
+			break
+		}
+	}
+
+	log.Printf("[%s-Suspend] Key %s 已手动暂停 (渠道: %s)", apiType, utils.MaskAPIKey(apiKey), upstream.Name)
+	statelog.LogStateTransition(apiType+"-Suspend", "key", utils.MaskAPIKey(apiKey), "active", "suspended", "manual_suspend", "channel="+upstream.Name)
+
+	if err := cm.saveConfigLocked(cm.config); err != nil {
+		return err
+	}
+	cm.publishKeyEvent(eventbus.TypeKeyBlacklisted, upstream.ChannelUID, apiType, apiKey, "manual_suspend", "", nil)
+	return nil
+}
+
+// ResumeKey 手动恢复指定 API Key（移除 Enabled 限制，恢复为活跃状态）
+// apiType: Messages/Responses/Gemini/Chat/Images/Vectors
+// channelIndex: 渠道在 upstream slice 中的索引
+func (cm *ConfigManager) ResumeKey(apiType string, channelIndex int, apiKey string) error {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	upstreams := cm.getUpstreamSliceLocked(apiType)
+	if upstreams == nil || channelIndex < 0 || channelIndex >= len(*upstreams) {
+		return fmt.Errorf("无效的渠道索引: %s[%d]", apiType, channelIndex)
+	}
+
+	upstream := &(*upstreams)[channelIndex]
+
+	// Key 必须在活跃列表中
+	if !slices.Contains(upstream.APIKeys, apiKey) {
+		return fmt.Errorf("key %s 不在活跃列表中", utils.MaskAPIKey(apiKey))
+	}
+
+	upstream.APIKeyConfigs = normalizeAPIKeyConfigs(upstream.APIKeys, upstream.APIKeyConfigs)
+	found := false
+	for i, cfg := range upstream.APIKeyConfigs {
+		if cfg.Key == apiKey {
+			// 移除 Enabled 限制，恢复默认（活跃）行为
+			upstream.APIKeyConfigs[i].Enabled = nil
+			// 如果移除 Enabled 后配置无其他有效字段，清除整个配置项
+			if !shouldPersistAPIKeyConfig(upstream.APIKeyConfigs[i]) {
+				upstream.APIKeyConfigs = append(upstream.APIKeyConfigs[:i], upstream.APIKeyConfigs[i+1:]...)
+			}
+			found = true
+			break
+		}
+	}
+	if !found {
+		// Key 没有配置项，也无需恢复——已经是活跃状态
+	}
+
+	log.Printf("[%s-Suspend] Key %s 已手动恢复 (渠道: %s)", apiType, utils.MaskAPIKey(apiKey), upstream.Name)
+	statelog.LogStateTransition(apiType+"-Suspend", "key", utils.MaskAPIKey(apiKey), "suspended", "active", "manual_resume", "channel="+upstream.Name)
+
+	if err := cm.saveConfigLocked(cm.config); err != nil {
+		return err
+	}
+	cm.publishKeyEvent(eventbus.TypeKeyRestored, upstream.ChannelUID, apiType, apiKey, "manual_resume", "", nil)
+	return nil
+}
+
+// RestoreAllKeys 恢复指定渠道所有不可用的 Key（被拉黑或手动暂停，持久化）。
+// 返回实际恢复的唯一 Key 数量。
+func (cm *ConfigManager) RestoreAllKeys(apiType string, channelIndex int) (int, error) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	upstreams := cm.getUpstreamSliceLocked(apiType)
+	if upstreams == nil || channelIndex < 0 || channelIndex >= len(*upstreams) {
+		return 0, fmt.Errorf("无效的渠道索引: %s[%d]", apiType, channelIndex)
+	}
+
+	upstream := &(*upstreams)[channelIndex]
+	disabledCount := len(upstream.DisabledAPIKeys)
+	restoredKeys := make(map[string]struct{}, disabledCount)
+
+	// 将所有被拉黑的 Key 移回活跃列表
+	savedConfigs := make(map[string]*APIKeyConfig, disabledCount)
+	for _, dk := range upstream.DisabledAPIKeys {
+		restoredKeys[dk.Key] = struct{}{}
+		if !slices.Contains(upstream.APIKeys, dk.Key) {
+			upstream.APIKeys = append(upstream.APIKeys, dk.Key)
+		}
+		if dk.Config != nil {
+			copyCfg := *dk.Config
+			savedConfigs[dk.Key] = &copyCfg
+		}
+		// 从 HistoricalAPIKeys 移除，避免 active∩historical 重复
+		upstream.HistoricalAPIKeys = slices.DeleteFunc(upstream.HistoricalAPIKeys, func(k string) bool {
+			return k == dk.Key
+		})
+		// 清除内存中的失败记录
+		cacheKey := failedKeyCacheKey(apiType, dk.Key)
+		delete(cm.failedKeysCache, cacheKey)
+	}
+
+	if disabledCount > 0 {
+		for _, cfg := range savedConfigs {
+			upstream.APIKeyConfigs = restoreAPIKeyConfig(upstream.APIKeyConfigs, cfg.Key, cfg)
+		}
+		upstream.APIKeyConfigs = normalizeAPIKeyConfigs(upstream.APIKeys, upstream.APIKeyConfigs)
+		upstream.DisabledAPIKeys = nil
+	}
+
+	// 渠道级“恢复”同时解除手动暂停，避免渠道已 active 但仍残留 enabled=false。
+	activeKeys := make(map[string]struct{}, len(upstream.APIKeys))
+	for _, key := range upstream.APIKeys {
+		activeKeys[key] = struct{}{}
+	}
+	resumedCount := 0
+	for i := 0; i < len(upstream.APIKeyConfigs); {
+		cfg := &upstream.APIKeyConfigs[i]
+		_, active := activeKeys[cfg.Key]
+		if !active || cfg.Enabled == nil || *cfg.Enabled {
+			i++
+			continue
+		}
+
+		cfg.Enabled = nil
+		restoredKeys[cfg.Key] = struct{}{}
+		resumedCount++
+		if !shouldPersistAPIKeyConfig(*cfg) {
+			upstream.APIKeyConfigs = append(upstream.APIKeyConfigs[:i], upstream.APIKeyConfigs[i+1:]...)
+			continue
+		}
+		i++
+	}
+
+	if len(restoredKeys) == 0 {
+		return 0, nil
+	}
+	if disabledCount > 0 {
+		log.Printf("[%s-Blacklist] 渠道 [%d] %s 的 %d 个被拉黑 Key 已全部恢复", apiType, channelIndex, upstream.Name, disabledCount)
+	}
+	if resumedCount > 0 {
+		log.Printf("[%s-Suspend] 渠道 [%d] %s 的 %d 个手动暂停 Key 已全部恢复", apiType, channelIndex, upstream.Name, resumedCount)
+	}
+
+	return len(restoredKeys), cm.saveConfigLocked(cm.config)
+}
+
+// RestoreDisabledKeys 恢复指定渠道中命中的被拉黑 Key，并返回实际恢复的 key 列表。
+func (cm *ConfigManager) RestoreDisabledKeys(apiType string, channelIndex int, keys []string) ([]string, error) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	upstreams := cm.getUpstreamSliceLocked(apiType)
+	if upstreams == nil || channelIndex < 0 || channelIndex >= len(*upstreams) {
+		return nil, fmt.Errorf("无效的渠道索引: %s[%d]", apiType, channelIndex)
+	}
+	if len(keys) == 0 {
+		return nil, nil
+	}
+
+	keySet := make(map[string]struct{}, len(keys))
+	for _, key := range keys {
+		if key == "" {
+			continue
+		}
+		keySet[key] = struct{}{}
+	}
+	if len(keySet) == 0 {
+		return nil, nil
+	}
+
+	upstream := &(*upstreams)[channelIndex]
+	restored := make([]string, 0, len(keySet))
+	newDisabled := make([]DisabledKeyInfo, 0, len(upstream.DisabledAPIKeys))
+	savedConfigs := make(map[string]*APIKeyConfig)
+	for _, dk := range upstream.DisabledAPIKeys {
+		if _, ok := keySet[dk.Key]; !ok {
+			newDisabled = append(newDisabled, dk)
+			continue
+		}
+		if !slices.Contains(upstream.APIKeys, dk.Key) {
+			upstream.APIKeys = append(upstream.APIKeys, dk.Key)
+		}
+		upstream.HistoricalAPIKeys = slices.DeleteFunc(upstream.HistoricalAPIKeys, func(k string) bool {
+			return k == dk.Key
+		})
+		delete(cm.failedKeysCache, failedKeyCacheKey(apiType, dk.Key))
+		if dk.Config != nil {
+			copyCfg := *dk.Config
+			savedConfigs[dk.Key] = &copyCfg
+		}
+		restored = append(restored, dk.Key)
+	}
+
+	if len(restored) == 0 {
+		return nil, nil
+	}
+
+	upstream.DisabledAPIKeys = newDisabled
+	upstream.APIKeyConfigs = normalizeAPIKeyConfigs(upstream.APIKeys, upstream.APIKeyConfigs)
+	for key, cfg := range savedConfigs {
+		upstream.APIKeyConfigs = restoreAPIKeyConfig(upstream.APIKeyConfigs, key, cfg)
+	}
+	log.Printf("[%s-Blacklist] 渠道 [%d] %s 自动恢复了 %d 个 Key", apiType, channelIndex, upstream.Name, len(restored))
+	if err := cm.saveConfigLocked(cm.config); err != nil {
+		return nil, err
+	}
+	return restored, nil
+}
+
+// DisableKeyModel 将 (apiKey, model) 组合加入限制列表（持久化，默认 1 小时后自动恢复）。
+// 仅限制该 Key 对该模型的路由，不影响该 Key 的其他模型，也不从 APIKeys 中移除。
+// recoverAt 为上游明确给出的恢复时间（RFC3339）；为空、无效或已过期时沿用 1 小时兜底，
+// 与 applyKeyBlacklistLocked 的 Key 级拉黑语义保持一致。
+func (cm *ConfigManager) DisableKeyModel(apiType string, channelIndex int, apiKey, model, reason, message, recoverAt string) error {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	upstreams := cm.getUpstreamSliceLocked(apiType)
+	if upstreams == nil || channelIndex < 0 || channelIndex >= len(*upstreams) {
+		return fmt.Errorf("无效的渠道索引: %s[%d]", apiType, channelIndex)
+	}
+	apiKey = strings.TrimSpace(apiKey)
+	model = strings.TrimSpace(model)
+	if apiKey == "" || model == "" {
+		return nil
+	}
+
+	upstream := &(*upstreams)[channelIndex]
+	now := time.Now()
+	resolvedRecoverAt := now.Add(time.Hour).Format(time.RFC3339)
+	if explicit, err := time.Parse(time.RFC3339, strings.TrimSpace(recoverAt)); err == nil && explicit.After(now) {
+		resolvedRecoverAt = explicit.Format(time.RFC3339)
+	}
+	recoverAt = resolvedRecoverAt
+
+	// 去重：限制仍生效时不刷新、不写盘，避免并发失败造成热路径磁盘抖动。
+	if upstream.IsKeyModelDisabledNow(apiKey, model, now) {
+		log.Printf("[%s-KeyModel] (Key %s, 模型 %s) 已处于限制期，跳过重复写入 (渠道: %s)",
+			apiType, utils.MaskAPIKey(apiKey), model, upstream.Name)
+		return nil
+	}
+
+	// 同 (key, model) 组合已过期则复用原记录并刷新恢复时间。
+	for i := range upstream.DisabledKeyModels {
+		dm := &upstream.DisabledKeyModels[i]
+		if dm.Key == apiKey && strings.EqualFold(strings.TrimSpace(dm.Model), model) {
+			dm.Reason = reason
+			dm.Message = message
+			dm.DisabledAt = now.Format(time.RFC3339)
+			dm.RecoverAt = recoverAt
+			log.Printf("[%s-KeyModel] 刷新 (Key %s, 模型 %s) 限制 (原因: %s, 渠道: %s)",
+				apiType, utils.MaskAPIKey(apiKey), model, reason, upstream.Name)
+			return cm.saveConfigLocked(cm.config)
+		}
+	}
+
+	upstream.DisabledKeyModels = append(upstream.DisabledKeyModels, DisabledKeyModelInfo{
+		Key:        apiKey,
+		Model:      model,
+		Reason:     reason,
+		Message:    message,
+		DisabledAt: now.Format(time.RFC3339),
+		RecoverAt:  recoverAt,
+	})
+	log.Printf("[%s-KeyModel] (Key %s, 模型 %s) 已限制 (原因: %s, 渠道: %s, 恢复时间: %s)",
+		apiType, utils.MaskAPIKey(apiKey), model, reason, upstream.Name, recoverAt)
+	statelog.LogStateTransition(apiType+"-KeyModel", "key_model", utils.MaskAPIKey(apiKey)+"|"+model, "active", "disabled", reason, "channel="+upstream.Name)
+
+	if err := cm.saveConfigLocked(cm.config); err != nil {
+		return err
+	}
+	cm.publishKeyEvent(eventbus.TypeKeyModelDisabled, upstream.ChannelUID, apiType, apiKey, reason, message, map[string]any{"model": model, "recoverAt": recoverAt})
+	return nil
+}
+
+// IsKeyModelDisabled 判断指定渠道下 (apiKey, model) 组合是否处于限制期内。
+func (cm *ConfigManager) IsKeyModelDisabled(apiType string, channelIndex int, apiKey, model string) bool {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	upstreams := cm.getUpstreamSliceLocked(apiType)
+	if upstreams == nil || channelIndex < 0 || channelIndex >= len(*upstreams) {
+		return false
+	}
+	return (*upstreams)[channelIndex].IsKeyModelDisabledNow(apiKey, model, time.Now())
+}
+
+// balanceEscalateModelThreshold 余额/配额类组合限制升级为整 Key 拉黑的阈值：
+// 渠道未配置精确模型白名单（空白名单或含通配/排除条目）时，无法证明"全部模型
+// 都不可用"，以该 Key 生效中限制的不同模型数达到该值作为升级信号。
+const balanceEscalateModelThreshold = 3
+
+// ShouldEscalateBalanceKeyBlacklist 判断余额/配额类组合限制是否已覆盖该 Key 的
+// 全部可用模型，应升级为整 Key 拉黑。
+//
+// 规则 1（精确覆盖）：SupportedModels 非空且全部为精确模型名（无 * 通配、无 ! 排除）
+// 且每个条目都已有生效中的组合限制。
+// 规则 2（阈值）：生效中限制的不同模型数（忽略大小写）≥ balanceEscalateModelThreshold。
+// 已过期（RecoverAt 已到）的限制不计入。
+func (cm *ConfigManager) ShouldEscalateBalanceKeyBlacklist(apiType string, channelIndex int, apiKey string) bool {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	upstreams := cm.getUpstreamSliceLocked(apiType)
+	if upstreams == nil || channelIndex < 0 || channelIndex >= len(*upstreams) {
+		return false
+	}
+	upstream := &(*upstreams)[channelIndex]
+
+	now := time.Now()
+	restricted := make(map[string]struct{})
+	for _, dm := range upstream.DisabledKeyModels {
+		if dm.Key != apiKey {
+			continue
+		}
+		if !upstream.IsKeyModelDisabledNow(apiKey, dm.Model, now) {
+			continue
+		}
+		restricted[strings.ToLower(strings.TrimSpace(dm.Model))] = struct{}{}
+	}
+	if len(restricted) == 0 {
+		return false
+	}
+	if len(restricted) >= balanceEscalateModelThreshold {
+		return true
+	}
+
+	// 规则 1：仅当白名单全部为精确名时才可精确判定覆盖；含通配/排除条目时
+	// 单次命中不足以证明钱包耗尽（可能只是个别模型池空），回落阈值规则。
+	allExact := len(upstream.SupportedModels) > 0
+	for _, pattern := range upstream.SupportedModels {
+		trimmed := strings.TrimSpace(pattern)
+		if trimmed == "" || strings.Contains(trimmed, "*") || strings.HasPrefix(trimmed, "!") {
+			allExact = false
+			break
+		}
+	}
+	if !allExact {
+		return false
+	}
+	for _, pattern := range upstream.SupportedModels {
+		if _, ok := restricted[strings.ToLower(strings.TrimSpace(pattern))]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// RestoreKeyModel 手动移除指定渠道下 (apiKey, model) 组合的限制（持久化）。
+func (cm *ConfigManager) RestoreKeyModel(apiType string, channelIndex int, apiKey, model string) error {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	upstreams := cm.getUpstreamSliceLocked(apiType)
+	if upstreams == nil || channelIndex < 0 || channelIndex >= len(*upstreams) {
+		return fmt.Errorf("无效的渠道索引: %s[%d]", apiType, channelIndex)
+	}
+	upstream := &(*upstreams)[channelIndex]
+
+	newList := make([]DisabledKeyModelInfo, 0, len(upstream.DisabledKeyModels))
+	removed := false
+	for _, dm := range upstream.DisabledKeyModels {
+		if dm.Key == apiKey && strings.EqualFold(strings.TrimSpace(dm.Model), strings.TrimSpace(model)) {
+			removed = true
+			continue
+		}
+		newList = append(newList, dm)
+	}
+	if !removed {
+		return fmt.Errorf("(Key %s, 模型 %s) 不在限制列表中", utils.MaskAPIKey(apiKey), model)
+	}
+
+	upstream.DisabledKeyModels = newList
+	log.Printf("[%s-KeyModel] (Key %s, 模型 %s) 限制已移除 (渠道: %s)", apiType, utils.MaskAPIKey(apiKey), model, upstream.Name)
+	statelog.LogStateTransition(apiType+"-KeyModel", "key_model", utils.MaskAPIKey(apiKey)+"|"+model, "disabled", "active", "manual_restore", "channel="+upstream.Name)
+
+	if err := cm.saveConfigLocked(cm.config); err != nil {
+		return err
+	}
+	cm.publishKeyEvent(eventbus.TypeKeyModelRestored, upstream.ChannelUID, apiType, apiKey, "manual_restore", "", map[string]any{"model": model})
+	return nil
+}
+
+// DisableGroupModel 永久禁用目标 Key 当前所属配额组的模型。
+// 空配额组不会与其他空组 Key 合并，而是退化为单 Key 限制。
+func (cm *ConfigManager) DisableGroupModel(apiType string, channelIndex int, apiKey, model string) (string, int, error) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	upstreams := cm.getUpstreamSliceLocked(apiType)
+	if upstreams == nil || channelIndex < 0 || channelIndex >= len(*upstreams) {
+		return "", 0, fmt.Errorf("无效的渠道索引: %s[%d]", apiType, channelIndex)
+	}
+	apiKey = strings.TrimSpace(apiKey)
+	model = strings.TrimSpace(model)
+	if apiKey == "" || model == "" {
+		return "", 0, fmt.Errorf("apiKey 和 model 不能为空")
+	}
+
+	upstream := &(*upstreams)[channelIndex]
+	quotaGroup, found := quotaGroupForAPIKey(upstream, apiKey)
+	if !found {
+		return "", 0, fmt.Errorf("API Key 不属于该渠道")
+	}
+	affectedKeyCount := countGroupModelAffectedKeys(upstream, apiKey, quotaGroup)
+
+	for i := range upstream.DisabledGroupModels {
+		dm := &upstream.DisabledGroupModels[i]
+		if !sameDisabledGroupModel(*dm, apiKey, quotaGroup, model) {
+			continue
+		}
+		return quotaGroup, affectedKeyCount, nil
+	}
+
+	previous := upstream.Clone().DisabledGroupModels
+	entry := DisabledGroupModelInfo{
+		QuotaGroup: quotaGroup,
+		Model:      model,
+		DisabledAt: time.Now().Format(time.RFC3339),
+	}
+	if quotaGroup == "" {
+		entry.Key = apiKey
+	}
+	upstream.DisabledGroupModels = append(upstream.DisabledGroupModels, entry)
+	if err := cm.saveConfigLocked(cm.config); err != nil {
+		upstream.DisabledGroupModels = previous
+		return "", 0, err
+	}
+	log.Printf("[%s-GroupModel] 已禁用模型 %s (配额组: %s, 影响 Key: %d, 渠道: %s)",
+		apiType, model, displayQuotaGroup(quotaGroup, apiKey), affectedKeyCount, upstream.Name)
+	return quotaGroup, affectedKeyCount, nil
+}
+
+// RestoreGroupModel 永久移除人工分组模型限制。quotaGroup 非空时可直接按组恢复，
+// 即使该组当前暂时没有成员；空组记录仍使用 apiKey 精确定位。
+func (cm *ConfigManager) RestoreGroupModel(apiType string, channelIndex int, apiKey, quotaGroup, model string) (string, int, error) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	upstreams := cm.getUpstreamSliceLocked(apiType)
+	if upstreams == nil || channelIndex < 0 || channelIndex >= len(*upstreams) {
+		return "", 0, fmt.Errorf("无效的渠道索引: %s[%d]", apiType, channelIndex)
+	}
+	apiKey = strings.TrimSpace(apiKey)
+	quotaGroup = strings.TrimSpace(quotaGroup)
+	model = strings.TrimSpace(model)
+	if model == "" || (apiKey == "" && quotaGroup == "") {
+		return "", 0, fmt.Errorf("model 以及 apiKey 或 quotaGroup 不能为空")
+	}
+
+	upstream := &(*upstreams)[channelIndex]
+	if quotaGroup == "" {
+		resolvedGroup, found := quotaGroupForAPIKey(upstream, apiKey)
+		if found {
+			quotaGroup = resolvedGroup
+		}
+	}
+	affectedKeyCount := countGroupModelAffectedKeys(upstream, apiKey, quotaGroup)
+	previous := upstream.Clone().DisabledGroupModels
+	next := make([]DisabledGroupModelInfo, 0, len(upstream.DisabledGroupModels))
+	removed := false
+	for _, dm := range upstream.DisabledGroupModels {
+		if sameDisabledGroupModel(dm, apiKey, quotaGroup, model) {
+			removed = true
+			continue
+		}
+		next = append(next, dm)
+	}
+	if !removed {
+		return quotaGroup, affectedKeyCount, nil
+	}
+	upstream.DisabledGroupModels = next
+	if err := cm.saveConfigLocked(cm.config); err != nil {
+		upstream.DisabledGroupModels = previous
+		return "", 0, err
+	}
+	log.Printf("[%s-GroupModel] 已恢复模型 %s (配额组: %s, 影响 Key: %d, 渠道: %s)",
+		apiType, model, displayQuotaGroup(quotaGroup, apiKey), affectedKeyCount, upstream.Name)
+	return quotaGroup, affectedKeyCount, nil
+}
+
+func quotaGroupForAPIKey(upstream *UpstreamConfig, apiKey string) (string, bool) {
+	apiKey = strings.TrimSpace(apiKey)
+	for _, key := range upstream.APIKeys {
+		if strings.TrimSpace(key) != apiKey {
+			continue
+		}
+		for _, cfg := range NormalizeAPIKeyConfigsForView(*upstream) {
+			if strings.TrimSpace(cfg.Key) == apiKey {
+				return strings.TrimSpace(cfg.QuotaGroup), true
+			}
+		}
+		return "", true
+	}
+	return "", false
+}
+
+func countGroupModelAffectedKeys(upstream *UpstreamConfig, apiKey, quotaGroup string) int {
+	if quotaGroup == "" {
+		if apiKey == "" {
+			return 0
+		}
+		return 1
+	}
+	count := 0
+	for _, cfg := range NormalizeAPIKeyConfigsForView(*upstream) {
+		if strings.TrimSpace(cfg.QuotaGroup) == quotaGroup && strings.TrimSpace(cfg.Key) != "" {
+			count++
+		}
+	}
+	return count
+}
+
+func sameDisabledGroupModel(dm DisabledGroupModelInfo, apiKey, quotaGroup, model string) bool {
+	if !strings.EqualFold(strings.TrimSpace(dm.Model), strings.TrimSpace(model)) {
+		return false
+	}
+	if quotaGroup != "" {
+		return strings.TrimSpace(dm.QuotaGroup) == quotaGroup
+	}
+	return strings.TrimSpace(dm.QuotaGroup) == "" && strings.TrimSpace(dm.Key) == apiKey
+}
+
+func displayQuotaGroup(quotaGroup, apiKey string) string {
+	if quotaGroup != "" {
+		return quotaGroup
+	}
+	return "单 Key " + utils.MaskAPIKey(apiKey)
+}
+
+// RestoreExpiredKeyModels 清理指定渠道下所有 RecoverAt 已到期的 (Key,模型) 限制条目。
+// 返回被恢复的组合描述（"maskedKey|model"），供定时恢复调度器汇总日志。
+func (cm *ConfigManager) RestoreExpiredKeyModels(apiType string, channelIndex int, now time.Time) ([]string, error) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	upstreams := cm.getUpstreamSliceLocked(apiType)
+	if upstreams == nil || channelIndex < 0 || channelIndex >= len(*upstreams) {
+		return nil, fmt.Errorf("无效的渠道索引: %s[%d]", apiType, channelIndex)
+	}
+	upstream := &(*upstreams)[channelIndex]
+	if len(upstream.DisabledKeyModels) == 0 {
+		return nil, nil
+	}
+
+	newList := make([]DisabledKeyModelInfo, 0, len(upstream.DisabledKeyModels))
+	restored := make([]string, 0)
+	for _, dm := range upstream.DisabledKeyModels {
+		expired := false
+		if dm.RecoverAt != "" {
+			if recoverAt, err := time.Parse(time.RFC3339, dm.RecoverAt); err == nil {
+				expired = !now.Before(recoverAt)
+			}
+		}
+		if expired {
+			restored = append(restored, utils.MaskAPIKey(dm.Key)+"|"+dm.Model)
+			continue
+		}
+		newList = append(newList, dm)
+	}
+	if len(restored) == 0 {
+		return nil, nil
+	}
+
+	upstream.DisabledKeyModels = newList
+	log.Printf("[%s-KeyModel] 渠道 [%d] %s 自动恢复了 %d 个 (Key,模型) 限制", apiType, channelIndex, upstream.Name, len(restored))
+	if err := cm.saveConfigLocked(cm.config); err != nil {
+		return nil, err
+	}
+	return restored, nil
+}
+
+// getUpstreamSliceLocked 根据 apiType 获取对应的 upstream slice 指针（调用方需持有锁）
+func (cm *ConfigManager) getUpstreamSliceLocked(apiType string) *[]UpstreamConfig {
+	switch apiType {
+	case "Messages":
+		return &cm.config.Upstream
+	case "Responses":
+		return &cm.config.ResponsesUpstream
+	case "Gemini":
+		return &cm.config.GeminiUpstream
+	case "Chat":
+		return &cm.config.ChatUpstream
+	case "Images":
+		return &cm.config.ImagesUpstream
+	case "Vectors":
+		return &cm.config.VectorsUpstream
+	default:
+		return nil
+	}
+}

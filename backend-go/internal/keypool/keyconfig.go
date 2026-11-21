@@ -1,0 +1,333 @@
+package keypool
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/BenedictKing/ccx/internal/ratelimit"
+)
+
+type Candidate struct {
+	APIKey     string
+	KeyUID     string
+	Config     config.APIKeyConfig
+	Index      int
+	Scope      string
+	QuotaGroup string
+}
+
+type Selection struct {
+	APIKey         string
+	KeyUID         string
+	CredentialID   string
+	CredentialName string
+	QuotaGroup     string
+	LimiterScope   string
+	Config         config.APIKeyConfig
+}
+
+func HasEffectiveConfig(upstream *config.UpstreamConfig) bool {
+	if upstream == nil {
+		return false
+	}
+	for _, cfg := range upstream.APIKeyConfigs {
+		if config.IsAPIKeyConfigEffective(cfg) {
+			return true
+		}
+	}
+	return false
+}
+
+// ModelCircuitChecker 判断 (渠道, Key, 模型) 组合是否处于运行时熔断隔离期。
+//
+// 由调用方注入而非 keypool 直接依赖 metrics：keypool 位于 config 之上、metrics 之外，
+// 反向 import 会形成不必要的耦合。nil 时不做该项过滤（fail-open）。
+type ModelCircuitChecker func(channelUID, apiKey, model string) bool
+
+// CandidatesForModel 返回可用 key 列表，过滤 enabled=false、failedKeys 和模型白名单。
+// model 为空时不按模型过滤。
+func CandidatesForModel(upstream *config.UpstreamConfig, failedKeys map[string]bool, model string) []Candidate {
+	return CandidatesForModelFiltered(upstream, failedKeys, model, nil)
+}
+
+// AutoWeightFactor 返回一把 Key 的软降权系数（0-1，1=不降权）。
+// channelUID 为渠道稳定标识，apiKey 为明文 Key；由调用方注入（metrics 层滑窗统计），
+// keypool 保持不依赖 metrics。nil 表示自动权重未启用。
+type AutoWeightFactor func(channelUID, apiKey string) float64
+
+// CandidatesForModelFiltered 在 CandidatesForModel 的基础上追加渠道-模型级运行时熔断过滤。
+//
+// 与 (Key,模型) 持久化限制（IsKeyModelDisabledNow）互补：后者针对上游明确声明的
+// model_not_found 等结构化信号，限制期 1 小时并写盘；circuitOpen 覆盖的是无法结构化
+// 识别的持续失败（如网关返回 HTML 403），纯内存、短周期、自动恢复。
+func CandidatesForModelFiltered(upstream *config.UpstreamConfig, failedKeys map[string]bool, model string, circuitOpen ModelCircuitChecker) []Candidate {
+	return CandidatesForModelWeighted(upstream, failedKeys, model, circuitOpen, nil)
+}
+
+// CandidatesForModelWeighted 在 CandidatesForModelFiltered 的基础上叠加 per-key
+// 自动权重：排序键从手控 weight 变为 手控weight × autoWeight系数。样本不足的 Key
+// 系数为 1，语义与旧排序完全一致；系数由 metrics 的 5 分钟滑窗成功率计算。
+func CandidatesForModelWeighted(upstream *config.UpstreamConfig, failedKeys map[string]bool, model string, circuitOpen ModelCircuitChecker, autoWeight AutoWeightFactor) []Candidate {
+	if upstream == nil || len(upstream.APIKeys) == 0 {
+		return nil
+	}
+
+	conflictingIdentities := conflictingAPIKeyIdentities(upstream.APIKeyConfigs)
+	configs := config.NormalizeAPIKeyConfigsForView(*upstream)
+	byKey := make(map[string]config.APIKeyConfig, len(configs))
+	for _, cfg := range configs {
+		byKey[cfg.Key] = cfg
+	}
+
+	model = strings.TrimSpace(model)
+	now := time.Now()
+	out := make([]Candidate, 0, len(upstream.APIKeys))
+	for i, key := range upstream.APIKeys {
+		key = strings.TrimSpace(key)
+		if key == "" || failedKeys[key] || conflictingIdentities[key] {
+			continue
+		}
+		if upstream.IsKeyDisabledNow(key, now) {
+			continue
+		}
+		cfg := byKey[key]
+		if cfg.Key == "" {
+			cfg.Key = key
+		}
+		if cfg.Enabled != nil && !*cfg.Enabled {
+			continue
+		}
+		// 分组 Key 持久化倍率。倍率非法或超过渠道级 MaxGroupMultiplier 上限时
+		// fail-closed，避免高倍率分组因手工/热重载配置变化进入调用候选。
+		if !config.EvaluateAPIKeyMultiplierEligibility(cfg, upstream.MaxGroupMultiplier, now).Eligible {
+			continue
+		}
+		if model != "" && len(cfg.Models) > 0 && !matchesModel(model, cfg.Models) {
+			continue
+		}
+		// (Key, 模型) 组合级限制：model_not_found 等错误后，该组合在限制期内被跳过，
+		// 不影响该 Key 的其他模型，也不阻断 failover 到其他渠道。
+		// 注意此处按选 Key 阶段的重定向后模型检查；autopilot 自动映射的目标模型
+		// 由发送前的复查兜底（handlers/common 请求构建后的 KeyModel 复查块）。
+		if model != "" && upstream.IsKeyModelDisabledNow(key, model, now) {
+			continue
+		}
+		quotaGroup := strings.TrimSpace(cfg.QuotaGroup)
+		// 人工分组模型禁用：同渠道内非空 quotaGroup 动态共享；空分组仅匹配目标 Key。
+		if model != "" && upstream.IsGroupModelDisabled(key, quotaGroup, model) {
+			continue
+		}
+		// 渠道-模型级运行时熔断：该组合正在持续失败时暂时跳过，
+		// 不影响同 Key 的其他模型，也不阻断 failover 到其他渠道。
+		if model != "" && circuitOpen != nil && upstream.ChannelUID != "" &&
+			circuitOpen(upstream.ChannelUID, key, model) {
+			continue
+		}
+		scope := LimiterScopeFor(key, cfg)
+		out = append(out, Candidate{
+			APIKey:     key,
+			KeyUID:     strings.TrimSpace(cfg.KeyUID),
+			Config:     cfg,
+			Index:      i,
+			Scope:      scope,
+			QuotaGroup: quotaGroup,
+		})
+	}
+
+	// 按有效权重降序排序，同权重时保持原有顺序（稳定排序）。
+	// 有效权重 = 手控 weight（0 视为 1）× 自动权重系数（默认 1.0）；
+	// 自动权重只做软降权，不改变手控权重的相对优先级语义。
+	if len(out) > 1 {
+		factorOf := func(cand Candidate) float64 {
+			if autoWeight == nil || upstream.ChannelUID == "" || cand.APIKey == "" {
+				return 1.0
+			}
+			factor := autoWeight(upstream.ChannelUID, cand.APIKey)
+			if factor <= 0 || factor > 1 || isNaN64(factor) {
+				return 1.0
+			}
+			return factor
+		}
+		sort.SliceStable(out, func(i, j int) bool {
+			wi, wj := out[i].Config.Weight, out[j].Config.Weight
+			if wi == 0 {
+				wi = 1
+			}
+			if wj == 0 {
+				wj = 1
+			}
+			return float64(wi)*factorOf(out[i]) > float64(wj)*factorOf(out[j])
+		})
+	}
+
+	return out
+}
+
+// conflictingAPIKeyIdentities 标记同一明文 Key 绑定到不同稳定身份或 new-api ownership 的配置。
+// 这类歧义不能由 map 的最后写入者静默决定，候选构建时必须 fail-closed，等待重新关联。
+func conflictingAPIKeyIdentities(configs []config.APIKeyConfig) map[string]bool {
+	type identity struct {
+		keyUID          string
+		credentialUID   string
+		subscriptionUID string
+		remoteTokenID   int64
+	}
+	seen := make(map[string]identity, len(configs))
+	conflicts := make(map[string]bool)
+	for _, cfg := range configs {
+		key := strings.TrimSpace(cfg.Key)
+		if key == "" {
+			continue
+		}
+		current := identity{
+			keyUID:          strings.TrimSpace(cfg.KeyUID),
+			credentialUID:   strings.TrimSpace(cfg.CredentialUID),
+			subscriptionUID: strings.TrimSpace(cfg.SourceSubscriptionUID),
+			remoteTokenID:   cfg.SourceRemoteTokenID,
+		}
+		previous, ok := seen[key]
+		if !ok {
+			seen[key] = current
+			continue
+		}
+		if identitiesConflict(previous.keyUID, current.keyUID) ||
+			identitiesConflict(previous.credentialUID, current.credentialUID) ||
+			identitiesConflict(previous.subscriptionUID, current.subscriptionUID) ||
+			(previous.remoteTokenID > 0 && current.remoteTokenID > 0 && previous.remoteTokenID != current.remoteTokenID) {
+			conflicts[key] = true
+		}
+	}
+	return conflicts
+}
+
+func identitiesConflict(left, right string) bool {
+	return left != "" && right != "" && left != right
+}
+
+// matchesModel 检查 model 是否在允许列表中（支持通配符 *）。
+// matchesModel 检查 model 是否符合 models 列表中的允许/否定规则。
+// 规则：
+//   - 空列表 → 默认允许所有
+//   - "!prefix" 表示否定模式：匹配则立即排除
+//   - "*"/"**" 表示通配所有
+//   - "*xxx"/"xxx*"/"*xxx*" 分别为后缀/前缀/包含匹配
+//   - 精确匹配优先
+//
+// 若有任意 include 规则匹配则返回 true；否定优先级最高（任意 !xx 匹配则返回 false）。
+// 全部规则均为 include 时，仅当至少一条匹配时返回 true。
+func matchesModel(model string, models []string) bool {
+	model = strings.ToLower(strings.TrimSpace(model))
+	matched := false
+	hasInclude := false
+	for _, raw := range models {
+		pattern := strings.ToLower(strings.TrimSpace(raw))
+		if pattern == "" {
+			continue
+		}
+		negated := false
+		if strings.HasPrefix(pattern, "!") {
+			negated = true
+			pattern = pattern[1:]
+			if pattern == "" {
+				continue
+			}
+		}
+
+		doesMatch := matchSinglePattern(model, pattern)
+
+		if negated {
+			if doesMatch {
+				return false
+			}
+			continue
+		}
+
+		hasInclude = true
+		if doesMatch {
+			matched = true
+		}
+	}
+	if !hasInclude {
+		// 全部都是否定规则（或为空），无任何排除命中则视为允许
+		return true
+	}
+	return matched
+}
+
+// matchSinglePattern 计算单个 pattern 是否匹配 model（pattern 已 trim+lower、已剥离否定前缀）。
+func matchSinglePattern(model, pattern string) bool {
+	// 通配所有：* 或 **
+	if pattern == "*" || pattern == "**" {
+		return true
+	}
+	if pattern == model {
+		return true
+	}
+	if strings.HasPrefix(pattern, "*") && strings.HasSuffix(pattern, "*") {
+		inner := pattern[1 : len(pattern)-1]
+		if inner == "" {
+			// 兜底：理论上已被 "*"/"**" 分支吞掉
+			return true
+		}
+		return strings.Contains(model, inner)
+	}
+	if strings.HasPrefix(pattern, "*") {
+		return strings.HasSuffix(model, pattern[1:])
+	}
+	if strings.HasSuffix(pattern, "*") {
+		return strings.HasPrefix(model, pattern[:len(pattern)-1])
+	}
+	return false
+}
+
+func ConfigForCandidate(channel config.UpstreamConfig, cfg config.APIKeyConfig) ratelimit.Config {
+	rpm := cfg.RateLimitRPM
+	if rpm <= 0 {
+		rpm = channel.RateLimitRPM
+	}
+	windowSeconds := cfg.RateLimitWindowMinutes
+	if windowSeconds <= 0 {
+		windowSeconds = channel.RateLimitWindowMinutes
+	}
+	maxConcurrent := cfg.RateLimitMaxConcurrent
+	if maxConcurrent <= 0 {
+		maxConcurrent = channel.RateLimitMaxConcurrent
+	}
+	autoFromHeaders := channel.IsRateLimitAutoFromHeadersEnabled()
+	if cfg.RateLimitAutoFromHeaders != nil {
+		autoFromHeaders = *cfg.RateLimitAutoFromHeaders
+	}
+	return ratelimit.Config{
+		RPM:             rpm,
+		WindowSeconds:   config.RateLimitWindowSeconds(windowSeconds),
+		MaxConcurrent:   maxConcurrent,
+		AutoFromHeaders: autoFromHeaders,
+	}
+}
+
+// LimiterScopeFor 根据 API Key 及其配置返回限速 scope。
+// 有 QuotaGroup 时返回 "quota:<stable-id>"，否则返回 "key:<stable-id>"。
+// CandidatesForModel 与 Autopilot inventory 必须复用该 helper，禁止复制
+// hash/quota 规则导致 scope 漂移。
+func LimiterScopeFor(key string, cfg config.APIKeyConfig) string {
+	key = strings.TrimSpace(key)
+	quotaGroup := strings.TrimSpace(cfg.QuotaGroup)
+	if quotaGroup != "" {
+		return "quota:" + stableKeyID("quota:"+quotaGroup)
+	}
+	return "key:" + stableKeyID(key)
+}
+
+func stableKeyID(key string) string {
+	sum := sha256.Sum256([]byte(key))
+	return hex.EncodeToString(sum[:])[:16]
+}
+
+// isNaN64 判断 float64 是否为 NaN（自动权重系数异常时按 1.0 处理）。
+func isNaN64(v float64) bool {
+	return v != v
+}

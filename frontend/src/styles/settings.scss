@@ -1,0 +1,23 @@
+// Vuetify 样式变量配置 - 复古像素主题
+
+// 复古像素主题：无圆角
+$border-radius-root: 0px !default;
+$btn-border-radius: 0px !default;
+$card-border-radius: 0px !default;
+$sheet-border-radius: 0px !default;
+
+// 自定义颜色 - 复古高对比度
+$primary: #6366F1 !default;
+$secondary: #8B5CF6 !default;
+$accent: #EC4899 !default;
+$success: #10B981 !default;
+$info: #3B82F6 !default;
+$warning: #F59E0B !default;
+$error: #EF4444 !default;
+
+// 字体配置 - 等宽字体
+$body-font-family: 'Courier New', Consolas, 'Liberation Mono', monospace !default;
+$headings-font-family: 'Courier New', Consolas, 'Liberation Mono', monospace !default;
+$line-height-root: 1.6 !default;
+
+@use 'vuetify/settings';

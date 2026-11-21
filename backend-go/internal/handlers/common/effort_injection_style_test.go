@@ -1,0 +1,179 @@
+package common
+
+import (
+	"testing"
+
+	"github.com/BenedictKing/ccx/internal/autopilot"
+	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/BenedictKing/ccx/internal/scheduler"
+	"github.com/tidwall/gjson"
+)
+
+// TestEffortInjectionStyle 断言注入形态由渠道种类/ServiceType 决定，而非模型名匹配。
+func TestEffortInjectionStyle(t *testing.T) {
+	tests := []struct {
+		name     string
+		kind     scheduler.ChannelKind
+		upstream *config.UpstreamConfig
+		want     string
+	}{
+		{
+			name:     "gemini 渠道走 Gemini 原生形态",
+			kind:     scheduler.ChannelKindGemini,
+			upstream: &config.UpstreamConfig{},
+			want:     config.ReasoningParamStyleGemini,
+		},
+		{
+			name:     "gemini 渠道忽略配置里的 thinking 形态",
+			kind:     scheduler.ChannelKindGemini,
+			upstream: &config.UpstreamConfig{ReasoningParamStyle: "thinking"},
+			want:     config.ReasoningParamStyleGemini,
+		},
+		{
+			name:     "非 gemini 渠道但 ServiceType=gemini 也走 Gemini 形态",
+			kind:     scheduler.ChannelKindChat,
+			upstream: &config.UpstreamConfig{ServiceType: "gemini"},
+			want:     config.ReasoningParamStyleGemini,
+		},
+		{
+			name:     "messages 渠道沿用 thinking 形态",
+			kind:     scheduler.ChannelKindMessages,
+			upstream: &config.UpstreamConfig{ReasoningParamStyle: "thinking"},
+			want:     "thinking",
+		},
+		{
+			name:     "chat 渠道沿用 reasoning_effort 形态",
+			kind:     scheduler.ChannelKindChat,
+			upstream: &config.UpstreamConfig{ReasoningParamStyle: "reasoning_effort"},
+			want:     "reasoning_effort",
+		},
+		{
+			name:     "未配置形态时回落到 Responses 的 reasoning 对象",
+			kind:     scheduler.ChannelKindResponses,
+			upstream: &config.UpstreamConfig{},
+			want:     "reasoning",
+		},
+		{
+			name:     "显式兼容形态覆盖 Responses 原生默认",
+			kind:     scheduler.ChannelKindResponses,
+			upstream: &config.UpstreamConfig{ServiceType: "responses", ReasoningParamStyle: "thinking"},
+			want:     "thinking",
+		},
+		// 自动托管渠道会被 RuntimeUpstreamForAutoManagedProvider 清空 ReasoningParamStyle，
+		// 此时必须按渠道类型推导原生形态，否则 effort 会写到上游不识别的字段被静默丢弃。
+		{
+			name:     "messages 渠道未配置形态时推导为 thinking",
+			kind:     scheduler.ChannelKindMessages,
+			upstream: &config.UpstreamConfig{},
+			want:     "thinking",
+		},
+		{
+			name:     "chat 渠道未配置形态时推导为 reasoning_effort",
+			kind:     scheduler.ChannelKindChat,
+			upstream: &config.UpstreamConfig{},
+			want:     "reasoning_effort",
+		},
+		// images / vectors 不接受思考参数，返回空串表示不注入
+		{
+			name:     "images 渠道不注入",
+			kind:     scheduler.ChannelKindImages,
+			upstream: &config.UpstreamConfig{ReasoningParamStyle: "thinking"},
+			want:     "",
+		},
+		{
+			name:     "vectors 渠道不注入",
+			kind:     scheduler.ChannelKindVectors,
+			upstream: &config.UpstreamConfig{ReasoningParamStyle: "reasoning_effort"},
+			want:     "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := effortInjectionStyle(tt.kind, tt.upstream); got != tt.want {
+				t.Errorf("effortInjectionStyle() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAtomicModelRewrite(t *testing.T) {
+	target := &autopilot.ResolvedRouteTarget{Model: "gemini-3.5-flash"}
+	got, ok := atomicModelRewrite([]byte(`{"model":"old","input":[]}`), target)
+	if !ok {
+		t.Fatal("atomicModelRewrite() ok = false, want true")
+	}
+	if model := gjson.GetBytes(got, "model").String(); model != target.Model {
+		t.Fatalf("model = %q, want %q", model, target.Model)
+	}
+}
+
+func TestExecutionEffortSupported(t *testing.T) {
+	tests := []struct {
+		name   string
+		model  string
+		effort autopilot.EffortLevel
+		want   bool
+	}{
+		{name: "gpt-6.1-sol 拒绝 off", model: "gpt-6.1-sol", effort: autopilot.EffortOff, want: false},
+		{name: "gpt-6.1-sol 接受 low", model: "gpt-6.1-sol", effort: autopilot.EffortLow, want: true},
+		{name: "gpt-6-sol 接受 off", model: "gpt-6-sol", effort: autopilot.EffortOff, want: true},
+		{name: "未知模型保持 fail-open", model: "unknown-model", effort: autopilot.EffortOff, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := executionEffortSupported(tt.model, tt.effort, &config.UpstreamConfig{}); got != tt.want {
+				t.Fatalf("executionEffortSupported() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestRewriteOutboundEffort_ByChannelKind 断言最终协议阶段的 effort 注入形态。
+func TestRewriteOutboundEffort_ByChannelKind(t *testing.T) {
+	tests := []struct {
+		name            string
+		kind            scheduler.ChannelKind
+		upstream        *config.UpstreamConfig
+		effort          autopilot.EffortLevel
+		body            string
+		model           string
+		wantPaths       map[string]string
+		wantAbsentPaths []string
+	}{
+		{name: "gemini 渠道写 thinkingLevel", kind: scheduler.ChannelKindGemini, upstream: &config.UpstreamConfig{}, effort: autopilot.EffortHigh, body: `{"model":"old","contents":[]}`, model: "gemini-3.5-flash", wantPaths: map[string]string{"generationConfig.thinkingConfig.thinkingLevel": "high"}, wantAbsentPaths: []string{"thinking", "reasoning", "reasoning_effort", "generationConfig.thinkingConfig.thinkingBudget"}},
+		{name: "gemini 渠道 off 用 thinkingBudget=0 关闭", kind: scheduler.ChannelKindGemini, upstream: &config.UpstreamConfig{}, effort: autopilot.EffortOff, body: `{"model":"old","contents":[]}`, model: "gemini-3.5-flash", wantPaths: map[string]string{"generationConfig.thinkingConfig.thinkingBudget": "0"}, wantAbsentPaths: []string{"generationConfig.thinkingConfig.thinkingLevel"}},
+		{name: "gemini 渠道 max 收敛到 high", kind: scheduler.ChannelKindGemini, upstream: &config.UpstreamConfig{}, effort: autopilot.EffortMax, body: `{"model":"old","contents":[]}`, model: "gemini-3.5-flash", wantPaths: map[string]string{"generationConfig.thinkingConfig.thinkingLevel": "high"}},
+		{name: "gemini 渠道无法映射的档位不注入 effort", kind: scheduler.ChannelKindGemini, upstream: &config.UpstreamConfig{}, effort: autopilot.EffortLevel("turbo"), body: `{"model":"old","contents":[]}`, model: "gemini-3.5-flash", wantAbsentPaths: []string{"generationConfig.thinkingConfig.thinkingLevel", "generationConfig.thinkingConfig.thinkingBudget"}},
+		{name: "messages 渠道保持 thinking.effort 形态", kind: scheduler.ChannelKindMessages, upstream: &config.UpstreamConfig{ReasoningParamStyle: "thinking"}, effort: autopilot.EffortHigh, body: `{"model":"old","messages":[]}`, model: "test-unknown-model", wantPaths: map[string]string{"thinking.type": "enabled", "thinking.effort": "high"}, wantAbsentPaths: []string{"generationConfig.thinkingConfig.thinkingLevel"}},
+		{name: "adaptive 模型写 output_config.effort", kind: scheduler.ChannelKindMessages, upstream: &config.UpstreamConfig{ServiceType: "claude"}, effort: autopilot.EffortHigh, body: `{"model":"claude-haiku-5-5","thinking":{"type":"enabled","budget_tokens":4096},"messages":[]}`, model: "claude-haiku-5-5", wantPaths: map[string]string{"thinking.type": "adaptive", "output_config.effort": "high"}, wantAbsentPaths: []string{"thinking.effort", "thinking.budget_tokens"}},
+		{name: "chat 渠道保持 reasoning_effort 形态", kind: scheduler.ChannelKindChat, upstream: &config.UpstreamConfig{ReasoningParamStyle: "reasoning_effort"}, effort: autopilot.EffortLow, body: `{"model":"old","messages":[]}`, model: "test-unknown-model", wantPaths: map[string]string{"reasoning_effort": "low"}, wantAbsentPaths: []string{"generationConfig.thinkingConfig.thinkingLevel"}},
+		{name: "responses 渠道保持 reasoning.effort 形态", kind: scheduler.ChannelKindResponses, upstream: &config.UpstreamConfig{}, effort: autopilot.EffortMedium, body: `{"model":"old","input":[]}`, model: "test-unknown-model", wantPaths: map[string]string{"reasoning.effort": "medium"}, wantAbsentPaths: []string{"generationConfig.thinkingConfig.thinkingLevel"}},
+		{name: "responses 渠道将内部 off 写为协议 none", kind: scheduler.ChannelKindResponses, upstream: &config.UpstreamConfig{ServiceType: "responses"}, effort: autopilot.EffortOff, body: `{"model":"old","input":[]}`, model: "test-unknown-model", wantPaths: map[string]string{"reasoning.effort": "none"}, wantAbsentPaths: []string{"reasoning_effort", "thinking"}},
+		{name: "chat 渠道将内部 off 写为协议 none", kind: scheduler.ChannelKindChat, upstream: &config.UpstreamConfig{ServiceType: "openai"}, effort: autopilot.EffortOff, body: `{"model":"old","messages":[]}`, model: "test-unknown-model", wantPaths: map[string]string{"reasoning_effort": "none"}, wantAbsentPaths: []string{"reasoning", "thinking"}},
+		{name: "images 渠道不注入任何思考参数", kind: scheduler.ChannelKindImages, upstream: &config.UpstreamConfig{}, effort: autopilot.EffortHigh, body: `{"model":"old","prompt":"cat"}`, model: "test-unknown-model", wantAbsentPaths: []string{"reasoning", "reasoning_effort", "thinking", "generationConfig.thinkingConfig.thinkingLevel"}},
+		{name: "vectors 渠道不注入任何思考参数", kind: scheduler.ChannelKindVectors, upstream: &config.UpstreamConfig{}, effort: autopilot.EffortHigh, body: `{"model":"old","input":"hello"}`, model: "test-unknown-model", wantAbsentPaths: []string{"reasoning", "reasoning_effort", "thinking", "generationConfig.thinkingConfig.thinkingLevel"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			target := &autopilot.ResolvedRouteTarget{Model: tt.model, Effort: tt.effort, EffortDecided: true}
+			got, _ := rewriteOutboundEffort([]byte(tt.body), target, tt.upstream, tt.kind)
+			for path, want := range tt.wantPaths {
+				value := gjson.GetBytes(got, path)
+				if !value.Exists() {
+					t.Errorf("path %q missing, body=%s", path, got)
+					continue
+				}
+				if value.String() != want {
+					t.Errorf("path %q = %q, want %q", path, value.String(), want)
+				}
+			}
+			for _, path := range tt.wantAbsentPaths {
+				if gjson.GetBytes(got, path).Exists() {
+					t.Errorf("path %q must be absent, body=%s", path, got)
+				}
+			}
+		})
+	}
+}

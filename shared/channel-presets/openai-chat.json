@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "providers": {
+    "deepseek": {
+      "reasoningParamStyle": "reasoning"
+    },
+    "mimo": {
+      "reasoningParamStyle": "thinking",
+      "rateLimitRpm": 80
+    },
+    "compshare": {
+      "reasoningParamStyle": "reasoning"
+    },
+    "runapi": {},
+    "unity2": {},
+    "openrouter": {},
+    "sensenova": {},
+    "modelscope": {},
+    "minimax": {},
+    "dashscope": {},
+    "opencode-zen": {
+      "reasoningParamStyle": "reasoning",
+      "authHeader": "bearer"
+    },
+    "opencode-go": {
+      "reasoningParamStyle": "reasoning",
+      "authHeader": "bearer"
+    },
+    "volc-ark": {},
+    "qianfan": {},
+    "xfyun": {},
+    "atomgit": {
+      "reasoningParamStyle": "thinking"
+    }
+  }
+}

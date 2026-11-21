@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "providers": {
+    "deepseek": {
+      "reasoningParamStyle": "reasoning",
+      "codexToolCompat": false,
+      "stripCodexClientTools": false
+    },
+    "mimo": {
+      "reasoningParamStyle": "reasoning",
+      "serviceType": "responses",
+      "codexToolCompat": true,
+      "stripCodexClientTools": true,
+      "rateLimitRpm": 80
+    },
+    "compshare": {
+      "reasoningParamStyle": "reasoning",
+      "codexToolCompat": false,
+      "stripCodexClientTools": false
+    },
+    "runapi": {
+      "codexToolCompat": false,
+      "stripCodexClientTools": false
+    },
+    "unity2": {
+      "codexToolCompat": false,
+      "stripCodexClientTools": false
+    },
+    "minimax": {
+      "codexToolCompat": false,
+      "stripCodexClientTools": false
+    },
+    "dashscope": {},
+    "opencode-zen": {
+      "reasoningParamStyle": "reasoning"
+    },
+    "opencode-go": {
+      "reasoningParamStyle": "reasoning"
+    },
+    "kimi": {},
+    "glm": {},
+    "sensenova": {},
+    "openrouter": {
+      "codexToolCompat": false,
+      "stripCodexClientTools": false
+    },
+    "modelscope": {
+      "codexToolCompat": false,
+      "stripCodexClientTools": false
+    },
+    "volc-ark": {
+      "reasoningParamStyle": "reasoning",
+      "codexToolCompat": false,
+      "stripCodexClientTools": false
+    },
+    "qianfan": {},
+    "xfyun": {
+      "serviceType": "responses"
+    },
+    "github-copilot": {
+      "serviceType": "copilot",
+      "baseUrl": "https://api.githubcopilot.com",
+      "codexToolCompat": false,
+      "stripCodexClientTools": false
+    },
+    "atomgit": {
+      "reasoningParamStyle": "thinking",
+      "serviceType": "openai",
+      "codexToolCompat": true,
+      "stripCodexClientTools": true
+    }
+  }
+}

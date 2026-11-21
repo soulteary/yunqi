@@ -1,0 +1,1884 @@
+// Package common 提供 handlers 模块的公共功能
+package common
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+
+	"github.com/BenedictKing/ccx/internal/scheduler"
+	"github.com/BenedictKing/ccx/internal/utils"
+	"github.com/gin-gonic/gin"
+)
+
+// FailoverError 封装故障转移错误信息
+type FailoverError struct {
+	Status int
+	Body   []byte
+}
+
+// ShouldRetryWithNextKey 判断是否应该使用下一个密钥重试
+// 返回: (shouldFailover bool, isQuotaRelated bool)
+//
+// apiType: 接口类型（Messages/Responses/Gemini），用于日志标签前缀
+//
+// 策略：大多数非 2xx 错误都尝试 failover（模糊处理错误类型，不依赖状态码语义精确分类），
+// 同时检查消息体中的配额相关关键词，确保 403 + "预扣费额度" 等情况能正确识别。
+// 但内容审核错误，以及 4xx 下的 invalid_request、schema 校验失败等不可重试错误不会重试。
+//
+// isQuotaRelated 标记用于调度器优先级调整：
+//   - true: 额度/配额相关，降低密钥优先级
+//   - false: 临时错误，不影响优先级
+func ShouldRetryWithNextKey(statusCode int, bodyBytes []byte, apiType string) (bool, bool) {
+	return ShouldRetryWithNextKeyWithLogTag(statusCode, bodyBytes, apiType, "")
+}
+
+func ShouldRetryWithNextKeyWithLogTag(statusCode int, bodyBytes []byte, apiType string, logTag string) (bool, bool) {
+	LogWithTag(logTag, "[%s-Failover-Entry] ShouldRetryWithNextKey 入口: statusCode=%d, bodyLen=%d",
+		apiType, statusCode, len(bodyBytes))
+	return shouldRetryWithNextKey(statusCode, bodyBytes, apiType, logTag)
+}
+
+// shouldRetryWithNextKey 大多数非 2xx 错误都尝试 failover（模糊处理错误类型，不依赖状态码语义精确分类）。
+// 同时检查消息体中的配额相关关键词，确保 403 + "预扣费额度" 等情况能正确识别。
+// 但对于内容审核错误，以及 4xx 下的 invalid_request、schema 校验失败等不可重试错误不会重试。
+// 例外：中转网关本地审核错误（new-api/one-api 自建敏感词过滤）允许 failover——
+// 词库是各站独立配置，错误从未到达真实上游，换渠道可能通过。
+func shouldRetryWithNextKey(statusCode int, bodyBytes []byte, apiType string, logTag string) (bool, bool) {
+	LogWithTag(logTag, "[%s-Failover] 处理错误分类: statusCode=%d, bodyLen=%d", apiType, statusCode, len(bodyBytes))
+	if statusCode >= 200 && statusCode < 300 {
+		return false, false
+	}
+
+	// 内容审核类错误（sensitive_words_detected 等）任何状态码都不应 failover
+	// 换渠道/换 Key 不会改变请求内容本身
+	if len(bodyBytes) > 0 && isContentModerationError(bodyBytes) {
+		if IsLocalGatewayModerationError(bodyBytes) {
+			LogWithTag(logTag, "[%s-Failover] 检测到中转网关本地审核错误 (statusCode=%d)，允许 failover 换渠道, body=%s", apiType, statusCode, errorBodySummaryForLog(apiType, statusCode, bodyBytes))
+			return true, false
+		}
+		LogWithTag(logTag, "[%s-Failover] 检测到内容审核错误 (statusCode=%d)，不进行 failover, body=%s", apiType, statusCode, errorBodySummaryForLog(apiType, statusCode, bodyBytes))
+		return false, false
+	}
+
+	bodyFailover, bodyQuota := false, false
+	bodyClassified := false
+	if len(bodyBytes) > 0 {
+		bodyFailover, bodyQuota = classifyByErrorMessageWithLogTag(bodyBytes, apiType, logTag)
+		bodyClassified = true
+	}
+
+	// 检查是否为参数校验类不可重试错误（invalid_request 等）
+	// 仅对 4xx 客户端错误生效，5xx 服务端错误应始终允许 failover
+	if statusCode >= 400 && statusCode < 500 && len(bodyBytes) > 0 {
+		if bodyFailover {
+			LogWithTag(logTag, "[%s-Failover] 消息体包含可重试业务错误，优先于 4xx 错误码处理", apiType)
+			return true, bodyQuota
+		}
+		if isNonRetryableError(bodyBytes, apiType) {
+			LogWithTag(logTag, "[%s-Failover] 检测到不可重试错误 (statusCode=%d)，不进行 failover, body=%s", apiType, statusCode, errorBodySummaryForLog(apiType, statusCode, bodyBytes))
+			return false, false
+		}
+	}
+
+	// 状态码直接标记为配额相关
+	if statusCode == 402 || statusCode == 429 {
+		LogWithTag(logTag, "[%s-Failover] 状态码 %d 直接标记为配额相关", apiType, statusCode)
+		return true, true
+	}
+
+	// 对于其他状态码，检查消息体是否包含配额相关关键词
+	// 这样 403 + "预扣费额度" 消息 → isQuotaRelated=true
+	if bodyClassified {
+		if bodyQuota {
+			LogWithTag(logTag, "[%s-Failover] 消息体包含配额相关关键词，标记为配额相关", apiType)
+			return true, true
+		}
+	}
+
+	LogWithTag(logTag, "[%s-Failover] 结果: shouldFailover=true, isQuotaRelated=false", apiType)
+	return true, false
+}
+
+// classifyByErrorMessage 基于错误消息内容分类
+func classifyByErrorMessage(bodyBytes []byte, apiType string) (bool, bool) {
+	return classifyByErrorMessageWithLogTag(bodyBytes, apiType, "")
+}
+
+func classifyByErrorMessageWithLogTag(bodyBytes []byte, apiType string, logTag string) (bool, bool) {
+	var errResp map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &errResp); err != nil {
+		LogWithTag(logTag, "[%s-Failover-Debug] JSON解析失败: %v, body长度=%d", apiType, err, len(bodyBytes))
+		if isMalformedUpstreamResponseBody(bodyBytes) {
+			LogWithTag(logTag, "[%s-Failover-Debug] 检测到上游返回非 JSON/坏响应体，进行 failover", apiType)
+			return true, false
+		}
+		return false, false
+	}
+
+	if errValue, ok := errResp["error"].(string); ok {
+		if failover, quota := classifyMessage(errValue); failover {
+			LogWithTag(logTag, "[%s-Failover-Debug] 提取到字符串 error: %s", apiType, errValue)
+			return true, quota
+		}
+	}
+
+	if failover, quota, field := classifyMessageFromMap(errResp); failover {
+		LogWithTag(logTag, "[%s-Failover-Debug] 提取到顶层消息 (字段: %s)", apiType, field)
+		return true, quota
+	}
+
+	if errCode, ok := firstStringField(errResp, "code", "status", "reason"); ok {
+		if isNonRetryableErrorCode(errCode) {
+			LogWithTag(logTag, "[%s-Failover-Debug] 检测到顶层不可重试错误码: %s", apiType, errCode)
+			return false, false
+		}
+		if failover, quota := classifyErrorCode(errCode); failover {
+			LogWithTag(logTag, "[%s-Failover-Debug] 提取到顶层错误码: %s", apiType, errCode)
+			return true, quota
+		}
+	}
+	if failover, quota := classifyDetailsFromMap(errResp); failover {
+		LogWithTag(logTag, "[%s-Failover-Debug] 提取到顶层 details 错误码", apiType)
+		return true, quota
+	}
+	if errType, ok := errResp["type"].(string); ok {
+		if failover, quota := classifyErrorType(errType); failover {
+			LogWithTag(logTag, "[%s-Failover-Debug] 提取到顶层 type: %s", apiType, errType)
+			return true, quota
+		}
+	}
+
+	errObj, ok := errResp["error"].(map[string]interface{})
+	if !ok {
+		LogWithTag(logTag, "[%s-Failover-Debug] 未找到error对象, keys=%v", apiType, getMapKeys(errResp))
+		return false, false
+	}
+
+	if failover, quota, field := classifyMessageFromMap(errObj); failover {
+		LogWithTag(logTag, "[%s-Failover-Debug] 提取到消息 (字段: %s)", apiType, field)
+		return true, quota
+	}
+
+	// 检查 error.code 字段，参数校验类错误码不应重试
+	if errCode, ok := errObj["code"].(string); ok {
+		if isNonRetryableErrorCode(errCode) {
+			LogWithTag(logTag, "[%s-Failover-Debug] 检测到不可重试错误码: %s", apiType, errCode)
+			return false, false
+		}
+		if failover, quota := classifyErrorCode(errCode); failover {
+			LogWithTag(logTag, "[%s-Failover-Debug] 提取到 error.code: %s", apiType, errCode)
+			return true, quota
+		}
+	}
+	if errCode, ok := firstStringField(errObj, "status", "reason"); ok {
+		if failover, quota := classifyErrorCode(errCode); failover {
+			LogWithTag(logTag, "[%s-Failover-Debug] 提取到 error.%s: %s", apiType, "status/reason", errCode)
+			return true, quota
+		}
+	}
+	if failover, quota := classifyDetailsFromMap(errObj); failover {
+		LogWithTag(logTag, "[%s-Failover-Debug] 提取到 error.details 错误码", apiType)
+		return true, quota
+	}
+
+	if isSchemaValidationError(errObj) {
+		LogWithTag(logTag, "[%s-Failover-Debug] 检测到 schema/invalid_request 错误，不进行 failover", apiType)
+		return false, false
+	}
+
+	// 如果 upstream_error 是嵌套对象，尝试提取其中的消息
+	if upstreamErr, ok := errObj["upstream_error"].(map[string]interface{}); ok {
+		if failover, quota, field := classifyMessageFromMap(upstreamErr); failover {
+			LogWithTag(logTag, "[%s-Failover-Debug] 提取到嵌套 upstream_error.%s", apiType, field)
+			return true, quota
+		}
+		if errCode, ok := firstStringField(upstreamErr, "code", "status", "reason"); ok {
+			if isNonRetryableErrorCode(errCode) {
+				LogWithTag(logTag, "[%s-Failover-Debug] 检测到嵌套 upstream_error 不可重试错误码: %s", apiType, errCode)
+				return false, false
+			}
+			if failover, quota := classifyErrorCode(errCode); failover {
+				LogWithTag(logTag, "[%s-Failover-Debug] 提取到嵌套 upstream_error 错误码: %s", apiType, errCode)
+				return true, quota
+			}
+		}
+		if failover, quota := classifyDetailsFromMap(upstreamErr); failover {
+			LogWithTag(logTag, "[%s-Failover-Debug] 提取到嵌套 upstream_error.details 错误码", apiType)
+			return true, quota
+		}
+	}
+
+	// 检查 type 字段
+	if errType, ok := errObj["type"].(string); ok {
+		if failover, quota := classifyErrorType(errType); failover {
+			return true, quota
+		}
+	}
+
+	LogWithTag(logTag, "[%s-Failover-Debug] 未匹配任何关键词, errObj keys=%v", apiType, getMapKeys(errObj))
+	return false, false
+}
+
+// isAccountRateLimitExceededMap 判断错误对象是否表示账号级限流。
+// 仅在 HTTP 429 分支使用，不能作为无状态码的全局 overloaded 标记。
+// code/type/message/detail/msg 统一参与匹配：
+//   - 精确错误码 AccountRateLimitExceeded（大小写/分隔符无关，火山系）
+//   - 规范化形式 account_rate_limit_exceeded
+//   - 消息兜底 "requests are too frequent"
+//   - new-api/one-api 系中文限流文案："请求数限制"（如"您已达到总请求数限制：
+//     1分钟内最多请求N次"）与"速率限制"——这类 429 不给 Retry-After，
+//     不识别时 AIMD 置信度停在 0.5 永远达不到采纳阈值，也不会触发 scope 冷却。
+//
+// 注意：英文通用文案（"too many requests"/"rate limit"）刻意不匹配——
+// 通用 429 只换 key 继续 failover，不升级为账号级冷却（既有测试锁定该边界）。
+func isAccountRateLimitExceededMap(m map[string]interface{}) bool {
+	combined := strings.ToLower(strings.Join([]string{
+		toStringField(m, "code"),
+		toStringField(m, "type"),
+		toStringField(m, "message"),
+		toStringField(m, "detail"),
+		toStringField(m, "msg"),
+	}, " "))
+
+	// 规范化（去非字母数字）后精确匹配，兼容 "Account Rate Limit Exceeded" 等带空格变体
+	if strings.Contains(normalizeAlnum(combined), "accountratelimitexceeded") {
+		return true
+	}
+	// 消息兜底：仅在 429 分支使用，不能升级为 channel 级 overloaded
+	if strings.Contains(combined, "requests are too frequent") {
+		return true
+	}
+	// new-api/one-api 系中文限流文案
+	if strings.Contains(combined, "请求数限制") || strings.Contains(combined, "速率限制") {
+		return true
+	}
+	return false
+}
+
+// normalizeAlnum 保留字母与数字，去除其余字符，用于错误码归一化比较。
+func normalizeAlnum(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// IsUpstreamAccountRateLimited 判断上游响应是否为账号级限流
+// （火山 AccountRateLimitExceeded / new-api 系中文限流文案，见 isAccountRateLimitExceededMap）。
+// 仅在 HTTP 429 时解析 body，避免把账号级限流
+// 混入通用 CPU/service overloaded 标记。
+// 命中后调用方应对当前 key/quota scope 施加短期冷却，而非冻结整个渠道；
+// 同渠道其他独立账号可继续 failover。
+func IsUpstreamAccountRateLimited(statusCode int, bodyBytes []byte) bool {
+	if statusCode != 429 {
+		return false
+	}
+	var errResp map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &errResp); err != nil {
+		return false
+	}
+	if isAccountRateLimitExceededMap(errResp) {
+		return true
+	}
+	if errObj, ok := errResp["error"].(map[string]interface{}); ok {
+		if isAccountRateLimitExceededMap(errObj) {
+			return true
+		}
+		if upstreamErr, ok := errObj["upstream_error"].(map[string]interface{}); ok {
+			return isAccountRateLimitExceededMap(upstreamErr)
+		}
+	}
+	return false
+}
+
+func IsUpstreamAccountPoolUnavailable(bodyBytes []byte) bool {
+	var errResp map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &errResp); err != nil {
+		return false
+	}
+
+	if isAccountPoolUnavailableMap(errResp) {
+		return true
+	}
+	if errObj, ok := errResp["error"].(map[string]interface{}); ok {
+		if isAccountPoolUnavailableMap(errObj) {
+			return true
+		}
+		if upstreamErr, ok := errObj["upstream_error"].(map[string]interface{}); ok {
+			return isAccountPoolUnavailableMap(upstreamErr)
+		}
+	}
+	return false
+}
+
+func isAccountPoolUnavailableMap(m map[string]interface{}) bool {
+	combined := strings.ToLower(strings.Join([]string{
+		toStringField(m, "code"),
+		toStringField(m, "type"),
+		toStringField(m, "message"),
+		toStringField(m, "detail"),
+		toStringField(m, "msg"),
+	}, " "))
+
+	accountPoolUnavailableMarkers := []string{
+		"no_available_account",
+		"no available account",
+		"no available accounts",
+		"no available gemini accounts",
+		"no available claude accounts",
+		"no available openai accounts",
+		"all available accounts exhausted",
+		"available accounts exhausted",
+		"accounts exhausted",
+		"account pool unavailable",
+		"账号池不可用",
+		"无可用账号",
+		"无可用账户",
+		"账户不可用",
+	}
+	for _, marker := range accountPoolUnavailableMarkers {
+		if strings.Contains(combined, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// isTemporarilyOverloadedMap 判断错误对象是否表示上游临时过载
+// （CPU 过载、服务暂时不可用等），用于触发渠道短时间冷却。
+func isTemporarilyOverloadedMap(m map[string]interface{}) bool {
+	combined := strings.ToLower(strings.Join([]string{
+		toStringField(m, "code"),
+		toStringField(m, "type"),
+		toStringField(m, "message"),
+		toStringField(m, "detail"),
+		toStringField(m, "msg"),
+	}, " "))
+
+	overloadedMarkers := []string{
+		"system_cpu_overloaded",
+		"cpu_overloaded",
+		"server_overloaded",
+		"overloaded_error",
+		"overloaded",
+		"service_unavailable",
+		"service_temporarily_unavailable",
+		"temporarily_unavailable",
+		"系统过载",
+		"服务暂时不可用",
+		"服务不可用",
+	}
+	for _, marker := range overloadedMarkers {
+		if strings.Contains(combined, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// IsUpstreamTemporarilyOverloaded 判断上游响应体是否表示临时过载
+// （如 503 system_cpu_overloaded、529 overloaded_error）。
+// 命中后调用方应对渠道施加短时间冷却，避免反复重试过载的上游。
+func IsUpstreamTemporarilyOverloaded(bodyBytes []byte) bool {
+	var errResp map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &errResp); err != nil {
+		return false
+	}
+
+	if isTemporarilyOverloadedMap(errResp) {
+		return true
+	}
+	if errObj, ok := errResp["error"].(map[string]interface{}); ok {
+		if isTemporarilyOverloadedMap(errObj) {
+			return true
+		}
+		if upstreamErr, ok := errObj["upstream_error"].(map[string]interface{}); ok {
+			return isTemporarilyOverloadedMap(upstreamErr)
+		}
+	}
+	return false
+}
+
+func classifyMessageFromMap(m map[string]interface{}) (bool, bool, string) {
+	messageFields := []string{"message", "param", "upstream_error", "detail", "error_description", "msg"}
+	for _, field := range messageFields {
+		if msg, ok := m[field].(string); ok {
+			if failover, quota := classifyMessage(msg); failover {
+				return true, quota, field
+			}
+		}
+	}
+	return false, false, ""
+}
+
+func classifyDetailsFromMap(m map[string]interface{}) (bool, bool) {
+	details, ok := m["details"].([]interface{})
+	if !ok {
+		return false, false
+	}
+	for _, item := range details {
+		detail, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if code, ok := firstStringField(detail, "reason", "code", "status"); ok {
+			if failover, quota := classifyErrorCode(code); failover {
+				return true, quota
+			}
+		}
+		if failover, quota, _ := classifyMessageFromMap(detail); failover {
+			return true, quota
+		}
+	}
+	return false, false
+}
+
+// classifyMessage 基于错误消息内容分类
+func classifyMessage(msg string) (bool, bool) {
+	msgLower := strings.ToLower(msg)
+
+	if isMalformedUpstreamResponseMessage(msgLower) {
+		return true, false
+	}
+
+	if isSchemaValidationMessage(msgLower) {
+		return false, false
+	}
+
+	// 临时限流关键词 (failover + quota，但不应永久拉黑)
+	// 注意：这些关键词标记为 quota 是为了触发优先级降低（避免立即重试同一 Key），
+	// 但 ShouldBlacklistKey 会通过独立逻辑判断是否拉黑
+	rateLimitKeywords := []string{
+		"rate limit", "ratelimit", "limit exceeded",
+		"too many requests", "请求过于频繁", "请求频率", "限流",
+	}
+	for _, keyword := range rateLimitKeywords {
+		if strings.Contains(msgLower, keyword) {
+			return true, true
+		}
+	}
+
+	// 配额/余额相关关键词 (failover + quota)
+	quotaKeywords := []string{
+		"insufficient", "quota", "credit", "balance",
+		"exceeded",
+		"billing", "payment", "subscription",
+		"积分不足", "余额不足", "请求数限制", "额度", "预扣费",
+	}
+	for _, keyword := range quotaKeywords {
+		if strings.Contains(msgLower, keyword) {
+			return true, true
+		}
+	}
+
+	// 认证/授权相关关键词 (failover + 非 quota)
+	authKeywords := []string{
+		"invalid", "unauthorized", "authentication",
+		"api key", "apikey", "token", "expired",
+		"permission", "forbidden", "denied",
+		"密钥无效", "认证失败", "权限不足",
+		"身份验证失败", "身份验证", "无效的令牌", "令牌无效", "令牌已过期",
+		"令牌过期", "令牌已失效", "令牌失效", "未授权", "鉴权失败",
+	}
+	for _, keyword := range authKeywords {
+		if strings.Contains(msgLower, keyword) {
+			return true, false
+		}
+	}
+
+	// 临时错误关键词 (failover + 非 quota)
+	transientKeywords := []string{
+		"timeout", "timed out", "temporarily",
+		"overloaded", "unavailable", "retry",
+		"server error", "internal error",
+		"超时", "暂时", "重试", "稍后再试",
+		"负载已饱和", "已饱和",
+	}
+	for _, keyword := range transientKeywords {
+		if strings.Contains(msgLower, keyword) {
+			return true, false
+		}
+	}
+
+	// 能力不匹配关键词 (failover + 非 quota)
+	// 网关路由决策失误导致请求发到了不支持该能力的上游渠道
+	// 例如: 不支持视觉的渠道收到含图片的请求，换渠道可能成功
+	capabilityKeywords := []string{
+		"multimodal", "vision",
+		"image", "unsupported", "not supported",
+		"supported api model names",
+		"cannot be processed", "无法处理", "不支持",
+	}
+	for _, keyword := range capabilityKeywords {
+		if strings.Contains(msgLower, keyword) {
+			return true, false
+		}
+	}
+
+	return false, false
+}
+
+func isMalformedUpstreamResponseBody(bodyBytes []byte) bool {
+	body := strings.ToLower(strings.TrimSpace(string(bodyBytes)))
+	if body == "" {
+		return false
+	}
+	if strings.HasPrefix(body, "<!doctype html") || strings.HasPrefix(body, "<html") {
+		return true
+	}
+	if strings.Contains(body, "<html") && (strings.Contains(body, "<body") || strings.Contains(body, "</html>")) {
+		return true
+	}
+	return isMalformedUpstreamResponseMessage(body)
+}
+
+func isMalformedUpstreamResponseMessage(msgLower string) bool {
+	msgLower = strings.ToLower(strings.TrimSpace(msgLower))
+	if msgLower == "" {
+		return false
+	}
+
+	responseMarkers := []string{
+		"bad_response_body",
+		"bad response body",
+		"read_response_body_failed",
+		"read response body failed",
+		"invalid json response",
+		"malformed json response",
+		"response body is not valid json",
+		"response is not valid json",
+		"upstream response is not valid json",
+		"json decode error",
+		"json.decoder.jsondecodeerror",
+		"json parse error",
+	}
+	for _, marker := range responseMarkers {
+		if strings.Contains(msgLower, marker) {
+			return true
+		}
+	}
+
+	parseMarkers := []string{
+		"expecting ',' delimiter",
+		"expecting value",
+		"invalid character '<'",
+		"unexpected end of json input",
+		"unexpected eof",
+		"unterminated string",
+		"extra data:",
+	}
+	for _, marker := range parseMarkers {
+		if !strings.Contains(msgLower, marker) {
+			continue
+		}
+		if strings.Contains(msgLower, "openaiexception") ||
+			strings.Contains(msgLower, "badrequesterror") ||
+			strings.Contains(msgLower, "upstream") ||
+			strings.Contains(msgLower, "response") {
+			return true
+		}
+	}
+
+	return false
+}
+
+// classifyErrorType 基于错误类型分类
+func classifyErrorType(errType string) (bool, bool) {
+	typeLower := strings.ToLower(errType)
+
+	// 只拦截明确的 schema/validation 错误
+	nonRetryableTypes := []string{
+		"schema_validation_error",
+		"validation_error",
+	}
+	for _, t := range nonRetryableTypes {
+		if strings.Contains(typeLower, t) {
+			return false, false
+		}
+	}
+
+	// 配额相关的错误类型 (failover + quota)
+	quotaTypes := []string{
+		"over_quota", "quota_exceeded", "rate_limit",
+		"billing", "insufficient", "payment",
+	}
+	for _, t := range quotaTypes {
+		if strings.Contains(typeLower, t) {
+			return true, true
+		}
+	}
+
+	// 认证相关的错误类型 (failover + 非 quota)
+	authTypes := []string{
+		"authentication", "authorization", "permission",
+		"invalid_api_key", "invalid_token", "expired",
+	}
+	for _, t := range authTypes {
+		if strings.Contains(typeLower, t) {
+			return true, false
+		}
+	}
+
+	// 服务端错误类型 (failover + 非 quota)
+	serverTypes := []string{
+		"server_error", "internal_error", "service_unavailable",
+		"timeout", "overloaded",
+	}
+	for _, t := range serverTypes {
+		if strings.Contains(typeLower, t) {
+			return true, false
+		}
+	}
+
+	return false, false
+}
+
+// classifyErrorCode 基于中转站常见业务错误码分类。
+// 只做明确 code 的正向识别；invalid_request/schema 类仍由不可重试逻辑优先处理。
+func classifyErrorCode(code string) (bool, bool) {
+	codeLower := strings.ToLower(strings.TrimSpace(code))
+	if codeLower == "" {
+		return false, false
+	}
+
+	quotaCodes := []string{
+		"rate_limit", "rate_limit_error", "rate_limit_exceeded", "resource_exhausted",
+		"over_quota", "quota_exceeded",
+	}
+	if codeInSet(codeLower, quotaCodes...) ||
+		strings.HasPrefix(codeLower, "rate_limit_") ||
+		strings.HasSuffix(codeLower, "_quota_exhausted") ||
+		strings.HasSuffix(codeLower, "_quota_exceeded") {
+		return true, true
+	}
+	if isInsufficientBalanceCode(codeLower) {
+		return true, true
+	}
+
+	if isAuthenticationErrorCode(codeLower) || isPermissionErrorCode(codeLower) {
+		return true, false
+	}
+
+	transientCodes := []string{
+		"server_error", "internal_error", "service_unavailable",
+		"upstream_error", "do_request_failed", "bad_response",
+		"bad_response_body", "bad_response_status_code", "read_response_body_failed",
+		"empty_response", "timeout", "overloaded",
+		"no_available_account",
+	}
+	if codeInSet(codeLower, transientCodes...) ||
+		strings.HasPrefix(codeLower, "bad_response_") ||
+		strings.HasPrefix(codeLower, "read_response_") ||
+		strings.HasSuffix(codeLower, "_timeout") ||
+		strings.HasSuffix(codeLower, "_overloaded") ||
+		isRetryableChannelCode(codeLower) {
+		return true, false
+	}
+
+	if codeLower == "model_not_found" {
+		return true, false
+	}
+
+	return false, false
+}
+
+func codeInSet(code string, codes ...string) bool {
+	for _, c := range codes {
+		if code == c {
+			return true
+		}
+	}
+	return false
+}
+
+func isRetryableChannelCode(code string) bool {
+	if !strings.HasPrefix(code, "channel:") {
+		return false
+	}
+	retryableChannelCodes := []string{
+		"channel:no_available_key",
+		"channel:response_time_exceeded",
+		"channel:aws_client_error",
+		"channel:invalid_key",
+		"channel:model_mapped_error",
+	}
+	return codeInSet(code, retryableChannelCodes...)
+}
+
+func isAuthenticationErrorCode(code string) bool {
+	codeLower := strings.ToLower(strings.TrimSpace(code))
+	authCodes := []string{
+		"invalid_api_key",
+		"api_key_required",
+		"api_key_disabled",
+		"api_key_expired",
+		"invalid_token",
+		"token_expired",
+		"token_revoked",
+		"empty_token",
+		"invalid_auth_header",
+		"invalid_admin_key",
+		"unauthorized",
+		"unauthenticated",
+		"user_not_found",
+		"user_inactive",
+	}
+	for _, c := range authCodes {
+		if codeLower == c {
+			return true
+		}
+	}
+	return false
+}
+
+func isPermissionErrorCode(code string) bool {
+	codeLower := strings.ToLower(strings.TrimSpace(code))
+	permissionCodes := []string{
+		"permission_error",
+		"permission_denied",
+		"access_denied",
+		"service_disabled",
+		"group_deleted",
+		"group_disabled",
+		"group_not_allowed",
+	}
+	for _, c := range permissionCodes {
+		if codeLower == c {
+			return true
+		}
+	}
+	return false
+}
+
+func isSchemaValidationError(errObj map[string]interface{}) bool {
+	// 先检查 error.code，排除认证相关错误（需要 failover）
+	if errCode, ok := errObj["code"].(string); ok {
+		codeLower := strings.ToLower(errCode)
+		// 认证错误应该触发 failover，不拦截
+		authCodes := []string{
+			"invalid_api_key",
+			"authentication_error",
+			"permission_denied",
+			"unauthorized",
+		}
+		for _, authCode := range authCodes {
+			if strings.Contains(codeLower, authCode) {
+				return false
+			}
+		}
+	}
+
+	// 检查消息内容
+	for _, field := range []string{"message", "param", "upstream_error", "detail"} {
+		if msg, ok := errObj[field].(string); ok && isSchemaValidationMessage(strings.ToLower(msg)) {
+			return true
+		}
+	}
+
+	if upstreamErr, ok := errObj["upstream_error"].(map[string]interface{}); ok {
+		if msg, ok := upstreamErr["message"].(string); ok && isSchemaValidationMessage(strings.ToLower(msg)) {
+			return true
+		}
+	}
+
+	// 检查 error.type，但排除单纯的 invalid_request_error（可能是认证问题）
+	if errType, ok := errObj["type"].(string); ok {
+		typeLower := strings.ToLower(errType)
+		// schema_validation_error 明确是参数错误，拦截
+		if strings.Contains(typeLower, "schema_validation") || strings.Contains(typeLower, "validation_error") {
+			return true
+		}
+		// invalid_request_error 需要结合其他信息判断，单独出现不拦截
+	}
+
+	return false
+}
+
+func isSchemaValidationMessage(msgLower string) bool {
+	nonRetryableKeywords := []string{
+		"invalid value",
+		"supported values are",
+		"schema validation",
+		"validation failed",
+		"invalid_request",
+		"invalid request",
+		"unsupported content type",
+		// 结构字段校验（Anthropic 常见）
+		"field required",
+		"required field",
+		"missing required parameter",
+		"is required",
+		"messages.",
+		".content.",
+		".thinking.",
+		"reasoning_content in the thinking mode",
+		"must be passed back to the api",
+	}
+	for _, keyword := range nonRetryableKeywords {
+		if strings.Contains(msgLower, keyword) {
+			return true
+		}
+	}
+	return false
+}
+
+// handleModelRoutingError 处理可归一化的模型路由错误。
+// 如果最后失败的错误可以被归一化为非 503 状态码（如 model_not_found → 404），
+// 则透传该错误体和归一化后的状态码；否则返回 false，由调用方继续返回通用 503
+func handleModelRoutingError(c *gin.Context, lastFailoverError *FailoverError) bool {
+	if lastFailoverError == nil {
+		return false
+	}
+	normalizedStatus := normalizeUpstreamErrorStatus(lastFailoverError.Status, lastFailoverError.Body)
+	if normalizedStatus == lastFailoverError.Status {
+		return false
+	}
+	var errBody map[string]interface{}
+	if err := json.Unmarshal(lastFailoverError.Body, &errBody); err == nil {
+		c.JSON(normalizedStatus, errBody)
+	} else {
+		c.JSON(normalizedStatus, gin.H{"error": string(lastFailoverError.Body)})
+	}
+	return true
+}
+
+// HandleAllChannelsFailed 处理所有渠道都失败的情况
+// lastFailoverError: 最后一个故障转移错误
+// lastError: 最后一个错误
+// apiType: API 类型（用于错误消息）
+func HandleAllChannelsFailed(c *gin.Context, lastFailoverError *FailoverError, lastError error, apiType string) {
+	// 保留明确的模型路由错误语义，其余情况默认返回通用错误
+	if handleModelRoutingError(c, lastFailoverError) {
+		return
+	}
+	// 上下文容量不足是请求属性而非服务故障：透传 400 context_length_exceeded，
+	// Codex 等客户端才能识别并触发压缩，而不是当作可重试的 503 无限重试。
+	if capErr, ok := scheduler.AsContextCapacityError(lastError); ok {
+		respondContextCapacityExceeded(c, capErr)
+		return
+	}
+	c.JSON(503, gin.H{
+		"type": "error",
+		"error": gin.H{
+			"type":    "service_unavailable",
+			"message": "All upstream channels are currently unavailable",
+		},
+	})
+}
+
+// respondContextCapacityExceeded 按上游 OpenAI 的 400 语义回包，
+// message 措辞与官方 context_length_exceeded 对齐以最大化客户端识别率。
+func respondContextCapacityExceeded(c *gin.Context, capErr *scheduler.ContextCapacityError) {
+	outputTokens := capErr.TotalBudget - capErr.InputTokens
+	if outputTokens < 0 {
+		outputTokens = 0
+	}
+	var message string
+	if capErr.MaxKnownWindow > 0 {
+		message = fmt.Sprintf(
+			"This model's maximum context length is %d tokens. However, you requested %d tokens (%d in the messages, %d in the completion). Please reduce the length of the messages or completion.",
+			capErr.MaxKnownWindow, capErr.TotalBudget, capErr.InputTokens, outputTokens,
+		)
+	} else {
+		message = fmt.Sprintf(
+			"No available channel declares a context window large enough: you requested %d tokens (%d in the messages, %d in the completion). Please reduce the length of the messages or completion.",
+			capErr.TotalBudget, capErr.InputTokens, outputTokens,
+		)
+	}
+	c.JSON(400, gin.H{
+		"error": gin.H{
+			"message": message,
+			"type":    "invalid_request_error",
+			"param":   nil,
+			"code":    "context_length_exceeded",
+		},
+	})
+}
+
+// HandleAllKeysFailed 处理所有密钥都失败的情况（单渠道模式）
+func HandleAllKeysFailed(c *gin.Context, lastFailoverError *FailoverError, lastError error, apiType string) {
+	// 保留明确的模型路由错误语义，其余情况默认返回通用错误
+	if handleModelRoutingError(c, lastFailoverError) {
+		return
+	}
+	c.JSON(503, gin.H{
+		"type": "error",
+		"error": gin.H{
+			"type":    "service_unavailable",
+			"message": "All upstream channels are currently unavailable",
+		},
+	})
+}
+
+// getMapKeys 获取 map 的所有 key（用于调试日志）
+func getMapKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+// isContentModerationErrorCode 判断错误码是否为内容审核类错误
+// 上游内容审核错误与请求内容本身相关，换渠道/换 Key 重试不会改变结果，任何状态码都不应 failover。
+// 例外见 IsLocalGatewayModerationError：中转网关本地审核允许 failover。
+func isContentModerationErrorCode(code string) bool {
+	codes := []string{
+		"sensitive_words_detected",
+		"violation_fee.grok.csam",
+		"content_moderation_failed",
+		"content_policy_violation",
+		"content_filter",
+		"content_blocked",
+		"moderation_blocked",
+		"prompt_blocked",
+	}
+	codeLower := strings.ToLower(code)
+	for _, c := range codes {
+		if codeLower == c {
+			return true
+		}
+	}
+	return false
+}
+
+// isNonRetryableErrorCode 判断错误码是否为参数校验类不可重试错误
+// 这类错误在 4xx 时不应 failover，但 5xx 时可能是上游误报，应允许 failover
+func isNonRetryableErrorCode(code string) bool {
+	codes := []string{
+		"invalid_request",
+		"invalid_request_error",
+		"bad_request",
+	}
+	codeLower := strings.ToLower(code)
+	for _, c := range codes {
+		if codeLower == c {
+			return true
+		}
+	}
+	return false
+}
+
+// isContentModerationError 检查响应体是否包含内容审核类错误
+// 任何状态码下都应阻止 failover（中转网关本地审核除外，见 IsLocalGatewayModerationError）
+func isContentModerationError(bodyBytes []byte) bool {
+	var errResp map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &errResp); err != nil {
+		return false
+	}
+	if isContentModerationMap(errResp) {
+		return true
+	}
+	errObj, ok := errResp["error"].(map[string]interface{})
+	if !ok {
+		return false
+	}
+	if isContentModerationMap(errObj) {
+		return true
+	}
+	if upstreamErr, ok := errObj["upstream_error"].(map[string]interface{}); ok {
+		return isContentModerationMap(upstreamErr)
+	}
+	return false
+}
+
+// localGatewayModerationErrorTypes 中转网关本地审核错误的 type 指纹。
+// new-api/one-api 系网关的自建敏感词过滤在转发上游之前本地拦截
+// （refs/new-api relay/request_billing.go，ErrorSource=local），错误类型固定为
+// 网关自身类型；真实上游返回的审核错误会以 upstream_error/claude_error 等类型透传。
+var localGatewayModerationErrorTypes = map[string]bool{
+	"new_api_error": true,
+	"one_api_error": true,
+}
+
+// IsLocalGatewayModerationError 判断响应体是否为「中转网关本地内容审核」错误：
+// 审核错误码 + 网关本地错误类型。此类过滤是各站独立配置、在网关侧前置执行，
+// 错误从未到达真实上游，换渠道可能通过，应允许 failover；
+// 真实上游的审核错误（换渠道不改变结果）不在此列。
+func IsLocalGatewayModerationError(bodyBytes []byte) bool {
+	var errResp map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &errResp); err != nil {
+		return false
+	}
+	if errObj, ok := errResp["error"].(map[string]interface{}); ok {
+		return isLocalGatewayModerationMap(errObj)
+	}
+	return isLocalGatewayModerationMap(errResp)
+}
+
+func isLocalGatewayModerationMap(m map[string]interface{}) bool {
+	if !isContentModerationMap(m) {
+		return false
+	}
+	typ, ok := firstStringField(m, "type")
+	if !ok || !localGatewayModerationErrorTypes[strings.ToLower(typ)] {
+		return false
+	}
+	// violation_fee.* 是真实上游的违规计费（如 violation_fee.grok.csam），网关只是
+	// 透传包装；此类内容在任何渠道都会被拒，且向更多渠道扩散重试有害，排除在外。
+	if code, ok := firstStringField(m, "code"); ok && strings.HasPrefix(strings.ToLower(code), "violation_fee.") {
+		return false
+	}
+	return true
+}
+
+func isContentModerationMap(m map[string]interface{}) bool {
+	for _, field := range []string{"code", "type", "status", "reason"} {
+		if value, ok := firstStringField(m, field); ok && isContentModerationErrorCode(value) {
+			return true
+		}
+	}
+	return false
+}
+
+// isNonRetryableError 检查响应体是否包含不可重试的错误码
+func isNonRetryableError(bodyBytes []byte, apiType string) bool {
+	var errResp map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &errResp); err != nil {
+		return false
+	}
+	if errCode, ok := firstStringField(errResp, "code"); ok && isNonRetryableErrorCode(errCode) {
+		return true
+	}
+	errObj, ok := errResp["error"].(map[string]interface{})
+	if !ok {
+		return false
+	}
+	// 在判定 schema/invalid_request 之前，先放行上游协议兼容类 400：
+	// 这些错误源于上游镜像不认识新版 Responses tools schema，换兼容上游后可恢复。
+	if strings.EqualFold(apiType, "Responses") && isResponsesToolsProtocolError(errObj) {
+		return false
+	}
+	// 同理放行上游请求体解析失败（"unexpected end of JSON input" 等）：
+	// 网关自身已成功解析并转发出完整请求体，此类 400 源于上游代理/后端链路解析失败，
+	// 换渠道后可恢复，不应作为客户端 schema 错误终结请求。
+	if isUpstreamRequestParseError(errObj) {
+		return false
+	}
+	// 同理放行「仅接受流式」类 400（"streaming is required: ..."）：文案含 "is
+	// required" 会被下面的 schema 校验拦截，但错误源于上游端点只接受 stream:true，
+	// 请求本身没有可修正之处，换流式友好的渠道后可恢复，不应终结请求。
+	if isStreamRequirementError(errObj) {
+		return false
+	}
+	if isSchemaValidationError(errObj) {
+		return true
+	}
+	if errCode, ok := errObj["code"].(string); ok {
+		return isNonRetryableErrorCode(errCode)
+	}
+	return false
+}
+
+// isResponsesToolsProtocolError 识别上游对 /v1/responses 中 tools 结构的兼容性拒绝。
+// 例如第三方 Responses 镜像不识别 Codex CLI 0.130+ 的 namespace/custom/web_search 等条目，
+// 返回形如 "Missing required parameter: 'tools[15].tools'" 的 400。
+func isResponsesToolsProtocolError(errObj map[string]interface{}) bool {
+	message := strings.ToLower(toStringField(errObj, "message"))
+	param := strings.ToLower(toStringField(errObj, "param"))
+	code := strings.ToLower(toStringField(errObj, "code"))
+	upstream := strings.ToLower(toStringField(errObj, "upstream_error"))
+	if nested, ok := errObj["upstream_error"].(map[string]interface{}); ok {
+		upstream += " " + strings.ToLower(toStringField(nested, "message"))
+		upstream += " " + strings.ToLower(toStringField(nested, "param"))
+		upstream += " " + strings.ToLower(toStringField(nested, "code"))
+	}
+
+	combined := strings.Join([]string{message, param, code, upstream}, " ")
+	if !mentionsResponsesTools(combined) {
+		return false
+	}
+	if code == "invalid_function_parameters" || code == "missing_required_parameter" {
+		return true
+	}
+	markers := []string{
+		"missing required parameter",
+		"unknown parameter",
+		"invalid schema",
+		"invalid function parameters",
+		"unsupported tool",
+		"unknown tool",
+		"expected", // 兼容 "expected object/array/string" 类 schema 文案
+	}
+	for _, marker := range markers {
+		if strings.Contains(combined, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// parserNativeRequestParseSignatures 是 JSON 解析器运行时的原生错误文案
+// （Go encoding/json / io、Python json、Node），业务错误文案不会偶然包含。
+var parserNativeRequestParseSignatures = []string{
+	"unexpected end of json input",   // Go encoding/json / Node
+	"unexpected eof",                 // Go io 截断
+	"looking for beginning of value", // Go encoding/json
+	"expecting value:",               // Python json
+	"expecting ',' delimiter",        // Python json
+	"extra data:",                    // Python json
+	"in json at position",            // Node（旧版 "Unexpected token < in JSON at position 0"）
+	"is not valid json",              // Node / 各运行时通用
+}
+
+// weakRequestParsePhrases 是弱解析短语：单独出现在顶层文案时不足以证明
+// 错误源于上游链路（业务文案可能偶然包含），须有额外证据（嵌套 upstream_error
+// 或文案同时指向请求体）才可作为豁免依据。
+var weakRequestParsePhrases = []string{
+	"cannot parse json",
+	"failed to parse json",
+}
+
+// isUpstreamRequestParseError 识别上游代理/后端对请求体的 JSON 解析失败。
+// 网关自身已成功解析并转发出完整请求体，此类 400 说明该上游链路有问题，
+// 换渠道可恢复，不属于客户端 schema 错误。
+//
+// 判定收紧为两条明确路径，避免客户端侧/业务侧解析错误被误豁免
+// （误豁免会导致必然失败的请求跨 Key/渠道重放，增加延迟与重复计费）：
+//  1. 解析错误位于嵌套 upstream_error（中转站显式标注上游来源），弱短语也认；
+//  2. 顶层 message/detail/msg 命中解析器原生特征；
+//     或弱短语且文案同时指向请求体（含 "body"，如 "failed to parse JSON body"）。
+func isUpstreamRequestParseError(errObj map[string]interface{}) bool {
+	containsAny := func(s string, markers []string) bool {
+		s = strings.ToLower(s)
+		for _, marker := range markers {
+			if strings.Contains(s, marker) {
+				return true
+			}
+		}
+		return false
+	}
+	topLevelMatch := func(s string) bool {
+		if containsAny(s, parserNativeRequestParseSignatures) {
+			return true
+		}
+		// 弱短语必须同时指向请求体：解析器原生文案之外的通用短语，
+		// 只有 "…json body…" 这类明确描述请求体解析失败的才可信。
+		lower := strings.ToLower(s)
+		return containsAny(lower, weakRequestParsePhrases) && strings.Contains(lower, "body")
+	}
+
+	if nested, ok := errObj["upstream_error"].(map[string]interface{}); ok {
+		for _, field := range []string{"message", "detail", "msg"} {
+			if containsAny(toStringField(nested, field), append(append([]string{}, parserNativeRequestParseSignatures...), weakRequestParsePhrases...)) {
+				return true
+			}
+		}
+	}
+	for _, field := range []string{"message", "detail", "msg"} {
+		if topLevelMatch(toStringField(errObj, field)) {
+			return true
+		}
+	}
+	return false
+}
+
+func mentionsResponsesTools(text string) bool {
+	toolMarkers := []string{
+		"tools",
+		"tool_choice",
+		"function '",
+		"function \"",
+		"web_search",
+		"tool_search",
+		"namespace",
+		"custom tool",
+	}
+	for _, marker := range toolMarkers {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func toStringField(m map[string]interface{}, key string) string {
+	if v, ok := m[key].(string); ok {
+		return v
+	}
+	return ""
+}
+
+// findNumericCode 从 map 中查找数字类型的错误码字段，返回字符串表示
+// 兼容 {"RetCode": 226615} 等非标准格式
+func findNumericCode(m map[string]interface{}, keys ...string) string {
+	for _, key := range keys {
+		if v, ok := m[key].(float64); ok {
+			// 整数不带小数点: 226615 → "226615"
+			if v == float64(int64(v)) {
+				return fmt.Sprintf("%d", int64(v))
+			}
+			return fmt.Sprintf("%v", v)
+		}
+	}
+	return ""
+}
+
+func firstStringField(m map[string]interface{}, keys ...string) (string, bool) {
+	for _, key := range keys {
+		if value := strings.TrimSpace(toStringField(m, key)); value != "" {
+			return value, true
+		}
+	}
+	return "", false
+}
+
+// isModelRoutingError 识别上游将模型路由失败误报为 5xx 的错误
+// 仅用于状态码归一化（5xx → 404），不阻断 failover
+func isModelRoutingError(bodyBytes []byte) bool {
+	var errResp map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &errResp); err != nil {
+		return false
+	}
+	errObj, ok := errResp["error"].(map[string]interface{})
+	if !ok {
+		return false
+	}
+	if errCode, ok := errObj["code"].(string); ok {
+		if strings.ToLower(errCode) == "model_not_found" {
+			return true
+		}
+	}
+	if errMsg, ok := errObj["message"].(string); ok {
+		msgLower := strings.ToLower(errMsg)
+		if strings.Contains(msgLower, "no available channel for model") {
+			return true
+		}
+	}
+	return false
+}
+
+// keyModelRestrictionReason 只识别能归因到当前 Key 的模型或模型工具权限错误。
+// 中转站 "no available channel"（无分组信息）属于 relay 级临时耗尽，只允许 failover，
+// 不能禁用健康 Key；带 "under group" 的是分组缺失——分组内容由站点运营方配置，
+// 分组不含该模型时同 Key 重试必然重复 400（实测 runanytime 7 把 key 分属
+// Gemini/Grok/ClaudeCode 等组，仅 2 把能服务 gpt-5.6-sol，其余每个请求白烧一轮
+// 400）。按 (Key,模型) 确定性失败处理走限时规避（1 小时恢复），即便撞上 relay
+// 上游池短暂全灭也能自愈。
+func keyModelRestrictionReason(bodyBytes []byte) string {
+	var errResp map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &errResp); err != nil {
+		return ""
+	}
+	errObj, ok := errResp["error"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+
+	code := strings.ToLower(strings.TrimSpace(toStringField(errObj, "code")))
+	message := strings.ToLower(strings.TrimSpace(toStringField(errObj, "message")))
+	if strings.Contains(message, "no available channel for model") && strings.Contains(message, "under group") {
+		return "model_not_in_key_group"
+	}
+	if strings.Contains(message, "no available channel for model") ||
+		strings.Contains(message, "under group") ||
+		strings.Contains(message, "(distributor)") {
+		if !isImageGenerationKeyRestrictionMessage(message) {
+			return ""
+		}
+	}
+	if isImageGenerationKeyRestrictionMessage(message) {
+		return "image_generation_not_enabled"
+	}
+	if code == "model_not_found" {
+		return "model_not_found"
+	}
+	if strings.Contains(message, "supported api model names") ||
+		strings.Contains(message, "unsupported model") ||
+		(strings.Contains(message, "model") && strings.Contains(message, "not supported")) ||
+		strings.Contains(message, "model not found") {
+		return "model_not_found"
+	}
+	return ""
+}
+
+func isKeyModelRestrictionError(bodyBytes []byte) bool {
+	return keyModelRestrictionReason(bodyBytes) != ""
+}
+
+func isImageGenerationKeyRestrictionMessage(message string) bool {
+	message = strings.ToLower(strings.TrimSpace(message))
+	if !strings.Contains(message, "image generation") && !strings.Contains(message, "image_generation") &&
+		!strings.Contains(message, "image_gen") && !strings.Contains(message, "imagegen") {
+		return false
+	}
+	markers := []string{
+		"not enabled",
+		"not allowed",
+		"not supported",
+		"unsupported",
+		"does not have access",
+		"permission",
+		"unknown tool",
+		"invalid tool",
+		"unrecognized tool",
+	}
+	for _, marker := range markers {
+		if strings.Contains(message, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// normalizeUpstreamErrorStatus 修正上游误报的客户端配置错误状态码
+func normalizeUpstreamErrorStatus(status int, bodyBytes []byte) int {
+	if status >= 500 && len(bodyBytes) > 0 && isModelRoutingError(bodyBytes) {
+		return 404
+	}
+	return status
+}
+
+// BlacklistResult 拉黑判定结果
+type BlacklistResult struct {
+	ShouldBlacklist bool
+	Reason          string // "authentication_error" / "permission_error" / "insufficient_balance" / "insufficient_quota"
+	Message         string // 原始错误信息摘要
+	RecoverAt       string // 上游明确给出的自动恢复时间（RFC3339）
+}
+
+func insufficientResourceReason(errorCode string) string {
+	if strings.EqualFold(strings.TrimSpace(errorCode), "AccountQuotaExceeded") {
+		return "insufficient_quota"
+	}
+	return "insufficient_balance"
+}
+
+// IsBalanceOrQuotaBlacklistReason 判断拉黑原因是否受“余额不足自动拉黑”开关控制。
+func IsBalanceOrQuotaBlacklistReason(reason string) bool {
+	reason = strings.ToLower(strings.TrimSpace(reason))
+	return reason == "insufficient_balance" || reason == "insufficient_quota"
+}
+
+// ShouldBlacklistKey 判断 HTTP 错误响应是否应该禁用该 Key。
+// 认证/权限错误需手动恢复；额度错误可按上游重置时间自动恢复。
+// 对余额或额度不足只识别明确语义，避免将普通 403/429 误判。
+func ShouldBlacklistKey(statusCode int, bodyBytes []byte) BlacklistResult {
+	// HTTP 402: 明确的付费/余额不足
+	if statusCode == 402 {
+		return BlacklistResult{
+			ShouldBlacklist: true,
+			Reason:          "insufficient_balance",
+			Message:         truncateMessage(string(bodyBytes)),
+		}
+	}
+
+	// 解析响应体
+	errType, errMessage := extractErrorInfo(bodyBytes)
+	errCode := extractErrorCode(bodyBytes)
+	if errType == "" && errMessage == "" && errCode == "" {
+		return BlacklistResult{}
+	}
+
+	typeLower := strings.ToLower(errType)
+	// 图片工具未向当前分组开放属于 Key×模型能力差异，不能按通用
+	// permission_error 拉黑整把 Key；请求链路会改用组合级限制。
+	if isImageGenerationKeyRestrictionMessage(errMessage) {
+		return BlacklistResult{}
+	}
+
+	// 高置信 message 优先于状态码/type/code。部分中转站会用 400 + invalid_request_error
+	// 包装真实的 Key 余额/认证状态，不能让外层错误码短路拉黑。
+	if isInsufficientBalanceMessage(errMessage) {
+		return BlacklistResult{
+			ShouldBlacklist: true,
+			Reason:          insufficientResourceReason(errCode),
+			Message:         truncateMessage(errMessage),
+			RecoverAt:       utils.ExtractQuotaRecoverAt(errMessage),
+		}
+	}
+	if isAuthenticationMessage(errMessage) {
+		return BlacklistResult{
+			ShouldBlacklist: true,
+			Reason:          "authentication_error",
+			Message:         truncateMessage(errMessage),
+		}
+	}
+	// new-api 分组权限错误（403 + "No permission to access group ..."）：
+	// 该 Key 绑定的分组已不可访问，与模型无关，整个 Key 在该渠道作废。
+	if statusCode == 403 && isGroupPermissionMessage(errMessage) {
+		return BlacklistResult{
+			ShouldBlacklist: true,
+			Reason:          "permission_error",
+			Message:         truncateMessage(errMessage),
+		}
+	}
+
+	// 认证错误: authentication_error / invalid_api_key
+	if typeLower == "authentication_error" || typeLower == "invalid_api_key" {
+		return BlacklistResult{
+			ShouldBlacklist: true,
+			Reason:          "authentication_error",
+			Message:         truncateMessage(errMessage),
+		}
+	}
+	if isAuthenticationErrorCode(errType) || isAuthenticationErrorCode(errCode) {
+		return BlacklistResult{
+			ShouldBlacklist: true,
+			Reason:          "authentication_error",
+			Message:         truncateMessage(errMessage),
+		}
+	}
+
+	// 某些上游只返回 401/403 + 明确的认证失败消息，没有 type/code
+	if (statusCode == 401 || statusCode == 403) && isAuthenticationMessage(errMessage) {
+		return BlacklistResult{
+			ShouldBlacklist: true,
+			Reason:          "authentication_error",
+			Message:         truncateMessage(errMessage),
+		}
+	}
+
+	// 权限错误: permission_error / permission_denied
+	if typeLower == "permission_error" || typeLower == "permission_denied" {
+		return BlacklistResult{
+			ShouldBlacklist: true,
+			Reason:          "permission_error",
+			Message:         truncateMessage(errMessage),
+		}
+	}
+	if isPermissionErrorCode(errType) || isPermissionErrorCode(errCode) {
+		return BlacklistResult{
+			ShouldBlacklist: true,
+			Reason:          "permission_error",
+			Message:         truncateMessage(errMessage),
+		}
+	}
+
+	// 余额不足的明确错误类型/错误码
+	if isInsufficientBalanceCode(errType) || isInsufficientBalanceCode(errCode) || typeLower == "billing_error" {
+		return BlacklistResult{
+			ShouldBlacklist: true,
+			Reason:          insufficientResourceReason(errCode),
+			Message:         truncateMessage(errMessage),
+			RecoverAt:       utils.ExtractQuotaRecoverAt(errMessage),
+		}
+	}
+
+	// 某些上游会返回 HTTP 401/403/429，但在 message 中携带明确的余额不足语义
+	if (statusCode == 401 || statusCode == 403 || statusCode == 429) && isInsufficientBalanceMessage(errMessage) {
+		return BlacklistResult{
+			ShouldBlacklist: true,
+			Reason:          insufficientResourceReason(errCode),
+			Message:         truncateMessage(errMessage),
+			RecoverAt:       utils.ExtractQuotaRecoverAt(errMessage),
+		}
+	}
+
+	return BlacklistResult{}
+}
+
+func isInsufficientBalanceMessage(msg string) bool {
+	if msg == "" {
+		return false
+	}
+
+	msgLower := strings.ToLower(msg)
+
+	// 临时限流错误（不应拉黑）：明确排除 rate_limit_error 等短期限流语义
+	// rate limit / ratelimit 通常是临时限流，由熔断机制处理，不应永久拉黑
+	transientRateLimitPhrases := []string{
+		"rate limit exceeded",
+		"rate_limit_error",
+		"ratelimit exceeded",
+		"too many requests",
+		"requests per",
+		"tokens per",
+		"perminute",
+		"请求过于频繁",
+		"请求频率",
+		"限流",
+	}
+	for _, p := range transientRateLimitPhrases {
+		if strings.Contains(msgLower, p) {
+			return false
+		}
+	}
+
+	// 精确短语兜底，避免双词组合遗漏极端变体
+	exactPhrases := []string{
+		"no balance",
+		"balance is negative",
+		"out of credits",
+		"quota used up",
+		"daily limit exceeded",
+		"daily usage limit exceeded",
+		"monthly limit exceeded",
+		"monthly call limit",
+		"call limit exceeded for your plan",
+		"tokenstatusexhausted",
+		"no active subscription found",
+	}
+	for _, p := range exactPhrases {
+		if strings.Contains(msgLower, p) {
+			return true
+		}
+	}
+
+	// 资源词: 标识"跟余额/额度相关"
+	resourceWords := []string{
+		"balance", "quota", "credit", "funds",
+		"subscription", "allowance",
+		"余额", "额度", "充提",
+	}
+	// 弱资源词: 单独出现不足以下结论，须搭配 statusWords
+	companionWords := []string{
+		"payment", "billing", "recharge", "top up",
+		"充值", "续费", "续订",
+	}
+	// 状态词: 标识"不足/耗尽/过期等负面状态"
+	statusWords := []string{
+		"insufficient", "negative", "exhausted", "depleted",
+		"too low", "expired", "overdue", "reached",
+		"not enough", "not sufficient", "exceeded",
+		"failed",
+		"不足", "耗尽", "已用尽", "已用完", "已过期", "已到期",
+		"过期", "失败",
+	}
+
+	hasResource := false
+	for _, w := range resourceWords {
+		if strings.Contains(msgLower, w) {
+			hasResource = true
+			break
+		}
+	}
+	if !hasResource {
+		for _, w := range companionWords {
+			if strings.Contains(msgLower, w) {
+				hasResource = true
+				break
+			}
+		}
+	}
+	if !hasResource {
+		return false
+	}
+
+	for _, w := range statusWords {
+		if strings.Contains(msgLower, w) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func isAuthenticationMessage(msg string) bool {
+	if msg == "" {
+		return false
+	}
+
+	msgLower := strings.ToLower(msg)
+	keywords := []string{
+		"invalid api key",
+		"invalid_api_key",
+		"invalid key",
+		"invalid token",
+		"token expired",
+		"token has expired",
+		"expired token",
+		"api key is disabled",
+		"api key disabled",
+		"api key is expired",
+		"api key expired",
+		"authentication failed",
+		"authentication error",
+		"unauthorized",
+		"api key is invalid",
+		"api key provided is invalid",
+		"无效的api key",
+		"api key无效",
+		"无效 api key",
+		"密钥已禁用",
+		"密钥已停用",
+		"密钥已过期",
+		"api key已禁用",
+		"api key已停用",
+		"api key已过期",
+		"认证失败",
+		"身份验证失败",
+		"无效的令牌",
+		"令牌无效",
+		"令牌已过期",
+		"令牌过期",
+		"令牌已失效",
+		"令牌失效",
+		"鉴权失败",
+	}
+	for _, keyword := range keywords {
+		if strings.Contains(msgLower, keyword) {
+			return true
+		}
+	}
+	return false
+}
+
+func isPermissionMessage(msg string) bool {
+	if msg == "" {
+		return false
+	}
+
+	msgLower := strings.ToLower(msg)
+	keywords := []string{
+		"permission denied",
+		"permission error",
+		"forbidden",
+		"access denied",
+		"权限不足",
+		"没有权限",
+		"禁止访问",
+	}
+	for _, keyword := range keywords {
+		if strings.Contains(msgLower, keyword) {
+			return true
+		}
+	}
+	return false
+}
+
+// isGroupPermissionMessage 识别 new-api 等中转站的"分组权限"错误。
+// 例如: "No permission to access group xxx. Switch this API key to an available group in the console"
+// 这类错误表示该 Key 绑定的分组已不可访问，与模型无关，整个 Key 在该渠道作废，应拉黑。
+func isGroupPermissionMessage(msg string) bool {
+	if msg == "" {
+		return false
+	}
+	msgLower := strings.ToLower(msg)
+	keywords := []string{
+		"no permission to access group",
+		"switch this api key to an available group",
+		"无权访问分组",
+		"无权限访问分组",
+	}
+	for _, keyword := range keywords {
+		if strings.Contains(msgLower, keyword) {
+			return true
+		}
+	}
+	return false
+}
+
+// extractErrorInfo 从 JSON 响应体中提取错误类型和错误消息
+// 支持嵌套格式 {"error":{"type":"...","code":"...","message":"..."}}
+// 和扁平格式 {"type":"...","code":"...","message":"..."}
+func extractErrorInfo(bodyBytes []byte) (errType string, errMessage string) {
+	var resp map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &resp); err != nil {
+		return "", ""
+	}
+
+	// 优先尝试嵌套格式: {"error": {"type": "...", "code": "...", "message": "..."}}
+	if errObj, ok := resp["error"].(map[string]interface{}); ok {
+		if t, ok := errObj["type"].(string); ok {
+			errType = t
+		} else if c, ok := errObj["code"].(string); ok {
+			errType = c
+		}
+		if m, ok := errObj["message"].(string); ok {
+			errMessage = m
+		} else if m, ok := errObj["Message"].(string); ok {
+			errMessage = m
+		}
+		return
+	}
+
+	// 兼容字符串格式: {"error": "..."}
+	if errStr, ok := resp["error"].(string); ok {
+		errMessage = errStr
+	}
+
+	// fallback: 扁平格式 {"type": "...", "code": "...", "message": "..."}
+	// 兼容大小写混合: {"RetCode": 226615, "Message": "..."}
+	// 兼容数字错误码: RetCode/retCode 为 float64 类型
+	if t, ok := resp["type"].(string); ok {
+		errType = t
+	} else if c, ok := resp["code"].(string); ok {
+		errType = c
+	} else if rc := findNumericCode(resp, "RetCode", "retCode"); rc != "" {
+		errType = rc
+	}
+	if m, ok := resp["message"].(string); ok {
+		errMessage = m
+	} else if m, ok := resp["Message"].(string); ok {
+		errMessage = m
+	}
+	return
+}
+
+func extractErrorCode(bodyBytes []byte) string {
+	var resp map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &resp); err != nil {
+		return ""
+	}
+	if errObj, ok := resp["error"].(map[string]interface{}); ok {
+		if code, ok := firstStringField(errObj, "code"); ok {
+			return code
+		}
+	}
+	if code, ok := firstStringField(resp, "code"); ok {
+		return code
+	}
+	// 兼容大写数字字段: {"RetCode": 226615}
+	if rc := findNumericCode(resp, "RetCode", "retCode"); rc != "" {
+		return rc
+	}
+	return ""
+}
+
+// truncateMessage 截断错误信息（最多800字符），用于指标/原因字段等短摘要场景
+// 使用 rune 截断，避免切断 UTF-8 多字节字符
+func truncateMessage(msg string) string {
+	runes := []rune(msg)
+	if len(runes) > 800 {
+		return string(runes[:800])
+	}
+	return msg
+}
+
+// truncateErrorSummary 用于日志打印上游错误详情，保留足够上下文以便定位协议/schema 问题
+// 上限设置为 4KB，避免极端情况下把巨型响应体全量入日志
+// 使用 rune 截断，避免切断 UTF-8 多字节字符
+func truncateErrorSummary(msg string) string {
+	const maxLen = 4096
+	runes := []rune(msg)
+	if len(runes) > maxLen {
+		return string(runes[:maxLen]) + "...(truncated)"
+	}
+	return msg
+}
+
+func errorBodySummaryForLog(apiType string, statusCode int, bodyBytes []byte) string {
+	if strings.EqualFold(apiType, "Vectors") {
+		return vectorsErrorSummaryForLog(statusCode, bodyBytes)
+	}
+	msg := strings.ReplaceAll(strings.ReplaceAll(strings.TrimSpace(string(bodyBytes)), "\n", " "), "\r", " ")
+	return truncateErrorSummary(msg)
+}
+
+func vectorsErrorSummaryForLog(statusCode int, bodyBytes []byte) string {
+	parts := []string{fmt.Sprintf("status=%d", statusCode)}
+	errType, _ := extractErrorInfo(bodyBytes)
+	errType = sanitizeVectorsErrorToken(errType)
+	errCode := sanitizeVectorsErrorToken(extractErrorCode(bodyBytes))
+	if errType != "" {
+		parts = append(parts, "type="+errType)
+	}
+	if errCode != "" && errCode != errType {
+		parts = append(parts, "code="+errCode)
+	}
+	if param := sanitizeVectorsErrorParam(extractErrorParam(bodyBytes)); param != "" {
+		parts = append(parts, "param="+param)
+	}
+	if len(parts) == 1 {
+		parts = append(parts, "body=omitted")
+	}
+	return strings.Join(parts, " ")
+}
+
+func sanitizeVectorsErrorToken(value string) string {
+	value = strings.ToLower(sanitizeVectorsDiagnosticField(value, 64))
+	if value == "" {
+		return ""
+	}
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.' {
+			continue
+		}
+		return ""
+	}
+	if _, ok := allowedVectorsErrorTokens[value]; !ok {
+		return ""
+	}
+	return value
+}
+
+func sanitizeVectorsErrorParam(value string) string {
+	value = strings.ToLower(sanitizeVectorsDiagnosticField(value, 80))
+	if _, ok := allowedVectorsErrorParams[value]; !ok {
+		return ""
+	}
+	return value
+}
+
+func sanitizeVectorsDiagnosticField(value string, maxRunes int) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	var b strings.Builder
+	for _, r := range value {
+		if r < 0x20 || r == 0x7f {
+			b.WriteByte(' ')
+			continue
+		}
+		b.WriteRune(r)
+	}
+	value = strings.Join(strings.Fields(b.String()), " ")
+	runes := []rune(value)
+	if len(runes) > maxRunes {
+		value = string(runes[:maxRunes])
+	}
+	return value
+}
+
+var allowedVectorsErrorTokens = map[string]struct{}{
+	"api_error":               {},
+	"authentication_error":    {},
+	"bad_request":             {},
+	"billing_error":           {},
+	"context_length_exceeded": {},
+	"forbidden":               {},
+	"insufficient_quota":      {},
+	"internal_error":          {},
+	"invalid_api_key":         {},
+	"invalid_json":            {},
+	"invalid_request":         {},
+	"invalid_request_error":   {},
+	"missing_parameter":       {},
+	"model_not_found":         {},
+	"not_found":               {},
+	"not_found_error":         {},
+	"overloaded":              {},
+	"permission_error":        {},
+	"quota_exceeded":          {},
+	"rate_limit_error":        {},
+	"rate_limit_exceeded":     {},
+	"server_error":            {},
+	"service_unavailable":     {},
+	"temporarily_unavailable": {},
+	"timeout":                 {},
+	"too_many_requests":       {},
+	"unauthorized":            {},
+	"unprocessable_entity":    {},
+	"unsupported_model":       {},
+	"validation_error":        {},
+}
+
+var allowedVectorsErrorParams = map[string]struct{}{
+	"dimensions":      {},
+	"encoding_format": {},
+	"input":           {},
+	"model":           {},
+	"user":            {},
+}
+
+func extractErrorParam(bodyBytes []byte) string {
+	var resp map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &resp); err != nil {
+		return ""
+	}
+	if errObj, ok := resp["error"].(map[string]interface{}); ok {
+		if param, ok := errObj["param"].(string); ok {
+			return strings.TrimSpace(param)
+		}
+	}
+	if param, ok := resp["param"].(string); ok {
+		return strings.TrimSpace(param)
+	}
+	return ""
+}

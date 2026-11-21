@@ -1,0 +1,400 @@
+package common
+
+import (
+	"encoding/json"
+	"net/http/httptest"
+	"strconv"
+	"strings"
+	"testing"
+
+	"github.com/BenedictKing/ccx/internal/autopilot"
+	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/BenedictKing/ccx/internal/scheduler"
+	"github.com/BenedictKing/ccx/internal/types"
+	"github.com/gin-gonic/gin"
+)
+
+func newAutopilotProfileTestContext(t *testing.T, path, body string, agentCtx *types.AgentContext) *gin.Context {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("POST", path, strings.NewReader(body))
+	SetRequestLogContextWithAgent(c, "session-test", 1, agentCtx)
+	return c
+}
+
+func TestAttachAutopilotRequestProfileExtractsProtocolFeatures(t *testing.T) {
+	t.Run("messages tools and subagent", func(t *testing.T) {
+		body := `{"model":"glm-5.2","messages":[{"role":"user","content":"hello"}],"tools":[{"name":"search"}]}`
+		c := newAutopilotProfileTestContext(t, "/v1/messages", body, &types.AgentContext{
+			AgentRole: "subagent",
+			AgentType: "claude_code_subagent",
+		})
+
+		profile := AttachAutopilotRequestProfile(c, scheduler.ChannelKindMessages, "glm-5.2", "completion", "session-test", []byte(body), 0)
+		if !profile.ToolUseNeed {
+			t.Fatal("ToolUseNeed = false, want true")
+		}
+		if profile.AgentRole != "subagent" || profile.AgentType != "claude_code_subagent" {
+			t.Fatalf("unexpected agent context: role=%q type=%q", profile.AgentRole, profile.AgentType)
+		}
+		if profile.EstTokens <= 0 || profile.ContextNeed != profile.EstTokens {
+			t.Fatalf("unexpected token estimate: est=%d context=%d", profile.EstTokens, profile.ContextNeed)
+		}
+		if profile.TaskClass != autopilot.TaskClassWorker {
+			t.Fatalf("TaskClass = %q, want worker", profile.TaskClass)
+		}
+		if profile.PromptHash == "" {
+			t.Fatal("PromptHash is empty")
+		}
+	})
+
+	t.Run("responses reasoning blocks lightweight whitelist", func(t *testing.T) {
+		body := `{"model":"claude-sonnet-5","input":"summarize this","reasoning":{"effort":"high"}}`
+		c := newAutopilotProfileTestContext(t, "/v1/responses", body, nil)
+
+		profile := AttachAutopilotRequestProfile(c, scheduler.ChannelKindResponses, "claude-sonnet-5", "summarize", "session-test", []byte(body), 0)
+		if !profile.ReasoningNeed {
+			t.Fatal("ReasoningNeed = false, want true")
+		}
+		if profile.Operation != "summarize" {
+			t.Fatalf("Operation = %q, want summarize", profile.Operation)
+		}
+		if profile.TaskClass == autopilot.TaskClassLightweight {
+			t.Fatal("reasoning request must not be classified as lightweight")
+		}
+	})
+
+	t.Run("messages MCP tool names require tool support", func(t *testing.T) {
+		body := `{"model":"claude-opus-4-8","messages":[{"role":"user","content":"inspect this repository"}],"tools":["Bash","mcp__serena__find_symbol"]}`
+		c := newAutopilotProfileTestContext(t, "/v1/messages", body, nil)
+
+		profile := AttachAutopilotRequestProfile(c, scheduler.ChannelKindMessages, "claude-opus-4-8", "completion", "session-test", []byte(body), 0)
+		if !profile.ToolUseNeed {
+			t.Fatal("MCP 工具列表必须设置 ToolUseNeed=true")
+		}
+	})
+
+	t.Run("disabled thinking remains false", func(t *testing.T) {
+		body := `{"model":"claude-sonnet-5","messages":[{"role":"user","content":"hello"}],"thinking":{"type":"disabled"}}`
+		c := newAutopilotProfileTestContext(t, "/v1/messages", body, nil)
+
+		profile := AttachAutopilotRequestProfile(c, scheduler.ChannelKindMessages, "claude-sonnet-5", "completion", "session-test", []byte(body), 0)
+		if profile.ReasoningNeed {
+			t.Fatal("ReasoningNeed = true for disabled thinking")
+		}
+	})
+
+	t.Run("zero Gemini thinking budget remains false", func(t *testing.T) {
+		body := `{"contents":[{"role":"user","parts":[{"text":"hello"}]}],"generationConfig":{"thinkingConfig":{"thinkingBudget":0}}}`
+		c := newAutopilotProfileTestContext(t, "/v1beta/models/gemini-3.5-flash:generateContent", body, nil)
+
+		profile := AttachAutopilotRequestProfile(c, scheduler.ChannelKindGemini, "gemini-3.5-flash", "completion", "session-test", []byte(body), 0)
+		if profile.ReasoningNeed {
+			t.Fatal("ReasoningNeed = true for zero thinking budget")
+		}
+	})
+
+	t.Run("vectors preserves dimensions", func(t *testing.T) {
+		body := `{"model":"text-embedding-3-small","input":"hello","dimensions":1536}`
+		c := newAutopilotProfileTestContext(t, "/v1/embeddings", body, nil)
+
+		profile := AttachAutopilotRequestProfile(c, scheduler.ChannelKindVectors, "text-embedding-3-small", "embedding", "session-test", []byte(body), 1536)
+		if profile.TaskClass != autopilot.TaskClassEmbedding {
+			t.Fatalf("TaskClass = %q, want embedding", profile.TaskClass)
+		}
+		if profile.EmbeddingDimension != 1536 {
+			t.Fatalf("EmbeddingDimension = %d, want 1536", profile.EmbeddingDimension)
+		}
+	})
+}
+
+func TestEnsureAutopilotRequestProfilePreservesAttachedProfile(t *testing.T) {
+	body := `{"model":"claude-sonnet-5","input":"summary"}`
+	c := newAutopilotProfileTestContext(t, "/v1/responses/compact", body, nil)
+	attached := AttachAutopilotRequestProfile(c, scheduler.ChannelKindResponses, "claude-sonnet-5", "summarize", "session-test", []byte(body), 0)
+
+	ensured := EnsureAutopilotRequestProfile(c, scheduler.ChannelKindResponses, "other-model", "completion", "other-session", []byte(body))
+	if ensured.Model != attached.Model || ensured.Operation != attached.Operation || ensured.PromptHash != attached.PromptHash {
+		t.Fatalf("EnsureAutopilotRequestProfile replaced attached profile: got %+v want %+v", ensured, attached)
+	}
+}
+
+func TestAttachAutopilotRequestProfileExtractsClientEffort(t *testing.T) {
+	tests := []struct {
+		name         string
+		kind         scheduler.ChannelKind
+		path         string
+		body         string
+		wantExplicit bool
+		wantEffort   autopilot.EffortLevel
+	}{
+		{
+			name:         "claude thinking disabled is explicit none",
+			kind:         scheduler.ChannelKindMessages,
+			path:         "/v1/messages",
+			body:         `{"model":"claude-sonnet-5","messages":[{"role":"user","content":"hi"}],"thinking":{"type":"disabled"}}`,
+			wantExplicit: true,
+			wantEffort:   autopilot.EffortOff,
+		},
+		{
+			name:         "claude thinking effort is explicit",
+			kind:         scheduler.ChannelKindMessages,
+			path:         "/v1/messages",
+			body:         `{"model":"claude-sonnet-5","messages":[{"role":"user","content":"hi"}],"thinking":{"type":"enabled","effort":"high"}}`,
+			wantExplicit: true,
+			wantEffort:   autopilot.EffortHigh,
+		},
+		{
+			name:         "chat reasoning_effort is explicit",
+			kind:         scheduler.ChannelKindChat,
+			path:         "/v1/chat/completions",
+			body:         `{"model":"gpt-5","messages":[{"role":"user","content":"hi"}],"reasoning_effort":"low"}`,
+			wantExplicit: true,
+			wantEffort:   autopilot.EffortLow,
+		},
+		{
+			name:         "chat reasoning_effort none is explicit off",
+			kind:         scheduler.ChannelKindChat,
+			path:         "/v1/chat/completions",
+			body:         `{"model":"gpt-5","messages":[{"role":"user","content":"hi"}],"reasoning_effort":"none"}`,
+			wantExplicit: true,
+			wantEffort:   autopilot.EffortOff,
+		},
+		{
+			name:         "responses reasoning.effort is explicit",
+			kind:         scheduler.ChannelKindResponses,
+			path:         "/v1/responses",
+			body:         `{"model":"claude-sonnet-5","input":"hi","reasoning":{"effort":"medium"}}`,
+			wantExplicit: true,
+			wantEffort:   autopilot.EffortMedium,
+		},
+		{
+			name:         "gemini thinkingLevel is explicit",
+			kind:         scheduler.ChannelKindGemini,
+			path:         "/v1beta/models/gemini-3.5-flash:generateContent",
+			body:         `{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"thinkingConfig":{"thinkingLevel":"high"}}}`,
+			wantExplicit: true,
+			wantEffort:   autopilot.EffortHigh,
+		},
+		{
+			name:         "no effort field is not declared",
+			kind:         scheduler.ChannelKindMessages,
+			path:         "/v1/messages",
+			body:         `{"model":"claude-sonnet-5","messages":[{"role":"user","content":"hi"}]}`,
+			wantExplicit: false,
+			wantEffort:   "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := newAutopilotProfileTestContext(t, tt.path, tt.body, nil)
+			profile := AttachAutopilotRequestProfile(c, tt.kind, "model", "completion", "session-test", []byte(tt.body), 0)
+			if profile.ClientEffortExplicit != tt.wantExplicit {
+				t.Fatalf("ClientEffortExplicit = %v, want %v", profile.ClientEffortExplicit, tt.wantExplicit)
+			}
+			if profile.ClientEffort != tt.wantEffort {
+				t.Fatalf("ClientEffort = %q, want %q", profile.ClientEffort, tt.wantEffort)
+			}
+		})
+	}
+}
+
+func TestAnalyzeAutopilotPromptExtractsEphemeralRoutingSignals(t *testing.T) {
+	req := decodeAutopilotRequest([]byte(`{
+		"system":"You are a coding assistant",
+		"messages":[
+			{"role":"user","content":"先检查 scheduler.go"},
+			{"role":"assistant","content":"ok"},
+			{"role":"user","content":"定位分布式路由的根因并完成架构重构\ndiff --git a/a.go b/a.go"}
+		],
+		"tools":[{"name":"Read"},{"function":{"name":"apply_patch"}}]
+	}`))
+
+	analysis := analyzeAutopilotPrompt(req, "")
+	if analysis.Complexity != autopilot.TaskComplexityComplex {
+		t.Fatalf("Complexity = %q, want complex", analysis.Complexity)
+	}
+	if analysis.DomainHints.SystemPrompt == "" || !analysis.DomainHints.HasDiffContext {
+		t.Fatalf("unexpected domain hints: %+v", analysis.DomainHints)
+	}
+	if len(analysis.DomainHints.ToolNames) != 2 {
+		t.Fatalf("ToolNames = %v, want 2 entries", analysis.DomainHints.ToolNames)
+	}
+	if len(analysis.DomainHints.FileExtensions) == 0 {
+		t.Fatalf("FileExtensions = %v, want .go", analysis.DomainHints.FileExtensions)
+	}
+}
+
+func TestAttachAutopilotRequestProfileIgnoresHarnessOverheadForTaskDifficulty(t *testing.T) {
+	tools := make([]map[string]interface{}, 0, 12)
+	for i := 0; i < 12; i++ {
+		tools = append(tools, map[string]interface{}{
+			"name":        "tool_" + strconv.Itoa(i),
+			"description": strings.Repeat("tool documentation ", 40),
+		})
+	}
+	bodyValue := map[string]interface{}{
+		"model": "claude-sonnet-5",
+		"messages": []interface{}{map[string]interface{}{
+			"role": "user",
+			"content": []interface{}{
+				map[string]interface{}{
+					"type": "text",
+					"text": "<system-reminder>" + strings.Repeat("generic harness context ", 5_000) + "</system-reminder>",
+				},
+				map[string]interface{}{"type": "text", "text": "请帮我写一段简短的个人介绍"},
+			},
+		}},
+		"tools":    tools,
+		"thinking": map[string]interface{}{"type": "adaptive"},
+	}
+	bodyBytes, err := json.Marshal(bodyValue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := newAutopilotProfileTestContext(t, "/v1/messages", string(bodyBytes), &types.AgentContext{AgentRole: "main"})
+
+	profile := AttachAutopilotRequestProfile(
+		c, scheduler.ChannelKindMessages, "claude-sonnet-5", "completion", "session-test", bodyBytes, 0)
+
+	if profile.EstTokens < 20_000 {
+		t.Fatalf("测试请求未形成足够大的整包上下文: EstTokens=%d", profile.EstTokens)
+	}
+	if profile.Complexity != autopilot.TaskComplexityRoutine || profile.TaskClass != autopilot.TaskClassWorker {
+		t.Fatalf("profile = complexity:%q class:%q, want routine/worker", profile.Complexity, profile.TaskClass)
+	}
+	// 质量档边界随基准数据分布动态漂移（computeQualityTierBoundaries 按全池
+	// 最大间隙划界，基准刷新会整体移动边界），期望不写死档位：reasoning 需求把
+	// routine 的 normal 抬到 high 后再被模型自身档位钳制，即 min(high, 模型档)。
+	sonnetTier := autopilot.ModelProfileQualityTier("claude-sonnet-5", autopilot.InferModelFamily("claude-sonnet-5", ""))
+	if wantTarget := clampTargetToModelTier(autopilot.QualityTierHigh, sonnetTier); profile.QualityTarget != wantTarget {
+		t.Fatalf("QualityTarget = %q, want %q (sonnet-5 tier=%q)", profile.QualityTarget, wantTarget, sonnetTier)
+	}
+	if !profile.ToolUseNeed || !profile.ReasoningNeed {
+		t.Fatalf("能力下界丢失: tools=%v reasoning=%v", profile.ToolUseNeed, profile.ReasoningNeed)
+	}
+}
+
+func TestAttachAutopilotRequestProfileRoutesByCurrentTaskDifficulty(t *testing.T) {
+	// 质量档边界随基准数据分布动态漂移（2026-08-31 刷新曾把 opus-5 从 premium 降到
+	// high、sonnet-5 从 normal 降到 low，而两者自身分数未变），期望不写死档位，
+	// 改为与运行时模型档位自洽：trivial/routine 的推导目标不得越过模型自身档位
+	// 钳制，complex(supervisor) 分支直接取模型自身档位。
+	opusTier := autopilot.ModelProfileQualityTier("claude-opus-5", autopilot.InferModelFamily("claude-opus-5", ""))
+	if opusTier == "" {
+		t.Fatal("claude-opus-5 质量档不可为空，无法构造自洽期望")
+	}
+	tests := []struct {
+		name           string
+		prompt         string
+		wantComplexity autopilot.TaskComplexity
+		wantClass      autopilot.TaskClass
+		wantTarget     autopilot.QualityTier
+	}{
+		{name: "trivial", prompt: "hello", wantComplexity: autopilot.TaskComplexityTrivial, wantClass: autopilot.TaskClassLightweight, wantTarget: autopilot.QualityTierLow},
+		{name: "routine", prompt: "实现一个分页查询并补充单元测试", wantComplexity: autopilot.TaskComplexityRoutine, wantClass: autopilot.TaskClassWorker, wantTarget: clampTargetToModelTier(autopilot.QualityTierNormal, opusTier)},
+		{name: "complex", prompt: "定位分布式调度的根因并重构整体架构", wantComplexity: autopilot.TaskComplexityComplex, wantClass: autopilot.TaskClassSupervisor, wantTarget: opusTier},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := `{"model":"claude-opus-5","messages":[{"role":"user","content":` + strconv.Quote(tt.prompt) + `}]}`
+			c := newAutopilotProfileTestContext(t, "/v1/messages", body, nil)
+			profile := AttachAutopilotRequestProfile(c, scheduler.ChannelKindMessages, "claude-opus-5", "completion", "session-test", []byte(body), 0)
+
+			if profile.Complexity != tt.wantComplexity || profile.TaskClass != tt.wantClass || profile.QualityTarget != tt.wantTarget {
+				t.Fatalf("profile = complexity:%q class:%q target:%q", profile.Complexity, profile.TaskClass, profile.QualityTarget)
+			}
+		})
+	}
+}
+
+func TestAttachAutopilotRequestProfileRoutingHeaders(t *testing.T) {
+	t.Run("scenario and cost preference headers", func(t *testing.T) {
+		body := `{"model":"gpt-5.6-luna","messages":[{"role":"user","content":"hello"}]}`
+		c := newAutopilotProfileTestContext(t, "/v1/messages", body, nil)
+		c.Request.Header.Set("X-Routing-Scenario", "daily_dev")
+		c.Request.Header.Set("X-Cost-Preference", "cost_first")
+
+		profile := AttachAutopilotRequestProfile(c, scheduler.ChannelKindMessages, "gpt-5.6-luna", "completion", "session-test", []byte(body), 0)
+		if profile.ScenarioPreset == nil || profile.ScenarioPreset.Key != "daily_dev" {
+			t.Fatalf("场景头未生效: %+v", profile.ScenarioPreset)
+		}
+		if profile.CostPreferenceOverride != "cost_first" {
+			t.Fatalf("价格偏好头未生效: %q", profile.CostPreferenceOverride)
+		}
+		// daily_dev 场景质量目标 normal 应跳过 luna(low) 的 QualityNeed 钳制
+		if profile.QualityTarget != autopilot.QualityTierNormal {
+			t.Fatalf("QualityTarget = %q, want normal", profile.QualityTarget)
+		}
+	})
+
+	t.Run("invalid headers ignored", func(t *testing.T) {
+		body := `{"model":"gpt-5.6-luna","messages":[{"role":"user","content":"hello"}]}`
+		c := newAutopilotProfileTestContext(t, "/v1/messages", body, nil)
+		c.Request.Header.Set("X-Routing-Scenario", "bogus-scenario")
+		c.Request.Header.Set("X-Cost-Preference", "garbage")
+
+		profile := AttachAutopilotRequestProfile(c, scheduler.ChannelKindMessages, "gpt-5.6-luna", "completion", "session-test", []byte(body), 0)
+		if profile.ScenarioPreset != nil {
+			t.Fatalf("非法场景头应被忽略: %+v", profile.ScenarioPreset)
+		}
+		if profile.CostPreferenceOverride != "" {
+			t.Fatalf("非法价格偏好头应被忽略: %q", profile.CostPreferenceOverride)
+		}
+	})
+
+	t.Run("header override disabled via provider", func(t *testing.T) {
+		disabled := false
+		SetScenarioConfigProvider(func() config.ScenarioRoutingConfig {
+			return config.ScenarioRoutingConfig{HeaderOverrideEnabled: &disabled}
+		})
+		t.Cleanup(func() { SetScenarioConfigProvider(nil) })
+
+		body := `{"model":"gpt-5.6-luna","messages":[{"role":"user","content":"hello"}]}`
+		c := newAutopilotProfileTestContext(t, "/v1/messages", body, nil)
+		c.Request.Header.Set("X-Routing-Scenario", "hard_problem")
+
+		profile := AttachAutopilotRequestProfile(c, scheduler.ChannelKindMessages, "gpt-5.6-luna", "completion", "session-test", []byte(body), 0)
+		if profile.ScenarioPreset != nil {
+			t.Fatalf("头覆盖被禁用时不应命中场景: %+v", profile.ScenarioPreset)
+		}
+	})
+
+	t.Run("global scenario via provider", func(t *testing.T) {
+		enabled := true
+		SetScenarioConfigProvider(func() config.ScenarioRoutingConfig {
+			return config.ScenarioRoutingConfig{Mode: "batch_cheap", HeaderOverrideEnabled: &enabled}
+		})
+		t.Cleanup(func() { SetScenarioConfigProvider(nil) })
+
+		body := `{"model":"gpt-5.6-luna","messages":[{"role":"user","content":"hello"}]}`
+		c := newAutopilotProfileTestContext(t, "/v1/messages", body, nil)
+
+		profile := AttachAutopilotRequestProfile(c, scheduler.ChannelKindMessages, "gpt-5.6-luna", "completion", "session-test", []byte(body), 0)
+		if profile.ScenarioPreset == nil || profile.ScenarioPreset.Key != "batch_cheap" {
+			t.Fatalf("全局场景未生效: %+v", profile.ScenarioPreset)
+		}
+		if profile.ScenarioPreset.EffortCeil != autopilot.EffortMedium {
+			t.Fatalf("batch_cheap 应有 medium 上限: %+v", profile.ScenarioPreset)
+		}
+	})
+}
+
+// clampTargetToModelTier 复现 ResolveQualityTarget 的档位钳制语义：
+// 复杂度推导出的质量目标不得超过模型自身档位（QualityNeed），取两者中较低者。
+// 用于把测试期望与随基准数据动态漂移的模型档位解耦。
+func clampTargetToModelTier(target, modelTier autopilot.QualityTier) autopilot.QualityTier {
+	rank := map[autopilot.QualityTier]int{
+		autopilot.QualityTierLow:     0,
+		autopilot.QualityTierNormal:  1,
+		autopilot.QualityTierHigh:    2,
+		autopilot.QualityTierPremium: 3,
+	}
+	if modelTier != "" && rank[modelTier] < rank[target] {
+		return modelTier
+	}
+	return target
+}

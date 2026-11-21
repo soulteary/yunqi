@@ -1,0 +1,534 @@
+import { describe, expect, it } from 'vitest'
+
+import type { Channel, ChannelMetrics, ChannelRecentActivity, ChannelsResponse } from '@/services/api'
+import { buildUnifiedChannelsData, buildUnifiedRecentActivity, buildUnifiedReorderPayloads, normalizeChannelStatus, PartialRouteOperationError, resolveChannelStatusMutationRoutes, resolveChannelRecoveryRoutes, routeHasOnlyDisabledKeys, summarizeSettledRouteOperations, withRouteKindMetrics, type LlmChannelKind } from './unifiedChannels'
+
+const channel = (
+  name: string,
+  accountUid: string,
+  index: number,
+  apiKeys: string[],
+  overrides: Partial<Channel> = {},
+): Channel => ({
+  name,
+  accountUid,
+  channelUid: `ch-${index}`,
+  providerId: 'mimo',
+  autoManaged: true,
+  index,
+  serviceType: name.endsWith('-claude') ? 'claude' : 'openai',
+  baseUrl: 'https://example.com',
+  apiKeys,
+  ...overrides,
+})
+
+const response = (channels: Channel[]): ChannelsResponse => ({ channels, current: -1 })
+
+describe('logical channel display status', () => {
+  const groupedStatus = (...statuses: Array<Channel['status']>) => {
+    const kinds: LlmChannelKind[] = ['messages', 'chat', 'responses', 'gemini']
+    const data = Object.fromEntries(kinds.map(kind => [kind, response([])])) as Record<LlmChannelKind, ChannelsResponse>
+    statuses.forEach((status, index) => {
+      const kind = kinds[index]
+      data[kind] = response([channel(`kimi-${kind}`, 'acct-status', index, ['sk-status'], { status })])
+    })
+    return buildUnifiedChannelsData(data).channels[0]
+  }
+
+  it.each([
+    [undefined, 'active'],
+    ['', 'active'],
+    ['healthy', 'active'],
+    ['active', 'active'],
+    ['suspended', 'suspended'],
+    ['disabled', 'disabled'],
+    ['error', 'error'],
+    ['unknown', 'unknown'],
+  ] as const)('统一状态 %s 归一化为 %s', (status, expected) => {
+    expect(normalizeChannelStatus(status)).toBe(expected)
+    expect(groupedStatus(status, status).status).toBe(expected)
+  })
+
+  it.each([
+    ['active', 'suspended'],
+    ['active', 'disabled'],
+    ['suspended', 'disabled'],
+    ['healthy', 'suspended'],
+    [undefined, 'disabled'],
+  ] as const)('混合状态 %s + %s 聚合为 partial', (left, right) => {
+    expect(groupedStatus(left, right).status).toBe('partial')
+  })
+
+  it('Kimi 类 messages 暂停而 chat/responses 活跃时显示部分可用并保留物理状态', () => {
+    const logicalChannel = groupedStatus('suspended', 'active', 'active')
+    expect(logicalChannel.status).toBe('partial')
+    expect(logicalChannel.protocolRoutes?.map(route => route.status)).toEqual([
+      'suspended',
+      'active',
+      'active',
+    ])
+  })
+})
+
+describe('channel status mutations', () => {
+  const logicalChannel = (): Channel => ({
+    ...channel('kimi-claude', 'acct-kimi', 0, ['sk-kimi'], { status: 'partial' }),
+    protocolRoutes: [
+      { kind: 'messages', index: 0, name: 'kimi-claude', serviceType: 'claude', status: 'suspended' },
+      { kind: 'chat', index: 1, name: 'kimi-chat', serviceType: 'openai', status: 'active' },
+      { kind: 'responses', index: 2, name: 'kimi-codex', serviceType: 'responses', status: 'active' },
+    ],
+  })
+
+  it('状态更新只生成 transport status，不会把 partial 发送给 API', () => {
+    expect(resolveChannelStatusMutationRoutes(logicalChannel(), 'suspended')).toEqual([
+      { kind: 'messages', index: 0, status: 'suspended' },
+      { kind: 'chat', index: 1, status: 'suspended' },
+      { kind: 'responses', index: 2, status: 'suspended' },
+    ])
+    expect(() => resolveChannelStatusMutationRoutes(logicalChannel(), 'partial')).toThrow(
+      'Display-only channel status cannot be persisted: partial',
+    )
+  })
+
+  it('暂停 active+disabled 的部分可用渠道时保留 disabled 路由', () => {
+    const mixed = logicalChannel()
+    mixed.protocolRoutes![0].status = 'active'
+    mixed.protocolRoutes![1].status = 'disabled'
+    expect(resolveChannelStatusMutationRoutes(mixed, 'suspended')).toEqual([
+      { kind: 'messages', index: 0, status: 'suspended' },
+      { kind: 'responses', index: 2, status: 'suspended' },
+    ])
+  })
+
+  it('显式禁用逻辑渠道时 fan-out 到全部物理路由', () => {
+    const mixed = logicalChannel()
+    mixed.protocolRoutes![1].status = 'disabled'
+    expect(resolveChannelStatusMutationRoutes(mixed, 'disabled')).toEqual([
+      { kind: 'messages', index: 0, status: 'disabled' },
+      { kind: 'chat', index: 1, status: 'disabled' },
+      { kind: 'responses', index: 2, status: 'disabled' },
+    ])
+  })
+})
+
+describe('settled route operations', () => {
+  it('保留部分成功与失败计数，供组件刷新后提示部分失败', () => {
+    const summary = summarizeSettledRouteOperations([
+      { status: 'fulfilled', value: 2 },
+      { status: 'rejected', reason: new Error('chat failed') },
+      { status: 'fulfilled', value: 1 },
+    ])
+    expect(summary).toMatchObject({ fulfilled: [2, 1], successCount: 2, failureCount: 1, totalCount: 3 })
+    const error = new PartialRouteOperationError(summary)
+    expect(error).toMatchObject({ successCount: 2, failureCount: 1, totalCount: 3 })
+    expect(error.message).toContain('chat failed')
+  })
+})
+
+describe('withRouteKindMetrics', () => {
+  const metric = (routeKind?: Channel['routeKind']): ChannelMetrics => ({
+    channelIndex: 1,
+    routeKind,
+    requestCount: 0,
+    successCount: 0,
+    failureCount: 0,
+    successRate: 0,
+    errorRate: 0,
+    consecutiveFailures: 0,
+    latency: 0,
+  })
+
+  it('routeKind 已存在时复用指标数组和对象引用', () => {
+    const metrics = [metric('messages')]
+    expect(withRouteKindMetrics('messages', metrics)).toBe(metrics)
+  })
+
+  it('仅为旧格式指标补充 routeKind', () => {
+    const metrics = [metric()]
+    const result = withRouteKindMetrics('chat', metrics)
+    expect(result).not.toBe(metrics)
+    expect(result[0]).toEqual({ ...metrics[0], routeKind: 'chat' })
+  })
+})
+
+describe('buildUnifiedChannelsData account grouping', () => {
+  it('优先按 accountUid 聚合多协议渠道，不依赖 Key 指纹', () => {
+    const data: Record<LlmChannelKind, ChannelsResponse> = {
+      messages: response([channel('mimo-main-claude', 'acct-main', 0, ['sk-a'])]),
+      chat: response([channel('mimo-main-chat', 'acct-main', 1, ['sk-a', 'sk-b'])]),
+      responses: response([channel('mimo-main-codex', 'acct-main', 2, ['sk-b'])]),
+      gemini: response([channel('mimo-main-gemini', 'acct-main', 3, ['sk-a'])]),
+    }
+
+    const result = buildUnifiedChannelsData(data)
+    expect(result.channels).toHaveLength(1)
+    expect(result.channels[0].accountUid).toBe('acct-main')
+    expect(result.channels[0].protocolCapsules?.map(item => item.label)).toEqual(['CLAUDE', 'CHAT'])
+    expect(result.channels[0].protocolRoutes?.map(item => item.kind)).toEqual(['messages', 'chat', 'responses', 'gemini'])
+    expect(result.channels[0].protocolRoutes?.map(item => item.status)).toEqual([undefined, undefined, undefined, undefined])
+    expect(result.channels[0].protocolRoutes?.map(item => item.apiKeys)).toEqual([
+      ['sk-a'],
+      ['sk-a', 'sk-b'],
+      ['sk-b'],
+      ['sk-a'],
+    ])
+  })
+
+  it('保留物理路由各自的 Key 配置与拉黑状态，避免共享 Key 误判', () => {
+    const disabled = {
+      key: 'sk-shared',
+      reason: 'authentication_error',
+      message: 'invalid only on messages',
+      disabledAt: '2026-07-28T00:00:00Z',
+    }
+    const data: Record<LlmChannelKind, ChannelsResponse> = {
+      messages: response([channel('kimi-claude', 'acct-route-keys', 0, [], {
+        status: 'active',
+        disabledApiKeys: [disabled],
+        apiKeyConfigs: [{ key: 'sk-shared', enabled: true }],
+      })]),
+      chat: response([channel('kimi-chat', 'acct-route-keys', 1, ['sk-shared'], {
+        status: 'active',
+        apiKeyConfigs: [{ key: 'sk-shared', enabled: true }],
+      })]),
+      responses: response([]),
+      gemini: response([]),
+    }
+
+    const routes = buildUnifiedChannelsData(data).channels[0].protocolRoutes!
+    expect(routes[0]).toMatchObject({
+      kind: 'messages',
+      apiKeys: [],
+      apiKeyConfigs: [{ key: 'sk-shared', enabled: true }],
+      disabledApiKeys: [disabled],
+    })
+    expect(routes[1]).toMatchObject({
+      kind: 'chat',
+      apiKeys: ['sk-shared'],
+      apiKeyConfigs: [{ key: 'sk-shared', enabled: true }],
+      disabledApiKeys: undefined,
+    })
+    expect(routeHasOnlyDisabledKeys(routes[0])).toBe(true)
+    expect(routeHasOnlyDisabledKeys(routes[1])).toBe(false)
+  })
+
+  it('聚合账号合并各协议凭证并按全部路由计算状态', () => {
+    const data: Record<LlmChannelKind, ChannelsResponse> = {
+      messages: response([channel('kimi-claude', 'acct-kimi', 0, [], {
+        status: 'suspended',
+      })]),
+      chat: response([channel('kimi-chat', 'acct-kimi', 1, ['sk-kimi', 'sk-disabled'], {
+        status: 'active',
+        apiKeyConfigs: [{ key: 'sk-kimi', credentialUid: 'cred-kimi' }],
+        disabledApiKeys: [{
+          key: 'sk-disabled',
+          reason: 'authentication_error',
+          message: 'invalid key',
+          disabledAt: '2026-07-28T00:00:00Z',
+        }],
+      })]),
+      responses: response([]),
+      gemini: response([]),
+    }
+
+    const [logicalChannel] = buildUnifiedChannelsData(data).channels
+    expect(logicalChannel.apiKeys).toEqual(['sk-kimi', 'sk-disabled'])
+    expect(logicalChannel.apiKeyConfigs).toEqual([
+      { key: 'sk-kimi', credentialUid: 'cred-kimi' },
+    ])
+    expect(logicalChannel.disabledApiKeys).toEqual([{
+      key: 'sk-disabled',
+      reason: 'authentication_error',
+      message: 'invalid key',
+      disabledAt: '2026-07-28T00:00:00Z',
+    }])
+    expect(logicalChannel.status).toBe('partial')
+  })
+
+  it('合并同一 Key 的配置时保留其他协议路由已有的分组倍率', () => {
+    const data: Record<LlmChannelKind, ChannelsResponse> = {
+      messages: response([channel('site-claude', 'acct-shared', 0, ['sk-shared'], {
+        apiKeyConfigs: [{ key: 'sk-shared', keyUid: 'uid-shared', groupMultiplier: 0.12 }],
+      })]),
+      chat: response([channel('site-chat', 'acct-shared', 1, ['sk-shared'], {
+        apiKeyConfigs: [{ key: 'sk-shared', keyUid: 'uid-shared' }],
+      })]),
+      responses: response([]),
+      gemini: response([]),
+    }
+
+    const logicalChannel = buildUnifiedChannelsData(data).channels[0]
+    expect(logicalChannel.apiKeyConfigs).toEqual([
+      { key: 'sk-shared', keyUid: 'uid-shared', groupMultiplier: 0.12 },
+    ])
+  })
+
+  it('主路由显式清空倍率时不被兄弟路由旧值覆盖', () => {
+    const data: Record<LlmChannelKind, ChannelsResponse> = {
+      messages: response([channel('site-claude', 'acct-shared', 0, ['sk-shared'], {
+        apiKeyConfigs: [{ key: 'sk-shared', keyUid: 'uid-shared', groupMultiplier: null }],
+      })]),
+      chat: response([channel('site-chat', 'acct-shared', 1, ['sk-shared'], {
+        apiKeyConfigs: [{ key: 'sk-shared', keyUid: 'uid-shared', groupMultiplier: 0.8 }],
+      })]),
+      responses: response([]),
+      gemini: response([]),
+    }
+
+    expect(buildUnifiedChannelsData(data).channels[0].apiKeyConfigs).toEqual([
+      { key: 'sk-shared', keyUid: 'uid-shared', groupMultiplier: null },
+    ])
+  })
+
+  it('保留各协议路由状态供聚合渠道恢复使用', () => {
+    const data: Record<LlmChannelKind, ChannelsResponse> = {
+      messages: response([channel('mimo-main-claude', 'acct-main', 0, ['sk-a'], { status: 'suspended' })]),
+      chat: response([channel('mimo-main-chat', 'acct-main', 1, ['sk-a'], { status: 'active' })]),
+      responses: response([channel('mimo-main-codex', 'acct-main', 2, ['sk-a'], { status: 'disabled' })]),
+      gemini: response([]),
+    }
+
+    const logicalChannel = buildUnifiedChannelsData(data).channels[0]
+    expect(logicalChannel.protocolRoutes?.map(route => route.status)).toEqual([
+      'suspended',
+      'active',
+      'disabled',
+    ])
+    expect(resolveChannelRecoveryRoutes(logicalChannel)).toEqual([
+      { kind: 'messages', index: 0, status: 'suspended' },
+      { kind: 'chat', index: 1, status: 'active' },
+      { kind: 'responses', index: 2, status: 'disabled' },
+    ])
+  })
+
+  it('相同 provider 和名称下不同 accountUid 不应合并', () => {
+    const data: Record<LlmChannelKind, ChannelsResponse> = {
+      messages: response([
+        channel('mimo-main-claude', 'acct-a', 0, ['sk-a']),
+        channel('mimo-main-claude', 'acct-b', 1, ['sk-b']),
+      ]),
+      chat: response([]),
+      responses: response([]),
+      gemini: response([]),
+    }
+
+    expect(buildUnifiedChannelsData(data).channels).toHaveLength(2)
+  })
+
+  it('按 accountUid 聚合自定义自动托管的全部成功协议', () => {
+    const custom = (name: string, index: number, serviceType: Channel['serviceType']): Channel =>
+      channel(name, 'acct-fastaitoken', index, ['sk-fastaitoken'], { providerId: '', autoManaged: true, serviceType })
+    const data: Record<LlmChannelKind, ChannelsResponse> = {
+      messages: response([{
+        ...custom('fastaitoken-com-test-claude', 0, 'claude'),
+        supportedModels: ['gpt-5.6-sol', 'gpt-5.6-terra'],
+      }]),
+      chat: response([{
+        ...custom('fastaitoken-com-test-chat', 0, 'openai'),
+        supportedModels: ['gpt-5.6-sol'],
+      }]),
+      responses: response([{
+        ...custom('fastaitoken-com-test-codex', 0, 'responses'),
+        supportedModels: ['codex-auto-review', 'gpt-5.6-sol'],
+      }]),
+      gemini: response([]),
+    }
+
+    const result = buildUnifiedChannelsData(data)
+    expect(result.channels).toHaveLength(1)
+    expect(result.channels[0].name).toBe('fastaitoken-com-test')
+    expect(result.channels[0].protocolCapsules?.map(item => item.label)).toEqual(['CLAUDE', 'CHAT', 'CODEX'])
+    expect(result.channels[0].protocolRoutes?.map(item => item.kind)).toEqual(['messages', 'chat', 'responses'])
+    expect(Object.fromEntries(
+      result.channels[0].protocolRoutes?.map(route => [route.kind, route.supportedModels]) ?? [],
+    )).toEqual({
+      messages: ['gpt-5.6-sol', 'gpt-5.6-terra'],
+      chat: ['gpt-5.6-sol'],
+      responses: ['codex-auto-review', 'gpt-5.6-sol'],
+    })
+  })
+
+  it('按迁移后的 accountUid 聚合普通同站点渠道', () => {
+    const data: Record<LlmChannelKind, ChannelsResponse> = {
+      messages: response([channel('ai-prism-messages', 'acct-prism', 38, ['sk-messages'], { autoManaged: false, serviceType: 'responses' })]),
+      chat: response([]),
+      responses: response([channel('ai-prism-responses', 'acct-prism', 30, ['sk-responses'], { autoManaged: false, serviceType: 'responses' })]),
+      gemini: response([channel('prism-gemini', 'acct-prism', 9, ['sk-gemini'], { autoManaged: false, serviceType: 'gemini' })]),
+    }
+
+    const result = buildUnifiedChannelsData(data)
+    expect(result.channels).toHaveLength(1)
+    expect(result.channels[0].protocolRoutes?.map(item => item.kind)).toEqual(['messages', 'responses', 'gemini'])
+    expect(result.channels[0].apiKeys).toEqual(['sk-messages', 'sk-responses', 'sk-gemini'])
+  })
+
+  it('协议标签只展示上游实际提供的 serviceType', () => {
+    const data: Record<LlmChannelKind, ChannelsResponse> = {
+      messages: response([channel('volcengine-claude', 'acct-volcengine', 0, ['ark-key'], {
+        providerId: 'volcengine',
+        serviceType: 'claude',
+      })]),
+      chat: response([channel('volcengine-chat', 'acct-volcengine', 0, ['ark-key'], {
+        providerId: 'volcengine',
+        serviceType: 'openai',
+      })]),
+      responses: response([channel('volcengine-codex', 'acct-volcengine', 0, ['ark-key'], {
+        providerId: 'volcengine',
+        serviceType: 'openai',
+      })]),
+      gemini: response([channel('volcengine-gemini', 'acct-volcengine', 0, ['ark-key'], {
+        providerId: 'volcengine',
+        serviceType: 'openai',
+      })]),
+    }
+
+    const [volcengine] = buildUnifiedChannelsData(data).channels
+    expect(volcengine.protocolCapsules?.map(item => item.label)).toEqual(['CLAUDE', 'CHAT'])
+    expect(volcengine.protocolRoutes).toHaveLength(4)
+    expect(volcengine.protocolRoutes?.every(route => route.supportedModels === undefined)).toBe(true)
+  })
+
+  it('新增单协议渠道置顶后保持多协议账号的既有相对顺序', () => {
+    const data: Record<LlmChannelKind, ChannelsResponse> = {
+      messages: response([
+        channel('localhost-37zq4d', 'acct-local', 0, ['sk-local'], { providerId: '', priority: 0 }),
+        channel('volcengine-claude', 'acct-volcengine', 1, ['sk-volcengine'], { providerId: 'volcengine', priority: 1 }),
+        channel('mimo-claude', 'acct-mimo', 2, ['sk-mimo'], { priority: 2 }),
+      ]),
+      chat: response([
+        channel('volcengine-chat', 'acct-volcengine', 0, ['sk-volcengine'], { providerId: 'volcengine', priority: 0 }),
+        channel('mimo-chat', 'acct-mimo', 1, ['sk-mimo'], { priority: 1 }),
+        channel('desktop-deepseek-chat', 'acct-deepseek', 34, ['sk-deepseek'], {
+          autoManaged: false,
+          providerId: '',
+          priority: 1,
+        }),
+      ]),
+      responses: response([
+        channel('volcengine-codex', 'acct-volcengine', 0, ['sk-volcengine'], { providerId: 'volcengine', priority: 0 }),
+        channel('mimo-codex', 'acct-mimo', 1, ['sk-mimo'], { priority: 1 }),
+        channel('aixoras-xanqfm', 'acct-aixoras', 2, ['sk-aixoras'], {
+          autoManaged: false,
+          providerId: '',
+          priority: 1,
+        }),
+      ]),
+      gemini: response([
+        channel('volcengine-gemini', 'acct-volcengine', 0, ['sk-volcengine'], { providerId: 'volcengine', priority: 0 }),
+        channel('mimo-gemini', 'acct-mimo', 1, ['sk-mimo'], { priority: 1 }),
+      ]),
+    }
+
+    const channels = buildUnifiedChannelsData(data).channels
+    const sorted = [...channels].sort((a, b) => (a.priority ?? a.index) - (b.priority ?? b.index))
+
+    expect(sorted.slice(0, 5).map(item => item.name)).toEqual([
+      'localhost-37zq4d',
+      'volcengine',
+      'mimo',
+      'desktop-deepseek-chat',
+      'aixoras-xanqfm',
+    ])
+    expect(channels.find(item => item.name === 'mimo')?.priority).toBe(1)
+  })
+
+  it('在列表头部插入渠道时保持既有逻辑渠道的展示 key 稳定', () => {
+    const original: Record<LlmChannelKind, ChannelsResponse> = {
+      messages: response([
+        channel('volcengine-claude', 'acct-volcengine', 0, ['sk-volcengine'], { providerId: 'volcengine' }),
+        channel('mimo-claude', 'acct-mimo', 1, ['sk-mimo']),
+      ]),
+      chat: response([]),
+      responses: response([]),
+      gemini: response([]),
+    }
+    const withNewChannel: Record<LlmChannelKind, ChannelsResponse> = {
+      ...original,
+      messages: response([
+        channel('localhost-37zq4d', 'acct-local', 0, ['sk-local'], { providerId: '' }),
+        ...original.messages.channels,
+      ]),
+    }
+
+    const originalMimo = buildUnifiedChannelsData(original).channels.find(item => item.name === 'mimo')
+    const nextMimo = buildUnifiedChannelsData(withNewChannel).channels.find(item => item.name === 'mimo')
+
+    expect(nextMimo?.displayKey).toBe(originalMimo?.displayKey)
+  })
+
+  it('聚合逻辑渠道全部协议的最近请求活动', () => {
+    const data: Record<LlmChannelKind, ChannelsResponse> = {
+      messages: response([channel('mimo-claude', 'acct-mimo', 0, ['sk-mimo'])]),
+      chat: response([channel('mimo-chat', 'acct-mimo', 1, ['sk-mimo'])]),
+      responses: response([]),
+      gemini: response([]),
+    }
+    const [logicalChannel] = buildUnifiedChannelsData(data).channels
+    const activity = (
+      channelIndex: number,
+      requestCount: number,
+      successCount: number,
+      failureCount: number,
+    ): ChannelRecentActivity => ({
+      channelIndex,
+      segments: {
+        4: { requestCount, successCount, failureCount, inputTokens: requestCount * 10, outputTokens: requestCount * 2 },
+      },
+      totalSegs: 150,
+      rpm: requestCount / 15,
+      tpm: requestCount * 2 / 15,
+    })
+
+    const [merged] = buildUnifiedRecentActivity([logicalChannel], {
+      messages: [activity(0, 2, 2, 0)],
+      chat: [activity(1, 3, 2, 1)],
+      responses: [],
+      gemini: [],
+    })
+
+    expect(merged.channelIndex).toBe(0)
+    expect(merged.routeKind).toBe('messages')
+    expect(merged.segments[4]).toEqual({
+      requestCount: 5,
+      successCount: 4,
+      failureCount: 1,
+      inputTokens: 50,
+      outputTokens: 10,
+    })
+    expect(merged.rpm).toBeCloseTo(5 / 15)
+    expect(merged.tpm).toBeCloseTo(10 / 15)
+  })
+})
+
+describe('buildUnifiedReorderPayloads', () => {
+  it('priority 使用统一列表全局位次而非各协议组内名次', () => {
+    const data: Record<LlmChannelKind, ChannelsResponse> = {
+      messages: response([
+        channel('a-claude', 'acct-a', 0, ['sk-a']),
+        channel('b-claude', 'acct-b', 1, ['sk-b']),
+      ]),
+      chat: response([]),
+      responses: response([]),
+      gemini: response([channel('g-gemini', 'acct-g', 0, ['sk-g'], { serviceType: 'gemini' })]),
+    }
+    const unified = buildUnifiedChannelsData(data).channels
+    const a = unified.find(c => c.protocolRoutes?.some(r => r.kind === 'messages' && r.index === 0))!
+    const b = unified.find(c => c.protocolRoutes?.some(r => r.kind === 'messages' && r.index === 1))!
+    const g = unified.find(c => c.protocolRoutes?.some(r => r.kind === 'gemini'))!
+
+    // 模拟拖拽后的统一列表顺序：a, g, b
+    const payloads = buildUnifiedReorderPayloads([a, g, b])
+
+    // messages：a 位次 1，b 位次 3（中间隔着 gemini 渠道）
+    expect(payloads.get('messages')).toEqual({ order: [0, 1], priorities: [1, 3] })
+    // gemini：g 位次 2。若按组内名次编号会得到 1，刷新后 min(priority) 会把 g 提到最前
+    expect(payloads.get('gemini')).toEqual({ order: [0], priorities: [2] })
+    expect(payloads.has('chat')).toBe(false)
+  })
+
+  it('无 protocolRoutes 的渠道不产生载荷', () => {
+    const payloads = buildUnifiedReorderPayloads([{ name: 'plain', index: 0 } as Channel])
+    expect(payloads.size).toBe(0)
+  })
+})

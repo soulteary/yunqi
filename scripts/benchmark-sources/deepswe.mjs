@@ -1,0 +1,319 @@
+/**
+ * deepswe 数据抓取器
+ *
+ * 从 https://deepswe.datacurve.ai 抓取 leaderboard 数据。
+ *
+ * 数据来源：
+ * - v1.1: /artifacts/v1.1/leaderboard-live.json (live leaderboard, 持续更新)
+ * - v1:   /artifacts/v1/leaderboard.json (frozen, May 2026)
+ *
+ * 数据结构：
+ * - rows: [{model, harness, reasoning_effort, pass_rate, pass_at_1, pass_at_4, ...}]
+ * - 每个模型可能有多个 harness + reasoning_effort 组合
+ */
+
+import { fetchWithTimeout } from './http.mjs'
+import { cachedFetch, cacheResponseData } from './http-cache.mjs'
+import { warnNewModelCandidates } from './mapper.mjs'
+
+const BASE_URL = 'https://deepswe.datacurve.ai'
+
+/**
+ * 获取 deepswe leaderboard 数据
+ * @param {string} version - 'v1.1' 或 'v1'
+ * @returns {Promise<Object>}
+ */
+export async function fetchLeaderboard(version = 'v1.1') {
+  const endpoint = version === 'v1.1' ? 'leaderboard-live' : 'leaderboard'
+  const url = `${BASE_URL}/artifacts/${version}/${endpoint}.json`
+
+  console.log(`[deepswe] Fetching ${url}`)
+
+  const result = await cachedFetch(url, {
+    headers: {
+      'User-Agent': 'ccx-benchmark-updater/1.0',
+      Accept: 'application/json',
+    },
+  })
+
+  if (result.cached) {
+    console.log(`[deepswe] ${url} → 304 Not Modified, using cached data`)
+    return result.data
+  }
+
+  const data = await result.response.json()
+  cacheResponseData(url, data)
+  return data
+}
+
+/**
+ * 获取 v1-delta 数据 (v1 vs v1.1 对比)
+ * @returns {Promise<Object>}
+ */
+export async function fetchV1Delta() {
+  const url = `${BASE_URL}/artifacts/v1.1/v1-delta.json`
+
+  console.log(`[deepswe] Fetching ${url}`)
+
+  const result = await cachedFetch(url, {
+    headers: {
+      'User-Agent': 'ccx-benchmark-updater/1.0',
+      Accept: 'application/json',
+    },
+  })
+
+  if (result.cached) {
+    console.log(`[deepswe] ${url} → 304 Not Modified, using cached data`)
+    return result.data
+  }
+
+  const data = await result.response.json()
+  cacheResponseData(url, data)
+  return data
+}
+
+/**
+ * 从 leaderboard 数据中提取每个模型的最佳表现
+ *
+ * 策略：对每个模型，取 pass_at_1 最高的记录
+ * （也可以考虑取 pass_at_4 最高，但 pass_at_1 更能反映实际使用体验）
+ *
+ * @param {Object} data - leaderboard JSON 数据
+ * @param {Object} modelMap - deepswe 模型名 -> CCX canonicalModel 映射
+ * @returns {Array} - [{canonicalModel, passRate, passAt1, passAt4, harness, reasoningEffort, nAttempted, nTasks, source, capturedAt}]
+ */
+export function extractBestPerModel(data, modelMap) {
+  const rows = data.rows || []
+  const bestPerModel = new Map()
+
+  for (const row of rows) {
+    const deepsweModel = row.model
+    const canonical = modelMap[deepsweModel]
+
+    if (!canonical) {
+      continue // 跳过未映射的模型
+    }
+
+    const existing = bestPerModel.get(canonical)
+    const score = row.pass_at_1 ?? row.pass_rate ?? 0
+
+    if (!existing || score > existing.score) {
+      bestPerModel.set(canonical, {
+        canonicalModel: canonical,
+        deepsweModel,
+        score,
+        passRate: row.pass_rate,
+        passAt1: row.pass_at_1,
+        passAt4: row.pass_at_4,
+        harness: row.harness,
+        reasoningEffort: row.reasoning_effort,
+        nAttempted: row.n_attempted,
+        nTasks: row.n_tasks_attempted,
+        nTasksPassed: row.n_tasks_passed_any,
+        ciLo: row.ci_lo,
+        ciHi: row.ci_hi,
+        ciHalf: row.ci_half,
+        nRuns: row.n_runs,
+        source: row.source,
+      })
+    }
+  }
+
+  return Array.from(bestPerModel.values())
+}
+
+/**
+ * 从 leaderboard 数据中提取每个模型 × effort 档的全部记录（同档多 harness 取最佳）。
+ * 档位评定需要统一到常规 effort 口径，只存最佳档会把"开满思考强度"的成绩
+ * 当成模型基础能力（如 gpt-5.6-luna max=67.2 而 medium=11.3）。
+ * @param {Object} data - leaderboard JSON 数据
+ * @param {Object} modelMap - deepswe 模型名 -> CCX canonicalModel 映射
+ * @returns {Map<string, Array>} - canonicalModel -> 该模型各 effort 档记录
+ */
+export function extractAllEffortsPerModel(data, modelMap) {
+  const rows = data.rows || []
+  const bestPerKey = new Map()
+
+  for (const row of rows) {
+    const deepsweModel = row.model
+    const canonical = modelMap[deepsweModel]
+    if (!canonical) continue
+
+    const effort = row.reasoning_effort || 'default'
+    const key = `${canonical}|${effort}`
+    const score = row.pass_at_1 ?? row.pass_rate ?? 0
+    const existing = bestPerKey.get(key)
+
+    if (!existing || score > existing.score) {
+      bestPerKey.set(key, {
+        canonicalModel: canonical,
+        deepsweModel,
+        score,
+        passRate: row.pass_rate,
+        passAt1: row.pass_at_1,
+        passAt4: row.pass_at_4,
+        harness: row.harness,
+        reasoningEffort: effort,
+        nAttempted: row.n_attempted,
+        nTasks: row.n_tasks_attempted,
+        nTasksPassed: row.n_tasks_passed_any,
+        ciLo: row.ci_lo,
+        ciHi: row.ci_hi,
+        ciHalf: row.ci_half,
+        nRuns: row.n_runs,
+        source: row.source,
+      })
+    }
+  }
+
+  const byCanonical = new Map()
+  for (const entry of bestPerKey.values()) {
+    if (!byCanonical.has(entry.canonicalModel)) {
+      byCanonical.set(entry.canonicalModel, [])
+    }
+    byCanonical.get(entry.canonicalModel).push(entry)
+  }
+  return byCanonical
+}
+
+/**
+ * 计算 cohort percentile
+ * @param {Array} allRows - 所有 leaderboard rows
+ * @param {number} score - 当前模型的分数
+ * @returns {number} - 百分位数 (0-1)
+ */
+export function calculateCohortPercentile(cohortModels, score) {
+  const allScores = cohortModels
+    .map(model => model.score ?? model.passAt1 ?? model.passRate ?? 0)
+    .filter(s => s > 0)
+
+  if (allScores.length === 0) return 0
+
+  const atOrBelow = allScores.filter(candidateScore => candidateScore <= score).length
+  return atOrBelow / allScores.length
+}
+
+/**
+ * 生成 benchmarkEvidence 对象
+ * @param {Object} modelData - extractBestPerModel 的输出
+ * @param {Array} allRows - 所有 leaderboard rows (用于计算 percentile)
+ * @param {string} benchmarkVersion - benchmark 版本 (如 'v1.1')
+ * @returns {Object} - benchmarkEvidence 条目
+ */
+export function toBenchmarkEvidence(modelData, cohortModels, benchmarkVersion = 'v1.1') {
+  const percentile = calculateCohortPercentile(cohortModels, modelData.score)
+
+  return {
+    benchmark: 'deepswe',
+    benchmarkVersion,
+    sourceModel: modelData.deepsweModel,
+    domain: 'coding',
+    metric: 'pass_at_1',
+    rawValue: modelData.score,
+    uncertainty: modelData.ciHalf || 0,
+    cohortPercentile: percentile,
+    taskCount: modelData.nTasks,
+    cohortSize: cohortModels.length,
+    effort: modelData.reasoningEffort || 'default',
+    selectionBasis: 'per_effort',
+    sourceUrl: `${BASE_URL}/`,
+    capturedAt: new Date().toISOString().split('T')[0],
+  }
+}
+
+function buildDeepsweProfiles(v11Data, v1Data, modelMap) {
+  const result = {}
+
+  // 处理 v1.1 (live leaderboard)：保留全部 effort 档，每档一条 evidence
+  if (v11Data?.rows) {
+    const bestV11 = extractBestPerModel(v11Data, modelMap)
+    const allEfforts = extractAllEffortsPerModel(v11Data, modelMap)
+    for (const [canonical, entries] of allEfforts) {
+      if (!result[canonical]) {
+        result[canonical] = { benchmarkEvidence: [], deepsweMeta: {} }
+      }
+      // cohort 与 meta 仍以各模型最佳档为基准（与既有口径一致）
+      const best = bestV11.find(m => m.canonicalModel === canonical)
+      for (const entry of entries) {
+        result[canonical].benchmarkEvidence.push(toBenchmarkEvidence(entry, bestV11, 'v1.1'))
+      }
+      if (best) {
+        result[canonical].deepsweMeta = {
+          deepsweModel: best.deepsweModel,
+          harness: best.harness,
+          reasoningEffort: best.reasoningEffort,
+          passAt4: best.passAt4,
+          ciLo: best.ciLo,
+          ciHi: best.ciHi,
+          nRuns: best.nRuns,
+        }
+      }
+    }
+  }
+
+  // 处理 v1 (frozen, 作为参考)
+  if (v1Data?.rows) {
+    const bestV1 = extractBestPerModel(v1Data, modelMap)
+    for (const model of bestV1) {
+      if (!result[model.canonicalModel]) {
+        result[model.canonicalModel] = { benchmarkEvidence: [], deepsweMeta: {} }
+      }
+      // v1 数据作为补充，如果 v1.1 没有该模型的数据则添加
+      const existingEvidence = result[model.canonicalModel].benchmarkEvidence.find(
+        e => e.benchmark === 'deepswe' && e.benchmarkVersion === 'v1.1'
+      )
+      if (!existingEvidence) {
+        const evidence = toBenchmarkEvidence(model, bestV1, 'v1')
+        result[model.canonicalModel].benchmarkEvidence.push(evidence)
+      }
+    }
+  }
+
+  return result
+}
+
+/**
+ * 抓取注册表数据与绘图所需的 live leaderboard，避免同一次更新重复请求。
+ * @param {Object} modelMap - deepswe 模型名 -> CCX canonicalModel 映射
+ * @returns {Promise<{profiles: Object, liveLeaderboard: Object}>}
+ */
+export async function fetchDeepsweDataset(modelMap) {
+  try {
+    const [v11Data, v1Data] = await Promise.all([
+      fetchLeaderboard('v1.1'),
+      fetchLeaderboard('v1').catch(() => null), // v1 是 frozen，可能不可用
+    ])
+    const profiles = buildDeepsweProfiles(v11Data, v1Data, modelMap)
+    const models = Object.keys(profiles).sort()
+    console.log(`[deepswe] Extracted data for ${models.length} models: ${models.join(', ') || '(none)'}`)
+
+    // 新模型检测：榜上出现同家族更高版本但未映射的模型名时告警，避免分数被静默丢弃
+    const unmapped = []
+    const seen = new Set()
+    for (const row of v11Data?.rows || []) {
+      if (row?.model && !modelMap[row.model] && !seen.has(row.model)) {
+        seen.add(row.model)
+        unmapped.push(row.model)
+      }
+    }
+    warnNewModelCandidates(unmapped, modelMap, {
+      source: 'deepswe',
+      mapName: 'DEEPSWE_MODEL_MAP',
+    })
+
+    return { profiles, liveLeaderboard: v11Data, unmapped }
+  } catch (err) {
+    console.error(`[deepswe] Failed to fetch data:`, err.message)
+    throw err
+  }
+}
+
+/**
+ * 主函数：抓取并转换 deepswe 数据
+ * @param {Object} modelMap - deepswe 模型名 -> CCX canonicalModel 映射
+ * @returns {Promise<Object>} - {canonicalModel: {benchmarkEvidence, deepsweMeta}}
+ */
+export async function fetchDeepsweData(modelMap) {
+  const { profiles } = await fetchDeepsweDataset(modelMap)
+  return profiles
+}
