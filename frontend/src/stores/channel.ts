@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia'
+import { buildProtocolModelLimitUpdates } from '@/utils/protocolModelLimits'
 import { ref, shallowReactive, computed, unref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { usePreferencesStore } from '@/stores/preferences'
@@ -466,19 +467,26 @@ export const useChannelStore = defineStore('channel', () => {
           )
         }
       } else if (isChat) {
-        await updateChannelByType('chat', editingChannelIndex, primaryPatch)
+        await updateChannelByType('chat', editingChannelIndex, primaryPatch, options?.originalChannel?.channelUid)
       } else if (isVectors) {
-        await updateChannelByType('vectors', editingChannelIndex, primaryPatch)
+        await updateChannelByType('vectors', editingChannelIndex, primaryPatch, options?.originalChannel?.channelUid)
       } else if (isImages) {
-        await updateChannelByType('images', editingChannelIndex, primaryPatch)
+        await updateChannelByType('images', editingChannelIndex, primaryPatch, options?.originalChannel?.channelUid)
       } else if (isGemini) {
-        await updateChannelByType('gemini', editingChannelIndex, primaryPatch)
+        await updateChannelByType('gemini', editingChannelIndex, primaryPatch, options?.originalChannel?.channelUid)
       } else if (isResponses) {
-        await updateChannelByType('responses', editingChannelIndex, primaryPatch)
+        await updateChannelByType('responses', editingChannelIndex, primaryPatch, options?.originalChannel?.channelUid)
       } else {
-        await updateChannelByType('messages', editingChannelIndex, primaryPatch)
+        await updateChannelByType('messages', editingChannelIndex, primaryPatch, options?.originalChannel?.channelUid)
       }
       const original = options?.originalChannel
+      const originalRoutes = original?.protocolRoutes?.length ? original.protocolRoutes : original ? [{
+        kind: targetTab, index: editingChannelIndex, channelUid: original.channelUid,
+        name: original.name, serviceType: original.serviceType, supportedModels: original.supportedModels,
+      }] : []
+      for (const update of buildProtocolModelLimitUpdates(originalRoutes, channel.protocolRoutes ?? [])) {
+        await api.updateChannelV2(update.channelUid, { kind: update.kind, supportedModels: update.supportedModels })
+      }
       const foldingRoutes = original?.protocolRoutes?.length ? original.protocolRoutes : original ? [{
         kind: targetTab, upstreamKind: targetTab, serviceType: original.serviceType,
         channelUid: original.channelUid, responsesReasoningFold: original.responsesReasoningFold,

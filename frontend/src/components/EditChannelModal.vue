@@ -69,6 +69,7 @@
                 @update:base-urls-text="baseUrlsText = $event"
                 @menu-update="onMenuUpdate"
               />
+              <ProtocolModelLimits v-model="protocolModelLimits" :disabled="submitting" />
               <ProtocolModelAvailability :routes="protocolModelRoutes" :loading="managedModelsLoading" @refreshed="handleProtocolModelsRefreshed" />
             </section>
 
@@ -477,6 +478,7 @@ import AddChannelHeader from './edit-channel/AddChannelHeader.vue'
 import AddChannelSidebarNav from './edit-channel/AddChannelSidebarNav.vue'
 import BasicInfoSection from './edit-channel/BasicInfoSection.vue'
 import ProtocolModelAvailability from './edit-channel/ProtocolModelAvailability.vue'
+import ProtocolModelLimits from './edit-channel/ProtocolModelLimits.vue'
 import ApiKeyManagementSection from './edit-channel/ApiKeyManagementSection.vue'
 import CustomHeadersSection from './edit-channel/CustomHeadersSection.vue'
 import NewApiAccountPanel from './edit-channel/NewApiAccountPanel.vue'
@@ -580,6 +582,7 @@ watch(
 
 const {
   formRef,
+  protocolModelLimits,
   activeSection,
   sections,
   baseUrlHasError,
