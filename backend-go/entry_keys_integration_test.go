@@ -36,6 +36,9 @@ func TestManagedEntryKeyGuardsRealProxyAndRotation(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	if err := a.cfgManager.AddResponsesUpstream(config.UpstreamConfig{ChannelUID: "ch_compact_denied", Name: "compact-denied", BaseURL: upstream.URL + "/denied", APIKeys: []string{"fake-upstream"}, ServiceType: "responses", SupportedModels: []string{"test-model"}, Status: "active"}); err != nil {
+		t.Fatal(err)
+	}
 	policy := config.EntryKey{ID: "entry", KeyHash: config.EntryKeyHash("route-proxy"), PrincipalID: "team-a", Models: []string{"test-model"}, ChannelUIDs: []string{"ch_allowed"}, CIDRs: []string{"192.0.2.0/24"}}
 	if err := a.cfgManager.PutEntryKey(policy, ""); err != nil {
 		t.Fatal(err)
@@ -63,6 +66,7 @@ func TestManagedEntryKeyGuardsRealProxyAndRotation(t *testing.T) {
 		t.Fatalf("ACL routing calls denied=%d allowed=%d", deniedCalls.Load(), allowedCalls.Load())
 	}
 	for _, tc := range []struct{ path, body, remote, xff string }{
+		{"/v1/quote", `{"channelKind":"chat","model":"forbidden","inputTokens":2,"outputTokens":1}`, "192.0.2.2:3000", ""},
 		{"/v1/chat/completions", `{"model":"forbidden","messages":[]}`, "192.0.2.2:3000", ""},
 		{"/v1/messages/count_tokens", `{"model":"forbidden","messages":[]}`, "192.0.2.2:3000", ""},
 		{"/v1/chat/completions", good, "198.51.100.2:3000", "192.0.2.2"},
@@ -72,6 +76,10 @@ func TestManagedEntryKeyGuardsRealProxyAndRotation(t *testing.T) {
 		if w.Code == 200 {
 			t.Fatalf("policy bypass: %s %s", tc.path, w.Body.String())
 		}
+	}
+	quote := invoke("/v1/quote", "route-proxy", `{"channelKind":"chat","model":"test-model","inputTokens":2,"outputTokens":1}`, "192.0.2.2:3000", "")
+	if quote.Code != 200 {
+		t.Fatalf("scoped quote failed %d %s", quote.Code, quote.Body.String())
 	}
 	if allowedCalls.Load() != 1 || deniedCalls.Load() != 0 {
 		t.Fatal("rejected requests reached upstream")
