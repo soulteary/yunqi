@@ -62,12 +62,12 @@
   - `authTokenModeOptions`：Bearer/Raw（行 420）
 - 首次接入表单：`frontend/src/components/NewApiSubscriptionForm.vue`（两步 verify→provision）
 - 订阅中心入口：`frontend/src/views/SubscriptionsView.vue`（`selectedProvider==='new-api'` 行 23）+ `SubscriptionProviderGrid.vue`（行 116-122）
-- 快速添加入口：`frontend/src/components/QuickAddChannelForm.vue`（`NEW_API_PROVIDER_VALUE='__new_api__'` 行 264）+ `subscriptions/NewApiQuickAddDialog.vue`
+- 快速添加入口：`frontend/src/components/QuickAddChannelForm.vue` 选择 new-api 后，直接内嵌 `NewApiSubscriptionForm`，传入 `auto-provision` 和默认渠道类型。
 
 ## 3. 数据模型：账号/key/凭证/渠道映射
 
 ### 3.1 订阅画像 `SubscriptionProfile`（`internal/autopilot/subscription_profile.go:15`）
-new-api 专用字段（行 62-94）：`Provider="new_api"`、`BaseURL`、`AccessToken`（敏感，明文序列化进 `profile_json`，API 响应脱敏）、`UserID`、`AuthTokenMode`、`ProxyURL`、`ProxyPreferDirect`（订阅级代理：绑定/同步经代理访问，直连优先开启时先直连、失败回退代理）、`ProvisionKeyName`、`ProvisionGroup`、`ProvisionGroupRatio`、`MaxGroupMultiplier`（接入时初始渠道上限的记录；运行时真源是渠道级 `UpstreamConfig.MaxGroupMultiplier`，仅作建 key 阈值回退与展示）、`ProvisionModels`、`ProvisionedTokenID`、`ProvisionedKeys []NewApiProvisionedKey`、`AvailableModels`、`GroupMultipliers map[string]float64`、`Accounts []NewApiAccount`（账号级 `ProxyURL/ProxyPreferDirect` 为空时继承订阅级）。计费条款为四字段币种/金额模型 `PaymentAmount/PaymentUnit/CreditAmount/CreditUnit`（行 37-40；旧 `RechargeMultiplier` 单字段已移除，`a96098da`，旧 JSON 键加载时自动忽略）。
+new-api 专用字段（行 62-94）：`Provider="new_api"`、`BaseURL`、`AccessToken`（敏感，写入 `profile_json` 前由 `encryptProfile` 加密，API 响应脱敏）、`UserID`、`AuthTokenMode`、`ProxyURL`、`ProxyPreferDirect`（订阅级代理：绑定/同步经代理访问，直连优先开启时先直连、失败回退代理）、`ProvisionKeyName`、`ProvisionGroup`、`ProvisionGroupRatio`、`MaxGroupMultiplier`（接入时初始渠道上限的记录；运行时真源是渠道级 `UpstreamConfig.MaxGroupMultiplier`，仅作建 key 阈值回退与展示）、`ProvisionModels`、`ProvisionedTokenID`、`ProvisionedKeys []NewApiProvisionedKey`、`AvailableModels`、`GroupMultipliers map[string]float64`、`Accounts []NewApiAccount`（账号级 `ProxyURL/ProxyPreferDirect` 为空时继承订阅级）。计费条款为四字段币种/金额模型 `PaymentAmount/PaymentUnit/CreditAmount/CreditUnit`（行 37-40；旧 `RechargeMultiplier` 单字段已移除，`a96098da`，旧 JSON 键加载时自动忽略）。
 
 - `NewApiProvisionedKey`（行 104）：`Name, Group, GroupMultiplier, TokenID, KeyUID`（**无明文 key**）
 - `NewApiAccount`（行 114）：`AccountUID, AccessToken, UserID, AuthTokenMode, DisplayName, Balance, Status, ProvisionedKeys[], LastSyncError, LastCheckedAt, CreatedAt`
@@ -75,7 +75,7 @@ new-api 专用字段（行 62-94）：`Provider="new_api"`、`BaseURL`、`Access
 持久化：`SubscriptionStore`（行 159），SQLite 表 `autopilot_subscriptions`（`subscription_uid` 主键 + `profile_json` JSON 列，行 214），内存 cache + `Patch` 乐观锁（行 317，`Version` 字段）。与 `ProfileStore` 共享同一 `*sql.DB`（`manager.go:187` `NewSubscriptionStoreWithDB`）。
 
 ### 3.2 渠道侧凭证元数据 `config.APIKeyConfig`（`internal/config/config.go:217`）
-key 明文只存在渠道配置，new-api 相关字段：`QuotaGroup`、`GroupMultiplier *float64`、`MaxGroupMultiplier *float64`、`MultiplierSource("new_api")`、`MultiplierUpdatedAt/ExpiresAt`、`MultiplierSyncStatus`、`MultiplierSyncError`、`SourceSubscriptionUID`、`SourceRemoteTokenID`、`KeyUID`。
+推理 Key 保存在渠道配置中，new-api 相关字段包括 `QuotaGroup`、`GroupMultiplier *float64`、`MultiplierSource("new_api")`、`MultiplierUpdatedAt/ExpiresAt`、`MultiplierSyncStatus`、`MultiplierSyncError`、`SourceSubscriptionUID`、`SourceRemoteTokenID` 和 `KeyUID`。旧 Key 级 `MaxGroupMultiplier` 字段仅保留读取兼容，加载时将旧值提升为渠道级上限后清空；运行时上限使用渠道级 `UpstreamConfig.MaxGroupMultiplier`。
 
 ### 3.3 渠道 `config.UpstreamConfig`（`config.go:19`）
 new-api 渠道标记：`AutoManaged=true`、`AutoManagedKind="new_api"`（行 128，取值 `"" | "generic" | "new_api"`）、`OriginType="relay"`、`OriginTier="second"`。
@@ -119,7 +119,7 @@ UpstreamConfig (channelUid, autoManagedKind=new_api)
 ### 4.1 渠道纳入调度（provision 落地）
 `handleNewApiProvision`（`handlers_newapi.go:427`）第 5 步：
 - 同站点合并 `findNewApiMergeTarget`（行 317，规范化 baseURL 去尾 `/`、忽略大小写、跳过带 `providerId` 的渠道、优先 active），合并时保留已有纯 key、去重追加新 key、补 `AutoManagedKind="new_api"`；渠道级 `MaxGroupMultiplier` 仅在目标渠道尚未设置时写入本次接入阈值（不覆盖用户已调过的渠道上限）
-- 否则新建，`kindToDefaultServiceType`（`handlers_auto_managed.go`）推导 serviceType，`GenerateChannelUID` 生成稳定 UID，接入阈值直接作为新建渠道的 `MaxGroupMultiplier` 初始值
+- 否则新建，`kindToDefaultServiceType`（`handlers_auto_managed_discovery.go`）推导 serviceType，`GenerateChannelUID` 生成稳定 UID，接入阈值直接作为新建渠道的 `MaxGroupMultiplier` 初始值
 - 第 6 步 `Store.LinkChannel`，第 7 步 `deps.Runner.TriggerDiscovery`（`auto_discovery.go:297`）
 
 ### 4.2 分组安全闸门 `resolveNewApiProvisionGroups`（`newapi_group_guard.go:24`）
