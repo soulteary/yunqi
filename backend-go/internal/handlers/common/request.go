@@ -217,7 +217,7 @@ func PassthroughJSONResponse(c fiber.Ctx, resp *http.Response, target interface{
 }
 
 func LogUpstreamResponseHeaders(c fiber.Ctx, resp *http.Response, envCfg *config.EnvConfig, apiType string) {
-	if !envCfg.EnableResponseLogs || !envCfg.IsDevelopment() || resp == nil {
+	if !envCfg.ShouldLogResponseBodies() || resp == nil {
 		return
 	}
 
@@ -227,6 +227,7 @@ func LogUpstreamResponseHeaders(c fiber.Ctx, resp *http.Response, envCfg *config
 			respHeaders[key] = values[0]
 		}
 	}
+	respHeaders = utils.MaskSensitiveHeaders(respHeaders)
 	respHeadersJSON, _ := json.MarshalIndent(respHeaders, "", "  ")
 	requestLogToConsole(c, "[%s-Response] 响应头:\n%s", apiType, string(respHeadersJSON))
 	rawHeadersJSON, _ := json.Marshal(respHeaders)
@@ -234,7 +235,7 @@ func LogUpstreamResponseHeaders(c fiber.Ctx, resp *http.Response, envCfg *config
 }
 
 func LogUpstreamResponseBody(c fiber.Ctx, bodyBytes []byte, envCfg *config.EnvConfig, apiType string) {
-	if !envCfg.EnableResponseLogs || !envCfg.IsDevelopment() {
+	if !envCfg.ShouldLogResponseBodies() {
 		return
 	}
 	if shouldOmitBodyForLog(apiType) {
@@ -243,8 +244,8 @@ func LogUpstreamResponseBody(c fiber.Ctx, bodyBytes []byte, envCfg *config.EnvCo
 		return
 	}
 
-	requestLogToConsole(c, "[%s-Response] 响应体:\n%s", apiType, utils.FormatJSONBytesForLog(bodyBytes, consoleJSONTextLimit))
-	requestLogToFile(c, "[%s-Response] 响应体:\n%s", apiType, utils.FormatJSONBytesRaw(bodyBytes))
+	requestLogToConsole(c, "[%s-Response] 响应体:\n%s", apiType, FormatResponseBodyJSONForLog(bodyBytes, consoleJSONTextLimit))
+	requestLogToFile(c, "[%s-Response] 响应体:\n%s", apiType, FormatResponseBodyRawForLog(bodyBytes))
 }
 
 func LogUpstreamResponse(c fiber.Ctx, resp *http.Response, bodyBytes []byte, envCfg *config.EnvConfig, apiType string) {
@@ -365,7 +366,7 @@ func logRequestDetails(req *http.Request, envCfg *config.EnvConfig, apiType stri
 	rawReqHeadersJSON, _ := json.Marshal(maskedReqHeaders)
 	requestLogToFileFromRequest(req, "[%s-Request-Headers] 实际请求头:\n%s", apiType, string(rawReqHeadersJSON))
 
-	if req.Body != nil {
+	if req.Body != nil && envCfg.ShouldLogRequestBodies() {
 		contentType := req.Header.Get("Content-Type")
 		if shouldOmitBodyForLog(apiType) {
 			requestLogToConsoleFromRequest(req, "[%s-Request-Body] 实际请求体: [omitted for vectors]", apiType)
@@ -380,8 +381,8 @@ func logRequestDetails(req *http.Request, envCfg *config.EnvConfig, apiType stri
 		bodyBytes, err := io.ReadAll(req.Body)
 		if err == nil {
 			req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-			requestLogToConsoleFromRequest(req, "[%s-Request-Body] 实际请求体:\n%s", apiType, MaskForLog(utils.FormatJSONBytesForLog(bodyBytes, consoleJSONTextLimit)))
-			requestLogToFileFromRequest(req, "[%s-Request-Body] 实际请求体:\n%s", apiType, MaskForLog(utils.FormatJSONBytesRaw(bodyBytes)))
+			requestLogToConsoleFromRequest(req, "[%s-Request-Body] 实际请求体:\n%s", apiType, MaskForLog(FormatRequestBodyJSONForLog(bodyBytes, consoleJSONTextLimit)))
+			requestLogToFileFromRequest(req, "[%s-Request-Body] 实际请求体:\n%s", apiType, MaskForLog(FormatRequestBodyRawForLog(bodyBytes)))
 		}
 	}
 }
@@ -396,18 +397,20 @@ func LogOriginalRequest(c fiber.Ctx, bodyBytes []byte, envCfg *config.EnvConfig,
 	requestLogToFile(c, "[Request-Receive] 收到%s请求: %s %s", apiType, httpbridge.Request(c).Method, httpbridge.Request(c).URL.Path)
 
 	if envCfg.IsDevelopment() {
-		contentType := httpbridge.GetHeader(c, "Content-Type")
-		if shouldOmitBodyForLog(apiType) {
-			requestLogToConsole(c, "[Request-OriginalBody] 原始请求体: [omitted for vectors]")
-			requestLogToFile(c, "[Request-OriginalBody] 原始请求体: [omitted for vectors]")
-		} else if strings.HasPrefix(strings.ToLower(contentType), "multipart/form-data") {
-			requestLogToConsole(c, "[Request-OriginalBody] 原始请求体: [multipart/form-data omitted]")
-			requestLogToFile(c, "[Request-OriginalBody] 原始请求体: [multipart/form-data omitted]")
-		} else {
-			requestLogToConsole(c, "[Request-OriginalBody] 原始请求体:\n%s", MaskForLog(utils.FormatJSONBytesForLog(bodyBytes, consoleJSONTextLimit)))
-			requestLogToFile(c, "[Request-OriginalBody] 原始请求体:\n%s", MaskForLog(utils.FormatJSONBytesRaw(bodyBytes)))
-		}
+		if envCfg.ShouldLogRequestBodies() {
+			contentType := httpbridge.GetHeader(c, "Content-Type")
+			if shouldOmitBodyForLog(apiType) {
+				requestLogToConsole(c, "[Request-OriginalBody] 原始请求体: [omitted for vectors]")
+				requestLogToFile(c, "[Request-OriginalBody] 原始请求体: [omitted for vectors]")
+			} else if strings.HasPrefix(strings.ToLower(contentType), "multipart/form-data") {
+				requestLogToConsole(c, "[Request-OriginalBody] 原始请求体: [multipart/form-data omitted]")
+				requestLogToFile(c, "[Request-OriginalBody] 原始请求体: [multipart/form-data omitted]")
+			} else {
+				requestLogToConsole(c, "[Request-OriginalBody] 原始请求体:\n%s", MaskForLog(FormatRequestBodyJSONForLog(bodyBytes, consoleJSONTextLimit)))
+				requestLogToFile(c, "[Request-OriginalBody] 原始请求体:\n%s", MaskForLog(FormatRequestBodyRawForLog(bodyBytes)))
+			}
 
+		}
 		sanitizedHeaders := make(map[string]string)
 		for key, values := range httpbridge.Request(c).Header {
 			if len(values) > 0 {

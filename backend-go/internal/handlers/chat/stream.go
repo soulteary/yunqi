@@ -26,7 +26,7 @@ func handleStreamSuccess(
 ) (*types.Usage, error) {
 	var totalUsage *types.Usage
 	logBuffer := common.NewLimitedLogBuffer(common.MaxUpstreamResponseLogBytes)
-	streamLoggingEnabled := envCfg.EnableResponseLogs && envCfg.IsDevelopment()
+	streamLoggingEnabled := envCfg.ShouldLogResponseBodies()
 
 	common.LogUpstreamResponseHeaders(c, resp, envCfg, "Chat")
 
@@ -97,7 +97,7 @@ func handleStreamSuccess(
 		responseTime := time.Since(startTime).Milliseconds()
 		common.RequestLogf(c, "[Chat-Stream-Timing] 流式响应完成: %dms", responseTime)
 		if logBuffer.Len() > 0 {
-			common.RequestLogf(c, "[Chat-Stream] 上游流式响应原始内容:\n%s", logBuffer.String())
+			common.RequestLogf(c, "[Chat-Stream] 上游流式响应原始内容:\n%s", common.ResponseBodyTextForLog(logBuffer.String()))
 		}
 	}
 

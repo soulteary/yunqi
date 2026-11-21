@@ -556,7 +556,7 @@ func logNormalProtocolDebug(c fiber.Ctx, resp *http.Response, bodyBytes []byte, 
 }
 
 func normalProtocolDebugEnabled(envCfg *config.EnvConfig) bool {
-	return envCfg != nil && envCfg.EnableResponseLogs && envCfg.IsDevelopment() && envCfg.ShouldLog("debug")
+	return envCfg != nil && envCfg.ShouldLogResponseBodies() && envCfg.ShouldLog("debug")
 }
 
 func looksLikeSSEPayload(bodyBytes []byte) bool {

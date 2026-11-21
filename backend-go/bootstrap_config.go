@@ -163,3 +163,15 @@ func initializeCredentialRedaction(env *config.EnvConfig) func() {
 	}
 	return redaction.Enable(keys)
 }
+
+func (a *application) configureBodyLogging() {
+	apply := func() {
+		if _, err := a.cfgManager.ActivateBodyLogging("system:config-reload"); err != nil {
+			log.Printf("[BodyLog-Policy] 正文日志策略未启用，审计/保存失败: %v", err)
+		}
+	}
+	if _, err := a.cfgManager.ActivateBodyLogging("system:startup"); err != nil {
+		log.Printf("[BodyLog-Policy] 正文日志策略未启用，审计/保存失败: %v", err)
+	}
+	a.cfgManager.RegisterOnConfigChange(func(_ config.Config) { apply() })
+}

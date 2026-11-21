@@ -2,6 +2,7 @@ package common
 
 import (
 	"github.com/soulteary/yunqi/internal/guardrails"
+	"github.com/soulteary/yunqi/internal/redaction"
 )
 
 // MaskForLog 是 key 掩码的统一入口：仅在写日志/落库前对文本做内容级凭据脱敏。
@@ -13,6 +14,7 @@ func MaskForLog(text string) string {
 	if text == "" {
 		return text
 	}
+	text = redaction.String(text)
 	reg := guardrails.DefaultRegistry()
 	if len(reg.List()) == 0 {
 		return text
@@ -20,5 +22,5 @@ func MaskForLog(text string) string {
 
 	// 传空 Context——日志侧不检查豁免头
 	masked, _ := reg.RunPostCall([]byte(text), &guardrails.Context{})
-	return string(masked)
+	return redaction.String(string(masked))
 }

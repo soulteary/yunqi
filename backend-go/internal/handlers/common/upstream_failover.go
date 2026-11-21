@@ -1478,12 +1478,12 @@ func TryUpstreamWithAllKeys(
 					if isBalanceError && restrictModel != "" {
 						// 余额/配额类：降级为 (Key,模型) 组合级限制，保留该 Key 对其他模型的调度；
 						// 仅当限制覆盖全部模型（白名单精确判定 / 阈值）时才升级为整 Key 拉黑。
-						blacklistMessage := blResult.Message
+						blacklistMessage, recoverAt := blacklistEvidenceForLog(apiType, resp.StatusCode, respBodyBytes, blResult)
 						if strings.EqualFold(apiType, "Vectors") {
 							blacklistMessage = errorBodySummaryForLog(apiType, resp.StatusCode, respBodyBytes)
 						}
 						if HandleBalanceClassKeyFailure(cfgManager, upstream, executionAPIType, executionIndex,
-							apiKey, restrictModel, blResult.Reason, blacklistMessage, blResult.RecoverAt) {
+							apiKey, restrictModel, blResult.Reason, blacklistMessage, recoverAt) {
 							RequestLogf(c, "[%s-Blacklist] 渠道 %s 模型 %s 余额/配额受限已覆盖全部模型，升级整 Key 拉黑 (Key: %s)",
 								apiType, upstream.Name, restrictModel, utils.MaskAPIKey(apiKey))
 							// 升级拉黑意味着整把 Key 不可用，写入 global 桶。
@@ -1492,11 +1492,11 @@ func TryUpstreamWithAllKeys(
 						// 未升级时不记熔断：配额类按约定不进熔断（recordModelCircuitFailure 文档），
 						// 持久化组合限制本身已阻断该组合调度。
 					} else if !isBalanceError || upstream.IsAutoBlacklistBalanceEnabled() {
-						blacklistMessage := blResult.Message
+						blacklistMessage, recoverAt := blacklistEvidenceForLog(apiType, resp.StatusCode, respBodyBytes, blResult)
 						if strings.EqualFold(apiType, "Vectors") {
 							blacklistMessage = errorBodySummaryForLog(apiType, resp.StatusCode, respBodyBytes)
 						}
-						if err := cfgManager.BlacklistKeyWithRecoverAt(executionAPIType, executionIndex, apiKey, blResult.Reason, blacklistMessage, blResult.RecoverAt); err != nil {
+						if err := cfgManager.BlacklistKeyWithRecoverAt(executionAPIType, executionIndex, apiKey, blResult.Reason, blacklistMessage, recoverAt); err != nil {
 							RequestLogf(c, "[%s-Blacklist] 拉黑 Key 失败: %v", apiType, err)
 						}
 						// 认证/权限错误写入 global 桶：整把 Key 不可用，所有模型都受影响。
@@ -1783,7 +1783,7 @@ func TryUpstreamWithAllKeys(
 					}
 
 					// 记录渠道日志
-					channelErrorInfo := string(respBodyBytes)
+					channelErrorInfo := errorBodySummaryForLog(apiType, resp.StatusCode, respBodyBytes)
 					if strings.EqualFold(apiType, "Vectors") {
 						channelErrorInfo = errorBodySummaryForLog(apiType, resp.StatusCode, respBodyBytes)
 					}
@@ -1834,7 +1834,7 @@ func TryUpstreamWithAllKeys(
 
 				// 非 failover 错误，记录失败指标后返回（请求已处理）
 				clientStatusCode := normalizeUpstreamErrorStatus(resp.StatusCode, respBodyBytes)
-				channelErrorInfo := string(respBodyBytes)
+				channelErrorInfo := errorBodySummaryForLog(apiType, resp.StatusCode, respBodyBytes)
 				if strings.EqualFold(apiType, "Vectors") {
 					errorSummary := errorBodySummaryForLog(apiType, resp.StatusCode, respBodyBytes)
 					channelErrorInfo = errorSummary
@@ -1974,8 +1974,8 @@ func TryUpstreamWithAllKeys(
 						metricsManager.RecordRequestFinalizeFailureWithClass(currentBaseURL, apiKey, metricsServiceType, requestID, metrics.FailureClassNonRetryable)
 					})
 					channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, metricsServiceType, executionKind)
-					CompleteLog(channelLogStore, metricsKey, logRequestID, http.StatusBadRequest, false, rejected.Error(), isRetryAttempt)
-					RequestLogf(c, "[%s-RequestRejected] 上游以流内错误拒绝请求 (Key: %s): %s", apiType, utils.MaskAPIKey(apiKey), rejected.Error())
+					CompleteLog(channelLogStore, metricsKey, logRequestID, http.StatusBadRequest, false, rejected.LogString(apiType), isRetryAttempt)
+					RequestLogf(c, "[%s-RequestRejected] 上游以流内错误拒绝请求 (Key: %s): %s", apiType, utils.MaskAPIKey(apiKey), rejected.LogString(apiType))
 					// 预检阶段 SSE 头未写：先按客户端协议写出错误体再返回，兑现
 					// handled=true 的「已向客户端写回响应」契约，避免终态错误空 200。
 					RespondUpstreamRequestRejected(c, apiType, rejected)

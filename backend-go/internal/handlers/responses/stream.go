@@ -68,7 +68,7 @@ func handleStreamSuccess(
 
 	var synthesizer *utils.StreamSynthesizer
 	logBuffer := common.NewLimitedLogBuffer(common.MaxUpstreamResponseLogBytes)
-	streamLoggingEnabled := envCfg.IsDevelopment() && envCfg.EnableResponseLogs
+	streamLoggingEnabled := envCfg.ShouldLogResponseBodies()
 
 	if streamLoggingEnabled {
 		synthesizer = utils.NewStreamSynthesizer(upstreamType)
@@ -419,7 +419,7 @@ func handleStreamSuccess(
 	if preflightEmpty {
 		common.RequestLogf(c, "[Responses-EmptyResponse] 上游返回空响应 (缓冲行数: %d, 诊断: %s)，触发重试", len(bufferedLines), preflightDiagnostic)
 		if rawLog := buildResponsesPreflightRawLog(bufferedLines); rawLog != "" {
-			common.RequestLogf(c, "[Responses-EmptyResponse-Raw] 上游流式响应原始内容:\n%s", rawLog)
+			common.RequestLogf(c, "[Responses-EmptyResponse-Raw] 上游流式响应原始内容:\n%s", common.ResponseBodyTextForLog(rawLog))
 		}
 		close(scanDone) // 通知 scanner goroutine 退出
 		if blacklistReason != "" {
@@ -888,12 +888,12 @@ streamEnd:
 				synthesizedContent := synthesizer.GetSynthesizedContent()
 				parseFailed := synthesizer.IsParseFailed()
 				if synthesizedContent != "" && !parseFailed {
-					common.RequestLogf(c, "[Responses-Stream] 上游流式响应合成内容:\n%s", strings.TrimSpace(synthesizedContent))
+					common.RequestLogf(c, "[Responses-Stream] 上游流式响应合成内容:\n%s", common.ResponseBodyTextForLog(strings.TrimSpace(synthesizedContent)))
 				} else if logBuffer.Len() > 0 {
-					common.RequestLogf(c, "[Responses-Stream] 上游流式响应原始内容:\n%s", logBuffer.String())
+					common.RequestLogf(c, "[Responses-Stream] 上游流式响应原始内容:\n%s", common.ResponseBodyTextForLog(logBuffer.String()))
 				}
 			} else if logBuffer.Len() > 0 {
-				common.RequestLogf(c, "[Responses-Stream] 上游流式响应原始内容:\n%s", logBuffer.String())
+				common.RequestLogf(c, "[Responses-Stream] 上游流式响应原始内容:\n%s", common.ResponseBodyTextForLog(logBuffer.String()))
 			}
 		}
 	}

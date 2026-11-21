@@ -36,8 +36,12 @@ GET /:routePrefix/health
 GET /:routePrefix/v1/models
 GET /:routePrefix/v1/models/:model
 GET /:routePrefix/v1/responses
+GET /access
+GET /api/access/channels
+GET /api/access/me
 GET /api/accounts
 GET /api/accounts/:accountUid/deepseek-balance
+GET /api/admin-credentials
 GET /api/advisor/decisions
 GET /api/advisor/stats
 GET /api/autopilot/ab-test-results
@@ -107,6 +111,8 @@ GET /api/images/ping
 GET /api/images/ping/:id
 GET /api/local-runtimes
 GET /api/local-runtimes/:uid
+GET /api/logging/body
+GET /api/logging/body/export
 GET /api/logical-channels
 GET /api/logical-channels/:uid
 GET /api/logical-channels/dashboard
@@ -206,6 +212,8 @@ POST /api/accounts/:accountUid/credentials/:credentialUid/compshare-console-cook
 POST /api/accounts/:accountUid/credentials/:credentialUid/kimi-console-token/refresh
 POST /api/accounts/:accountUid/credentials/:credentialUid/mimo-console-cookie/refresh
 POST /api/accounts/:accountUid/credentials/:credentialUid/volcengine-plan-usage/refresh
+POST /api/admin-credentials
+POST /api/admin-credentials/:id/rotate
 POST /api/autopilot/ab-test/emergency-stop
 POST /api/autopilot/route-preview
 POST /api/channel-discovery
@@ -396,11 +404,13 @@ POST /v1/quote
 POST /v1/responses
 POST /v1/responses/compact
 POST /v1beta/models/*modelAction
+PUT /api/access/channels/:uid/state
 PUT /api/accounts/:accountUid
 PUT /api/accounts/:accountUid/credentials/:credentialUid/compshare-console-cookie
 PUT /api/accounts/:accountUid/credentials/:credentialUid/kimi-console-token
 PUT /api/accounts/:accountUid/credentials/:credentialUid/mimo-console-cookie
 PUT /api/accounts/:accountUid/credentials/:credentialUid/volcengine-access-key
+PUT /api/admin-credentials/:id
 PUT /api/autopilot/cost/exchange-rates
 PUT /api/channels/:uid
 PUT /api/chat/channels/:id
@@ -409,6 +419,7 @@ PUT /api/conversations/settings
 PUT /api/entry-keys/:id
 PUT /api/gemini/channels/:id
 PUT /api/images/channels/:id
+PUT /api/logging/body
 PUT /api/logical-channels/:uid
 PUT /api/messages/channels/:id
 PUT /api/racing/config
@@ -418,11 +429,3 @@ PUT /api/smart-routing/config
 PUT /api/subscriptions/:uid
 PUT /api/task-templates/:id
 PUT /api/vectors/channels/:id
-GET /api/access/me
-GET /api/access/channels
-PUT /api/access/channels/:uid/state
-GET /api/admin-credentials
-POST /api/admin-credentials
-PUT /api/admin-credentials/:id
-POST /api/admin-credentials/:id/rotate
-GET /access

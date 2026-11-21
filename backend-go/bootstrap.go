@@ -112,6 +112,7 @@ func runService(cliOpts cliOptions) {
 
 	a := &application{envCfg: envCfg, paths: paths, cfgManager: cfgManager}
 	a.configureGuardrails()
+	a.configureBodyLogging()
 	a.startPresetUpdater()
 	a.configureThinkingCache()
 	defer errutil.IgnoreDeferred(thinkingcache.Close)

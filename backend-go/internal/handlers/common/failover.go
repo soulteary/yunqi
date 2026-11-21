@@ -4,6 +4,7 @@ package common
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/soulteary/yunqi/internal/config"
 	"strings"
 
 	"github.com/gofiber/fiber/v3"
@@ -1763,11 +1764,11 @@ func truncateErrorSummary(msg string) string {
 }
 
 func errorBodySummaryForLog(apiType string, statusCode int, bodyBytes []byte) string {
-	if strings.EqualFold(apiType, "Vectors") {
+	if strings.EqualFold(apiType, "Vectors") || !config.RuntimeBodyLogging().ResponseBodies {
 		return vectorsErrorSummaryForLog(statusCode, bodyBytes)
 	}
 	msg := strings.ReplaceAll(strings.ReplaceAll(strings.TrimSpace(string(bodyBytes)), "\n", " "), "\r", " ")
-	return truncateErrorSummary(msg)
+	return ResponseBodyTextForLog(truncateErrorSummary(msg))
 }
 
 func vectorsErrorSummaryForLog(statusCode int, bodyBytes []byte) string {
