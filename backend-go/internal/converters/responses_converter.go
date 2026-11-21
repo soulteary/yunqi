@@ -312,6 +312,8 @@ func ClaudeResponseToResponses(claudeResp map[string]interface{}, sessionID stri
 
 	// 转换 output
 	output := []types.ResponsesItem{}
+	sourceFallback := false
+	hostedQueries := map[string]interface{}{}
 	for _, c := range content {
 		contentBlock, ok := c.(map[string]interface{})
 		if !ok {
@@ -331,10 +333,35 @@ func ClaudeResponseToResponses(claudeResp map[string]interface{}, sessionID stri
 			}
 		case "text":
 			text, _ := contentBlock["text"].(string)
+			if sources := ClaudeSearchSourceText(contentBlock); sources != "" {
+				text += sources
+				sourceFallback = true
+			}
 			output = append(output, types.ResponsesItem{
 				Type:    "text",
 				Content: text,
 			})
+		case "server_tool_use":
+			if contentBlock["name"] == "web_search" {
+				id, _ := contentBlock["id"].(string)
+				hostedQueries[id] = contentBlock["input"]
+			}
+		case "web_search_tool_result":
+			id, _ := contentBlock["tool_use_id"].(string)
+			action := map[string]interface{}{"type": "search"}
+			if input, ok := hostedQueries[id].(map[string]interface{}); ok {
+				action["query"] = input["query"]
+			}
+			output = append(output, types.ResponsesItem{ID: id, Type: "web_search_call", Status: "completed", Action: action})
+			if text := ClaudeSearchSourceText(contentBlock); text != "" {
+				output = append(output, types.ResponsesItem{Type: "text", Content: text})
+				sourceFallback = true
+			}
+		case "search_result":
+			if text := ClaudeSearchSourceText(contentBlock); text != "" {
+				output = append(output, types.ResponsesItem{Type: "text", Content: text})
+				sourceFallback = true
+			}
 		case "tool_use":
 			id, _ := contentBlock["id"].(string)
 			name, _ := contentBlock["name"].(string)
@@ -366,7 +393,12 @@ func ClaudeResponseToResponses(claudeResp map[string]interface{}, sessionID stri
 	// 生成 response ID
 	responseID := generateResponseID()
 
+	var metadata map[string]string
+	if sourceFallback {
+		metadata = map[string]string{"yunqi_conversion_diagnostics": "hosted_search_sources_preserved_as_text"}
+	}
 	return &types.ResponsesResponse{
+		Metadata:   metadata,
 		ID:         responseID,
 		Model:      model,
 		Output:     output,

@@ -40,6 +40,7 @@ type ResponsesRequest struct {
 // ResponsesItem Responses API 消息项
 type ResponsesItem struct {
 	ID        string        `json:"id,omitempty"`
+	Action    interface{}   `json:"action,omitempty"`
 	Type      string        `json:"type"`           // message, text, function_call, function_call_output（tool_call/tool_result 仅兼容 legacy Claude 输入）
 	Role      string        `json:"role,omitempty"` // user, assistant (用于 type=message)
 	Status    string        `json:"status,omitempty"`
@@ -76,13 +77,14 @@ type ToolUse struct {
 
 // ResponsesResponse Responses API 响应
 type ResponsesResponse struct {
-	ID         string          `json:"id"`
-	Model      string          `json:"model"`
-	Output     []ResponsesItem `json:"output"`
-	Status     string          `json:"status"` // completed, failed
-	PreviousID string          `json:"previous_id,omitempty"`
-	Usage      ResponsesUsage  `json:"usage"`
-	Created    int64           `json:"created,omitempty"`
+	Metadata   map[string]string `json:"metadata,omitempty"`
+	ID         string            `json:"id"`
+	Model      string            `json:"model"`
+	Output     []ResponsesItem   `json:"output"`
+	Status     string            `json:"status"` // completed, failed
+	PreviousID string            `json:"previous_id,omitempty"`
+	Usage      ResponsesUsage    `json:"usage"`
+	Created    int64             `json:"created,omitempty"`
 }
 
 // ResponsesUsage Responses API 使用统计

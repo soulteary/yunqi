@@ -3,6 +3,7 @@ package converters
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -30,6 +31,7 @@ type claudeToResponsesState struct {
 	ReasoningBuf       strings.Builder
 	ToolArgsBuf        strings.Builder
 	CompletedOutput    []interface{}
+	SourceFallback     bool
 	InputTokens        int64
 	OutputTokens       int64
 	// Claude usage 的缓存字段：completed 事件原样透出，供出口归一为官方 OpenAI 口径时加回 input_tokens
@@ -116,6 +118,22 @@ func ConvertClaudeMessagesToResponses(ctx context.Context, modelName string, ori
 			if text := root.Get("content_block.text").String(); text != "" {
 				out = append(out, st.appendTextDelta(text, nextSeq)...)
 			}
+			var block map[string]interface{}
+			if json.Unmarshal([]byte(root.Get("content_block").Raw), &block) == nil {
+				if sources := ClaudeSearchSourceText(block); sources != "" {
+					out = append(out, st.appendTextDelta(sources, nextSeq)...)
+					st.SourceFallback = true
+				}
+			}
+		case "web_search_tool_result", "search_result":
+			var block map[string]interface{}
+			if json.Unmarshal([]byte(root.Get("content_block").Raw), &block) == nil {
+				if text := ClaudeSearchSourceText(block); text != "" {
+					out = append(out, st.startText(nextSeq)...)
+					out = append(out, st.appendTextDelta(text, nextSeq)...)
+					st.SourceFallback = true
+				}
+			}
 		case "tool_use":
 			out = append(out, st.startToolUse(
 				root.Get("content_block.id").String(),
@@ -139,6 +157,17 @@ func ConvertClaudeMessagesToResponses(ctx context.Context, modelName string, ori
 					out = append(out, st.startText(nextSeq)...)
 				}
 				out = append(out, st.appendTextDelta(text, nextSeq)...)
+			}
+		case "citations_delta":
+			var citation map[string]interface{}
+			if json.Unmarshal([]byte(root.Get("delta.citation").Raw), &citation) == nil {
+				if text := ClaudeCitationSourceText(citation); text != "" {
+					if st.ActiveItemType != "text" {
+						out = append(out, st.startText(nextSeq)...)
+					}
+					out = append(out, st.appendTextDelta(text, nextSeq)...)
+					st.SourceFallback = true
+				}
 			}
 		case "input_json_delta":
 			if partialJSON := root.Get("delta.partial_json").String(); partialJSON != "" {
@@ -548,6 +577,9 @@ func (st *claudeToResponsesState) completedEvent(modelName string, originalReque
 	}
 
 	completed, _ = sjson.Set(completed, "response.output", st.CompletedOutput)
+	if st.SourceFallback {
+		completed, _ = sjson.Set(completed, "response.metadata.yunqi_conversion_diagnostics", "hosted_search_sources_preserved_as_text")
+	}
 	completed, _ = sjson.Set(completed, "response.usage.input_tokens", st.InputTokens)
 	completed, _ = sjson.Set(completed, "response.usage.output_tokens", st.OutputTokens)
 	completed, _ = sjson.Set(completed, "response.usage.total_tokens", st.InputTokens+st.OutputTokens)
