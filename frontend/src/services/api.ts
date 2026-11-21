@@ -33,13 +33,15 @@ function createApiMethods(client: ApiClient) {
 }
 
 type ApiMethods = ReturnType<typeof createApiMethods>
-export interface ApiService extends ApiMethods {}
-
-export class ApiService {
+// Object.assign installs the composed methods on each instance. Describe that
+// constructor result once rather than merging a class and an interface.
+const ApiServiceBase = class {
   constructor() {
     Object.assign(this, createApiMethods(new ApiClient()))
   }
-}
+} as new () => ApiMethods
+
+export class ApiService extends ApiServiceBase {}
 
 export const api = new ApiService()
 export default api

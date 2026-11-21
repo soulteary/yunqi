@@ -19,6 +19,7 @@ jobs:
         working-directory: frontend
         run: |
           bun install --frozen-lockfile
+          bun run lint
           bun run test
           bun run build
       - name: Embed frontend

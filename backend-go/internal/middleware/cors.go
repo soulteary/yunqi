@@ -1,6 +1,8 @@
 package middleware
 
 import (
+	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/gofiber/fiber/v3"
@@ -8,36 +10,35 @@ import (
 	"github.com/soulteary/yunqi/internal/httpbridge"
 )
 
-// CORSMiddleware CORS 中间件
+// CORSMiddleware only grants cross-origin access when explicitly enabled.
 func CORSMiddleware(envCfg *config.EnvConfig) fiber.Handler {
 	return func(c fiber.Ctx) error {
-		origin := httpbridge.GetHeader(c, "Origin")
-		if origin != "" {
-			setCORSHeaders(c, envCfg, origin)
+		if envCfg.EnableCORS {
+			// Both accepted and rejected origins affect the response headers. Include
+			// requests without Origin so shared caches cannot reuse an incorrect variant.
+			httpbridge.Writer(c).Header().Add("Vary", "Origin")
+			if origin := httpbridge.GetHeader(c, "Origin"); origin != "" {
+				setCORSHeaders(c, envCfg, origin)
+			}
 		}
 
-		// OPTIONS 预检请求不携带自定义认证头，始终直接返回 CORS 响应。
-		if httpbridge.Request(c).Method == "OPTIONS" {
-			httpbridge.AbortWithStatus(c, 204)
+		// Preflight requests do not carry authentication. Without allow headers the
+		// browser still rejects cross-origin access when disabled or not permitted.
+		if httpbridge.Request(c).Method == http.MethodOptions {
+			httpbridge.AbortWithStatus(c, http.StatusNoContent)
 			return nil
 		}
-
-		// 如果未启用 CORS，非跨域请求保持原有行为。
-		if !envCfg.EnableCORS && origin == "" {
-			return c.Next()
-		}
-
 		return c.Next()
 	}
 }
 
 func setCORSHeaders(c fiber.Ctx, envCfg *config.EnvConfig, origin string) {
-	allowOrigin := envCfg.CORSOrigin
-	if envCfg.IsDevelopment() && strings.Contains(origin, "localhost") {
+	allowOrigin := strings.TrimSpace(envCfg.CORSOrigin)
+	if envCfg.IsDevelopment() && isLocalhostOrigin(origin) {
 		allowOrigin = origin
 	}
-	if !envCfg.EnableCORS {
-		allowOrigin = origin
+	if allowOrigin != "*" && allowOrigin != origin {
+		return
 	}
 	httpbridge.Header(c, "Access-Control-Allow-Origin", allowOrigin)
 	httpbridge.Header(c, "Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
@@ -45,4 +46,11 @@ func setCORSHeaders(c fiber.Ctx, envCfg *config.EnvConfig, origin string) {
 	if allowOrigin != "*" {
 		httpbridge.Header(c, "Access-Control-Allow-Credentials", "true")
 	}
+}
+
+func isLocalhostOrigin(origin string) bool {
+	parsed, err := url.Parse(origin)
+	return err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") &&
+		strings.EqualFold(parsed.Hostname(), "localhost") && parsed.User == nil &&
+		parsed.Path == "" && parsed.RawQuery == "" && !parsed.ForceQuery && parsed.Fragment == ""
 }

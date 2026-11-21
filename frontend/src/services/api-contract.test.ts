@@ -31,6 +31,24 @@ describe('public API compatibility', () => {
     }
     expect([...methods].sort()).toEqual(methodNames)
   })
+  it('constructs independent typed instances with callable composed methods', async () => {
+    const first: ApiService = new ApiService()
+    const second: ApiService = new ApiService()
+    expect(first).toBeInstanceOf(ApiService)
+    expect(second).toBeInstanceOf(ApiService)
+    expect(first).not.toBe(second)
+    expect(first.getChannels).not.toBe(second.getChannels)
+
+    // Composed methods close over their transport and remain callable when used
+    // as callbacks, without sharing mutable methods with another instance.
+    const { getChannels } = first
+    await getChannels()
+    await second.getChannels()
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      '/api/messages/channels',
+      '/api/messages/channels'
+    ])
+  })
   const protocols = [
     ['messages', 'addChannel', 'updateChannel', 'deleteChannel', 'getChannelMetricsHistory'],
     [
