@@ -70,6 +70,10 @@ Client
 4. Provider 负责将请求转换成上游协议并处理流式/非流式响应。
 5. 指标和渠道日志记录请求生命周期，再返回统一响应。
 
+Native Responses upstreams forward text in real time by default. `responsesReasoningFold` defaults to `false`, including existing configurations that omit it. Enable **Responses reasoning continuation** in the channel editor to opt in to automatic continuation of truncated reasoning; this mode forwards reasoning while buffering text and tool calls until the round finishes and no further continuation is needed.
+
+The real-time path only buffers tool calls that require Codex format restoration, releasing each when that tool item finishes without blocking normal text.
+
 ## 核心模块职责
 
 ### `internal/config/`

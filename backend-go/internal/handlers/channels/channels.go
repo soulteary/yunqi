@@ -117,6 +117,7 @@ type CreateRequest struct {
 	ResponseHeaderTimeoutMs int                   `json:"responseHeaderTimeoutMs"`
 	NoVision                bool                  `json:"noVision"`
 	FastMode                bool                  `json:"fastMode"`
+	ResponsesReasoningFold  bool                  `json:"responsesReasoningFold"`
 }
 
 // Create 创建渠道（统一入口，按 kind 路由到对应数组）。
@@ -152,6 +153,7 @@ func (h *Handler) Create(c fiber.Ctx) error {
 		ResponseHeaderTimeoutMs: req.ResponseHeaderTimeoutMs,
 		NoVision:                req.NoVision,
 		FastMode:                req.FastMode,
+		ResponsesReasoningFold:  req.ResponsesReasoningFold,
 	}
 
 	if err := config.AddUpstreamByKind(h.cm, k, up, req.Placement); err != nil {
@@ -196,6 +198,7 @@ type UpdateRequest struct {
 	ConvertImageURLToB64JSON      *bool                                     `json:"convertImageUrlToB64Json"`
 	StripCodexClientTools         *bool                                     `json:"stripCodexClientTools"`
 	CodexToolCompat               *bool                                     `json:"codexToolCompat"`
+	ResponsesReasoningFold        *bool                                     `json:"responsesReasoningFold"`
 	EmbeddingCapabilities         map[string]config.EmbeddingCapability     `json:"embeddingCapabilities"`
 	DefaultCapability             *config.UpstreamModelCapability           `json:"defaultCapability"`
 	AllowUnknownContext           *bool                                     `json:"allowUnknownContext"`
@@ -270,6 +273,7 @@ func (h *Handler) Update(c fiber.Ctx) error {
 		ConvertImageURLToB64JSON:      req.ConvertImageURLToB64JSON,
 		StripCodexClientTools:         req.StripCodexClientTools,
 		CodexToolCompat:               req.CodexToolCompat,
+		ResponsesReasoningFold:        req.ResponsesReasoningFold,
 		EmbeddingCapabilities:         req.EmbeddingCapabilities,
 		DefaultCapability:             req.DefaultCapability,
 		AllowUnknownContext:           req.AllowUnknownContext,
