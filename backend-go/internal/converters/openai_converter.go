@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"github.com/soulteary/yunqi/internal/session"
 	"github.com/soulteary/yunqi/internal/types"
+	"github.com/tidwall/gjson"
 )
 
 // ============== OpenAI Chat Completions 转换器 ==============
@@ -26,6 +27,16 @@ func (c *OpenAIChatConverter) ToProviderRequest(sess *session.Session, req *type
 		"stream":   req.Stream,
 	}
 
+	if len(req.Text) > 0 {
+		raw, err := json.Marshal(req)
+		if err != nil {
+			return nil, err
+		}
+		converted := ConvertResponsesToOpenAIChatRequest(req.Model, raw, req.Stream)
+		if format := gjson.GetBytes(converted, "response_format"); format.Exists() {
+			openaiReq["response_format"] = json.RawMessage(format.Raw)
+		}
+	}
 	for key, value := range map[string]json.RawMessage{"prompt_cache_key": req.PromptCacheKey, "prompt_cache_options": req.PromptCacheOptions, "prompt_cache_retention": req.PromptCacheRetention} {
 		if len(value) > 0 {
 			openaiReq[key] = value

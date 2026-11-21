@@ -30,6 +30,9 @@ func (c *ResponsesPassthroughConverter) ToProviderRequest(sess *session.Session,
 		"user":                 req.User,
 		"stream_options":       req.StreamOptions,
 	}
+	if len(req.Text) > 0 {
+		reqMap["text"] = req.Text
+	}
 	for key, value := range map[string]json.RawMessage{"prompt_cache_key": req.PromptCacheKey, "prompt_cache_options": req.PromptCacheOptions, "prompt_cache_retention": req.PromptCacheRetention} {
 		if len(value) > 0 {
 			reqMap[key] = value
