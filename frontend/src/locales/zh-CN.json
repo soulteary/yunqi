@@ -299,6 +299,8 @@
   "addChannel.apiKeys": "API Keys",
   "addChannel.detectedKeys": "已检测到 {count} 个 API Key",
   "addChannel.enterApiKey": "请输入至少一个 API Key",
+  "addChannel.manualApiKeysLabel": "手动填写 API Key（可选）",
+  "addChannel.manualApiKeysHint": "自动识别不准确时可在此填写，每行一个。非空时替代自动识别的 Key；清空后恢复自动识别。",
   "addChannel.channelName": "渠道名称",
   "addChannel.channelType": "渠道类型",
   "copilotOAuth.description": "使用 GitHub OAuth 获取 Copilot 授权，授权成功后会把 GitHub OAuth token 添加为本渠道密钥。该 token 仅用于与 GitHub 交互，Yunqi 会自动换成短期 Copilot token。",

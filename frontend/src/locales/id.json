@@ -299,6 +299,8 @@
   "addChannel.apiKeys": "API Keys",
   "addChannel.detectedKeys": "Terdeteksi {count} API Key",
   "addChannel.enterApiKey": "Masukkan setidaknya satu API Key",
+  "addChannel.manualApiKeysLabel": "Masukkan API Key secara manual (opsional)",
+  "addChannel.manualApiKeysHint": "Jika deteksi keliru, masukkan satu key per baris. Isian ini menggantikan key terdeteksi; kosongkan untuk memakai deteksi lagi.",
   "addChannel.channelName": "Nama channel",
   "addChannel.channelType": "Tipe channel",
   "copilotOAuth.description": "Gunakan GitHub OAuth untuk mengotorisasi Copilot. Setelah berhasil, token GitHub OAuth akan ditambahkan sebagai key channel ini. Token ini hanya digunakan untuk berkomunikasi dengan GitHub; Yunqi akan menukarnya secara otomatis dengan token Copilot jangka pendek.",

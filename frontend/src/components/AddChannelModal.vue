@@ -62,6 +62,18 @@
             @input="parseQuickInput"
           />
 
+          <v-textarea
+            v-model="manualApiKeysText"
+            data-test="manual-api-keys"
+            :label="t('addChannel.manualApiKeysLabel')"
+            :hint="t('addChannel.manualApiKeysHint')"
+            persistent-hint
+            variant="outlined"
+            rows="2"
+            auto-grow
+            :disabled="standardSubmitting"
+          />
+
           <!-- 代理 URL（可选）：境外上游直连不可达时经代理发现与访问 -->
           <v-text-field
             v-model="standardProxyUrl"
@@ -247,7 +259,7 @@ import {
   type DiscoveryProtocol
 } from '../utils/expectedRequestUrls'
 import { parseQuickInput as parseQuickInputUtil } from '../utils/quickInputParser'
-import { buildQuickAddChannelName, findExistingQuickAddChannel } from '../utils/quickAddChannel'
+import { buildQuickAddChannelName, findExistingQuickAddChannel, normalizeQuickAddApiKeys } from '../utils/quickAddChannel'
 import { useI18n } from '../i18n'
 import { useAuthStore } from '../stores/auth'
 import { useChannelStore } from '../stores/channel'
@@ -295,7 +307,11 @@ const standardProxyUrl = ref('')
 const standardProxyPreferDirect = ref(false)
 const detectedBaseUrl = ref('')
 const detectedBaseUrls = ref<string[]>([])
-const detectedApiKeys = ref<string[]>([])
+const parsedApiKeys = ref<string[]>([])
+const manualApiKeysText = ref('')
+const detectedApiKeys = computed(() => manualApiKeysText.value.trim()
+  ? normalizeQuickAddApiKeys(manualApiKeysText.value.split(/\r?\n/))
+  : parsedApiKeys.value)
 // 标准模式先做本地预览识别，提交时仍以真实协议探测结果为准。
 const quickServiceType = ref<ServiceType>(getDefaultServiceTypeValue())
 const randomSuffix = ref(generateRandomString(6))
@@ -409,7 +425,7 @@ function parseQuickInput() {
   const result = parseQuickInputUtil(quickInput.value, fallbackServiceType)
   detectedBaseUrl.value = result.detectedBaseUrl
   detectedBaseUrls.value = result.detectedBaseUrls
-  detectedApiKeys.value = result.detectedApiKeys
+  parsedApiKeys.value = result.detectedApiKeys
   const detectedServiceType =
     props.channelType === 'images' || props.channelType === 'vectors' ? 'openai' : result.detectedServiceType
   quickServiceType.value = detectedServiceType || fallbackServiceType
@@ -450,7 +466,8 @@ function resetQuickState() {
   standardProxyPreferDirect.value = false
   detectedBaseUrl.value = ''
   detectedBaseUrls.value = []
-  detectedApiKeys.value = []
+  parsedApiKeys.value = []
+  manualApiKeysText.value = ''
   quickServiceType.value = getDefaultServiceTypeValue()
   randomSuffix.value = generateRandomString(6)
   standardSubmitting.value = false
