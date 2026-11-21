@@ -165,6 +165,7 @@ func TestCopilotCrossWireMediaIsPreservedOrRejected(t *testing.T) {
 		name, wire, path, body string
 		reject                 bool
 	}{
+		{"codex_tool_history_is_not_media", "chat", "/v1/responses", `{"model":"opaque","input":[{"type":"additional_tools","tools":[{"type":"function","name":"lookup","parameters":{"type":"object"}}]},{"type":"custom_tool_call","call_id":"custom-1","name":"apply_patch","input":"fake-file"},{"type":"custom_tool_call_output","call_id":"custom-1","output":"fake-file"},{"type":"tool_search_call","call_id":"search-1","arguments":{"query":"lookup"}},{"type":"tool_search_output","call_id":"search-1","tools":[]},{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}]}`, false},
 		{"tool_input_type_is_data", "chat", "/v1/messages", `{"model":"opaque","messages":[{"role":"assistant","content":[{"type":"tool_use","id":"call-1","name":"lookup","input":{"type":"image","data":{"type":"file"}}}]}],"tools":[{"name":"lookup","input_schema":{"type":"object"}}]}`, false},
 		{"function_output_type_is_data", "chat", "/v1/responses", `{"model":"opaque","input":[{"type":"function_call_output","call_id":"call-1","output":{"type":"image","data":"fake-file"}}]}`, false},
 		{"chat_image_to_messages", "messages", "/v1/chat/completions", `{"model":"opaque","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"https://example.invalid/picture.png"}}]}]}`, true},
@@ -198,6 +199,9 @@ func TestCopilotCrossWireMediaIsPreservedOrRejected(t *testing.T) {
 			}
 			body, _ := io.ReadAll(req.Body)
 			req.Body.Close()
+			if tc.name == "codex_tool_history_is_not_media" {
+				return
+			}
 			if tc.name == "tool_input_type_is_data" {
 				if !strings.Contains(string(body), `image`) {
 					t.Fatalf("tool arguments lost: %s", body)

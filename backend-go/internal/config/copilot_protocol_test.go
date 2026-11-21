@@ -34,6 +34,15 @@ func TestCopilotProtocolCRUDAndSnapshot(t *testing.T) {
 	if restored.ResponsesUpstream[0].CopilotProtocol != "messages" || restored.ResponsesUpstream[0].ServiceType != "copilot" {
 		t.Fatal("JSON/save lost protocol or identity")
 	}
+	reloaded, err := NewConfigManager(cm.configFile, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reloaded.Close()
+	if got := reloaded.GetConfig().ResponsesUpstream[0]; got.CopilotProtocol != "messages" || got.ServiceType != "copilot" {
+		t.Fatalf("disk/authoritative round trip lost identity: %+v", got)
+	}
+
 	invalid := "https://example.invalid/responses"
 	if _, err := cm.UpdateResponsesUpstream(0, UpstreamUpdate{CopilotProtocol: &invalid}); err == nil {
 		t.Fatal("accepted arbitrary endpoint as protocol")

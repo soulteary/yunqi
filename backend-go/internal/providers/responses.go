@@ -1967,5 +1967,31 @@ func copilotHasUnsupportedMedia(body []byte, path, wire string) bool {
 		}
 		return false
 	}
-	return unsupported(request["messages"]) || unsupported(request["input"])
+	if unsupported(request["messages"]) {
+		return true
+	}
+	// Responses input items include tool declarations and opaque call/history
+	// records. Only message content and explicit media items are content blocks.
+	if items, ok := request["input"].([]interface{}); ok {
+		for _, raw := range items {
+			item, ok := raw.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			kind, _ := item["type"].(string)
+			if kind == "message" || item["role"] != nil {
+				if unsupported(item["content"]) {
+					return true
+				}
+				continue
+			}
+			switch kind {
+			case "image_url", "input_image", "image", "document", "file", "input_file", "input_audio", "audio", "audio_url", "input_video", "video":
+				if unsupported(item) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
