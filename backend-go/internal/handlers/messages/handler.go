@@ -17,6 +17,7 @@ import (
 	"github.com/soulteary/yunqi/internal/middleware"
 	"github.com/soulteary/yunqi/internal/providers"
 	"github.com/soulteary/yunqi/internal/scheduler"
+	"github.com/soulteary/yunqi/internal/thinkingcache"
 	"github.com/soulteary/yunqi/internal/types"
 	"github.com/soulteary/yunqi/internal/utils"
 )
@@ -505,6 +506,12 @@ func handleNormalResponse(
 	// 竞速提交闸门：完整响应校验通过后裁决赢家；败者零字节写客户端。
 	if !common.RacingClaimClientCommit(c) {
 		return nil, common.ErrRacingSuperseded
+	}
+	// 仅缓存已交付分支的规范化内容，保留空 thinking 的存在性和客户端可见工具 ID。
+	if thinkingcache.ShouldTrackClaudeThinking(upstream, requestBody) {
+		if sessionID := utils.ExtractUnifiedSessionID(c, requestBody); sessionID != "" {
+			thinkingcache.StoreClaudeResponseThinking(sessionID, claudeResp.Content)
+		}
 	}
 	// 转发上游响应头
 	utils.ForwardResponseHeaders(resp.Header, httpbridge.Writer(c))
