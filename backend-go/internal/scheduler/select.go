@@ -13,6 +13,7 @@ import (
 	"github.com/soulteary/yunqi/internal/keypool"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/ratelimit"
+	"github.com/soulteary/yunqi/internal/telemetry"
 )
 
 const (
@@ -236,6 +237,8 @@ func (s *ChannelScheduler) SelectChannel(
 }
 
 func (s *ChannelScheduler) SelectChannelWithOptions(ctx context.Context, opts SelectionOptions) (*SelectionResult, error) {
+	endTiming := telemetry.Phase(ctx, "selection")
+	defer endTiming()
 	// Hold the provider lock only while copying references. Callbacks may update
 	// providers themselves, and nested readers can deadlock behind a queued writer.
 	s.mu.RLock()

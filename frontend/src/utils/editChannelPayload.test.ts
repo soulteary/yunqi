@@ -44,3 +44,13 @@ describe('extractEditChannelPayloadFields', () => {
     expect(result.apiKeyConfigs).toEqual(configs)
   })
 })
+
+it('editing a name retains optional configuration and concrete false/zero/null values', () => {
+  const channel = {
+    name: 'before', fastMode: false, requestTimeoutMs: 0, outboundNetwork: null,
+    customHeaders: { 'x-extra': 'keep' }, balanceCheck: { enabled: false },
+  } as unknown as Channel
+  expect({ ...extractEditChannelPayloadFields(channel), name: 'after' }).toEqual({
+    ...channel, name: 'after',
+  })
+})

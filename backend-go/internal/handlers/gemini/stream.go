@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/soulteary/yunqi/internal/redaction"
 	"net/http"
 	"strings"
 	"time"
@@ -243,6 +244,19 @@ func preflightGeminiStream(resp *http.Response, upstreamType string, timeouts co
 				continue
 			}
 			jsonData := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+			if upstreamType == "gemini" {
+				if err := types.ValidateGeminiFinishReasons([]byte(jsonData)); err != nil {
+					return nil, chunkChan, bodyErrChan, fmt.Errorf("%w: %v", common.ErrEmptyStreamResponse, err)
+				}
+				var chunk types.GeminiStreamChunk
+				if json.Unmarshal([]byte(jsonData), &chunk) == nil {
+					for _, candidate := range chunk.Candidates {
+						if types.GeminiFinishReasonFailed(candidate.FinishReason) {
+							return nil, chunkChan, bodyErrChan, fmt.Errorf("%w: Gemini finishReason %s", common.ErrEmptyStreamResponse, candidate.FinishReason)
+						}
+					}
+				}
+			}
 			if reason, msg, recoverAt, isErr := common.DetectStreamDataError(jsonData); isErr {
 				if reason != "" {
 					return nil, chunkChan, bodyErrChan, &common.ErrBlacklistKey{Reason: reason, Message: msg, RecoverAt: recoverAt}
@@ -365,21 +379,45 @@ func hasGeminiSemanticContent(jsonData string) bool {
 	if err := json.Unmarshal([]byte(jsonData), &event); err != nil {
 		return false
 	}
+	// Explicit native refusals are terminal, visible outcomes, not empty streams.
+	if feedback, ok := event["promptFeedback"].(map[string]interface{}); ok {
+		if reason, ok := feedback["blockReason"].(string); ok && strings.TrimSpace(reason) != "" {
+			return true
+		}
+	}
 	// 检测 text content
 	if candidates, ok := event["candidates"].([]interface{}); ok && len(candidates) > 0 {
 		if candidate, ok := candidates[0].(map[string]interface{}); ok {
+			reason, _ := candidate["finishReason"].(string)
+			switch reason {
+			case "SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "IMAGE_SAFETY", "IMAGE_PROHIBITED_CONTENT":
+				return true
+			}
 			if content, ok := candidate["content"].(map[string]interface{}); ok {
 				if parts, ok := content["parts"].([]interface{}); ok && len(parts) > 0 {
 					for _, part := range parts {
 						if p, ok := part.(map[string]interface{}); ok {
-							if text, ok := p["text"].(string); ok && text != "" {
+							if thought, _ := p["thought"].(bool); thought {
+								continue
+							}
+							if text, ok := p["text"].(string); ok && strings.TrimSpace(text) != "" && !common.IsEffectivelyEmptyStreamText(text) {
 								return true
 							}
-							if _, ok := p["functionCall"]; ok {
-								return true
+							if data, ok := p["inlineData"].(map[string]interface{}); ok {
+								if value, _ := data["data"].(string); strings.TrimSpace(value) != "" {
+									return true
+								}
 							}
-							if _, ok := p["thought"]; ok {
-								return true
+							if data, ok := p["fileData"].(map[string]interface{}); ok {
+								if value, _ := data["fileUri"].(string); strings.TrimSpace(value) != "" {
+									return true
+								}
+							}
+							if call, ok := p["functionCall"].(map[string]interface{}); ok {
+								name, _ := call["name"].(string)
+								if strings.TrimSpace(name) != "" {
+									return true
+								}
 							}
 						}
 					}
@@ -499,7 +537,8 @@ func handleStreamSuccess(
 	}
 	reader := newStreamLineReader(chunkChan, bodyErrChan, common.GetStreamTimeoutObserver(c))
 	reader.remainder = bufferedBody
-	progress := common.NewStreamProgressLogger("Gemini", startTime, envCfg.ShouldLog("info"), common.RequestLogTag(c))
+	progress := common.NewStreamProgressLogger("Gemini", startTime, envCfg.ShouldLog("info"), common.RequestLogTag(c)).WithMetricsContext(httpbridge.Request(c).Context())
+	defer progress.FinishMetricsFallback()
 
 	switch upstreamType {
 	case "gemini":
@@ -576,7 +615,7 @@ func geminiAbortRepetitionLoop(c fiber.Ctx, flusher http.Flusher, progress *comm
 		},
 	}
 	chunkBytes, _ := json.Marshal(errPayload)
-	_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(chunkBytes))
+	_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(redaction.ErrorJSON(chunkBytes)))
 	if flusher != nil {
 		flusher.Flush()
 	}
@@ -633,9 +672,29 @@ func streamGeminiToGemini(
 		if strings.HasPrefix(line, "data: ") {
 			jsonData := strings.TrimPrefix(line, "data: ")
 
+			if err := types.ValidateGeminiFinishReasons([]byte(jsonData)); err != nil {
+				payload, _ := json.Marshal(types.GeminiError{Error: types.GeminiErrorDetail{Code: 502, Status: "INTERNAL", Message: err.Error()}})
+				_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", payload)
+				if flusher != nil {
+					flusher.Flush()
+				}
+				progress.Finish("error")
+				return nil, err
+			}
 			// 尝试解析 usage
 			var chunk types.GeminiStreamChunk
 			if err := json.Unmarshal([]byte(jsonData), &chunk); err == nil {
+				for _, candidate := range chunk.Candidates {
+					if types.GeminiFinishReasonFailed(candidate.FinishReason) {
+						payload, _ := json.Marshal(types.GeminiError{Error: types.GeminiErrorDetail{Code: 502, Status: "INTERNAL", Message: "Gemini generation failed: " + candidate.FinishReason}})
+						_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", payload)
+						if flusher != nil {
+							flusher.Flush()
+						}
+						progress.Finish("error")
+						return nil, fmt.Errorf("Gemini finishReason %s", candidate.FinishReason)
+					}
+				}
 				if chunk.UsageMetadata != nil {
 					totalUsage = &types.Usage{
 						InputTokens:  chunk.UsageMetadata.PromptTokenCount - chunk.UsageMetadata.CachedContentTokenCount,
@@ -647,10 +706,10 @@ func streamGeminiToGemini(
 				}
 			}
 			lastWasDataLine = true
-			_, _ = fmt.Fprintf(httpbridge.Writer(c), "%s\n", line)
+			_, _ = fmt.Fprintf(httpbridge.Writer(c), "%s\n", redaction.SSEErrorEvent(line))
 		} else if line != "" {
 			lastWasDataLine = false
-			_, _ = fmt.Fprintf(httpbridge.Writer(c), "%s\n", line)
+			_, _ = fmt.Fprintf(httpbridge.Writer(c), "%s\n", redaction.SSEErrorEvent(line))
 		} else {
 			lastWasDataLine = false
 			_, _ = fmt.Fprintf(httpbridge.Writer(c), "\n")
@@ -745,7 +804,7 @@ func streamClaudeToGemini(
 					},
 				}
 				chunkBytes, _ := json.Marshal(geminiChunk)
-				_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(chunkBytes))
+				_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(redaction.ErrorJSON(chunkBytes)))
 				if flusher != nil {
 					flusher.Flush()
 				}
@@ -771,7 +830,7 @@ func streamClaudeToGemini(
 				}
 
 				chunkBytes, _ := json.Marshal(geminiChunk)
-				_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(chunkBytes))
+				_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(redaction.ErrorJSON(chunkBytes)))
 				if flusher != nil {
 					flusher.Flush()
 				}
@@ -807,7 +866,7 @@ func streamClaudeToGemini(
 					},
 				}
 				chunkBytes, _ := json.Marshal(geminiChunk)
-				_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(chunkBytes))
+				_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(redaction.ErrorJSON(chunkBytes)))
 				if flusher != nil {
 					flusher.Flush()
 				}
@@ -895,7 +954,7 @@ func streamOpenAIToGemini(
 					},
 				}
 				chunkBytes, _ := json.Marshal(geminiChunk)
-				_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(chunkBytes))
+				_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(redaction.ErrorJSON(chunkBytes)))
 				if flusher != nil {
 					flusher.Flush()
 				}
@@ -925,7 +984,7 @@ func streamOpenAIToGemini(
 					},
 				}
 				chunkBytes, _ := json.Marshal(geminiChunk)
-				_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(chunkBytes))
+				_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(redaction.ErrorJSON(chunkBytes)))
 				if flusher != nil {
 					flusher.Flush()
 				}
@@ -956,7 +1015,7 @@ func streamOpenAIToGemini(
 			}
 
 			chunkBytes, _ := json.Marshal(geminiChunk)
-			_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(chunkBytes))
+			_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(redaction.ErrorJSON(chunkBytes)))
 			if flusher != nil {
 				flusher.Flush()
 			}
@@ -983,7 +1042,7 @@ func streamOpenAIToGemini(
 			}
 
 			chunkBytes, _ := json.Marshal(geminiChunk)
-			_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(chunkBytes))
+			_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(redaction.ErrorJSON(chunkBytes)))
 			if flusher != nil {
 				flusher.Flush()
 			}
@@ -1000,7 +1059,7 @@ func streamOpenAIToGemini(
 				},
 			}
 			chunkBytes, _ := json.Marshal(geminiChunk)
-			_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(chunkBytes))
+			_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(redaction.ErrorJSON(chunkBytes)))
 			if flusher != nil {
 				flusher.Flush()
 			}

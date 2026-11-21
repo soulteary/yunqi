@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/soulteary/yunqi/internal/redaction"
 	"github.com/soulteary/yunqi/internal/utils"
 )
 
@@ -27,7 +28,7 @@ func BuildStreamErrorEvent(err error) string {
 		"type": "error",
 		"error": map[string]interface{}{
 			"type":    "stream_error",
-			"message": streamErrorClientMessage(err),
+			"message": redaction.String(streamErrorClientMessage(err)),
 		},
 	}
 	eventJSON, _ := json.Marshal(errorEvent)

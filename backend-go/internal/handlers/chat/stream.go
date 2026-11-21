@@ -68,7 +68,8 @@ func handleStreamSuccess(
 	if !ok {
 		common.RequestLogf(c, "[Chat-Stream] 警告: ResponseWriter 不支持 Flusher")
 	}
-	progress := common.NewStreamProgressLogger("Chat", startTime, envCfg.ShouldLog("info"), common.RequestLogTag(c))
+	progress := common.NewStreamProgressLogger("Chat", startTime, envCfg.ShouldLog("info"), common.RequestLogTag(c)).WithMetricsContext(httpbridge.Request(c).Context())
+	defer progress.FinishMetricsFallback()
 
 	switch upstreamType {
 	case "claude":
