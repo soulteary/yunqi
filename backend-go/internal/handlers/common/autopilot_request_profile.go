@@ -11,6 +11,7 @@ import (
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/scheduler"
+	"github.com/soulteary/yunqi/internal/telemetry"
 	"github.com/soulteary/yunqi/internal/utils"
 )
 
@@ -91,6 +92,7 @@ func AttachAutopilotRequestProfile(
 	})
 
 	if c != nil && httpbridge.Request(c) != nil {
+		profile.OTLPTraceID = telemetry.TraceID(httpbridge.Request(c).Context())
 		ctx := autopilot.ContextWithRequestProfile(httpbridge.Request(c).Context(), profile)
 		httpbridge.SetRequest(c, httpbridge.Request(c).WithContext(ctx))
 	}

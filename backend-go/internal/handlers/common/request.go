@@ -306,9 +306,11 @@ func SendRequestWithLifecycleTrace(req *http.Request, upstream *config.UpstreamC
 			req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
 		}
 	}
+	req, finishUpstreamTrace := telemetry.StartUpstreamTrace(req, upstream.ServiceType)
 	req = withLifecycleTrace(req, lifecycleTrace)
 	req, endNetwork := telemetry.NetworkTiming(req)
 	resp, err := client.Do(req)
+	finishUpstreamTrace(resp, err)
 	endNetwork()
 	if err == nil && isStream && resp.StatusCode >= 200 && resp.StatusCode < 300 && lifecycleTrace != nil {
 		lifecycleTrace.finishFirstContentWait = telemetry.Phase(req.Context(), "upstream_first_content")
