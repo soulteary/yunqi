@@ -22,7 +22,7 @@
     </div>
 
     <!-- Empty state -->
-    <div v-else-if="!loading && !overview" class="text-center py-12 text-medium-emphasis">
+    <div v-else-if="!loading && !overview" class="text-center py-12 text-high-emphasis">
       <v-icon size="64" class="mb-4" color="grey">mdi-view-dashboard-outline</v-icon>
       <div class="text-body-1">{{ t('cockpitOverview.empty') }}</div>
     </div>
@@ -38,13 +38,13 @@
         <v-col cols="6" sm="4" md="2">
           <v-card variant="tonal" rounded="lg" class="pa-3 text-center">
             <div class="text-h5 font-weight-bold">{{ overview.health.totalChannels }}</div>
-            <div class="text-caption text-medium-emphasis">{{ t('cockpitOverview.channels') }}</div>
+            <div class="text-caption text-high-emphasis">{{ t('cockpitOverview.channels') }}</div>
           </v-card>
         </v-col>
         <v-col cols="6" sm="4" md="2">
           <v-card variant="tonal" rounded="lg" class="pa-3 text-center">
             <div class="text-h5 font-weight-bold">{{ overview.health.totalEndpoints }}</div>
-            <div class="text-caption text-medium-emphasis">{{ t('cockpitOverview.endpoints') }}</div>
+            <div class="text-caption text-high-emphasis">{{ t('cockpitOverview.endpoints') }}</div>
           </v-card>
         </v-col>
         <v-col
@@ -55,7 +55,7 @@
           <v-card variant="tonal" :color="st.color" rounded="lg" class="pa-3 text-center">
             <v-icon :color="st.color" size="24" class="mb-1">{{ st.icon }}</v-icon>
             <div class="text-h5 font-weight-bold">{{ st.count }}</div>
-            <div class="text-caption text-medium-emphasis">{{ t(st.labelKey) }}</div>
+            <div class="text-caption text-high-emphasis">{{ t(st.labelKey) }}</div>
           </v-card>
         </v-col>
       </v-row>
@@ -69,7 +69,7 @@
         <v-col cols="6" sm="4" md="2">
           <v-card variant="tonal" rounded="lg" class="pa-3 text-center">
             <div class="text-h5 font-weight-bold">{{ overview.subscriptions.total }}</div>
-            <div class="text-caption text-medium-emphasis">{{ t('cockpitOverview.totalSubscriptions') }}</div>
+            <div class="text-caption text-high-emphasis">{{ t('cockpitOverview.totalSubscriptions') }}</div>
           </v-card>
         </v-col>
         <v-col
@@ -79,7 +79,7 @@
         >
           <v-card variant="tonal" color="primary" rounded="lg" class="pa-3 text-center">
             <div class="text-h6 font-weight-bold">{{ code }} {{ amount.toFixed(2) }}</div>
-            <div class="text-caption text-medium-emphasis">{{ t('cockpitOverview.balanceByCode') }}</div>
+            <div class="text-caption text-high-emphasis">{{ t('cockpitOverview.balanceByCode') }}</div>
           </v-card>
         </v-col>
       </v-row>
@@ -118,13 +118,13 @@
         <v-col cols="6" sm="4" md="2">
           <v-card variant="tonal" rounded="lg" class="pa-3 text-center">
             <div class="text-h5 font-weight-bold">{{ overview.localRuntimes.total }}</div>
-            <div class="text-caption text-medium-emphasis">{{ t('cockpitOverview.totalRuntimes') }}</div>
+            <div class="text-caption text-high-emphasis">{{ t('cockpitOverview.totalRuntimes') }}</div>
           </v-card>
         </v-col>
         <v-col cols="6" sm="4" md="2">
           <v-card variant="tonal" rounded="lg" class="pa-3 text-center">
             <div class="text-h5 font-weight-bold">{{ overview.localRuntimes.totalModels }}</div>
-            <div class="text-caption text-medium-emphasis">{{ t('cockpitOverview.totalModels') }}</div>
+            <div class="text-caption text-high-emphasis">{{ t('cockpitOverview.totalModels') }}</div>
           </v-card>
         </v-col>
         <v-col
@@ -134,7 +134,7 @@
         >
           <v-card variant="tonal" :color="getRuntimeStatusColor(String(status))" rounded="lg" class="pa-3 text-center">
             <div class="text-h6 font-weight-bold">{{ count }}</div>
-            <div class="text-caption text-medium-emphasis">{{ String(status) }}</div>
+            <div class="text-caption text-high-emphasis">{{ String(status) }}</div>
           </v-card>
         </v-col>
       </v-row>
@@ -148,13 +148,13 @@
         <v-col cols="6" sm="4" md="2">
           <v-card variant="tonal" color="info" rounded="lg" class="pa-3 text-center">
             <div class="text-h5 font-weight-bold">{{ overview.manualIntents.activeCount }}</div>
-            <div class="text-caption text-medium-emphasis">{{ t('cockpitOverview.activeIntents') }}</div>
+            <div class="text-caption text-high-emphasis">{{ t('cockpitOverview.activeIntents') }}</div>
           </v-card>
         </v-col>
         <v-col cols="6" sm="4" md="2">
           <v-card variant="tonal" rounded="lg" class="pa-3 text-center">
             <div class="text-h5 font-weight-bold">{{ overview.manualIntents.totalCount }}</div>
-            <div class="text-caption text-medium-emphasis">{{ t('cockpitOverview.totalIntents') }}</div>
+            <div class="text-caption text-high-emphasis">{{ t('cockpitOverview.totalIntents') }}</div>
           </v-card>
         </v-col>
       </v-row>
@@ -165,7 +165,7 @@
         {{ t('cockpitOverview.activeTrials') }}
       </div>
 
-      <div v-if="activeTrials.length === 0" class="text-body-2 text-medium-emphasis mb-4">
+      <div v-if="activeTrials.length === 0" class="text-body-2 text-high-emphasis mb-4">
         {{ t('cockpitOverview.noActiveTrials') }}
       </div>
 
@@ -181,14 +181,14 @@
               <v-chip size="x-small" variant="tonal" :color="getIntentStatusColor(trial.status)">{{ t(`manualIntent.status.${trial.status}`) }}</v-chip>
             </div>
             <div v-if="trial.model" class="text-body-2 mb-1">
-              <span class="text-medium-emphasis">{{ t('manualIntent.field.model') }}:</span>
+              <span class="text-high-emphasis">{{ t('manualIntent.field.model') }}:</span>
               <code class="text-caption">{{ trial.model }}</code>
             </div>
             <div v-if="trial.channelUid" class="text-body-2 mb-1">
-              <span class="text-medium-emphasis">{{ t('manualIntent.field.channelUid') }}:</span>
+              <span class="text-high-emphasis">{{ t('manualIntent.field.channelUid') }}:</span>
               <code class="text-caption">{{ trial.channelUid }}</code>
             </div>
-            <div class="text-caption text-medium-emphasis mb-1">
+            <div class="text-caption text-high-emphasis mb-1">
               {{ t('cockpitOverview.trialRemaining', { time: formatRemaining(trial.expiresAt) }) }}
             </div>
             <div class="text-caption mb-2">
@@ -218,7 +218,7 @@
         {{ t('cockpitOverview.recommendations') }}
       </div>
 
-      <div v-if="recommendations.length === 0" class="text-body-2 text-medium-emphasis mb-4">
+      <div v-if="recommendations.length === 0" class="text-body-2 text-high-emphasis mb-4">
         {{ t('cockpitOverview.noRecommendations') }}
       </div>
 
@@ -231,19 +231,19 @@
           <v-card variant="tonal" color="success" rounded="lg" class="pa-3">
             <div class="d-flex align-center justify-space-between mb-1">
               <v-chip size="x-small" variant="tonal" color="primary">{{ rec.domain }}</v-chip>
-              <span class="text-caption text-medium-emphasis">{{ t('cockpitOverview.usageCount', { count: rec.domainUsageCount }) }}</span>
+              <span class="text-caption text-high-emphasis">{{ t('cockpitOverview.usageCount', { count: rec.domainUsageCount }) }}</span>
             </div>
             <div class="text-body-2 mb-1">
-              <span class="text-medium-emphasis">{{ t('cockpitOverview.currentChannel') }}:</span>
+              <span class="text-high-emphasis">{{ t('cockpitOverview.currentChannel') }}:</span>
               <code class="text-caption">{{ rec.currentChannelUid }}</code>
-              <span class="text-caption text-medium-emphasis"> ({{ rec.currentScore.toFixed(2) }})</span>
+              <span class="text-caption text-high-emphasis"> ({{ rec.currentScore.toFixed(2) }})</span>
             </div>
             <div class="text-body-2 mb-1">
-              <span class="text-medium-emphasis">{{ t('cockpitOverview.recommendedChannel') }}:</span>
+              <span class="text-high-emphasis">{{ t('cockpitOverview.recommendedChannel') }}:</span>
               <code class="text-caption font-weight-bold">{{ rec.recommendedChannelUid }}</code>
-              <span class="text-caption text-medium-emphasis"> ({{ rec.recommendedScore.toFixed(2) }})</span>
+              <span class="text-caption text-high-emphasis"> ({{ rec.recommendedScore.toFixed(2) }})</span>
             </div>
-            <div class="text-caption text-medium-emphasis">
+            <div class="text-caption text-high-emphasis">
               {{ t('cockpitOverview.scoreDelta', { delta: rec.scoreDelta.toFixed(2) }) }}
             </div>
           </v-card>
@@ -256,7 +256,7 @@
         {{ t('cockpitOverview.todoList') }}
       </div>
 
-      <div v-if="overview.todoItems.length === 0" class="text-body-2 text-medium-emphasis mb-4">
+      <div v-if="overview.todoItems.length === 0" class="text-body-2 text-high-emphasis mb-4">
         {{ t('cockpitOverview.noTodoItems') }}
       </div>
 

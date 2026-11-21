@@ -746,7 +746,7 @@ a.api-type-text {
   color: white;
 }
 .stat-card-info .stat-card-value {
-  color: #3b82f6;
+  color: #1d4ed8;
 }
 .v-theme--dark .stat-card-info .stat-card-value {
   color: #60a5fa;
@@ -757,7 +757,7 @@ a.api-type-text {
   color: white;
 }
 .stat-card-success .stat-card-value {
-  color: #10b981;
+  color: #065f46;
 }
 .v-theme--dark .stat-card-success .stat-card-value {
   color: #34d399;
@@ -779,7 +779,7 @@ a.api-type-text {
   color: white;
 }
 .stat-card-emerald .stat-card-value {
-  color: #059669;
+  color: #065f46;
 }
 .v-theme--dark .stat-card-emerald .stat-card-value {
   color: #34d399;
@@ -790,7 +790,7 @@ a.api-type-text {
   color: white;
 }
 .stat-card-error .stat-card-value {
-  color: #dc2626;
+  color: #b91c1c;
 }
 .v-theme--dark .stat-card-error .stat-card-value {
   color: #f87171;
