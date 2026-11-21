@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"github.com/soulteary/yunqi/internal/types"
 	"github.com/tidwall/gjson"
+	"mime"
+	"net/url"
+	"path"
 	"strings"
 )
 
@@ -205,38 +208,102 @@ func chatToolContentToResponses(content gjson.Result) string {
 	return string(raw)
 }
 
-func geminiToolOutputMedia(output interface{}) (interface{}, []types.GeminiFunctionResponsePart) {
-	text, media := chatToolOutput(output)
-	if len(media) == 0 {
-		return buildGeminiFunctionResponsePayload(output), nil
+func geminiToolOutputMedia(output interface{}) (interface{}, []types.GeminiFunctionResponsePart, error) {
+	values, ok := output.([]interface{})
+	if !ok {
+		return buildGeminiFunctionResponsePayload(output), nil, nil
 	}
 	var parts []types.GeminiFunctionResponsePart
-	refs := make([]interface{}, 0, len(media))
-	for _, value := range media {
-		block, _ := value.(map[string]interface{})
-		url := ""
-		switch block["type"] {
-		case "image_url":
-			image, _ := block["image_url"].(map[string]interface{})
-			url, _ = image["url"].(string)
-		case "file":
-			file, _ := block["file"].(map[string]interface{})
-			url, _ = file["file_data"].(string)
-		}
-		source := claudeMediaSource(url)
-		if source["type"] != "base64" {
+	var refs []interface{}
+	var text []string
+	for _, value := range values {
+		block, ok := value.(map[string]interface{})
+		if !ok {
+			raw, _ := json.Marshal(value)
+			text = append(text, string(raw))
 			continue
 		}
-		name := fmt.Sprintf("tool_media_%d", len(parts))
-		mime, _ := source["media_type"].(string)
-		data, _ := source["data"].(string)
-		parts = append(parts, types.GeminiFunctionResponsePart{InlineData: &types.GeminiInlineData{MimeType: mime, Data: data, DisplayName: name}})
-		refs = append(refs, map[string]interface{}{"$ref": name})
+		kind, _ := block["type"].(string)
+		switch kind {
+		case "input_image", "image_url", "image", "input_file", "file", "document":
+			address := ""
+			mimeType, _ := block["mime_type"].(string)
+			filename, _ := block["filename"].(string)
+			if image, ok := block["image_url"].(string); ok {
+				address = image
+			}
+			if image, ok := block["image_url"].(map[string]interface{}); ok {
+				address, _ = image["url"].(string)
+			}
+			source := block
+			if file, ok := block["file"].(map[string]interface{}); ok {
+				source = file
+			}
+			if data, ok := source["file_data"].(string); ok {
+				address = data
+			}
+			if uri, ok := source["file_url"].(string); ok && address == "" {
+				address = uri
+			}
+			if value, ok := source["filename"].(string); ok {
+				filename = value
+			}
+			if native, ok := block["source"].(map[string]interface{}); ok {
+				if value, ok := native["media_type"].(string); ok {
+					mimeType = value
+				}
+				if native["type"] == "base64" {
+					data, _ := native["data"].(string)
+					address = "data:" + mimeType + ";base64," + data
+				} else {
+					address, _ = native["url"].(string)
+				}
+			}
+			if address == "" {
+				return nil, nil, fmt.Errorf("Gemini tool media requires inline data or a URL; provider file IDs are not portable")
+			}
+			name := fmt.Sprintf("tool_media_%d", len(parts))
+			if header, data, ok := strings.Cut(address, ","); ok && strings.HasPrefix(header, "data:") && strings.HasSuffix(header, ";base64") {
+				mimeType = strings.TrimSuffix(strings.TrimPrefix(header, "data:"), ";base64")
+				if mimeType == "" || data == "" {
+					return nil, nil, fmt.Errorf("Gemini tool inline media requires MIME and data")
+				}
+				parts = append(parts, types.GeminiFunctionResponsePart{InlineData: &types.GeminiInlineData{MimeType: mimeType, Data: data, DisplayName: name}})
+			} else {
+				parsed, err := url.Parse(address)
+				if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https" && parsed.Scheme != "gs") {
+					return nil, nil, fmt.Errorf("Gemini tool media requires a data URL or portable URI")
+				}
+				if mimeType == "" {
+					mimeType = mime.TypeByExtension(path.Ext(filename))
+					if mimeType == "" {
+						mimeType = mime.TypeByExtension(path.Ext(parsed.Path))
+					}
+					mimeType = strings.Split(mimeType, ";")[0]
+				}
+				if mimeType == "" || strings.Contains(mimeType, "*") {
+					return nil, nil, fmt.Errorf("Gemini tool media URL requires a MIME type or a recognized file extension")
+				}
+				parts = append(parts, types.GeminiFunctionResponsePart{FileData: &types.GeminiFileData{FileURI: address, MimeType: mimeType, DisplayName: name}})
+			}
+			ref := map[string]interface{}{"$ref": name}
+			if filename != "" {
+				ref["filename"] = filename
+			}
+			refs = append(refs, ref)
+		case "input_text", "output_text", "text":
+			if value, ok := block["text"].(string); ok {
+				text = append(text, value)
+			}
+		default:
+			raw, _ := json.Marshal(block)
+			text = append(text, string(raw))
+		}
 	}
-	if len(parts) != len(media) {
-		return buildGeminiFunctionResponsePayload(output), nil
+	if len(parts) == 0 {
+		return buildGeminiFunctionResponsePayload(output), nil, nil
 	}
-	return map[string]interface{}{"output": text, "media": refs}, parts
+	return map[string]interface{}{"output": strings.Join(text, "\n"), "media": refs}, parts, nil
 }
 
 func geminiFunctionResponseOutput(response *types.GeminiFunctionResponse) interface{} {
@@ -272,4 +339,11 @@ func geminiFunctionResponseOutput(response *types.GeminiFunctionResponse) interf
 		}
 	}
 	return parts
+}
+
+func geminiToolCorrelationID(id, name string) string {
+	if id != "" {
+		return id
+	}
+	return name
 }

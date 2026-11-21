@@ -130,7 +130,7 @@ func geminiContentToResponsesItems(content *types.GeminiContent) []types.Respons
 			items = append(items, types.ResponsesItem{
 				Type:      "function_call",
 				Role:      role,
-				CallID:    part.FunctionCall.Name,
+				CallID:    geminiToolCorrelationID(part.FunctionCall.ID, part.FunctionCall.Name),
 				Name:      part.FunctionCall.Name,
 				Arguments: string(argsJSON),
 			})
@@ -143,7 +143,7 @@ func geminiContentToResponsesItems(content *types.GeminiContent) []types.Respons
 			items = append(items, types.ResponsesItem{
 				Type:   "function_call_output",
 				Role:   role,
-				CallID: part.FunctionResponse.Name,
+				CallID: geminiToolCorrelationID(part.FunctionResponse.ID, part.FunctionResponse.Name),
 				Output: geminiFunctionResponseOutput(part.FunctionResponse),
 			})
 		}

@@ -109,6 +109,38 @@ func GeminiToOpenAIRequest(geminiReq *types.GeminiRequest, model string) (map[st
 
 	// 2. 转换 contents -> messages
 	for _, content := range geminiReq.Contents {
+		var replies []types.GeminiPart
+		var other []types.GeminiPart
+		for _, part := range content.Parts {
+			if part.FunctionResponse != nil {
+				replies = append(replies, part)
+			} else {
+				other = append(other, part)
+			}
+		}
+		if len(replies) > 0 {
+			for _, part := range replies {
+				single := types.GeminiContent{Role: content.Role, Parts: []types.GeminiPart{part}}
+				msg, err := geminiContentToOpenAIMessage(&single)
+				if err != nil {
+					return nil, err
+				}
+				if msg != nil {
+					messages = append(messages, msg)
+				}
+			}
+			if len(other) > 0 {
+				single := types.GeminiContent{Role: content.Role, Parts: other}
+				msg, err := geminiContentToOpenAIMessage(&single)
+				if err != nil {
+					return nil, err
+				}
+				if msg != nil {
+					messages = append(messages, msg)
+				}
+			}
+			continue
+		}
 		msg, err := geminiContentToOpenAIMessage(&content)
 		if err != nil {
 			return nil, err
@@ -400,7 +432,7 @@ func geminiContentToClaudeMessage(content *types.GeminiContent) (map[string]inte
 
 		if part.FunctionCall != nil {
 			// 工具调用
-			toolUseID := part.FunctionCall.Name
+			toolUseID := geminiToolCorrelationID(part.FunctionCall.ID, part.FunctionCall.Name)
 			if toolUseID == "" {
 				continue
 			}
@@ -421,7 +453,7 @@ func geminiContentToClaudeMessage(content *types.GeminiContent) (map[string]inte
 			}
 			claudeContent = append(claudeContent, map[string]interface{}{
 				"type":        "tool_result",
-				"tool_use_id": part.FunctionResponse.Name,
+				"tool_use_id": geminiToolCorrelationID(part.FunctionResponse.ID, part.FunctionResponse.Name),
 				"content":     output,
 			})
 		}
@@ -474,7 +506,10 @@ func geminiContentToOpenAIMessage(content *types.GeminiContent) (map[string]inte
 			if functionName == "" {
 				continue
 			}
-			toolCallID := fmt.Sprintf("%s_%d", functionName, idx)
+			toolCallID := part.FunctionCall.ID
+			if toolCallID == "" {
+				toolCallID = fmt.Sprintf("%s_%d", functionName, idx)
+			}
 			argsJSON, _ := JSONMarshal(part.FunctionCall.Args)
 			toolCalls = append(toolCalls, map[string]interface{}{
 				"id":   toolCallID,
@@ -488,7 +523,7 @@ func geminiContentToOpenAIMessage(content *types.GeminiContent) (map[string]inte
 
 		if part.FunctionResponse != nil {
 			hasToolResponse = true
-			toolResponseName = part.FunctionResponse.Name
+			toolResponseName = geminiToolCorrelationID(part.FunctionResponse.ID, part.FunctionResponse.Name)
 			toolResponseContent = geminiFunctionResponseOutput(part.FunctionResponse)
 		}
 	}

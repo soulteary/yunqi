@@ -98,3 +98,75 @@ func TestClaudeRejectsNonportableToolFileID(t *testing.T) {
 		t.Fatal("nonportable file ID silently accepted")
 	}
 }
+
+func TestGeminiMixedToolMediaPortableOrRejected(t *testing.T) {
+	for _, tc := range []struct {
+		name, part string
+		reject     bool
+	}{
+		{"url", `{"type":"input_file","file_url":"https://example.test/report.pdf"}`, false},
+		{"id", `{"type":"input_file","file_id":"foreign-id"}`, true},
+		{"unknown-mime", `{"type":"input_file","file_url":"https://example.test/opaque"}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var req types.ResponsesRequest
+			raw := `{"input":[{"type":"function_call_output","call_id":"a","output":[{"type":"input_image","image_url":"data:image/png;base64,aW1hZ2U="},` + tc.part + `]}]}`
+			if err := json.Unmarshal([]byte(raw), &req); err != nil {
+				t.Fatal(err)
+			}
+			got, err := ResponsesToGeminiRequest(&session.Session{}, &req, "m")
+			if tc.reject {
+				if err == nil {
+					t.Fatal("nonportable media accepted")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := got.Contents[0].Parts[0].FunctionResponse
+			if len(r.Parts) != 2 || r.Parts[0].InlineData == nil || r.Parts[1].FileData == nil || r.Parts[1].FileData.MimeType != "application/pdf" {
+				t.Fatalf("media lost: %#v", r)
+			}
+			body, _ := json.Marshal(r.Response)
+			if strings.Contains(string(body), "aW1hZ2U=") {
+				t.Fatalf("base64 text fallback %s", body)
+			}
+		})
+	}
+}
+
+func TestGeminiNativeParallelResultsPreserveIDs(t *testing.T) {
+	var req types.GeminiRequest
+	raw := `{"contents":[{"role":"model","parts":[{"functionCall":{"id":"a","name":"same","args":{}}},{"functionCall":{"id":"b","name":"same","args":{}}}]},{"role":"user","parts":[{"functionResponse":{"id":"a","name":"same","response":{"output":"first"},"parts":[{"inlineData":{"mimeType":"image/png","data":"aW1hZ2U="}}]}},{"functionResponse":{"id":"b","name":"same","response":{"output":"second"}}}]}]}`
+	if err := json.Unmarshal([]byte(raw), &req); err != nil {
+		t.Fatal(err)
+	}
+	chat, err := GeminiToOpenAIRequest(&req, "m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(chat)
+	root := gjson.ParseBytes(body)
+	if root.Get("messages.0.tool_calls.0.id").String() != "a" || root.Get("messages.0.tool_calls.1.id").String() != "b" || root.Get("messages.1.tool_call_id").String() != "a" || root.Get("messages.2.tool_call_id").String() != "b" || root.Get("messages.3.role").String() != "user" {
+		t.Fatalf("chat pairing lost %s", body)
+	}
+	claude, err := GeminiToClaudeRequest(&req, "m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ = json.Marshal(claude)
+	root = gjson.ParseBytes(body)
+	if root.Get("messages.1.content.0.tool_use_id").String() != "a" || root.Get("messages.1.content.1.tool_use_id").String() != "b" || root.Get("messages.1.content.0.content.1.source.data").String() != "aW1hZ2U=" {
+		t.Fatalf("Claude pairing/media lost %s", body)
+	}
+	responses, err := GeminiToResponsesRequest(&req, "m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ = json.Marshal(responses)
+	root = gjson.ParseBytes(body)
+	if root.Get("input.2.call_id").String() != "a" || root.Get("input.3.call_id").String() != "b" {
+		t.Fatalf("Responses pairing lost %s", body)
+	}
+}

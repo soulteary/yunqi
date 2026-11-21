@@ -7,7 +7,6 @@ import "encoding/json"
 // Gemini API 常量
 // =====================================================================}
 
-
 // DummyThoughtSignature 用于跳过 Gemini thought_signature 验证
 // 参考: https://ai.google.dev/gemini-api/docs/thought-signatures
 const DummyThoughtSignature = "skip_thought_signature_validator"
@@ -20,7 +19,6 @@ const StripThoughtSignatureMarker = "__STRIP_THOUGHT_SIGNATURE__"
 
 // Gemini API 请求结构
 // =====================================================================}
-
 
 // GeminiRequest Gemini API 请求
 type GeminiRequest struct {
@@ -109,8 +107,9 @@ type GeminiInlineData struct {
 
 // GeminiFileData 文件引用（File API）
 type GeminiFileData struct {
-	MimeType string `json:"mimeType,omitempty"`
-	FileURI  string `json:"fileUri"`
+	DisplayName string `json:"displayName,omitempty"`
+	MimeType    string `json:"mimeType,omitempty"`
+	FileURI     string `json:"fileUri"`
 }
 
 // GeminiFunctionCall 函数调用
@@ -119,6 +118,7 @@ type GeminiFileData struct {
 // - 驼峰格式（thoughtSignature）：Gemini CLI 等第三方客户端
 // 为了保持透传，我们记录原始格式并在输出时使用相同格式
 type GeminiFunctionCall struct {
+	ID               string                 `json:"id,omitempty"`
 	Name             string                 `json:"name"`
 	Args             map[string]interface{} `json:"args"`
 	ThoughtSignature string                 `json:"-"` // thoughtSignature 位于 part 层级，仅内部使用
@@ -126,6 +126,7 @@ type GeminiFunctionCall struct {
 
 // GeminiFunctionResponse 函数响应
 type GeminiFunctionResponse struct {
+	ID       string                       `json:"id,omitempty"`
 	Parts    []GeminiFunctionResponsePart `json:"parts,omitempty"`
 	Name     string                       `json:"name"`
 	Response interface{}                  `json:"response"`
@@ -283,7 +284,6 @@ type GeminiSafetySetting struct {
 // Gemini API 响应结构
 // =====================================================================}
 
-
 // GeminiResponse Gemini API 响应
 type GeminiResponse struct {
 	Candidates     []GeminiCandidate     `json:"candidates"`
@@ -326,7 +326,6 @@ type GeminiUsageMetadata struct {
 // Gemini 流式响应结构
 // =====================================================================}
 
-
 // GeminiStreamChunk Gemini 流式响应块
 type GeminiStreamChunk struct {
 	Candidates    []GeminiCandidate    `json:"candidates,omitempty"`
@@ -337,7 +336,6 @@ type GeminiStreamChunk struct {
 
 // Gemini 错误响应结构
 // =====================================================================}
-
 
 // GeminiError Gemini 错误响应
 type GeminiError struct {
