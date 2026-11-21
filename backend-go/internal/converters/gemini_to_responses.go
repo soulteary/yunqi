@@ -144,7 +144,7 @@ func geminiContentToResponsesItems(content *types.GeminiContent) []types.Respons
 				Type:   "function_call_output",
 				Role:   role,
 				CallID: part.FunctionResponse.Name,
-				Output: part.FunctionResponse.Response,
+				Output: geminiFunctionResponseOutput(part.FunctionResponse),
 			})
 		}
 	}

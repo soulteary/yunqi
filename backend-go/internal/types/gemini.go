@@ -98,8 +98,9 @@ func (p GeminiPart) MarshalJSON() ([]byte, error) {
 
 // GeminiInlineData 内联数据（图片、音频等）
 type GeminiInlineData struct {
-	MimeType string `json:"mimeType"`
-	Data     string `json:"data"` // base64 编码
+	DisplayName string `json:"displayName,omitempty"`
+	MimeType    string `json:"mimeType"`
+	Data        string `json:"data"` // base64 编码
 }
 
 // GeminiFileData 文件引用（File API）
@@ -121,8 +122,9 @@ type GeminiFunctionCall struct {
 
 // GeminiFunctionResponse 函数响应
 type GeminiFunctionResponse struct {
-	Name     string      `json:"name"`
-	Response interface{} `json:"response"`
+	Parts    []GeminiFunctionResponsePart `json:"parts,omitempty"`
+	Name     string                       `json:"name"`
+	Response interface{}                  `json:"response"`
 }
 
 // GeminiTool 工具定义
@@ -334,4 +336,11 @@ type GeminiErrorDetail struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
 	Status  string `json:"status"`
+}
+
+// GeminiFunctionResponsePart carries native multimodal tool output, separate
+// from the JSON response object so Base64 is never rendered as ordinary text.
+type GeminiFunctionResponsePart struct {
+	InlineData *GeminiInlineData `json:"inlineData,omitempty"`
+	FileData   *GeminiFileData   `json:"fileData,omitempty"`
 }

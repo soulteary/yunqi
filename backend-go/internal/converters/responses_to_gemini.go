@@ -156,13 +156,15 @@ func responsesItemToGeminiContents(item types.ResponsesItem) []types.GeminiConte
 			return nil
 		}
 
+		payload, mediaParts := geminiToolOutputMedia(output)
 		contents = append(contents, types.GeminiContent{
 			Role: "user",
 			Parts: []types.GeminiPart{
 				{
 					FunctionResponse: &types.GeminiFunctionResponse{
 						Name:     callID,
-						Response: buildGeminiFunctionResponsePayload(output),
+						Response: payload,
+						Parts:    mediaParts,
 					},
 				},
 			},
