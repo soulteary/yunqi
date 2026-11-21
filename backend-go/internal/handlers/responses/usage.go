@@ -11,10 +11,10 @@ import (
 )
 
 func checkResponsesEventUsage(event string, enableLog bool) (bool, bool, responsesStreamUsage) {
-	return checkResponsesEventUsageWithLogTag(event, enableLog, "")
+	return checkResponsesEventUsageWithLogTag(event, enableLog, "", false)
 }
 
-func checkResponsesEventUsageWithLogTag(event string, enableLog bool, logTag string) (bool, bool, responsesStreamUsage) {
+func checkResponsesEventUsageWithLogTag(event string, enableLog bool, logTag string, converted bool) (bool, bool, responsesStreamUsage) {
 	lines := strings.Split(event, "\n")
 	for _, line := range lines {
 		// 支持 "data:" 和 "data: " 两种格式（有些上游不带空格）
@@ -40,9 +40,9 @@ func checkResponsesEventUsageWithLogTag(event string, enableLog bool, logTag str
 					usageData := extractResponsesUsageFromMap(usage)
 					needPatch := usageData.InputTokens <= 1 || usageData.OutputTokens <= 1
 
-					// 仅当检测到 Claude 原生缓存字段时，才跳过 input_tokens 补全
-					// OpenAI 的 input_tokens_details.cached_tokens 不应阻止补全
-					if usageData.HasClaudeCache && usageData.InputTokens <= 1 {
+					// 转换后 input_tokens 是未缓存输入；完整缓存命中时 0/1 是有效值。
+					// 原生 Responses 使用含缓存口径，不套用此内部恒等式。
+					if usageData.InputTokens <= 1 && (usageData.HasClaudeCache || (converted && coherentCachedInputUsage(usageData.InputTokens, usageData.OutputTokens, usageData.TotalTokens, usageData.CacheReadInputTokens, usageData.CacheCreationInputTokens, usageData.CacheCreation5mInputTokens, usageData.CacheCreation1hInputTokens))) {
 						needPatch = usageData.OutputTokens <= 1 // 有 Claude 缓存时只检查 output
 					}
 
@@ -188,6 +188,13 @@ func effectiveCacheCreationTokens(cacheCreation, cacheCreation5m, cacheCreation1
 	return cacheCreation5m + cacheCreation1h
 }
 
+// Only a complete, self-consistent internal usage record proves a tiny uncached
+// input is real. A cache field alone must not disable missing-usage repair.
+func coherentCachedInputUsage(input, output, total, read, creation, creation5m, creation1h int) bool {
+	return input >= 0 && output >= 0 && total > 0 && read > 0 && creation >= 0 && creation5m >= 0 && creation1h >= 0 &&
+		total == calculateTotalTokensWithCache(input, output, read, creation, creation5m, creation1h)
+}
+
 // openAIInclusiveCacheAddend 汇总缓存读 + 有效缓存写 token。
 // 协议转换器内部按"不含缓存"口径输出 input_tokens，而官方 OpenAI Responses 语义要求
 // input_tokens 已包含缓存命中部分，出口归一时把这部分加回。
@@ -270,6 +277,16 @@ func normalizeCompletedUsageDataLine(line string) string {
 	if cacheRead == 0 {
 		if details, ok := usage["input_tokens_details"].(map[string]interface{}); ok {
 			cacheRead = jsonIntFromMap(details, "cached_tokens")
+		}
+	}
+	if cacheRead > 0 {
+		details, ok := usage["input_tokens_details"].(map[string]interface{})
+		if !ok {
+			details = make(map[string]interface{})
+			usage["input_tokens_details"] = details
+		}
+		if jsonIntFromMap(details, "cached_tokens") <= 0 {
+			details["cached_tokens"] = cacheRead
 		}
 	}
 	cacheCreation := jsonIntFromMap(usage, "cache_creation_input_tokens")
@@ -476,7 +493,7 @@ func injectResponsesUsageToCompletedEventWithLogTag(event string, requestBody []
 
 // patchResponsesCompletedEventUsage 修补 response.completed 事件中的 usage
 
-func patchResponsesCompletedEventUsageWithLogTag(event string, requestBody []byte, outputText string, collected *responsesStreamUsage, envCfg *config.EnvConfig, logTag string) string {
+func patchResponsesCompletedEventUsageWithLogTag(event string, requestBody []byte, outputText string, collected *responsesStreamUsage, envCfg *config.EnvConfig, logTag string, converted bool) string {
 	var result strings.Builder
 	lines := strings.Split(event, "\n")
 
@@ -505,9 +522,8 @@ func patchResponsesCompletedEventUsageWithLogTag(event string, requestBody []byt
 					originalOutput := collected.OutputTokens
 					patched := false
 
-					// 修补 input_tokens（仅当没有 Claude 原生缓存时）
-					// OpenAI 的 cached_tokens 不应阻止 input_tokens 补全
-					if collected.InputTokens <= 1 && !collected.HasClaudeCache {
+					knownCachedInput := converted && coherentCachedInputUsage(collected.InputTokens, collected.OutputTokens, collected.TotalTokens, collected.CacheReadInputTokens, collected.CacheCreationInputTokens, collected.CacheCreation5mInputTokens, collected.CacheCreation1hInputTokens)
+					if collected.InputTokens <= 1 && !collected.HasClaudeCache && !knownCachedInput {
 						estimatedInput := utils.EstimateResponsesRequestTokens(requestBody)
 						usage["input_tokens"] = estimatedInput
 						collected.InputTokens = estimatedInput

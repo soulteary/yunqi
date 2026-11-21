@@ -646,7 +646,7 @@ func handleLocalCompactV2Stream(
 				continue
 			}
 			collectStreamSummary(event, &summaryBuf, &responseID)
-			if detected, _, usageData := checkResponsesEventUsageWithLogTag(event, false, common.RequestLogTag(c)); detected {
+			if detected, _, usageData := checkResponsesEventUsageWithLogTag(event, false, common.RequestLogTag(c), false); detected {
 				updateResponsesStreamUsage(&collectedUsage, usageData)
 			}
 		}

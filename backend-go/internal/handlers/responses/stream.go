@@ -540,7 +540,7 @@ func handleStreamSuccess(
 			}
 
 			// 检测并收集 usage
-			detected, needPatch, usageData := checkResponsesEventUsageWithLogTag(event, envCfg.EnableResponseLogs && envCfg.ShouldLog("debug"), common.RequestLogTag(c))
+			detected, needPatch, usageData := checkResponsesEventUsageWithLogTag(event, envCfg.EnableResponseLogs && envCfg.ShouldLog("debug"), common.RequestLogTag(c), needConvert)
 			if detected {
 				if !hasUsage {
 					hasUsage = true
@@ -586,7 +586,7 @@ func handleStreamSuccess(
 					}
 				} else if needTokenPatch {
 					// 需要修补虚假值
-					eventToSend = patchResponsesCompletedEventUsageWithLogTag(event, originalRequestJSON, outputTextBuffer.String(), &collectedUsage, envCfg, common.RequestLogTag(c))
+					eventToSend = patchResponsesCompletedEventUsageWithLogTag(event, originalRequestJSON, outputTextBuffer.String(), &collectedUsage, envCfg, common.RequestLogTag(c), needConvert)
 				}
 				// 改写 model 字段（仅 passthrough 场景，转换器已处理好转换场景）
 				if envCfg.RewriteResponseModel && !needConvert && originalReq != nil && originalReq.Model != "" {
@@ -833,7 +833,7 @@ streamEnd:
 						collectedUsage.CacheCreation1hInputTokens,
 					)
 				} else if needTokenPatch {
-					eventToSend = patchResponsesCompletedEventUsageWithLogTag(event, originalRequestJSON, outputTextBuffer.String(), &collectedUsage, envCfg, common.RequestLogTag(c))
+					eventToSend = patchResponsesCompletedEventUsageWithLogTag(event, originalRequestJSON, outputTextBuffer.String(), &collectedUsage, envCfg, common.RequestLogTag(c), needConvert)
 				}
 				// 改写 model 字段（仅 passthrough 场景，转换器已处理好转换场景）
 				if envCfg.RewriteResponseModel && !needConvert && originalReq != nil && originalReq.Model != "" {
