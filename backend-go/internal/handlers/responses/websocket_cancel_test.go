@@ -199,3 +199,36 @@ func TestWebSocketWarmupReservationDoesNotLeak(t *testing.T) {
 		t.Fatal("idle cancellation leaked into next turn")
 	}
 }
+
+func TestWebSocketInvalidCreateReleasesReservation(t *testing.T) {
+	var calls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"ready\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"ready\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n")
+	}))
+	defer upstream.Close()
+	router := newResponsesWebSocketTestRouter(t, config.UpstreamConfig{BaseURL: upstream.URL, APIKeys: []string{"test"}, ServiceType: "responses", Status: "active"})
+	proxy := httptest.NewServer(httpbridge.Handler(router))
+	defer proxy.Close()
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(proxy.URL, "http")+"/v1/responses", http.Header{"x-api-key": []string{"secret-key"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if err := conn.WriteJSON(map[string]interface{}{"type": "response.create", "model": 123, "input": "invalid"}); err != nil {
+		t.Fatal(err)
+	}
+	readWebSocketJSONUntilType(t, conn, "error")
+	if err := conn.WriteJSON(map[string]interface{}{"type": "response.cancel"}); err != nil {
+		t.Fatal(err)
+	}
+	readWebSocketJSONUntilType(t, conn, "error")
+	if err := conn.WriteJSON(map[string]interface{}{"type": "response.create", "model": "m", "input": "ready"}); err != nil {
+		t.Fatal(err)
+	}
+	readWebSocketJSONUntilType(t, conn, "response.completed")
+	if calls.Load() != 1 {
+		t.Fatalf("invalid or cancelled request reached upstream: calls=%d", calls.Load())
+	}
+}

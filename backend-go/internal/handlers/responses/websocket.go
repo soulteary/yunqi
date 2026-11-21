@@ -125,6 +125,11 @@ func normalizeWebSocketResponseCreatePayload(payload []byte) ([]byte, bool, erro
 	if err != nil {
 		return nil, false, err
 	}
+	if model, present := req["model"]; present {
+		if _, ok := model.(string); !ok {
+			return nil, false, fmt.Errorf("model must be a string")
+		}
+	}
 	warmup := req["generate"] == false
 
 	delete(req, "type")
@@ -185,16 +190,18 @@ func serveResponsesWebSocketBridgeLoop(
 					}
 				}
 			}
+			reserved := false
 			if kind == websocket.TextMessage {
 				var event struct {
 					Type string `json:"type"`
 				}
 				if json.Unmarshal(body, &event) == nil && event.Type == "response.create" {
 					active.reserve()
+					reserved = true
 				}
 			}
 			select {
-			case messages <- webSocketClientMessage{kind, body}:
+			case messages <- webSocketClientMessage{kind, body, reserved}:
 			case <-ctx.Done():
 				return
 			default:
@@ -207,6 +214,7 @@ func serveResponsesWebSocketBridgeLoop(
 	}()
 	defer func() { cancel(); _ = conn.Close(); <-readerDone }()
 	payload := firstPayload
+	payloadReserved := true
 	var continuation responsesWebSocketContinuation
 	for {
 		if payload == nil {
@@ -221,6 +229,7 @@ func serveResponsesWebSocketBridgeLoop(
 				return
 			}
 			payload = message.body
+			payloadReserved = message.reserved
 		}
 
 		if ctx.Err() != nil {
@@ -236,7 +245,12 @@ func serveResponsesWebSocketBridgeLoop(
 		}
 		requestBody, warmup, err := normalizeWebSocketResponseCreatePayload(payload)
 		payload = nil
+		reserved := payloadReserved
+		payloadReserved = false
 		if err != nil {
+			if reserved {
+				active.discardReservation()
+			}
 			_ = writeWebSocketError(conn, http.StatusBadRequest, "invalid_request", err.Error())
 			continue
 		}
@@ -272,8 +286,9 @@ func serveResponsesWebSocketBridgeLoop(
 }
 
 type webSocketClientMessage struct {
-	kind int
-	body []byte
+	kind     int
+	body     []byte
+	reserved bool
 }
 
 func serveResponseCreateOverWebSocket(
