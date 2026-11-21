@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"log"
+	"os"
 	"time"
 
 	"github.com/soulteary/yunqi/internal/config"
@@ -24,7 +25,8 @@ func (a *application) configureGuardrails() {
 	gatewayKeys := []string{a.envCfg.ProxyAccessKey, a.envCfg.GetAdminAccessKey()}
 	gatewayKeys = append(gatewayKeys, a.envCfg.ExtraProxyAccessKeys...)
 	credentialMasker.SetStaticKeys(gatewayKeys)
-	redaction.Configure(gatewayKeys)
+	initializeCredentialRedaction(a.envCfg)
+	redaction.Add(gatewayKeys)
 	updateCredentials := func(cfg config.Config) {
 		if data, err := json.Marshal(cfg); err == nil {
 			redaction.ObserveJSON(data)
@@ -151,4 +153,13 @@ func (a *application) initConversations() {
 
 	a.overrideManager = conversation.NewOverrideManager(overrideTTL)
 	a.channelScheduler.SetConversationComponents(a.conversationTracker, a.overrideManager)
+}
+
+func initializeCredentialRedaction(env *config.EnvConfig) func() {
+	keys := []string{env.ProxyAccessKey, env.GetAdminAccessKey()}
+	keys = append(keys, env.ExtraProxyAccessKeys...)
+	if secret := os.Getenv("IDENTITY_PROXY_SECRET"); secret != "" {
+		keys = append(keys, secret)
+	}
+	return redaction.Enable(keys)
 }

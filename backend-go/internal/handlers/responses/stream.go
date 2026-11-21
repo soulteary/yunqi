@@ -467,7 +467,8 @@ func handleStreamSuccess(
 	promptTokensTotal := 0
 	completedEventSent := false
 	eventsSentCount := 0
-	progress := common.NewStreamProgressLogger("Responses", startTime, envCfg.ShouldLog("info"), common.RequestLogTag(c))
+	progress := common.NewStreamProgressLogger("Responses", startTime, envCfg.ShouldLog("info"), common.RequestLogTag(c)).WithMetricsContext(httpbridge.Request(c).Context())
+	defer progress.FinishMetricsFallback()
 
 	// 收集流式 output items（含 reasoning 的 encrypted_content）用于 session 回写
 	outputCollector := newStreamOutputCollector()

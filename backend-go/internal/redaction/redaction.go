@@ -53,6 +53,19 @@ func Configure(values []string) {
 	store(values)
 	enabled.Store(true)
 }
+
+// Enable protects staged startup without replacing credentials already observed
+// from the initial config read or clearing a fail-closed capacity state. The
+// returned closure supports isolated callers/tests; services keep it enabled.
+func Enable(values []string) func() {
+	updateMu.Lock()
+	old, wasEnabled := current.Load(), enabled.Load()
+	enabled.Store(true)
+	updateMu.Unlock()
+	Add(values)
+	return func() { updateMu.Lock(); current.Store(old); enabled.Store(wasEnabled); updateMu.Unlock() }
+}
+
 func Add(values []string) {
 	updateMu.Lock()
 	defer updateMu.Unlock()

@@ -754,7 +754,8 @@ func ProcessStreamEvents(
 		postCommitChan = postCommitTimer.C
 		defer postCommitTimer.Stop()
 	}
-	progress := NewStreamProgressLogger("Messages", startTime, envCfg.ShouldLog("info"), RequestLogTag(c))
+	progress := NewStreamProgressLogger("Messages", startTime, envCfg.ShouldLog("info"), RequestLogTag(c)).WithMetricsContext(httpbridge.Request(c).Context())
+	defer progress.FinishMetricsFallback()
 	toolCallPending := ctx.ToolCallTracker != nil && ctx.ToolCallTracker.HasPendingToolCall()
 	if toolCallPending && timeouts.ToolCallIdleTimeoutMs > 0 {
 		activeTimeoutMs = timeouts.ToolCallIdleTimeoutMs

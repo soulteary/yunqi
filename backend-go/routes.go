@@ -5,6 +5,7 @@ import (
 	"github.com/gofiber/fiber/v3/middleware/recover"
 	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/middleware"
+	"github.com/soulteary/yunqi/internal/telemetry"
 )
 
 // newRouter only registers middleware and routes. All runtime dependencies and
@@ -12,11 +13,16 @@ import (
 func (a *application) newRouter() *fiber.App {
 	if a.cfgManager != nil {
 		a.envCfg.ManagedProxyKeyLookup = a.cfgManager.FindEntryKey
+		a.envCfg.ManagedAdminKeyLookup = a.cfgManager.FindAdminCredential
 	}
 	// 创建路由器（使用自定义 Logger，根据 QUIET_POLLING_LOGS 配置过滤轮询日志）
 	r := httpbridge.NewApp()
 	r.Use(middleware.FilteredLogger(a.envCfg))
 	r.Use(recover.New())
+	if a.monitoring == nil {
+		a.monitoring = telemetry.NewRegistry()
+	}
+	r.Use(a.monitoring.Middleware())
 
 	// 配置 CORS
 	r.Use(middleware.CORSMiddleware(a.envCfg))

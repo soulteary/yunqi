@@ -23,6 +23,7 @@ import (
 	"github.com/soulteary/yunqi/internal/middleware"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/session"
+	"github.com/soulteary/yunqi/internal/telemetry"
 	"github.com/soulteary/yunqi/internal/utils"
 )
 
@@ -47,6 +48,7 @@ func WebSocketHandler(
 ) fiber.Handler {
 	httpHandler := Handler(envCfg, cfgManager, sessionManager, channelScheduler)
 	bridgeRouter := httpbridge.NewApp()
+	bridgeRouter.Use(telemetry.BridgeMiddleware())
 	bridgeRouter.Use(middleware.ProxyAdmissionMiddleware(envCfg))
 	bridgeRouter.Post("/v1/responses", httpHandler)
 	bridgeRouter.Post("/:routePrefix/v1/responses", httpHandler)
@@ -344,6 +346,7 @@ func copyWebSocketRequestHeaders(src http.Header, dst http.Header) {
 }
 
 type responsesWebSocketWriter struct {
+	observeWrite func() func()
 	active       *webSocketActiveTurn
 	conn         *websocket.Conn
 	context      context.Context
@@ -368,6 +371,7 @@ func newResponsesWebSocketWriter(conn *websocket.Conn) *responsesWebSocketWriter
 	}
 }
 
+func (w *responsesWebSocketWriter) ObserveWrites(observe func() func()) { w.observeWrite = observe }
 func (w *responsesWebSocketWriter) Header() http.Header {
 	return w.header
 }
@@ -514,7 +518,13 @@ func (w *responsesWebSocketWriter) sendCurrentData() {
 		w.active.observe(data)
 	}
 	_ = w.conn.SetWriteDeadline(time.Now().Add(responsesWebSocketWriteTimeout))
-	w.setWriteError(w.conn.WriteMessage(websocket.TextMessage, redaction.ErrorJSON([]byte(data))))
+	payload := redaction.ErrorJSON([]byte(data))
+	endWrite := func() {}
+	if w.observeWrite != nil {
+		endWrite = w.observeWrite()
+	}
+	w.setWriteError(w.conn.WriteMessage(websocket.TextMessage, payload))
+	endWrite()
 	if w.writeErr == nil {
 		w.continuation.observe(data)
 	}

@@ -14,6 +14,8 @@ import (
 )
 
 func (a *application) registerSystemRoutes(r *fiber.App) {
+	r.Get("/access", handlers.AccessPortal(a.envCfg))
+
 	// 健康检查端点（固定路径 /health，与 Dockerfile HEALTHCHECK 保持一致）
 	healthHandler := handlers.HealthCheck(a.envCfg, a.cfgManager)
 	r.Get("/health", healthHandler)
@@ -30,6 +32,7 @@ func (a *application) registerSystemRoutes(r *fiber.App) {
 
 func (a *application) registerManagementRoutes(apiGroup fiber.Router) {
 	handlers.RegisterEntryKeyRoutes(apiGroup, a.cfgManager)
+	handlers.RegisterAdminAccessRoutes(apiGroup, a.envCfg, a.cfgManager)
 	apiGroup.Get("/network/interfaces", handlers.NetworkInterfaces())
 	apiGroup.Post("/network/diagnose", handlers.DiagnoseNetwork(a.cfgManager))
 	discoveryModelFetchers := buildChannelDiscoveryModelFetchers(a.cfgManager)
@@ -93,6 +96,7 @@ func (a *application) registerManagementRoutes(apiGroup fiber.Router) {
 	apiGroup.Get("/conversations/settings", handlers.GetConversationSettings(convDeps))
 	apiGroup.Put("/conversations/settings", handlers.UpdateConversationSettings(convDeps))
 
+	apiGroup.Get("/metrics/prometheus", a.monitoring.Serve)
 	apiGroup.Get("/reports/requests", handlers.GetRequestHistory(a.metricsStore))
 	// Phase 4 Item 2: 成本报表 API（按 user/model/key 分组聚合）
 	apiGroup.Get("/reports/cost", handlers.GetCostReport(&handlers.CostReportDeps{

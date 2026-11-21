@@ -467,6 +467,7 @@ type responseWriter struct {
 	request      *http.Request
 	header       *fasthttp.ResponseHeader
 	hijacked     bool
+	observeWrite func() func()
 }
 
 func (w *responseWriter) WriteHeader(code int) {
@@ -488,7 +489,17 @@ func (w *responseWriter) WriteHeaderNow() {
 	w.size = 0
 	w.ResponseWriter.WriteHeader(w.status)
 }
+func SetWriteObserver(c fiber.Ctx, observe func() func()) {
+	if w, ok := Writer(c).(interface{ ObserveWrites(func() func()) }); ok {
+		w.ObserveWrites(observe)
+	}
+}
+func (w *responseWriter) ObserveWrites(observe func() func()) { w.observeWrite = observe }
 func (w *responseWriter) Write(p []byte) (int, error) {
+	if w.observeWrite != nil {
+		end := w.observeWrite()
+		defer end()
+	}
 	w.WriteHeaderNow()
 	n, e := w.ResponseWriter.Write(p)
 	w.size += n
@@ -499,6 +510,10 @@ func (w *responseWriter) Status() int                       { return w.status }
 func (w *responseWriter) Size() int                         { return w.size }
 func (w *responseWriter) Written() bool                     { return w.size >= 0 }
 func (w *responseWriter) Flush() {
+	if w.observeWrite != nil {
+		end := w.observeWrite()
+		defer end()
+	}
 	w.WriteHeaderNow()
 	_ = http.NewResponseController(w.ResponseWriter).Flush()
 }

@@ -83,6 +83,7 @@ func (cm *ConfigManager) loadConfig() error {
 
 	var loaded Config
 	autopilotDecodeFallback := false
+	redaction.ObserveJSON(data)
 	if err := json.Unmarshal(data, &loaded); err != nil {
 		fallback, fallbackErr := decodeConfigWithDefaultAutopilot(data)
 		if fallbackErr != nil {
