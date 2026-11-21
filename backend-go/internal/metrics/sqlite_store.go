@@ -367,6 +367,14 @@ func initSchema(db *sql.DB) error {
 			}
 		}
 	}
+	// Filter-specific keyset indexes do not reserve a schema version.
+	for _, column := range []string{"model,", "channel_uid,", "correlation_id,"} {
+		name := strings.ReplaceAll(column, ",", "")
+		if _, err := db.Exec("CREATE INDEX IF NOT EXISTS idx_history_" + name + " ON request_records(api_type," + column + "timestamp DESC,id DESC)"); err != nil {
+			return fmt.Errorf("history index: %w", err)
+		}
+	}
+
 	return nil
 }
 
