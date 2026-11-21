@@ -2,7 +2,7 @@
 
 > Yunqi is a high-performance multi-upstream AI API proxy and protocol translation gateway supporting Claude, OpenAI Chat, OpenAI Images, Codex Responses, and Gemini.
 
-Yunqi provides unified proxy entry, built-in web admin, channel orchestration, failover, multi-key management, and model routing. Built with Go 1.25 + Gin backend and Vue 3 frontend.
+Yunqi provides unified proxy entry, built-in web admin, channel orchestration, failover, multi-key management, and model routing. Built with Go 1.26 + Fiber v3 backend and Vue 3 frontend.
 
 ## Getting Started
 

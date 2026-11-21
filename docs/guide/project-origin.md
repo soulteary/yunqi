@@ -43,7 +43,7 @@ Claude Code / Codex / 其他客户端
 
 ## 当前仓库与本轮范围
 
-本仓库从上游 `3a08db977187a37ed4236d6a755fb8ab3aebc214` 快照建立，初始提交为 [`02d7a24`](https://github.com/soulteary/yunqi/commit/02d7a24f3b97d229f32872f00aa76a3dd3bb13c1)。本轮首先完成项目更名、许可调整、暂停继承的发布动作和移除广告赞助。当前已逐项迁入 Web-only 改造、启动装配和前端业务模块拆分；Wails 桌面外壳已经移除，管理入口统一为内嵌 Web 控制台。框架迁移继续按独立提交推进。
+本仓库从上游 `3a08db977187a37ed4236d6a755fb8ab3aebc214` 快照建立，初始提交为 [`02d7a24`](https://github.com/soulteary/yunqi/commit/02d7a24f3b97d229f32872f00aa76a3dd3bb13c1)。初始化阶段完成项目更名、许可调整、暂停继承的发布动作和移除广告赞助。当前已逐项迁入 Web-only 改造、启动装配和前端业务模块拆分；Wails 桌面外壳已经移除，管理入口统一为内嵌 Web 控制台。Gin 已完全替换为 Fiber v3，Go 最低版本为 1.26；代理传输继续保留 net/http 的流式、取消、HTTP/2 与 WebSocket 语义。迁移范围与验证见[迁移记录](migration-ccx.md)。
 
 ## 名称与兼容边界
 

@@ -188,7 +188,7 @@ chmod 644 .air.toml
 
 - [Air 官方文档](https://github.com/air-verse/air)
 - [Air 配置示例](https://github.com/air-verse/air/blob/master/air_example.toml)
-- [Gin 开发模式文档](https://gin-gonic.com/docs/quickstart/)
+- [Fiber v3 官方文档](https://docs.gofiber.io/)
 
 ---
 

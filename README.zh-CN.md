@@ -125,7 +125,7 @@ docker compose up -d yunqi
 
 ### 方式三：源码构建
 
-前置依赖：[Go 1.25+](https://go.dev/dl/)、[Bun](https://bun.sh)、Make（macOS 需先执行 `xcode-select --install`）。
+前置依赖：[Go 1.26+](https://go.dev/dl/)、[Bun](https://bun.sh)、Make（macOS 需先执行 `xcode-select --install`）。
 
 ```bash
 git clone https://github.com/soulteary/yunqi

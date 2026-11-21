@@ -125,7 +125,7 @@ docker compose up -d yunqi
 
 ### Option 3: Build From Source
 
-Prerequisites: [Go 1.25+](https://go.dev/dl/), [Bun](https://bun.sh), and Make (macOS: `xcode-select --install`).
+Prerequisites: [Go 1.26+](https://go.dev/dl/), [Bun](https://bun.sh), and Make (macOS: `xcode-select --install`).
 
 ```bash
 git clone https://github.com/soulteary/yunqi

@@ -398,7 +398,6 @@ ENABLE_RESPONSE_LOGS=true
 
 | 配置项 | `development` | `production` |
 |--------|---------------|--------------|
-| Gin 模式 | DebugMode | ReleaseMode |
 | `/admin/dev/info` | ✅ 开启 | ❌ 关闭 |
 | CORS | 宽松（localhost自动允许）| 严格 |
 | 日志 | 详细 | 最小 |

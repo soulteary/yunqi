@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with th
 
 Yunqi 是一个支持 Claude、OpenAI Chat、OpenAI Images、OpenAI Embeddings、Codex Responses 和 Gemini 的多上游 AI API 代理与协议转换网关，提供统一代理入口和 Web 管理界面。
 
-**技术栈**: Go 1.25 + Gin（后端）+ Vue 3 + Vuetify 3 + TypeScript（前端）+ Docker  
+**技术栈**: Go 1.26 + Fiber v3（后端）+ Vue 3 + Vuetify 4 + TypeScript（前端）+ Docker
 **版本管理**: 根目录 `VERSION` 是唯一版本源，构建时通过 `backend-go/Makefile` 的 `-ldflags` 注入运行时版本信息。
 
 ## 常用命令

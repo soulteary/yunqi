@@ -270,3 +270,9 @@ Images 请求会在渠道日志中记录具体端点类型：
 Web 页面继续从 `frontend/src/services/api.ts` 导入 `api`、默认单例或 `ApiService`。该文件只组合业务模块；`services/api/client.ts` 集中处理请求头、动态认证、语言、响应解析及错误。六类协议渠道位于 `services/api/channels/`，稳定 UID / 逻辑渠道、能力测试、监控、健康、会话、订阅、账号、路由和成本分别拥有业务模块。
 
 DTO 位于 `services/types/`，原 `api-types.ts` 和 `console-types.ts` 作为兼容导出入口。业务实现直接导入所属 DTO，共享类型使用 `import type`，不通过门面回引业务模块。公共方法清单与请求契约测试用于确保拆分不改变路径、载荷、默认值、认证失效处理或页面调用方式。
+
+## Fiber 路由与 HTTP 传输
+
+后端统一使用 Fiber v3.7.0，最低 Go 版本为 1.26，已移除 Gin 及其压缩中间件依赖。所有路由、鉴权中间件和 Handler 使用原生 Fiber 类型。
+
+`internal/httpbridge/` 连接 Fiber 路由与现有 `net/http` 传输。HTTP 服务器、TLS、同端口 HTTP/HTTPS 和优雅关闭仍由 `server.go` 与 TLS 模块负责；请求体不在路由前额外缓冲，客户端取消、HTTP/2、SSE 刷新和 WebSocket 升级继续使用原始请求和响应写入器。桥接层还处理 JSON 校验、并发请求状态、竞速上下文副本，以及静态路由相对参数路由的优先级。配置文件和数据库格式不变。

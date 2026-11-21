@@ -11,7 +11,7 @@
 - 根目录 `VERSION` 是唯一发布版本源；后端构建时通过 `backend-go/Makefile` 的 `-ldflags` 注入运行时版本信息。
 
 ## 项目结构与模块
-- `backend-go/`：主 Go 服务（Gin），负责路由、认证、调度、协议转换、指标与日志；前端构建产物嵌入到 `backend-go/frontend/dist/`。
+- `backend-go/`：主 Go 服务（Fiber v3），负责路由、认证、调度、协议转换、指标与日志；前端构建产物嵌入到 `backend-go/frontend/dist/`。
 - `frontend/`：Vue 3 + Vite + Vuetify 管理界面。
 - `dist/`：发布构建产物，禁止手动编辑。
 - `.config/`：运行时配置与持久化目录（如 `config.json`、`metrics.db`、`backups/`）。
