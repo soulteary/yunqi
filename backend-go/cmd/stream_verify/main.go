@@ -31,6 +31,7 @@ type EventInfo struct {
 	Message map[string]interface{} `json:"message,omitempty"`
 	Usage   *UsageInfo             `json:"usage,omitempty"`
 	Delta   map[string]interface{} `json:"delta,omitempty"`
+	Error   map[string]interface{} `json:"error,omitempty"`
 	Index   int                    `json:"index,omitempty"`
 }
 
@@ -230,6 +231,12 @@ func verifyStream(name, baseURL, apiKey, model, prompt string, verbose bool) *Ve
 			result.UsageEvents = append(result.UsageEvents, *event.Usage)
 		}
 		switch event.Type {
+		case "error":
+			message := "上游返回 error 事件"
+			if detail, ok := event.Error["message"].(string); ok && detail != "" {
+				message += ": " + detail
+			}
+			result.Errors = append(result.Errors, message)
 		case "message_start":
 			result.HasMessageStart = true
 		case "message_stop":

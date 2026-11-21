@@ -54,6 +54,7 @@ func TestRunCLIReturnsFailureForInvalidStreamsAndComparisons(t *testing.T) {
 		{"different-cache-usage", strings.Replace(valid, "128", "64", 1), 1},
 		{"missing-stop", strings.Replace(valid, "data: {\"type\":\"message_stop\"}\n\n", "", 1), 1},
 		{"missing-content-block", strings.Replace(valid, "data: {\"type\":\"content_block_start\"}\n\n", "", 1), 1},
+		{"error-before-stop", strings.Replace(valid, "data: {\"type\":\"message_stop\"}", "data: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"busy\"}}\n\ndata: {\"type\":\"message_stop\"}", 1), 1},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			upstream := serveStream(t, test.body, false)
