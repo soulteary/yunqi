@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/soulteary/yunqi/internal/redaction"
 	"github.com/soulteary/yunqi/internal/utils"
 )
 
@@ -62,6 +63,7 @@ func protectMetadataTransport(base http.RoundTripper, proxied bool) http.RoundTr
 // DNS failures remain allowed, but known aliases and locally observed metadata
 // addresses are rejected before any request is sent to the proxy.
 func (t *metadataGuardTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	redaction.ObserveRequest(req)
 	if req == nil || req.URL == nil {
 		return blockedOutboundRequest(req, errors.New("missing request URL"))
 	}
