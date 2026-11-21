@@ -32,16 +32,17 @@ const (
 // ChannelDiscoveryFastRequest 快速探活请求体。
 // 与 ChannelDiscoveryRequest 区别：不支持单次全量探测，仅探一个真实模型以定 primaryKind。
 type ChannelDiscoveryFastRequest struct {
-	ChannelKind        string            `json:"channelKind"` // 可选提示，不能限制自动探测结果
-	BaseURL            string            `json:"baseUrl"`     // 兼容单 URL
-	BaseURLs           []string          `json:"baseUrls"`
-	APIKey             string            `json:"apiKey"` // 兼容单 key
-	APIKeys            []string          `json:"apiKeys"`
-	AuthHeader         string            `json:"authHeader"`
-	CustomHeaders      map[string]string `json:"customHeaders"`
-	ProxyURL           string            `json:"proxyUrl"`
-	ProxyPreferDirect  bool              `json:"proxyPreferDirect"`
-	InsecureSkipVerify bool              `json:"insecureSkipVerify"`
+	ChannelKind        string                        `json:"channelKind"` // 可选提示，不能限制自动探测结果
+	BaseURL            string                        `json:"baseUrl"`     // 兼容单 URL
+	BaseURLs           []string                      `json:"baseUrls"`
+	APIKey             string                        `json:"apiKey"` // 兼容单 key
+	APIKeys            []string                      `json:"apiKeys"`
+	AuthHeader         string                        `json:"authHeader"`
+	CustomHeaders      map[string]string             `json:"customHeaders"`
+	ProxyURL           string                        `json:"proxyUrl"`
+	ProxyPreferDirect  bool                          `json:"proxyPreferDirect"`
+	OutboundNetwork    *config.OutboundNetworkConfig `json:"outboundNetwork,omitempty"`
+	InsecureSkipVerify bool                          `json:"insecureSkipVerify"`
 }
 
 // ChannelDiscoveryFastResponse 快速探活响应体。
@@ -257,6 +258,7 @@ func buildFastTransientChannel(baseURL, apiKey string, req ChannelDiscoveryFastR
 		CustomHeaders:      cloneStringMap(req.CustomHeaders),
 		ProxyURL:           strings.TrimSpace(req.ProxyURL),
 		ProxyPreferDirect:  req.ProxyPreferDirect,
+		OutboundNetwork:    req.OutboundNetwork,
 		InsecureSkipVerify: req.InsecureSkipVerify,
 	}
 }

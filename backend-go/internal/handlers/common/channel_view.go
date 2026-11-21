@@ -46,6 +46,7 @@ func BuildChannelView(up config.UpstreamConfig, index int) fiber.Map {
 		"customHeaders":                 up.CustomHeaders,
 		"proxyUrl":                      up.ProxyURL,
 		"proxyPreferDirect":             up.ProxyPreferDirect,
+		"outboundNetwork":               up.OutboundNetwork,
 		"supportedModels":               up.SupportedModels,
 		"routePrefix":                   up.RoutePrefix,
 		"disabledApiKeys":               up.DisabledAPIKeys,

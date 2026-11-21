@@ -691,6 +691,7 @@ func (r *AutoDiscoveryRunner) probeProtocolModel(
 			Insecure:          channel.InsecureSkipVerify,
 			ProxyURL:          channel.ProxyURL,
 			ProxyPreferDirect: channel.ProxyPreferDirect,
+			OutboundNetwork:   channel.OutboundNetwork,
 		})
 	}
 	resp, err := client.Do(req)

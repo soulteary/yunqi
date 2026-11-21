@@ -55,20 +55,21 @@ type CreateRequestBody struct {
 
 // CreateRequestBodyProtocol POST 单协议入参。
 type CreateRequestBodyProtocol struct {
-	Kind              string                `json:"kind"`
-	ServiceType       string                `json:"serviceType"`
-	APIKeys           []string              `json:"apiKeys"`
-	APIKeyConfigs     []config.APIKeyConfig `json:"apiKeyConfigs"`
-	BaseURLs          []string              `json:"baseUrls"`
-	BaseURL           string                `json:"baseUrl"`
-	Priority          int                   `json:"priority"`
-	Enabled           *bool                 `json:"enabled"`
-	Status            string                `json:"status"`
-	RoutePrefix       string                `json:"routePrefix"`
-	SupportedModels   []string              `json:"supportedModels"`
-	CustomHeaders     map[string]string     `json:"customHeaders"`
-	ProxyURL          string                `json:"proxyUrl"`
-	ProxyPreferDirect bool                  `json:"proxyPreferDirect"`
+	Kind              string                        `json:"kind"`
+	ServiceType       string                        `json:"serviceType"`
+	APIKeys           []string                      `json:"apiKeys"`
+	APIKeyConfigs     []config.APIKeyConfig         `json:"apiKeyConfigs"`
+	BaseURLs          []string                      `json:"baseUrls"`
+	BaseURL           string                        `json:"baseUrl"`
+	Priority          int                           `json:"priority"`
+	Enabled           *bool                         `json:"enabled"`
+	Status            string                        `json:"status"`
+	RoutePrefix       string                        `json:"routePrefix"`
+	SupportedModels   []string                      `json:"supportedModels"`
+	CustomHeaders     map[string]string             `json:"customHeaders"`
+	ProxyURL          string                        `json:"proxyUrl"`
+	ProxyPreferDirect bool                          `json:"proxyPreferDirect"`
+	OutboundNetwork   *config.OutboundNetworkConfig `json:"outboundNetwork,omitempty"`
 }
 
 // UpdateRequestBody PUT 入参。
@@ -91,20 +92,21 @@ type UpdateRequestBodyCommon struct {
 
 // UpdateRequestBodyProtocol 单协议更新/新增。
 type UpdateRequestBodyProtocol struct {
-	Kind              string                `json:"kind"`
-	ServiceType       string                `json:"serviceType"`
-	APIKeys           []string              `json:"apiKeys"`
-	APIKeyConfigs     []config.APIKeyConfig `json:"apiKeyConfigs"`
-	BaseURLs          []string              `json:"baseUrls"`
-	BaseURL           string                `json:"baseUrl"`
-	Priority          int                   `json:"priority"`
-	Enabled           *bool                 `json:"enabled"`
-	Status            string                `json:"status"`
-	RoutePrefix       string                `json:"routePrefix"`
-	SupportedModels   []string              `json:"supportedModels"`
-	CustomHeaders     map[string]string     `json:"customHeaders"`
-	ProxyURL          string                `json:"proxyUrl"`
-	ProxyPreferDirect bool                  `json:"proxyPreferDirect"`
+	Kind              string                      `json:"kind"`
+	ServiceType       string                      `json:"serviceType"`
+	APIKeys           []string                    `json:"apiKeys"`
+	APIKeyConfigs     []config.APIKeyConfig       `json:"apiKeyConfigs"`
+	BaseURLs          []string                    `json:"baseUrls"`
+	BaseURL           string                      `json:"baseUrl"`
+	Priority          int                         `json:"priority"`
+	Enabled           *bool                       `json:"enabled"`
+	Status            string                      `json:"status"`
+	RoutePrefix       string                      `json:"routePrefix"`
+	SupportedModels   []string                    `json:"supportedModels"`
+	CustomHeaders     map[string]string           `json:"customHeaders"`
+	ProxyURL          string                      `json:"proxyUrl"`
+	ProxyPreferDirect bool                        `json:"proxyPreferDirect"`
+	OutboundNetwork   config.OutboundNetworkPatch `json:"outboundNetwork,omitempty"`
 }
 
 // List GET /api/logical-channels?kind=llm
@@ -420,6 +422,7 @@ func (h *Handler) Create(c fiber.Ctx) error {
 			CustomHeaders:     p.CustomHeaders,
 			ProxyURL:          p.ProxyURL,
 			ProxyPreferDirect: p.ProxyPreferDirect,
+			OutboundNetwork:   p.OutboundNetwork,
 		})
 	}
 	if in.Kind == "" {
@@ -475,6 +478,7 @@ func (h *Handler) Update(c fiber.Ctx) error {
 			CustomHeaders:     p.CustomHeaders,
 			ProxyURL:          p.ProxyURL,
 			ProxyPreferDirect: p.ProxyPreferDirect,
+			OutboundNetwork:   p.OutboundNetwork,
 		})
 	}
 	// removals 是"协议 kind"列表（如 "messages"），不是 ChannelUID：必须在 Update

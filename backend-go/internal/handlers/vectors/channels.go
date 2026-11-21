@@ -317,10 +317,11 @@ type GetModelsRequest struct {
 	BaseURLs []string `json:"baseUrls"`
 	ProxyURL string   `json:"proxyUrl"`
 	// ProxyPreferDirect 直连优先（nil=未指定，回退渠道配置）；仅在配置了代理时有意义
-	ProxyPreferDirect  *bool             `json:"proxyPreferDirect"`
-	InsecureSkipVerify *bool             `json:"insecureSkipVerify"`
-	CustomHeaders      map[string]string `json:"customHeaders"`
-	AuthHeader         string            `json:"authHeader"`
+	ProxyPreferDirect  *bool                       `json:"proxyPreferDirect"`
+	OutboundNetwork    config.OutboundNetworkPatch `json:"outboundNetwork"`
+	InsecureSkipVerify *bool                       `json:"insecureSkipVerify"`
+	CustomHeaders      map[string]string           `json:"customHeaders"`
+	AuthHeader         string                      `json:"authHeader"`
 	// LearnedClientFingerprint 上游存在客户端指纹校验（保活 L1 等无渠道上下文的
 	// 调用方传入渠道学习到的标记），命中时请求带 Claude Code 客户端伪装头。
 	LearnedClientFingerprint bool `json:"learnedClientFingerprint,omitempty"`
@@ -330,6 +331,9 @@ func GetChannelModels(cfgManager *config.ConfigManager) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		id, err := strconv.Atoi(httpbridge.Param(c, "id"))
 		if err != nil {
+			if common.RespondNetworkEgressError(c, err) {
+				return nil
+			}
 			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "Invalid channel ID"})
 			return nil
 		}
@@ -345,6 +349,7 @@ func GetChannelModels(cfgManager *config.ConfigManager) fiber.Handler {
 		insecureSkipVerify := false
 		proxyURL := req.ProxyURL
 		proxyPreferDirect := req.ProxyPreferDirect != nil && *req.ProxyPreferDirect
+		outboundNetwork := req.OutboundNetwork.Value
 		authHeader := req.AuthHeader
 		learnedClientFingerprint := req.LearnedClientFingerprint
 
@@ -371,6 +376,10 @@ func GetChannelModels(cfgManager *config.ConfigManager) fiber.Handler {
 			insecureSkipVerify = channel.InsecureSkipVerify
 			proxyURL = channel.ProxyURL
 			proxyPreferDirect = channel.ProxyPreferDirect
+			outboundNetwork = channel.OutboundNetwork
+			if req.OutboundNetwork.Set {
+				outboundNetwork = req.OutboundNetwork.Value
+			}
 			authHeader = channel.AuthHeader
 			learnedClientFingerprint = channel.LearnedClientFingerprint || req.LearnedClientFingerprint
 			if req.InsecureSkipVerify != nil {
@@ -394,20 +403,27 @@ func GetChannelModels(cfgManager *config.ConfigManager) fiber.Handler {
 		}
 
 		url := buildModelsURL(baseURL)
+		if req.OutboundNetwork.Set {
+			outboundNetwork = req.OutboundNetwork.Value
+		}
 		clientOpts := httpclient.ClientOptions{
+			OutboundNetwork:   outboundNetwork,
 			Timeout:           10 * time.Second,
 			Insecure:          insecureSkipVerify,
 			ProxyURL:          proxyURL,
 			ProxyPreferDirect: proxyPreferDirect,
 		}
 		client := httpclient.GetManager().GetClient(clientOpts)
-		if req.BaseURL != "" && req.ProxyURL != "" {
+		if req.BaseURL != "" {
 			// 新增模式下的临时代理参数高变，不进缓存
 			client = httpclient.GetManager().NewClient(clientOpts)
 		}
 
 		httpReq, err := http.NewRequestWithContext(httpbridge.Request(c).Context(), http.MethodGet, url, nil)
 		if err != nil {
+			if common.RespondNetworkEgressError(c, err) {
+				return nil
+			}
 			log.Printf("[Vectors-Models] create request failed: channel=%s, error=%s", channelName, sanitizeModelsProbeError(err, url))
 			httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": fmt.Sprintf("Failed to create request: %v", err)})
 			return nil
@@ -424,6 +440,9 @@ func GetChannelModels(cfgManager *config.ConfigManager) fiber.Handler {
 		log.Printf("[Vectors-Models] requesting models: channel=%s, key=%s", channelName, utils.MaskAPIKey(apiKey))
 		resp, err := client.Do(httpReq)
 		if err != nil {
+			if common.RespondNetworkEgressError(c, err) {
+				return nil
+			}
 			log.Printf("[Vectors-Models] request failed: channel=%s, key=%s, error=%s", channelName, utils.MaskAPIKey(apiKey), sanitizeModelsProbeError(err, url))
 			httpbridge.JSON(c, http.StatusBadGateway, fiber.Map{"error": fmt.Sprintf("Failed to fetch models: %v", err)})
 			return nil
@@ -431,6 +450,9 @@ func GetChannelModels(cfgManager *config.ConfigManager) fiber.Handler {
 		body, err := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
 		if err != nil {
+			if common.RespondNetworkEgressError(c, err) {
+				return nil
+			}
 			httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": fmt.Sprintf("Failed to read response: %v", err)})
 			return nil
 		}

@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/soulteary/yunqi/internal/errutil"
 	"io"
 	"log"
 	"net/http"
@@ -14,6 +13,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/soulteary/yunqi/internal/errutil"
+	"github.com/soulteary/yunqi/internal/httpclient"
 )
 
 // ── 探测优先级 ──
@@ -46,12 +48,13 @@ func probePriorityFromState(state HealthState) ProbePriority {
 
 // ProbeResult L2 探测结果。
 type ProbeResult struct {
-	EndpointUID  string
-	Success      bool
-	StatusCode   int
-	LatencyMs    int64
-	ErrorMessage string
-	ProbedAt     time.Time
+	EndpointUID      string
+	Success          bool
+	StatusCode       int
+	LatencyMs        int64
+	ErrorMessage     string
+	LocalEgressError bool
+	ProbedAt         time.Time
 }
 
 // ── API Key 解析 ──
@@ -330,13 +333,14 @@ func (c ProbeWorkerConfig) withDefaults() ProbeWorkerConfig {
 // 将需要探测的 endpoint 入队，按优先级出队执行轻量 HTTP 探测。
 // 探测请求直接通过 http.Client 发起，不经过 MetricsManager/调度器/Provider 转换链路。
 type ProbeWorker struct {
-	store    *ProfileStore
-	config   ProbeWorkerConfig
-	budget   *ProbeBudget
-	queue    *ProbeQueue
-	client   *http.Client
-	timeFn   func() time.Time
-	resolver APIKeyResolver // 可选：由 main.go 装配注入，未设置时探测请求全部跳过（fail-open）
+	store          *ProfileStore
+	config         ProbeWorkerConfig
+	budget         *ProbeBudget
+	queue          *ProbeQueue
+	client         *http.Client
+	clientResolver func(string, time.Duration) (*http.Client, bool)
+	timeFn         func() time.Time
+	resolver       APIKeyResolver // 可选：由 main.go 装配注入，未设置时探测请求全部跳过（fail-open）
 
 	cancel func()
 	wg     sync.WaitGroup
@@ -355,7 +359,12 @@ func NewProbeWorker(store *ProfileStore, cfg ProbeWorkerConfig) *ProbeWorker {
 	}
 }
 
-// SetAPIKeyResolver 注入 API Key 解析回调。未注入时所有探测请求会被跳过（不消耗预算）。
+// SetClientResolver 在每次探测时读取渠道出口策略，并保留探测超时。
+func (w *ProbeWorker) SetClientResolver(resolve func(string, time.Duration) (*http.Client, bool)) {
+	w.clientResolver = resolve
+}
+
+// SetAPIKeyResolver 注入 API Key 解析回调。未注入时跳过探测（不消耗预算）。
 func (w *ProbeWorker) SetAPIKeyResolver(resolver APIKeyResolver) {
 	w.resolver = resolver
 }
@@ -492,6 +501,9 @@ func (w *ProbeWorker) processQueue() {
 		}
 
 		result := w.executeProbe(profile, apiKey)
+		if result.LocalEgressError {
+			continue
+		}
 		w.applyProbeResult(result)
 	}
 }
@@ -536,11 +548,22 @@ func (w *ProbeWorker) executeProbe(profile *KeyEndpointProfile, apiKey string) P
 
 	// 发起探测（直接 http.Client，不经过 MetricsManager）
 	start := time.Now()
-	resp, err := w.client.Do(httpReq)
+	client := w.client
+	if w.clientResolver != nil {
+		var ok bool
+		client, ok = w.clientResolver(profile.ChannelUID, w.config.ProbeTimeout)
+		if !ok {
+			result.LocalEgressError = true
+			result.ErrorMessage = "network_egress_unavailable"
+			return result
+		}
+	}
+	resp, err := client.Do(httpReq)
 	latency := time.Since(start)
 	result.LatencyMs = latency.Milliseconds()
 
 	if err != nil {
+		result.LocalEgressError = httpclient.IsEgressError(err)
 		result.ErrorMessage = fmt.Sprintf("HTTP 请求失败: %v", err)
 		if !w.config.QuietLogs {
 			log.Printf("[ProbeWorker-Probe] endpoint=%s 探测失败: %v (latency=%dms)",

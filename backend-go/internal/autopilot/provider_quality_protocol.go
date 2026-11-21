@@ -40,6 +40,7 @@ func (p *ProviderQualityProbe) runSample(
 		Insecure:          upstream.InsecureSkipVerify,
 		ProxyURL:          upstream.ProxyURL,
 		ProxyPreferDirect: upstream.ProxyPreferDirect,
+		OutboundNetwork:   upstream.OutboundNetwork,
 	})
 
 	start := time.Now()

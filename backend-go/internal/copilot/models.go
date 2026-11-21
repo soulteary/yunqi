@@ -130,7 +130,15 @@ func (r *EndpointResolver) Models(ctx context.Context, githubToken, proxyURL str
 		baseURL = DefaultAPIBaseURL
 	}
 	baseURL = strings.TrimRight(baseURL, "/")
-	key := sha256.Sum256([]byte(token + "\x00" + baseURL + "\x00" + proxyURL))
+	policyKey := ""
+	if opts, ok := httpclient.OutboundOptionsFromContext(ctx); ok && opts.OutboundNetwork != nil {
+		plan, e := httpclient.ResolveOutboundPlan(opts)
+		if e != nil {
+			return token, baseURL, nil, e
+		}
+		policyKey = plan.Fingerprint
+	}
+	key := sha256.Sum256([]byte(token + "\x00" + baseURL + "\x00" + proxyURL + "\x00" + policyKey))
 	r.mu.Lock()
 	entry, ok := r.cache[key]
 	r.mu.Unlock()
@@ -138,6 +146,9 @@ func (r *EndpointResolver) Models(ctx context.Context, githubToken, proxyURL str
 		return token, baseURL, CloneModelDetails(entry.models), nil
 	}
 	client := r.client
+	if opts, ok := httpclient.OutboundOptionsFromContext(ctx); ok && opts.OutboundNetwork != nil {
+		client = httpclient.GetManager().GetClient(opts)
+	}
 	if client == nil {
 		client = httpclient.GetManager().NewStandardClient(10*time.Second, false, proxyURL)
 	}

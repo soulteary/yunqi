@@ -20,6 +20,7 @@ describe('buildChannelPayload', () => {
       fastMode: true,
       customHeaders: { 'x-test': '1' },
       proxyUrl: ' http://127.0.0.1:7890 ',
+      outboundNetwork: { proxyMode: 'direct', interfaceName: 'en0', dns: { mode: 'bound', servers: ['192.0.2.53:53'] } },
       requestTimeoutMs: 15000,
       responseHeaderTimeoutMs: 90000,
       routePrefix: '',
@@ -42,6 +43,7 @@ describe('buildChannelPayload', () => {
     expect(result.textVerbosity).toBe('medium')
     expect(result.fastMode).toBe(true)
     expect(result.proxyUrl).toBe('http://127.0.0.1:7890')
+    expect(result.outboundNetwork).toEqual({ proxyMode: 'direct', interfaceName: 'en0', dns: { mode: 'bound', servers: ['192.0.2.53:53'] } })
     expect(result.requestTimeoutMs).toBe(15000)
     expect(result.responseHeaderTimeoutMs).toBe(90000)
     expect(result.historicalImageTurnLimit).toBe(3)

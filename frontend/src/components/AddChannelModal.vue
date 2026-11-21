@@ -74,7 +74,8 @@
             :disabled="standardSubmitting"
           />
 
-          <!-- 代理 URL（可选）：境外上游直连不可达时经代理发现与访问 -->
+          <OutboundNetworkSettings v-model="standardOutboundNetwork" :base-url="detectedBaseUrls[0]" :proxy-url="standardProxyUrl" :proxy-prefer-direct="standardProxyPreferDirect" />
+<!-- 代理 URL（可选）：境外上游直连不可达时经代理发现与访问 -->
           <v-text-field
             v-model="standardProxyUrl"
             :label="t('addChannel.proxyUrlLabel')"
@@ -92,7 +93,7 @@
             persistent-hint
             color="primary"
             density="compact"
-            :disabled="!standardProxyUrl.trim()"
+            :disabled="!standardProxyUrl.trim() || (!!standardOutboundNetwork?.proxyMode && standardOutboundNetwork.proxyMode !== 'legacy')"
           />
 
           <v-card variant="outlined" class="detection-status-card" rounded="lg">
@@ -249,6 +250,8 @@
 </template>
 
 <script setup lang="ts">
+import OutboundNetworkSettings from './OutboundNetworkSettings.vue'
+import type { OutboundNetworkConfig } from '../services/types/network'
 import { computed, ref, watch } from 'vue'
 import { useDialogHotkeys } from '@/composables/useDialogHotkeys'
 import { useTheme } from 'vuetify'
@@ -303,6 +306,7 @@ const preferencesStore = usePreferencesStore()
 const quickInput = ref('')
 // 标准模式代理 URL（可选）：发现/探活与渠道后续上游请求经代理访问
 const standardProxyUrl = ref('')
+const standardOutboundNetwork = ref<OutboundNetworkConfig | null>(null)
 // 直连优先：配置代理后先直连，失败自动回退代理
 const standardProxyPreferDirect = ref(false)
 const detectedBaseUrl = ref('')
@@ -462,6 +466,7 @@ function expectedProtocolLabel(protocol: DiscoveryProtocol | ChannelType): strin
 
 function resetQuickState() {
   quickInput.value = ''
+  standardOutboundNetwork.value = null
   standardProxyUrl.value = ''
   standardProxyPreferDirect.value = false
   detectedBaseUrl.value = ''
@@ -501,6 +506,7 @@ async function handleQuickSubmit() {
   try {
     const routeDiscovery = await discoverFast(props.channelType, detectedBaseUrls.value, detectedApiKeys.value, {
       proxyUrl: standardProxyUrl.value.trim() || undefined,
+      outboundNetwork: standardOutboundNetwork.value,
       proxyPreferDirect: standardProxyPreferDirect.value || undefined
     })
     if (!routeDiscovery) {
@@ -514,6 +520,7 @@ async function handleQuickSubmit() {
       routes: routeDiscovery.routes,
       rateLimitHint: routeDiscovery.rateLimitHint,
       proxyUrl: standardProxyUrl.value.trim() || undefined,
+      outboundNetwork: standardOutboundNetwork.value,
       proxyPreferDirect: standardProxyPreferDirect.value || undefined,
       placement: placement.value
     })

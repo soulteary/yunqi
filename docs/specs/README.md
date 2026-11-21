@@ -75,6 +75,10 @@ Channels   (Claude/OpenAI/Gemini/...)
 
 未完成事项集中在 [TODO](https://github.com/soulteary/yunqi/blob/main/TODO.md) 与专项规格的限制章节；旧记录中的问题不自动视为当前缺陷。
 
+## 出口网络
+
+- [出口网卡选择与跳过代理](./outbound-network.md)：逻辑渠道的严格出口绑定、代理模式、DNS、连接池、关联探测、诊断与平台边界；已实现；跨平台验证范围见文末。
+
 ## 待补充
 
 以下为跨模块的待排期方向；各模块的具体限制见对应规格。

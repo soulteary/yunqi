@@ -671,7 +671,12 @@ func downloadImageAsBase64(ctx context.Context, rawURL string, upstream *config.
 		insecureSkipVerify = upstream.InsecureSkipVerify
 		proxyURL = upstream.ProxyURL
 	}
-	client := httpclient.GetManager().NewStandardClient(imageURLDownloadTimeout, insecureSkipVerify, proxyURL)
+	opts := httpclient.ClientOptions{Timeout: imageURLDownloadTimeout, Insecure: insecureSkipVerify, ProxyURL: proxyURL}
+	if upstream != nil {
+		opts.OutboundNetwork = upstream.OutboundNetwork
+		opts.ProxyPreferDirect = upstream.ProxyPreferDirect
+	}
+	client := httpclient.GetManager().NewClient(opts)
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err

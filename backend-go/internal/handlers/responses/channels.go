@@ -310,7 +310,7 @@ func buildPingRequest(upstream config.UpstreamConfig, baseURL string) (*http.Req
 		if len(upstream.APIKeys) == 0 {
 			return nil, fmt.Errorf("copilot 渠道缺少 GitHub OAuth token")
 		}
-		copilotToken, copilotBaseURL, err := copilot.ResolveTokenWithProxy(context.Background(), upstream.APIKeys[0], upstream.ProxyURL)
+		copilotToken, copilotBaseURL, err := copilot.ResolveTokenWithProxy(httpclient.WithOutboundContext(context.Background(), &upstream), upstream.APIKeys[0], upstream.ProxyURL)
 		if err != nil {
 			return nil, fmt.Errorf("copilot token 交换失败: %w", err)
 		}
@@ -387,10 +387,11 @@ type GetModelsRequest struct {
 	ServiceType string   `json:"serviceType"`
 	ProxyURL    string   `json:"proxyUrl"`
 	// ProxyPreferDirect 直连优先（nil=未指定，回退渠道配置）；仅在配置了代理时有意义
-	ProxyPreferDirect  *bool             `json:"proxyPreferDirect"`
-	InsecureSkipVerify *bool             `json:"insecureSkipVerify"`
-	CustomHeaders      map[string]string `json:"customHeaders"`
-	AuthHeader         string            `json:"authHeader"`
+	ProxyPreferDirect  *bool                       `json:"proxyPreferDirect"`
+	OutboundNetwork    config.OutboundNetworkPatch `json:"outboundNetwork"`
+	InsecureSkipVerify *bool                       `json:"insecureSkipVerify"`
+	CustomHeaders      map[string]string           `json:"customHeaders"`
+	AuthHeader         string                      `json:"authHeader"`
 	// LearnedClientFingerprint 上游存在客户端指纹校验（保活 L1 等无渠道上下文的
 	// 调用方传入渠道学习到的标记），命中时请求带 Claude Code 客户端伪装头。
 	LearnedClientFingerprint bool `json:"learnedClientFingerprint,omitempty"`
@@ -403,6 +404,9 @@ func GetChannelModels(cfgManager *config.ConfigManager) fiber.Handler {
 		idStr := httpbridge.Param(c, "id")
 		id, err := strconv.Atoi(idStr)
 		if err != nil {
+			if common.RespondNetworkEgressError(c, err) {
+				return nil
+			}
 			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "Invalid channel ID"})
 			return nil
 		}
@@ -422,6 +426,7 @@ func GetChannelModels(cfgManager *config.ConfigManager) fiber.Handler {
 		var insecureSkipVerify bool
 		var proxyURL string
 		var proxyPreferDirect bool
+		var outboundNetwork = req.OutboundNetwork.Value
 		var authHeader string
 		var learnedClientFingerprint bool
 
@@ -465,6 +470,10 @@ func GetChannelModels(cfgManager *config.ConfigManager) fiber.Handler {
 			insecureSkipVerify = channel.InsecureSkipVerify
 			proxyURL = channel.ProxyURL
 			proxyPreferDirect = channel.ProxyPreferDirect
+			outboundNetwork = channel.OutboundNetwork
+			if req.OutboundNetwork.Set {
+				outboundNetwork = req.OutboundNetwork.Value
+			}
 			authHeader = channel.AuthHeader
 			learnedClientFingerprint = channel.LearnedClientFingerprint || req.LearnedClientFingerprint
 			if req.BaseURL != "" {
@@ -502,6 +511,9 @@ func GetChannelModels(cfgManager *config.ConfigManager) fiber.Handler {
 		// /api/plan 无此接口），改走管控面套餐模型接口。
 		if volcengineModels, handled, err := autopilot.FetchVolcenginePlanModelsForChannel(httpbridge.Request(c).Context(), cfgManager, channel, baseURL, apiKey); handled {
 			if err != nil {
+				if common.RespondNetworkEgressError(c, err) {
+					return nil
+				}
 				log.Printf("[Responses-Models] 火山套餐模型查询失败: channel=%s, key=%s, error=%v", channelName, utils.MaskAPIKey(apiKey), err)
 				httpbridge.JSON(c, http.StatusBadGateway, fiber.Map{"error": err.Error(), "statusCode": 502})
 				return nil
@@ -519,20 +531,27 @@ func GetChannelModels(cfgManager *config.ConfigManager) fiber.Handler {
 		if serviceType == "copilot" {
 			url = strings.TrimSuffix(strings.TrimSuffix(baseURL, "#"), "/") + "/models"
 		}
+		if req.OutboundNetwork.Set {
+			outboundNetwork = req.OutboundNetwork.Value
+		}
 		clientOpts := httpclient.ClientOptions{
+			OutboundNetwork:   outboundNetwork,
 			Timeout:           10 * time.Second,
 			Insecure:          insecureSkipVerify,
 			ProxyURL:          proxyURL,
 			ProxyPreferDirect: proxyPreferDirect,
 		}
 		client := httpclient.GetManager().GetClient(clientOpts)
-		if req.BaseURL != "" && req.ProxyURL != "" {
+		if req.BaseURL != "" {
 			// 新增模式下的临时代理参数高变，不进缓存
 			client = httpclient.GetManager().NewClient(clientOpts)
 		}
 
 		httpReq, err := http.NewRequestWithContext(httpbridge.Request(c).Context(), "GET", url, nil)
 		if err != nil {
+			if common.RespondNetworkEgressError(c, err) {
+				return nil
+			}
 			log.Printf("[Responses-Models] 创建请求失败: channel=%s, url=%s, error=%v", channelName, url, err)
 			httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": fmt.Sprintf("Failed to create request: %v", err)})
 			return nil
@@ -552,8 +571,11 @@ func GetChannelModels(cfgManager *config.ConfigManager) fiber.Handler {
 				httpReq.Header.Set("x-goog-api-key", apiKey)
 			}
 		case "copilot":
-			copilotToken, copilotBaseURL, err := copilot.ResolveTokenWithProxy(httpbridge.Request(c).Context(), apiKey, proxyURL)
+			copilotToken, copilotBaseURL, err := copilot.ResolveTokenWithProxy(httpclient.WithOutboundContext(httpbridge.Request(c).Context(), &config.UpstreamConfig{OutboundNetwork: outboundNetwork, ProxyURL: proxyURL, ProxyPreferDirect: proxyPreferDirect, InsecureSkipVerify: insecureSkipVerify}), apiKey, proxyURL)
 			if err != nil {
+				if common.RespondNetworkEgressError(c, err) {
+					return nil
+				}
 				httpbridge.JSON(c, http.StatusBadGateway, fiber.Map{"error": fmt.Sprintf("Failed to exchange Copilot token: %v", err)})
 				return nil
 			}
@@ -562,6 +584,9 @@ func GetChannelModels(cfgManager *config.ConfigManager) fiber.Handler {
 				url = strings.TrimRight(copilotBaseURL, "/") + "/models"
 				httpReq, err = http.NewRequestWithContext(httpbridge.Request(c).Context(), "GET", url, nil)
 				if err != nil {
+					if common.RespondNetworkEgressError(c, err) {
+						return nil
+					}
 					httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": fmt.Sprintf("Failed to create request: %v", err)})
 					return nil
 				}
@@ -584,6 +609,9 @@ func GetChannelModels(cfgManager *config.ConfigManager) fiber.Handler {
 
 		resp, err := client.Do(httpReq)
 		if err != nil {
+			if common.RespondNetworkEgressError(c, err) {
+				return nil
+			}
 			log.Printf("[Responses-Models] 请求失败: channel=%s, key=%s, url=%s, error=%v",
 				channelName, utils.MaskAPIKey(apiKey), url, err)
 			httpbridge.JSON(c, http.StatusBadGateway, fiber.Map{"error": fmt.Sprintf("Failed to fetch models: %v", err)})
@@ -593,6 +621,9 @@ func GetChannelModels(cfgManager *config.ConfigManager) fiber.Handler {
 		body, err := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
 		if err != nil {
+			if common.RespondNetworkEgressError(c, err) {
+				return nil
+			}
 			log.Printf("[Responses-Models] 读取响应失败: channel=%s, error=%v", channelName, err)
 			httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": fmt.Sprintf("Failed to read response: %v", err)})
 			return nil
@@ -652,7 +683,7 @@ func DiagnoseCopilotChannel(cfgManager *config.ConfigManager) fiber.Handler {
 			return nil
 		}
 
-		httpClient := httpclient.GetManager().GetStandardClient(15*time.Second, upstream.InsecureSkipVerify, upstream.ProxyURL)
+		httpClient := httpclient.GetManager().GetClient(httpclient.ClientOptions{Timeout: 15 * time.Second, Insecure: upstream.InsecureSkipVerify, ProxyURL: upstream.ProxyURL, ProxyPreferDirect: upstream.ProxyPreferDirect, OutboundNetwork: upstream.OutboundNetwork})
 		diagnoseResult, err := copilot.Diagnose(httpbridge.Request(c).Context(), httpClient, accessToken, upstream.ProxyURL, upstream.InsecureSkipVerify)
 		if err != nil {
 			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})

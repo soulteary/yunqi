@@ -1,3 +1,4 @@
+import type { OutboundNetworkConfig } from '../services/types/network'
 import type { Channel, EmbeddingCapability, UpstreamModelCapability } from '../services/api'
 import { normalizeAdvancedChannelOptions } from './channelAdvancedOptions'
 import { deduplicateEquivalentBaseUrls } from './baseUrlSemantics'
@@ -74,6 +75,7 @@ export interface ChannelFormLike {
   textVerbosity: 'low' | 'medium' | 'high' | ''
   fastMode: boolean
   customHeaders: Record<string, string>
+  outboundNetwork?: OutboundNetworkConfig | null
   proxyUrl: string
   racing?: { enabled?: boolean }
   balanceCheck?: Channel['balanceCheck']
@@ -557,6 +559,7 @@ export function buildChannelPayload(
     fastMode: advancedOptions.fastMode,
     customHeaders: form.customHeaders,
     proxyUrl: form.proxyUrl.trim(),
+    outboundNetwork: form.outboundNetwork ?? null,
     routePrefix: form.routePrefix.trim(),
     supportedModels: form.supportedModels,
     autoBlacklistBalance: form.autoBlacklistBalance,

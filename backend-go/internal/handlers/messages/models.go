@@ -1003,7 +1003,7 @@ func requestModelsFromSelection(ctx context.Context, cfgManager *config.ConfigMa
 			return nil, upstream, false
 		}
 		proxyURL := strings.TrimSpace(upstream.ProxyURL)
-		rt, baseURL, err := copilotTokenResolver(ctx, keyCandidates[0].apiKey, proxyURL)
+		rt, baseURL, err := copilotTokenResolver(httpclient.WithOutboundContext(ctx, upstream), keyCandidates[0].apiKey, proxyURL)
 		if err != nil {
 			log.Printf("[Models-Copilot] Copilot token exchange 失败: channel=%s, error=%v", upstream.Name, err)
 			return nil, upstream, false
@@ -1031,6 +1031,7 @@ func requestModelsFromSelection(ctx context.Context, cfgManager *config.ConfigMa
 		Insecure:          upstream.InsecureSkipVerify,
 		ProxyURL:          upstream.ProxyURL,
 		ProxyPreferDirect: upstream.ProxyPreferDirect,
+		OutboundNetwork:   upstream.OutboundNetwork,
 	})
 
 	keyCandidates := selectModelsAPIKeyCandidates(cfgManager, upstream, channelType)

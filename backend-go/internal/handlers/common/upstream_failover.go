@@ -20,6 +20,7 @@ import (
 	"github.com/soulteary/yunqi/internal/autopilot"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/httpbridge"
+	"github.com/soulteary/yunqi/internal/httpclient"
 	"github.com/soulteary/yunqi/internal/keypool"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/middleware"
@@ -518,6 +519,14 @@ func TryUpstreamWithAllKeys(
 		return false, "", 0, nil, nil, nil
 	}
 	upstream = config.RuntimeUpstreamForAutoManagedProvider(upstream)
+	if upstream.OutboundNetwork != nil {
+		upstreamCopy := *upstream
+		upstreamCopy.OutboundNetwork = config.CloneOutboundNetwork(upstream.OutboundNetwork)
+		upstream = &upstreamCopy
+		if _, err := httpclient.ResolveOutboundPlan(httpclient.ClientOptions{OutboundNetwork: upstream.OutboundNetwork, ProxyURL: upstream.ProxyURL, ProxyPreferDirect: upstream.ProxyPreferDirect}); err != nil {
+			return false, "", 0, nil, nil, err
+		}
+	}
 
 	// 请求侧压缩：仅对 messages 类入口的 tool_result 历史做 RTK 模式压缩。
 	// fail-open：异常/保真门不通过/膨胀 均回退原文，不阻断请求。
@@ -1327,6 +1336,12 @@ func TryUpstreamWithAllKeys(
 					CompleteLog(channelLogStore, metricsKey, logRequestID, 0, false, "client canceled", isRetryAttempt)
 					RequestLogf(c, "[%s-Cancel] 请求已取消（SendRequest 阶段）", apiType)
 					return true, "", 0, nil, nil, err
+				}
+				if httpclient.IsEgressError(err) {
+					metricsManager.RecordRequestFinalizeIgnored(currentBaseURL, apiKey, metricsServiceType, requestID)
+					channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, metricsServiceType, executionKind)
+					CompleteLog(channelLogStore, metricsKey, logRequestID, 0, false, err.Error(), isRetryAttempt)
+					return false, "", 0, nil, nil, err
 				}
 				// 真实渠道故障：计入失败，继续 failover
 				failedKeys[apiKey] = true

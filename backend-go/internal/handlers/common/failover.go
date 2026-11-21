@@ -8,6 +8,7 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/httpbridge"
+	"github.com/soulteary/yunqi/internal/httpclient"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/utils"
 )
@@ -852,6 +853,10 @@ func handleModelRoutingError(c fiber.Ctx, lastFailoverError *FailoverError) bool
 // lastError: 最后一个错误
 // apiType: API 类型（用于错误消息）
 func HandleAllChannelsFailed(c fiber.Ctx, lastFailoverError *FailoverError, lastError error, apiType string) {
+	if lastFailoverError == nil && httpclient.IsEgressError(lastError) {
+		httpbridge.JSON(c, 503, fiber.Map{"error": fiber.Map{"type": "network_egress_unavailable", "message": "Configured network egress is unavailable"}})
+		return
+	}
 	// 保留明确的模型路由错误语义，其余情况默认返回通用错误
 	if handleModelRoutingError(c, lastFailoverError) {
 		return
@@ -902,6 +907,10 @@ func respondContextCapacityExceeded(c fiber.Ctx, capErr *scheduler.ContextCapaci
 
 // HandleAllKeysFailed 处理所有密钥都失败的情况（单渠道模式）
 func HandleAllKeysFailed(c fiber.Ctx, lastFailoverError *FailoverError, lastError error, apiType string) {
+	if lastFailoverError == nil && httpclient.IsEgressError(lastError) {
+		httpbridge.JSON(c, 503, fiber.Map{"error": fiber.Map{"type": "network_egress_unavailable", "message": "Configured network egress is unavailable"}})
+		return
+	}
 	// 保留明确的模型路由错误语义，其余情况默认返回通用错误
 	if handleModelRoutingError(c, lastFailoverError) {
 		return
@@ -1882,4 +1891,14 @@ func extractErrorParam(bodyBytes []byte) string {
 		return strings.TrimSpace(param)
 	}
 	return ""
+}
+
+// RespondNetworkEgressError preserves local policy failures across management
+// handlers and the internal model-fetch adapter without inspecting error text.
+func RespondNetworkEgressError(c fiber.Ctx, err error) bool {
+	if !httpclient.IsEgressError(err) {
+		return false
+	}
+	httpbridge.JSON(c, 503, fiber.Map{"error": fiber.Map{"type": "network_egress_unavailable", "message": "Configured network egress is unavailable"}})
+	return true
 }

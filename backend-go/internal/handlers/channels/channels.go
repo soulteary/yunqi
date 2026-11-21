@@ -97,28 +97,29 @@ func referencedCapabilities(v config.ChannelView, byUID map[string]config.Endpoi
 
 // CreateRequest 统一渠道创建请求体。
 type CreateRequest struct {
-	Kind                    string                `json:"kind"` // messages|chat|responses|gemini|images|vectors
-	Name                    string                `json:"name"`
-	CopilotProtocol         string                `json:"copilotProtocol,omitempty"`
-	ServiceType             string                `json:"serviceType"`
-	BaseURL                 string                `json:"baseUrl"`
-	BaseURLs                []string              `json:"baseUrls"`
-	APIKeys                 []string              `json:"apiKeys"`
-	APIKeyConfigs           []config.APIKeyConfig `json:"apiKeyConfigs"`
-	SupportedModels         []string              `json:"supportedModels"`
-	CustomHeaders           map[string]string     `json:"customHeaders"`
-	ProxyURL                string                `json:"proxyUrl"`
-	ProxyPreferDirect       bool                  `json:"proxyPreferDirect"`
-	RoutePrefix             string                `json:"routePrefix"`
-	Status                  string                `json:"status"`
-	Placement               string                `json:"placement"`
-	AuthHeader              string                `json:"authHeader"`
-	InsecureSkipVerify      bool                  `json:"insecureSkipVerify"`
-	RequestTimeoutMs        int                   `json:"requestTimeoutMs"`
-	ResponseHeaderTimeoutMs int                   `json:"responseHeaderTimeoutMs"`
-	NoVision                bool                  `json:"noVision"`
-	FastMode                bool                  `json:"fastMode"`
-	ResponsesReasoningFold  bool                  `json:"responsesReasoningFold"`
+	Kind                    string                        `json:"kind"` // messages|chat|responses|gemini|images|vectors
+	Name                    string                        `json:"name"`
+	CopilotProtocol         string                        `json:"copilotProtocol,omitempty"`
+	ServiceType             string                        `json:"serviceType"`
+	BaseURL                 string                        `json:"baseUrl"`
+	BaseURLs                []string                      `json:"baseUrls"`
+	APIKeys                 []string                      `json:"apiKeys"`
+	APIKeyConfigs           []config.APIKeyConfig         `json:"apiKeyConfigs"`
+	SupportedModels         []string                      `json:"supportedModels"`
+	CustomHeaders           map[string]string             `json:"customHeaders"`
+	ProxyURL                string                        `json:"proxyUrl"`
+	ProxyPreferDirect       bool                          `json:"proxyPreferDirect"`
+	OutboundNetwork         *config.OutboundNetworkConfig `json:"outboundNetwork,omitempty"`
+	RoutePrefix             string                        `json:"routePrefix"`
+	Status                  string                        `json:"status"`
+	Placement               string                        `json:"placement"`
+	AuthHeader              string                        `json:"authHeader"`
+	InsecureSkipVerify      bool                          `json:"insecureSkipVerify"`
+	RequestTimeoutMs        int                           `json:"requestTimeoutMs"`
+	ResponseHeaderTimeoutMs int                           `json:"responseHeaderTimeoutMs"`
+	NoVision                bool                          `json:"noVision"`
+	FastMode                bool                          `json:"fastMode"`
+	ResponsesReasoningFold  bool                          `json:"responsesReasoningFold"`
 }
 
 // Create 创建渠道（统一入口，按 kind 路由到对应数组）。
@@ -147,6 +148,7 @@ func (h *Handler) Create(c fiber.Ctx) error {
 		CustomHeaders:           req.CustomHeaders,
 		ProxyURL:                req.ProxyURL,
 		ProxyPreferDirect:       req.ProxyPreferDirect,
+		OutboundNetwork:         req.OutboundNetwork,
 		RoutePrefix:             req.RoutePrefix,
 		Status:                  req.Status,
 		AuthHeader:              req.AuthHeader,
@@ -182,6 +184,7 @@ type UpdateRequest struct {
 	CustomHeaders                 map[string]string                         `json:"customHeaders"`
 	ProxyURL                      *string                                   `json:"proxyUrl"`
 	ProxyPreferDirect             *bool                                     `json:"proxyPreferDirect"`
+	OutboundNetwork               config.OutboundNetworkPatch               `json:"outboundNetwork,omitempty"`
 	RoutePrefix                   *string                                   `json:"routePrefix"`
 	Status                        *string                                   `json:"status"`
 	Priority                      *int                                      `json:"priority"`
@@ -258,6 +261,7 @@ func (h *Handler) Update(c fiber.Ctx) error {
 		CustomHeaders:                 req.CustomHeaders,
 		ProxyURL:                      req.ProxyURL,
 		ProxyPreferDirect:             req.ProxyPreferDirect,
+		OutboundNetwork:               req.OutboundNetwork,
 		RoutePrefix:                   req.RoutePrefix,
 		Status:                        req.Status,
 		Priority:                      req.Priority,

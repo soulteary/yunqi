@@ -50,9 +50,10 @@ type RoutePreviewSchedulerDiagnose struct {
 
 // RoutePreviewSelectedInfo scheduler 层最终选中的渠道信息。
 type RoutePreviewSelectedInfo struct {
-	ChannelIndex int    `json:"channelIndex"`
-	ChannelName  string `json:"channelName"`
-	ServiceType  string `json:"serviceType"`
+	ChannelIndex    int                           `json:"channelIndex"`
+	ChannelName     string                        `json:"channelName"`
+	ServiceType     string                        `json:"serviceType"`
+	OutboundNetwork *config.OutboundNetworkConfig `json:"outboundNetwork,omitempty"`
 }
 
 // RoutePreviewResponse 路由预演响应体。
@@ -186,9 +187,10 @@ func handleRoutePreview(smartRouter *SmartRouter, sch *scheduler.ChannelSchedule
 				schedDiag.Summary = scheduler.FormatSelectionTraceSummary(result.Trace, 8)
 				if result.Upstream != nil {
 					schedDiag.Selected = &RoutePreviewSelectedInfo{
-						ChannelIndex: result.ChannelIndex,
-						ChannelName:  result.Upstream.Name,
-						ServiceType:  result.Upstream.ServiceType,
+						ChannelIndex:    result.ChannelIndex,
+						ChannelName:     result.Upstream.Name,
+						ServiceType:     result.Upstream.ServiceType,
+						OutboundNetwork: config.CloneOutboundNetwork(result.Upstream.OutboundNetwork),
 					}
 				}
 			}

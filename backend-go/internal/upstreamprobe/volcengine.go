@@ -53,6 +53,7 @@ type Result struct {
 type ProbeOptions struct {
 	ProxyURL           string
 	ProxyPreferDirect  bool
+	OutboundNetwork    *config.OutboundNetworkConfig
 	CustomHeaders      map[string]string
 	InsecureSkipVerify bool
 }
@@ -280,6 +281,7 @@ func postJSONProbe(ctx context.Context, urlStr, apiKey, authHeader string, prepa
 		Insecure:          options.InsecureSkipVerify,
 		ProxyURL:          proxyURL,
 		ProxyPreferDirect: options.ProxyPreferDirect,
+		OutboundNetwork:   options.OutboundNetwork,
 	})
 	resp, err := client.Do(req)
 	if err != nil {

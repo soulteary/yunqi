@@ -929,6 +929,9 @@ func applyAccountChannelChanges(cfg *Config, accountUID string, updates []Accoun
 		return fmt.Errorf("账号 %s 包含不一致的 provider", accountUID)
 	}
 	for _, addition := range additions {
+		if err := ValidateOutboundNetwork(addition.Upstream.OutboundNetwork, addition.Upstream.ProxyURL); err != nil {
+			return err
+		}
 		additionProvider := strings.TrimSpace(addition.Upstream.ProviderID)
 		if !providerKnown {
 			providerID = additionProvider

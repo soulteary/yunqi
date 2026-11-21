@@ -51,6 +51,7 @@ type CreateLogicalChannelProtocol struct {
 	CustomHeaders     map[string]string
 	ProxyURL          string
 	ProxyPreferDirect bool
+	OutboundNetwork   *OutboundNetworkConfig
 }
 
 // CreateLogicalChannel 在事务内创建一个逻辑渠道及一组物理渠道。
@@ -147,6 +148,9 @@ func (cm *ConfigManager) CreateLogicalChannel(in CreateLogicalChannelInput) (*Lo
 // createPhysicalChannelForLogicalLocked 在锁内创建一条物理渠道并写入对应数组。
 // 成功返回插入后的 UpstreamConfig（已分配 ChannelUID 等）。
 func (cm *ConfigManager) createPhysicalChannelForLogicalLocked(in CreateLogicalChannelInput, p CreateLogicalChannelProtocol, logicalUID string) (UpstreamConfig, error) {
+	if err := ValidateOutboundNetwork(p.OutboundNetwork, p.ProxyURL); err != nil {
+		return UpstreamConfig{}, err
+	}
 	baseURLs := append([]string(nil), in.BaseURLs...)
 	if len(p.BaseURLs) > 0 {
 		baseURLs = append(baseURLs, p.BaseURLs...)
@@ -154,6 +158,18 @@ func (cm *ConfigManager) createPhysicalChannelForLogicalLocked(in CreateLogicalC
 	baseURL := strings.TrimSpace(p.BaseURL)
 	if baseURL == "" && len(baseURLs) > 0 {
 		baseURL = baseURLs[0]
+	}
+	if p.OutboundNetwork == nil && logicalUID != "" {
+		for _, kind := range orderedChannelKinds() {
+			for _, route := range *ChannelKindRegistry[kind].SliceRef(&cm.config) {
+				if route.LogicalChannelUID == logicalUID && route.OutboundNetwork != nil {
+					p.OutboundNetwork = CloneOutboundNetwork(route.OutboundNetwork)
+					p.ProxyURL = route.ProxyURL
+					p.ProxyPreferDirect = route.ProxyPreferDirect
+					break
+				}
+			}
+		}
 	}
 	up := UpstreamConfig{
 		ChannelUID:        GenerateChannelUID(),
@@ -172,6 +188,7 @@ func (cm *ConfigManager) createPhysicalChannelForLogicalLocked(in CreateLogicalC
 		CustomHeaders:     p.CustomHeaders,
 		ProxyURL:          p.ProxyURL,
 		ProxyPreferDirect: p.ProxyPreferDirect,
+		OutboundNetwork:   CloneOutboundNetwork(p.OutboundNetwork),
 		LogicalChannelUID: logicalUID,
 		LogicalName:       in.Name,
 		Status:            defaultChannelStatus(p.Status, p.Enabled),
@@ -214,6 +231,9 @@ func (cm *ConfigManager) createPhysicalChannelForLogicalLocked(in CreateLogicalC
 		}
 	default:
 		return up, fmt.Errorf("不支持的协议 kind: %s", p.Kind)
+	}
+	if err == nil && up.OutboundNetwork != nil {
+		applyLogicalOutboundNetwork(&cm.config, logicalUID, up.OutboundNetwork, up.ProxyURL, up.ProxyPreferDirect)
 	}
 	return up, err
 }
@@ -309,6 +329,7 @@ type UpdateLogicalChannelProtocol struct {
 	CustomHeaders     map[string]string
 	ProxyURL          string
 	ProxyPreferDirect bool
+	OutboundNetwork   OutboundNetworkPatch
 }
 
 // UpdateLogicalChannel 事务内更新逻辑渠道（含 protocols 的增删改）。
@@ -457,6 +478,7 @@ func (cm *ConfigManager) UpdateLogicalChannel(in UpdateLogicalChannelInput) (*Lo
 				CustomHeaders:     p.CustomHeaders,
 				ProxyURL:          p.ProxyURL,
 				ProxyPreferDirect: p.ProxyPreferDirect,
+				OutboundNetwork:   CloneOutboundNetwork(p.OutboundNetwork.Value),
 			}, logical.LogicalChannelUID)
 			if err != nil {
 				cm.restoreAllUpstreamSlicesLocked(backupSlices)
@@ -687,11 +709,20 @@ func (cm *ConfigManager) updatePhysicalChannelForLogicalLocked(kind, channelUID 
 	if p.CustomHeaders != nil {
 		up.CustomHeaders = p.CustomHeaders
 	}
+	if p.OutboundNetwork.Set {
+		up.OutboundNetwork = CloneOutboundNetwork(p.OutboundNetwork.Value)
+	}
 	if p.ProxyURL != "" {
 		up.ProxyURL = p.ProxyURL
 	}
 	if p.ProxyPreferDirect {
 		up.ProxyPreferDirect = true
+	}
+	if err := ValidateOutboundNetwork(up.OutboundNetwork, up.ProxyURL); err != nil {
+		return err
+	}
+	if p.OutboundNetwork.Set || (up.OutboundNetwork != nil && (p.ProxyURL != "" || p.ProxyPreferDirect)) {
+		applyLogicalOutboundNetwork(&cm.config, logical.LogicalChannelUID, up.OutboundNetwork, up.ProxyURL, up.ProxyPreferDirect)
 	}
 	return nil
 }
@@ -905,3 +936,17 @@ func baseURLSiteIdentitiesImport(rawURL string) []string {
 
 // errors 占位避免未使用 import 警告（保留 errors 接口以备未来更细错误类型）
 var _ = errors.New
+
+// Shared network settings and their legacy proxy source must move together.
+func applyLogicalOutboundNetwork(cfg *Config, uid string, network *OutboundNetworkConfig, proxyURL string, preferDirect bool) {
+	for _, kind := range orderedChannelKinds() {
+		routes := ChannelKindRegistry[kind].SliceRef(cfg)
+		for i := range *routes {
+			if (*routes)[i].LogicalChannelUID == uid {
+				(*routes)[i].OutboundNetwork = CloneOutboundNetwork(network)
+				(*routes)[i].ProxyURL = proxyURL
+				(*routes)[i].ProxyPreferDirect = preferDirect
+			}
+		}
+	}
+}

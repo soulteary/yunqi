@@ -29,7 +29,8 @@ type AutoAddRequest struct {
 	// 用于添加直连不可达的境外上游。
 	ProxyURL string `json:"proxyUrl,omitempty"`
 	// ProxyPreferDirect 直连优先：配置了代理时先直连，失败自动回退代理。
-	ProxyPreferDirect bool `json:"proxyPreferDirect,omitempty"`
+	ProxyPreferDirect bool                          `json:"proxyPreferDirect,omitempty"`
+	OutboundNetwork   *config.OutboundNetworkConfig `json:"outboundNetwork,omitempty"`
 	// Placement 故障转移位置："front"（首位）| 缺省末尾
 	Placement string `json:"placement,omitempty"`
 }

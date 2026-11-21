@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpclient"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/quota"
 	"github.com/soulteary/yunqi/internal/upstreamprobe"
@@ -385,6 +386,11 @@ func (m *Manager) probeChannel(channelType string, channelIndex int) {
 		return
 	}
 	u := &upstreams[channelIndex]
+	if u.OutboundNetwork != nil {
+		if _, err := httpclient.ResolveOutboundPlan(httpclient.ClientOptions{OutboundNetwork: u.OutboundNetwork, ProxyURL: u.ProxyURL, ProxyPreferDirect: u.ProxyPreferDirect}); err != nil {
+			return
+		}
+	}
 	policy := cfg.ResolveBalancePolicy(u)
 	now := m.now()
 	keys := eligibleBalanceKeyList(u, now)
@@ -420,10 +426,14 @@ func (m *Manager) probeChannel(channelType string, channelIndex int) {
 			CustomHeaders:      u.CustomHeaders,
 			ProxyURL:           u.ProxyURL,
 			ProxyPreferDirect:  u.ProxyPreferDirect,
+			OutboundNetwork:    u.OutboundNetwork,
 			InsecureSkipVerify: u.InsecureSkipVerify,
 			Timeout:            policy.Timeout,
 		}
 		res := upstreamprobe.ProbeBalance(context.Background(), probeReq, policy.Provider, preferred)
+		if httpclient.IsEgressError(res.Err) {
+			return
+		}
 		if res.Identified && res.Provider != config.BalanceProviderAuto {
 			m.rememberProvider(memoKey, res.Provider)
 		}

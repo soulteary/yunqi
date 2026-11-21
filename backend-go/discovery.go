@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"github.com/soulteary/yunqi/internal/handlers/responses"
 	"github.com/soulteary/yunqi/internal/healthcheck"
 	"github.com/soulteary/yunqi/internal/httpbridge"
+	"github.com/soulteary/yunqi/internal/httpclient"
 	"github.com/soulteary/yunqi/internal/upstreamprobe"
 )
 
@@ -38,6 +40,7 @@ func channelModelsHandlerFetcher(handler fiber.Handler) handlers.ChannelDiscover
 			"serviceType":              req.ServiceType,
 			"proxyUrl":                 req.ProxyURL,
 			"proxyPreferDirect":        req.ProxyPreferDirect,
+			"outboundNetwork":          req.OutboundNetwork,
 			"insecureSkipVerify":       req.InsecureSkipVerify,
 			"customHeaders":            req.CustomHeaders,
 			"authHeader":               req.AuthHeader,
@@ -55,6 +58,16 @@ func channelModelsHandlerFetcher(handler fiber.Handler) handlers.ChannelDiscover
 		httpbridge.SetParams(fiberCtx, httpbridge.Params{{Key: "id", Value: "0"}})
 
 		handler(fiberCtx)
+		if recorder.Code == 503 {
+			var body struct {
+				Error struct {
+					Type string `json:"type"`
+				} `json:"error"`
+			}
+			if json.Unmarshal(recorder.Body.Bytes(), &body) == nil && body.Error.Type == "network_egress_unavailable" {
+				return handlers.DiscoveryModelsFetchResponse{}, &httpclient.EgressError{Stage: "probe", Err: errors.New("configured network egress is unavailable")}
+			}
+		}
 
 		return handlers.DiscoveryModelsFetchResponse{
 			StatusCode: recorder.Code,
@@ -76,6 +89,7 @@ func healthCheckL1Fetcher(handler fiber.Handler) healthcheck.L1Fetcher {
 			sc, body, model, err := upstreamprobe.VolcenginePlanL1Probe(ctx, req.ServiceType, req.BaseURL, req.APIKey, req.AuthHeader, candidates, upstreamprobe.ProbeOptions{
 				ProxyURL:           req.ProxyURL,
 				ProxyPreferDirect:  req.ProxyPreferDirect,
+				OutboundNetwork:    req.OutboundNetwork,
 				CustomHeaders:      req.CustomHeaders,
 				InsecureSkipVerify: req.InsecureSkipVerify,
 			})
@@ -92,6 +106,7 @@ func healthCheckL1Fetcher(handler fiber.Handler) healthcheck.L1Fetcher {
 			CustomHeaders:            req.CustomHeaders,
 			ProxyURL:                 req.ProxyURL,
 			ProxyPreferDirect:        req.ProxyPreferDirect,
+			OutboundNetwork:          req.OutboundNetwork,
 			InsecureSkipVerify:       req.InsecureSkipVerify,
 			LearnedClientFingerprint: req.LearnedClientFingerprint,
 		})

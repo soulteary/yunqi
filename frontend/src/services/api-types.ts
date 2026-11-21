@@ -15,3 +15,5 @@ export type * from './types/routing-traces'
 export type * from './types/subscriptions'
 export type * from './types/system'
 export { BALANCE_PROVIDER_VALUES } from './types/health'
+
+export type * from './types/network'

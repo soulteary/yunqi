@@ -702,6 +702,7 @@ func (r *AutoDiscoveryRunner) discoverEndpoints(ctx context.Context, channel *co
 			Insecure:          channel.InsecureSkipVerify,
 			ProxyURL:          channel.ProxyURL,
 			ProxyPreferDirect: channel.ProxyPreferDirect,
+			OutboundNetwork:   channel.OutboundNetwork,
 		})
 	}
 
@@ -762,6 +763,7 @@ func (r *AutoDiscoveryRunner) discoverEndpointsWithCheckpoint(ctx context.Contex
 			Insecure:          channel.InsecureSkipVerify,
 			ProxyURL:          channel.ProxyURL,
 			ProxyPreferDirect: channel.ProxyPreferDirect,
+			OutboundNetwork:   channel.OutboundNetwork,
 		})
 	}
 

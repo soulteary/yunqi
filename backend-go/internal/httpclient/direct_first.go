@@ -35,8 +35,14 @@ type directFirstRoundTripper struct {
 // RoundTrip 实现 http.RoundTripper。
 func (t *directFirstRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	resp, err := t.direct.RoundTrip(req)
-	if errors.Is(err, errMetadataDestination) {
-		return nil, err
+	if errors.Is(err, errMetadataDestination) || IsEgressError(err) {
+		return resp, err
+	}
+	if cancelErr := req.Context().Err(); cancelErr != nil {
+		if resp != nil {
+			resp.Body.Close()
+		}
+		return nil, cancelErr
 	}
 	if err == nil && !isProxyFallbackStatus(resp.StatusCode) {
 		return resp, nil
@@ -47,14 +53,6 @@ func (t *directFirstRoundTripper) RoundTrip(req *http.Request) (*http.Response, 
 		return resp, err
 	}
 
-	if err == nil {
-		// 关闭直连响应体（此时仅收到响应头，未开始消费流式 body，关闭安全）
-		resp.Body.Close()
-		log.Printf("[HttpClient-Proxy] 直连优先: %s 返回 %d，回退代理 %s", req.URL.Host, resp.StatusCode, utils.RedactURLCredentials(t.proxyURL))
-	} else {
-		log.Printf("[HttpClient-Proxy] 直连优先: %s 直连失败(%v)，回退代理 %s", req.URL.Host, err, utils.RedactURLCredentials(t.proxyURL))
-	}
-
 	retry := req.Clone(req.Context())
 	if req.GetBody != nil {
 		body, bodyErr := req.GetBody()
@@ -63,5 +61,21 @@ func (t *directFirstRoundTripper) RoundTrip(req *http.Request) (*http.Response, 
 		}
 		retry.Body = body
 	}
+	if err == nil {
+		// 关闭直连响应体（此时仅收到响应头，未开始消费流式 body，关闭安全）
+		resp.Body.Close()
+		log.Printf("[HttpClient-Proxy] 直连优先: %s 返回 %d，回退代理 %s", req.URL.Host, resp.StatusCode, utils.RedactURLCredentials(t.proxyURL))
+	} else {
+		log.Printf("[HttpClient-Proxy] 直连优先: %s 直连失败(%v)，回退代理 %s", req.URL.Host, err, utils.RedactURLCredentials(t.proxyURL))
+	}
+
 	return t.proxied.RoundTrip(retry)
+}
+
+func (t *directFirstRoundTripper) CloseIdleConnections() {
+	for _, rt := range []http.RoundTripper{t.direct, t.proxied} {
+		if c, ok := rt.(interface{ CloseIdleConnections() }); ok {
+			c.CloseIdleConnections()
+		}
+	}
 }

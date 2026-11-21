@@ -102,17 +102,18 @@ func (p *discoveryProbePacer) result() DiscoveryRateLimitResult {
 }
 
 type ChannelDiscoveryRequest struct {
-	ChannelKind        string            `json:"channelKind"`
-	ServiceType        string            `json:"serviceType"`
-	BaseURL            string            `json:"baseUrl"`
-	BaseURLs           []string          `json:"baseUrls"`
-	APIKey             string            `json:"apiKey"`
-	AuthHeader         string            `json:"authHeader"`
-	CustomHeaders      map[string]string `json:"customHeaders"`
-	ProxyURL           string            `json:"proxyUrl"`
-	ProxyPreferDirect  bool              `json:"proxyPreferDirect"`
-	InsecureSkipVerify bool              `json:"insecureSkipVerify"`
-	TargetClients      []string          `json:"targetClients"`
+	ChannelKind        string                        `json:"channelKind"`
+	ServiceType        string                        `json:"serviceType"`
+	BaseURL            string                        `json:"baseUrl"`
+	BaseURLs           []string                      `json:"baseUrls"`
+	APIKey             string                        `json:"apiKey"`
+	AuthHeader         string                        `json:"authHeader"`
+	CustomHeaders      map[string]string             `json:"customHeaders"`
+	ProxyURL           string                        `json:"proxyUrl"`
+	ProxyPreferDirect  bool                          `json:"proxyPreferDirect"`
+	OutboundNetwork    *config.OutboundNetworkConfig `json:"outboundNetwork,omitempty"`
+	InsecureSkipVerify bool                          `json:"insecureSkipVerify"`
+	TargetClients      []string                      `json:"targetClients"`
 	// ProbeAllModels 仅用于兼容旧版调用方。serviceType 为空时服务端会自动全量探测。
 	ProbeAllModels bool `json:"probeAllModels"`
 }
@@ -127,6 +128,7 @@ type DiscoveryModelsFetchRequest struct {
 	CustomHeaders      map[string]string
 	ProxyURL           string
 	ProxyPreferDirect  bool
+	OutboundNetwork    *config.OutboundNetworkConfig
 	InsecureSkipVerify bool
 	// LearnedClientFingerprint 渠道学习到的客户端伪装标记（保活 L1 等调用方传入），
 	// 命中时 GetChannelModels 请求带 Claude Code 客户端伪装头。
@@ -337,6 +339,7 @@ func buildTransientDiscoveryChannel(req ChannelDiscoveryRequest) (*config.Upstre
 		CustomHeaders:      cloneStringMap(req.CustomHeaders),
 		ProxyURL:           strings.TrimSpace(req.ProxyURL),
 		ProxyPreferDirect:  req.ProxyPreferDirect,
+		OutboundNetwork:    req.OutboundNetwork,
 		InsecureSkipVerify: req.InsecureSkipVerify,
 	}, nil
 }
@@ -1277,6 +1280,7 @@ func discoverTransientModelsForCandidate(ctx context.Context, channel *config.Up
 		CustomHeaders:            cloneStringMap(channel.CustomHeaders),
 		ProxyURL:                 channel.ProxyURL,
 		ProxyPreferDirect:        channel.ProxyPreferDirect,
+		OutboundNetwork:          channel.OutboundNetwork,
 		InsecureSkipVerify:       channel.InsecureSkipVerify,
 		LearnedClientFingerprint: channel.LearnedClientFingerprint,
 	})
@@ -1361,6 +1365,7 @@ func discoverTransientModels(ctx context.Context, channel *config.UpstreamConfig
 		Insecure:          channel.InsecureSkipVerify,
 		ProxyURL:          channel.ProxyURL,
 		ProxyPreferDirect: channel.ProxyPreferDirect,
+		OutboundNetwork:   channel.OutboundNetwork,
 	})
 	// Anthropic 风格端点（messages/claude）首发即带 Claude Code 探针头，与 capability test
 	// 探测一致；其余风格裸发，命中客户端指纹风控时由 FetchUpstreamModels 带探针头重试。

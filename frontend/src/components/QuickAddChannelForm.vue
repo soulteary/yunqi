@@ -97,7 +97,8 @@
 
     <!-- 代理 URL（可选）：境外上游直连不可达时经代理发现与访问 -->
     <div v-if="!isExplicitProviderMode">
-      <v-text-field
+      <OutboundNetworkSettings v-model="outboundNetwork" :base-url="baseUrls[0]" :proxy-url="proxyUrl" :proxy-prefer-direct="proxyPreferDirect" />
+<v-text-field
         v-model="proxyUrl"
         :label="t('addChannel.proxyUrlLabel')"
         :placeholder="t('addChannel.proxyUrlPlaceholder')"
@@ -115,7 +116,7 @@
         persistent-hint
         color="primary"
         density="compact"
-        :disabled="!proxyUrl.trim()"
+        :disabled="!proxyUrl.trim() || (!!outboundNetwork?.proxyMode && outboundNetwork.proxyMode !== 'legacy')"
       />
     </div>
 
@@ -219,6 +220,8 @@
 </template>
 
 <script setup lang="ts">
+import OutboundNetworkSettings from './OutboundNetworkSettings.vue'
+import type { OutboundNetworkConfig } from '../services/types/network'
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from '../i18n'
 import type { Channel } from '../services/api'
@@ -266,6 +269,7 @@ const { t } = useI18n()
 const baseUrls = ref<string[]>([''])
 const apiKeys = ref<string[]>([''])
 const proxyUrl = ref('')
+const outboundNetwork = ref<OutboundNetworkConfig | null>(null)
 const proxyPreferDirect = ref(false)
 const showKeys = ref<boolean[]>([false])
 const submitting = ref(false)
@@ -425,6 +429,7 @@ function getGeneratedName(): string {
 async function discoverCustomRoutes(baseUrls: string[], apiKeys: string[]) {
   const discovery = await discoverFast(props.channelType, baseUrls, apiKeys, {
     proxyUrl: proxyUrl.value.trim() || undefined,
+      outboundNetwork: outboundNetwork.value,
     proxyPreferDirect: proxyPreferDirect.value || undefined
   })
   if (!discovery) {
@@ -470,6 +475,7 @@ async function handleSubmit() {
             routes: routeDiscovery?.routes,
             rateLimitHint: routeDiscovery?.rateLimitHint,
             proxyUrl: proxyUrl.value.trim() || undefined,
+      outboundNetwork: outboundNetwork.value,
             proxyPreferDirect: proxyPreferDirect.value || undefined,
             placement: props.placement
           }
@@ -491,6 +497,7 @@ function resetForm() {
   providerId.value = defaultProviderId.value
   baseUrls.value = ['']
   apiKeys.value = ['']
+  outboundNetwork.value = null
   proxyUrl.value = ''
   proxyPreferDirect.value = false
   showKeys.value = [false]

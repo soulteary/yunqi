@@ -134,6 +134,9 @@ func (k ChannelKind) Label() string {
 // addUpstreamCommonLocked 是六类 Add*Upstream 方法的通用实现。
 // 调用方必须已持有 cm.mu 写锁。
 func (cm *ConfigManager) addUpstreamCommonLocked(k ChannelKindConfig, upstream UpstreamConfig, placements ...string) error {
+	if err := ValidateOutboundNetwork(upstream.OutboundNetwork, upstream.ProxyURL); err != nil {
+		return err
+	}
 	if upstream.Status == "" {
 		upstream.Status = "active"
 	}
@@ -343,6 +346,20 @@ func (cm *ConfigManager) updateUpstreamCommon(k ChannelKindConfig, index int, up
 // 本函数不处理 baseURL/serviceType 相关逻辑，由调用方提前处理。
 func applyUpstreamUpdateFields(upstream *UpstreamConfig, updates UpstreamUpdate) (bool, error) {
 	var shouldResetMetrics bool
+	network := upstream.OutboundNetwork
+	proxyURL := upstream.ProxyURL
+	if updates.OutboundNetwork.Set {
+		network = updates.OutboundNetwork.Value
+	}
+	if updates.ProxyURL != nil {
+		proxyURL = *updates.ProxyURL
+	}
+	if err := ValidateOutboundNetwork(network, proxyURL); err != nil {
+		return false, err
+	}
+	if updates.OutboundNetwork.Set {
+		upstream.OutboundNetwork = CloneOutboundNetwork(network)
+	}
 
 	if updates.AuthHeader != nil {
 		authHeader, err := applyAuthHeader(*updates.AuthHeader)

@@ -10,6 +10,7 @@ import (
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/handlers"
 	"github.com/soulteary/yunqi/internal/handlers/common"
+	"github.com/soulteary/yunqi/internal/httpclient"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/utils"
 )
@@ -169,6 +170,9 @@ func (m *Manager) probeOneModel(
 	success, _, statusCode, respBody, upstreamModel, sendErr := handlers.SendHealthCheckL2Stream(ctx, &probeChannel, req.WithContext(ctx), channelType)
 	cancel()
 
+	if httpclient.IsEgressError(sendErr) {
+		return false
+	}
 	rec.LatencyMs = time.Since(start).Milliseconds()
 
 	switch {
