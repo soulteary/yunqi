@@ -243,6 +243,16 @@ func preflightGeminiStream(resp *http.Response, upstreamType string, timeouts co
 				continue
 			}
 			jsonData := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+			if upstreamType == "gemini" {
+				var chunk types.GeminiStreamChunk
+				if json.Unmarshal([]byte(jsonData), &chunk) == nil {
+					for _, candidate := range chunk.Candidates {
+						if types.GeminiFinishReasonFailed(candidate.FinishReason) {
+							return nil, chunkChan, bodyErrChan, fmt.Errorf("%w: Gemini finishReason %s", common.ErrEmptyStreamResponse, candidate.FinishReason)
+						}
+					}
+				}
+			}
 			if reason, msg, recoverAt, isErr := common.DetectStreamDataError(jsonData); isErr {
 				if reason != "" {
 					return nil, chunkChan, bodyErrChan, &common.ErrBlacklistKey{Reason: reason, Message: msg, RecoverAt: recoverAt}
@@ -372,14 +382,17 @@ func hasGeminiSemanticContent(jsonData string) bool {
 				if parts, ok := content["parts"].([]interface{}); ok && len(parts) > 0 {
 					for _, part := range parts {
 						if p, ok := part.(map[string]interface{}); ok {
+							if thought, _ := p["thought"].(bool); thought {
+								continue
+							}
 							if text, ok := p["text"].(string); ok && text != "" {
 								return true
 							}
-							if _, ok := p["functionCall"]; ok {
-								return true
-							}
-							if _, ok := p["thought"]; ok {
-								return true
+							if call, ok := p["functionCall"].(map[string]interface{}); ok {
+								name, _ := call["name"].(string)
+								if strings.TrimSpace(name) != "" {
+									return true
+								}
 							}
 						}
 					}
@@ -636,6 +649,17 @@ func streamGeminiToGemini(
 			// 尝试解析 usage
 			var chunk types.GeminiStreamChunk
 			if err := json.Unmarshal([]byte(jsonData), &chunk); err == nil {
+				for _, candidate := range chunk.Candidates {
+					if types.GeminiFinishReasonFailed(candidate.FinishReason) {
+						payload, _ := json.Marshal(types.GeminiError{Error: types.GeminiErrorDetail{Code: 502, Status: "INTERNAL", Message: "Gemini generation failed: " + candidate.FinishReason}})
+						_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", payload)
+						if flusher != nil {
+							flusher.Flush()
+						}
+						progress.Finish("error")
+						return nil, fmt.Errorf("Gemini finishReason %s", candidate.FinishReason)
+					}
+				}
 				if chunk.UsageMetadata != nil {
 					totalUsage = &types.Usage{
 						InputTokens:  chunk.UsageMetadata.PromptTokenCount - chunk.UsageMetadata.CachedContentTokenCount,

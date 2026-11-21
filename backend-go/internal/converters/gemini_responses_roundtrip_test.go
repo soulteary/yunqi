@@ -174,6 +174,9 @@ func TestConvertGeminiStreamToResponses_MapsFinishReasonToStatus(t *testing.T) {
 		{name: "stop maps to completed", finishReason: "STOP", expectStatus: "completed"},
 		{name: "max tokens maps to incomplete", finishReason: "MAX_TOKENS", expectStatus: "incomplete"},
 		{name: "safety maps to failed", finishReason: "SAFETY", expectStatus: "failed"},
+		{name: "malformed response fails", finishReason: "MALFORMED_RESPONSE", expectStatus: "failed"},
+		{name: "malformed function fails", finishReason: "MALFORMED_FUNCTION_CALL", expectStatus: "failed"},
+		{name: "unknown finish fails", finishReason: "NEW_UNKNOWN_REASON", expectStatus: "failed"},
 	}
 
 	for _, tt := range cases {
@@ -184,13 +187,13 @@ func TestConvertGeminiStreamToResponses_MapsFinishReasonToStatus(t *testing.T) {
 
 			var completed string
 			for _, ev := range events {
-				if strings.Contains(ev, "response.completed") {
+				if strings.Contains(ev, "response."+tt.expectStatus) {
 					completed = ev
 					break
 				}
 			}
 			if completed == "" {
-				t.Fatalf("expected response.completed event, got %#v", events)
+				t.Fatalf("expected matching terminal event, got %#v", events)
 			}
 
 			var payload struct {

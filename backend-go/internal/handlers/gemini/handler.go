@@ -688,6 +688,11 @@ func handleSuccess(
 		return nil, common.PassthroughResponse(c, resp)
 	}
 
+	for _, candidate := range geminiResp.Candidates {
+		if types.GeminiFinishReasonFailed(candidate.FinishReason) {
+			return nil, fmt.Errorf("%w: Gemini finishReason %s", common.ErrEmptyNonStreamResponse, candidate.FinishReason)
+		}
+	}
 	// 空响应拦截：上游 200 但 candidates 语义为空，
 	// Header 未发送，可安全 failover 到下一个 Key/BaseURL/渠道
 	if common.IsGeminiResponseEmpty(geminiResp) {

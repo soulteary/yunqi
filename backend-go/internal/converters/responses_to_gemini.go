@@ -306,6 +306,15 @@ func GeminiResponseToResponses(geminiResp map[string]interface{}, sessionID stri
 	// 转换 finishReason → status
 	finishReason, _ := candidate["finishReason"].(string)
 	status := geminiFinishReasonToResponsesStatus(finishReason)
+	deliverable := len(textParts) > 0
+	for _, item := range output {
+		if item.Type == "function_call" && strings.TrimSpace(item.Name) != "" {
+			deliverable = true
+		}
+	}
+	if status == "completed" && !deliverable {
+		status = "failed"
+	}
 
 	// 提取 usage
 	usage := ExtractUsageMetrics(geminiResp["usageMetadata"])
@@ -325,14 +334,14 @@ func GeminiResponseToResponses(geminiResp map[string]interface{}, sessionID stri
 // geminiFinishReasonToResponsesStatus 将 Gemini finishReason 转换为 Responses status
 func geminiFinishReasonToResponsesStatus(finishReason string) string {
 	switch finishReason {
-	case "STOP":
+	case "", "STOP":
 		return "completed"
 	case "MAX_TOKENS":
 		return "incomplete"
 	case "SAFETY", "RECITATION":
 		return "failed"
 	default:
-		return "completed"
+		return "failed"
 	}
 }
 
@@ -638,13 +647,25 @@ func (st *geminiToResponsesStreamState) generateCompletedEvent(originalRequestRa
 
 	// 将 Gemini finishReason 转换为 Responses status
 	status := geminiFinishReasonToResponsesStatus(finishReason)
+	if status == "completed" && strings.TrimSpace(st.TextBuf.String()) == "" && len(st.FunctionCalls) == 0 {
+		status = "failed"
+		finishReason = "NO_DELIVERABLE_OUTPUT"
+	}
 
-	// 构建 response.completed
+	// Use a terminal event consistent with the actual generation status.
 	completed := `{"type":"response.completed","sequence_number":0,"response":{"id":"","object":"response","created_at":0,"status":"completed","background":false,"error":null}}`
 	completed, _ = sjson.Set(completed, "sequence_number", nextSeq())
 	completed, _ = sjson.Set(completed, "response.id", st.ResponseID)
 	completed, _ = sjson.Set(completed, "response.created_at", st.CreatedAt)
-	completed, _ = sjson.Set(completed, "response.status", status) // 使用转换后的 status
+	completed, _ = sjson.Set(completed, "response.status", status)
+	if status != "completed" {
+		completed, _ = sjson.Set(completed, "type", "response."+status)
+	}
+	if status == "failed" {
+		completed, _ = sjson.Set(completed, "response.error", map[string]interface{}{"code": "gemini_finish_reason", "message": "Gemini generation failed: " + finishReason, "source": "upstream"})
+	} else if status == "incomplete" {
+		completed, _ = sjson.Set(completed, "response.incomplete_details.reason", "max_output_tokens")
+	}
 
 	// 注入原始请求字段
 	if originalRequestRawJSON != nil {
@@ -721,6 +742,6 @@ func (st *geminiToResponsesStreamState) generateCompletedEvent(originalRequestRa
 		completed, _ = sjson.Set(completed, "response.usage.cache_read_input_tokens", st.CachedTokens)
 	}
 
-	out = append(out, emitResponsesEvent("response.completed", completed))
+	out = append(out, emitResponsesEvent("response."+status, completed))
 	return out
 }

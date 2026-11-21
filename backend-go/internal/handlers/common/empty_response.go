@@ -252,10 +252,16 @@ func IsGeminiResponseEmpty(resp *types.GeminiResponse) bool {
 			continue
 		}
 		for _, part := range cand.Content.Parts {
+			if part.Thought {
+				continue
+			}
 			if !IsEffectivelyEmptyStreamText(part.Text) {
 				return false
 			}
 			if part.FunctionCall != nil {
+				if strings.TrimSpace(part.FunctionCall.Name) == "" {
+					continue
+				}
 				return len(part.FunctionCall.Args) == 0 && toolRequiresArguments(part.FunctionCall.Name)
 			}
 			if part.InlineData != nil || part.FileData != nil {
