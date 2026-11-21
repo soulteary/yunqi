@@ -10,6 +10,9 @@ import (
 // newRouter only registers middleware and routes. All runtime dependencies and
 // workers are wired by runService before the server starts accepting requests.
 func (a *application) newRouter() *fiber.App {
+	if a.cfgManager != nil {
+		a.envCfg.ManagedProxyKeyLookup = a.cfgManager.FindEntryKey
+	}
 	// 创建路由器（使用自定义 Logger，根据 QUIET_POLLING_LOGS 配置过滤轮询日志）
 	r := httpbridge.NewApp()
 	r.Use(middleware.FilteredLogger(a.envCfg))

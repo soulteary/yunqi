@@ -14,6 +14,7 @@ import (
 	"github.com/soulteary/yunqi/internal/handlers/common"
 	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/metrics"
+	"github.com/soulteary/yunqi/internal/middleware"
 	"github.com/soulteary/yunqi/internal/providers"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/session"
@@ -96,6 +97,10 @@ func tryLocalCompactV2WithKey(
 	cfgManager *config.ConfigManager,
 	sessionManager *session.SessionManager,
 ) (bool, *compactError) {
+	if !middleware.AuthorizeProxyRoute(c, envCfg, extractCompactRequestModel(bodyBytes), upstream.ChannelUID) {
+		return true, nil
+	}
+
 	var originalReq types.ResponsesRequest
 	if err := json.Unmarshal(bodyBytes, &originalReq); err != nil {
 		return false, &compactError{status: 400, body: []byte(`{"error":"解析 compact v2 请求失败"}`), shouldFailover: false, err: err}
@@ -109,6 +114,9 @@ func tryLocalCompactV2WithKey(
 		return false, &compactError{status: 400, body: []byte(fmt.Sprintf(`{"error":"%s"}`, err.Error())), shouldFailover: false, err: err}
 	}
 
+	if !middleware.AuthorizeProxyRoute(c, envCfg, extractCompactRequestModel(localBody), upstream.ChannelUID) {
+		return true, nil
+	}
 	provider := &providers.ResponsesProvider{SessionManager: sessionManager}
 	req, _, err := provider.ConvertBodyToProviderRequest(c, upstream, apiKey, localBody, "/v1/responses")
 	if err != nil {

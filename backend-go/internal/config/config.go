@@ -1406,6 +1406,7 @@ type CircuitBreakerConfig struct {
 }
 
 type Config struct {
+	EntryKeys       []EntryKey             `json:"entryKeys,omitempty"`
 	CodexAutoReview CodexAutoReviewMapping `json:"codexAutoReview,omitempty"`
 	ManagedAccounts []ManagedAccountConfig `json:"managedAccounts,omitempty"`
 	Upstream        []UpstreamConfig       `json:"upstream,omitempty"`
@@ -1531,6 +1532,10 @@ func (cm *ConfigManager) GetConfig() Config {
 
 	// 深拷贝整个 Config 结构体
 	cloned := cm.config
+	cloned.EntryKeys = make([]EntryKey, len(cm.config.EntryKeys))
+	for i, key := range cm.config.EntryKeys {
+		cloned.EntryKeys[i] = cloneEntryKey(key)
+	}
 	if cm.config.ManagedAccounts != nil {
 		cloned.ManagedAccounts = make([]ManagedAccountConfig, len(cm.config.ManagedAccounts))
 		for i, account := range cm.config.ManagedAccounts {

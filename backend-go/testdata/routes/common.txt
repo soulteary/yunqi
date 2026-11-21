@@ -410,3 +410,7 @@ PUT /api/smart-routing/config
 PUT /api/subscriptions/:uid
 PUT /api/task-templates/:id
 PUT /api/vectors/channels/:id
+GET /api/entry-keys
+POST /api/entry-keys
+PUT /api/entry-keys/:id
+POST /api/entry-keys/:id/rotate
