@@ -23,6 +23,9 @@ func (a *application) configureGuardrails() {
 	credentialMasker := guardrails.NewCredentialMasker()
 	// 注入网关自身密钥
 	gatewayKeys := []string{a.envCfg.ProxyAccessKey, a.envCfg.GetAdminAccessKey()}
+	if a.envCfg.IdentityProxySecret != "" {
+		gatewayKeys = append(gatewayKeys, a.envCfg.IdentityProxySecret)
+	}
 	gatewayKeys = append(gatewayKeys, a.envCfg.ExtraProxyAccessKeys...)
 	credentialMasker.SetStaticKeys(gatewayKeys)
 	initializeCredentialRedaction(a.envCfg)
@@ -156,7 +159,7 @@ func (a *application) initConversations() {
 }
 
 func initializeCredentialRedaction(env *config.EnvConfig) func() {
-	keys := []string{env.ProxyAccessKey, env.GetAdminAccessKey()}
+	keys := []string{env.ProxyAccessKey, env.GetAdminAccessKey(), env.IdentityProxySecret}
 	keys = append(keys, env.ExtraProxyAccessKeys...)
 	if secret := os.Getenv("IDENTITY_PROXY_SECRET"); secret != "" {
 		keys = append(keys, secret)

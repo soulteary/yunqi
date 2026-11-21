@@ -245,17 +245,23 @@ func IsGeminiResponseEmpty(resp *types.GeminiResponse) bool {
 	for _, cand := range resp.Candidates {
 		// 安全拦截 / 版权拦截也应原样透传，不触发 failover
 		switch cand.FinishReason {
-		case "SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII":
+		case "SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "IMAGE_SAFETY", "IMAGE_PROHIBITED_CONTENT":
 			return false
 		}
 		if cand.Content == nil {
 			continue
 		}
 		for _, part := range cand.Content.Parts {
-			if !IsEffectivelyEmptyStreamText(part.Text) {
+			if part.Thought {
+				continue
+			}
+			if strings.TrimSpace(part.Text) != "" && !IsEffectivelyEmptyStreamText(part.Text) {
 				return false
 			}
 			if part.FunctionCall != nil {
+				if strings.TrimSpace(part.FunctionCall.Name) == "" {
+					continue
+				}
 				return len(part.FunctionCall.Args) == 0 && toolRequiresArguments(part.FunctionCall.Name)
 			}
 			if part.InlineData != nil || part.FileData != nil {

@@ -97,6 +97,7 @@ GET /api/health-center/profile-coverage
 GET /api/health-center/provider-quality/budget
 GET /api/health-center/state-events
 GET /api/health-center/state-events/stream
+GET /api/identity-proxy
 GET /api/images/channels
 GET /api/images/channels/:id/auto-status
 GET /api/images/channels/:id/balance
@@ -207,6 +208,7 @@ POST /:routePrefix/v1/responses
 POST /:routePrefix/v1/responses/compact
 POST /:routePrefix/v1beta/models/*modelAction
 POST /admin/config/save
+POST /api/access/session/revoke
 POST /api/accounts/:accountUid/credentials
 POST /api/accounts/:accountUid/credentials/:credentialUid/compshare-console-cookie/refresh
 POST /api/accounts/:accountUid/credentials/:credentialUid/kimi-console-token/refresh
@@ -281,6 +283,7 @@ POST /api/gemini/channels/reorder
 POST /api/gemini/channels/scheduler/diagnose
 POST /api/health-center/endpoints/:endpointUid/token-plan-usage/refresh
 POST /api/health-center/provider-quality/probe
+POST /api/identity-proxy/sessions/revoke
 POST /api/images/channels
 POST /api/images/channels/:id/auto-discover
 POST /api/images/channels/:id/balance/check
@@ -418,6 +421,7 @@ PUT /api/console/codex-auto-review
 PUT /api/conversations/settings
 PUT /api/entry-keys/:id
 PUT /api/gemini/channels/:id
+PUT /api/identity-proxy
 PUT /api/images/channels/:id
 PUT /api/logging/body
 PUT /api/logical-channels/:uid
