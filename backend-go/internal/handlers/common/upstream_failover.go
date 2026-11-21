@@ -1383,9 +1383,17 @@ func TryUpstreamWithAllKeys(
 			signalEndpointUID := autopilot.GenerateEndpointUID(upstream.ChannelUID, currentBaseURL, keyHash)
 
 			if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-				respBodyBytes, _ := io.ReadAll(resp.Body)
-				_ = resp.Body.Close()
-				respBodyBytes = utils.DecompressGzipIfNeeded(resp, respBodyBytes)
+				errorBodyTimeout := time.Duration(requestUpstream.GetEffectiveRequestTimeoutMs(config.GetRuntimeRequestTimeoutMs(envCfg.RequestTimeout))) * time.Millisecond
+				respBodyBytes, readErr := readUpstreamErrorBody(httpbridge.Request(c).Context(), resp, errorBodyTimeout)
+				if cancelErr := httpbridge.Request(c).Context().Err(); cancelErr != nil {
+					metricsManager.RecordRequestFinalizeClientCancel(currentBaseURL, apiKey, metricsServiceType, requestID)
+					channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, metricsServiceType, executionKind)
+					CompleteLog(channelLogStore, metricsKey, logRequestID, 0, false, "client canceled", isRetryAttempt)
+					return true, "", 0, nil, nil, cancelErr
+				}
+				if readErr != nil {
+					RequestLogf(c, "[%s-ErrorBody] 错误响应体读取受限，按 HTTP %d 及已有内容分类: %v", apiType, resp.StatusCode, readErr)
+				}
 
 				// 记录错误响应头（用于诊断限流 header）
 				LogUpstreamResponseHeaders(c, resp, envCfg, apiType)
