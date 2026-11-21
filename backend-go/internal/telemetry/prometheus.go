@@ -65,7 +65,10 @@ func (r *Registry) Middleware() fiber.Handler {
 		if kind == "" {
 			return c.Next()
 		}
-		httpbridge.SetRequest(c, req.WithContext(context.WithValue(req.Context(), metricContextKey{}, requestMetricContext{r, kind})))
+		timingCtx, timeline := WithTiming(req.Context())
+		defer timeline.Finish()
+		httpbridge.SetWriteObserver(c, func() func() { return Phase(timingCtx, "downstream_write") })
+		httpbridge.SetRequest(c, req.WithContext(context.WithValue(timingCtx, metricContextKey{}, requestMetricContext{r, kind})))
 		start := time.Now()
 		r.mu.Lock()
 		r.active[kind]++
