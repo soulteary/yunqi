@@ -242,8 +242,8 @@ func handleMultiChannel(
 				title := extractTitleFromResponseText(result.ResponseText)
 				updated := channelScheduler.UpdateConversationTitle(scheduler.ChannelKindMessages, userID, title)
 				if envCfg.ShouldLog("debug") {
-					common.RequestLogf(c, "[Messages-Title-Debug] title 更新结果: user=%s, title=%q, updated=%t, responseTextLen=%d",
-						scheduler.MaskUserIDForLog(userID), title, updated, len(result.ResponseText))
+					common.RequestLogf(c, "[Messages-Title-Debug] title 更新结果: user=%s, updated=%t, responseTextLen=%d",
+						scheduler.MaskUserIDForLog(userID), updated, len(result.ResponseText))
 				}
 				return
 			}
@@ -379,8 +379,8 @@ func handleSingleChannel(
 			title := extractTitleFromResponseText(responseTextString(responseText))
 			updated := channelScheduler.UpdateConversationTitle(scheduler.ChannelKindMessages, userID, title)
 			if envCfg.ShouldLog("debug") {
-				common.RequestLogf(c, "[Messages-Title-Debug] 单渠道 title 更新结果: user=%s, title=%q, updated=%t, responseTextLen=%d",
-					scheduler.MaskUserIDForLog(userID), title, updated, len(responseTextString(responseText)))
+				common.RequestLogf(c, "[Messages-Title-Debug] 单渠道 title 更新结果: user=%s, updated=%t, responseTextLen=%d",
+					scheduler.MaskUserIDForLog(userID), updated, len(responseTextString(responseText)))
 			}
 		} else if isRecapRequest {
 			responseText, _ := httpbridge.Value(c, "responseText")
@@ -556,7 +556,7 @@ func logNormalProtocolDebug(c fiber.Ctx, resp *http.Response, bodyBytes []byte, 
 }
 
 func normalProtocolDebugEnabled(envCfg *config.EnvConfig) bool {
-	return envCfg != nil && envCfg.EnableResponseLogs && envCfg.IsDevelopment() && envCfg.ShouldLog("debug")
+	return envCfg != nil && envCfg.ShouldLogResponseBodies() && envCfg.ShouldLog("debug")
 }
 
 func looksLikeSSEPayload(bodyBytes []byte) bool {
@@ -569,6 +569,7 @@ func looksLikeSSEPayload(bodyBytes []byte) bool {
 }
 
 func previewPrefix(bodyBytes []byte, limit int) string {
+	bodyBytes = []byte(common.ResponseBodyTextForLog(string(bodyBytes)))
 	if limit <= 0 || len(bodyBytes) <= limit {
 		return string(bodyBytes)
 	}
@@ -576,6 +577,7 @@ func previewPrefix(bodyBytes []byte, limit int) string {
 }
 
 func previewSuffix(bodyBytes []byte, limit int) string {
+	bodyBytes = []byte(common.ResponseBodyTextForLog(string(bodyBytes)))
 	if limit <= 0 || len(bodyBytes) <= limit {
 		return string(bodyBytes)
 	}
