@@ -25,10 +25,13 @@ type requestSeries struct {
 	canceled uint64
 }
 type Registry struct {
-	events   map[string]uint64
-	mu       sync.Mutex
-	requests map[string]*requestSeries
-	active   map[string]int64
+	tracing         *Tracing
+	diagnostics     map[string]*Diagnostics
+	diagnosticOrder []string
+	events          map[string]uint64
+	mu              sync.Mutex
+	requests        map[string]*requestSeries
+	active          map[string]int64
 }
 
 func NewRegistry() *Registry {
@@ -65,8 +68,15 @@ func (r *Registry) Middleware() fiber.Handler {
 		if kind == "" {
 			return c.Next()
 		}
-		timingCtx, timeline := WithTiming(req.Context())
-		defer timeline.Finish()
+		traceCtx, endTrace := r.startServerTrace(req.Context(), req.Header, kind, req.Method)
+		timingCtx, timeline := WithTiming(traceCtx)
+		timingCtx, diagnostic := r.startDiagnostics(timingCtx, kind, timeline)
+		if diagnostic != nil {
+			httpbridge.Writer(c).Header().Set("X-Yunqi-Request-Id", DiagnosticRequestID(timingCtx))
+		}
+		if id := TraceID(timingCtx); id != "" {
+			httpbridge.Writer(c).Header().Set("X-Yunqi-Trace-Id", id)
+		}
 		httpbridge.SetWriteObserver(c, func() func() { return Phase(timingCtx, "downstream_write") })
 		httpbridge.SetRequest(c, req.WithContext(context.WithValue(timingCtx, metricContextKey{}, requestMetricContext{r, kind})))
 		start := time.Now()
@@ -99,6 +109,9 @@ func (r *Registry) Middleware() fiber.Handler {
 				}
 			}
 			r.mu.Unlock()
+			timeline.Finish()
+			diagnostic.Finish(code, req.Context().Err() != nil)
+			endTrace(code, timeline.Snapshot())
 			if p != nil {
 				panic(p)
 			}
@@ -129,6 +142,7 @@ func (r *Registry) WritePrometheus(w io.Writer) {
 	for key, value := range r.active {
 		active[key] = value
 	}
+	tracing := r.tracing
 	events := make(map[string]uint64, len(r.events))
 	for key, value := range r.events {
 		events[key] = value
@@ -168,6 +182,7 @@ func (r *Registry) WritePrometheus(w io.Writer) {
 		_, _ = fmt.Fprintf(w, "yunqi_proxy_inflight{endpoint=%q} %d\n", kind, active[kind])
 	}
 	writeEvents(w, events)
+	writeTracingHealth(w, tracing)
 	var mem runtime.MemStats
 	runtime.ReadMemStats(&mem)
 	_, _ = fmt.Fprintf(w, "# HELP yunqi_runtime_goroutines Current Go goroutines.\n# TYPE yunqi_runtime_goroutines gauge\nyunqi_runtime_goroutines %d\n# HELP yunqi_runtime_heap_alloc_bytes Current Go heap allocation.\n# TYPE yunqi_runtime_heap_alloc_bytes gauge\nyunqi_runtime_heap_alloc_bytes %d\n", runtime.NumGoroutine(), mem.HeapAlloc)

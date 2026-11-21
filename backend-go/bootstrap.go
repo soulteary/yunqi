@@ -111,6 +111,7 @@ func runService(cliOpts cliOptions) {
 	defer errutil.IgnoreDeferred(cfgManager.Close)
 
 	a := &application{envCfg: envCfg, paths: paths, cfgManager: cfgManager}
+	a.initTelemetry()
 	a.configureGuardrails()
 	a.startPresetUpdater()
 	a.configureThinkingCache()

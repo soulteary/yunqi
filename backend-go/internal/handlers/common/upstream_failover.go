@@ -1098,6 +1098,7 @@ func TryUpstreamWithAllKeys(
 					endQueue()
 					if rlErr != nil {
 						telemetry.Event(httpbridge.Request(c).Context(), "limiter", "scope")
+						recordLocalDiagnostic(c, upstream.ChannelUID, selection.KeyUID, apiKey, executionAPIType, "limiter", "gateway")
 						lastError = rlErr
 						RequestLogf(c, "[%s-RateLimit] 渠道限速器拦截: %v，尝试下一个 Key/渠道", apiType, rlErr)
 						failedKeys[apiKey] = true
@@ -1112,6 +1113,7 @@ func TryUpstreamWithAllKeys(
 					endQueue()
 					if rlErr != nil {
 						telemetry.Event(httpbridge.Request(c).Context(), "limiter", "scope")
+						recordLocalDiagnostic(c, upstream.ChannelUID, selection.KeyUID, apiKey, executionAPIType, "limiter", "gateway")
 						lastError = rlErr
 						RequestLogf(c, "[%s-RateLimit] Key/Quota 限速器拦截: scope=%s, err=%v，尝试下一个 Key/渠道", apiType, selection.LimiterScope, rlErr)
 						failedKeys[apiKey] = true
@@ -1135,6 +1137,7 @@ func TryUpstreamWithAllKeys(
 			req, err := buildRequest(c, upstreamCopy, apiKey)
 			if err != nil {
 				_ = recordFinalConversion(c, requestBody, nil, apiType, upstreamCopy.ServiceType)
+				recordLocalDiagnostic(c, upstream.ChannelUID, selection.KeyUID, apiKey, executionAPIType, "build", "gateway")
 				// buildRequest 失败通常是客户端参数问题或本地构建错误
 				// 不应污染熔断统计，直接返回错误
 				RequestLogf(c, "[%s-BuildRequest] 请求构建失败: %v", apiType, err)
@@ -1240,7 +1243,16 @@ func TryUpstreamWithAllKeys(
 			// 创建 pending 状态日志（附带代理上下文与会话标识，用于 subagent 观测）
 			// interfaceType 记录实际执行协议：联邦 sibling 必须归属到 chat/responses，
 			// 否则日志会把 chat 上的尝试错误地展示成 messages 渠道的尝试。
-			logOpts = append(logOpts, func(log *metrics.ChannelLog) { log.TimingSource = telemetry.Timing(httpbridge.Request(c).Context()) })
+			logOpts = append(logOpts, func(log *metrics.ChannelLog) {
+				log.Diagnostics = telemetry.DiagnosticsFromContext(httpbridge.Request(c).Context())
+				log.ChannelUID = upstream.ChannelUID
+				log.KeyUID = selection.KeyUID
+				if log.KeyUID == "" {
+					log.KeyUID = diagnosticKeyUID(apiKey)
+				}
+				log.TimingSource = telemetry.Timing(httpbridge.Request(c).Context())
+				log.OTLPTraceID = telemetry.TraceID(httpbridge.Request(c).Context())
+			})
 			logRequestID := CreatePendingLog(channelLogStore, metricsKey, executionIndex, upstream.Name, actualAttemptModel, actualOriginalModel, originalReasoningEffort, actualReasoningEffort, apiKey, currentBaseURL, executionAPIType, operation, metrics.RequestSourceProxy, AgentContextFromFiber(c), SessionIDFromFiber(c), logOpts...)
 
 			// 计算当前 Key 的 ConsumptionPolicy，供 metrics 与 trace 共同使用。
@@ -1255,6 +1267,7 @@ func TryUpstreamWithAllKeys(
 			// 向 Autopilot trace 追加一条 "started" endpoint 尝试摘要（fail-open）
 			attemptTraceUID, _ := httpbridge.Value(c, "ccx.autopilot_trace_uid")
 			if uid, ok := attemptTraceUID.(string); ok && uid != "" {
+				telemetry.LinkInternal(httpbridge.Request(c).Context(), requestCorrelationID, uid)
 				configuredCostMultiplier := -1.0
 				if endpointPolicy != nil {
 					if _, cands := callPolicySortKeyBindings(endpointPolicy, upstream.ChannelUID, currentBaseURL, []string{apiKey}, apiType, c); len(cands) > 0 {
@@ -1334,6 +1347,9 @@ func TryUpstreamWithAllKeys(
 					model, actualAttemptModel, mappingNote, utils.MaskAPIKey(apiKey))
 			}
 			resp, err := SendRequestWithLifecycleTrace(req, requestUpstream, envCfg, isStream, apiType, lifecycleTrace)
+			if resp != nil {
+				channelLogStore.Update(metricsKey, logRequestID, func(log *metrics.ChannelLog) { log.UpstreamRequestID = diagnosticUpstreamRequestID(resp.Header) })
+			}
 			if err != nil {
 				lastError = err
 				// 竞速败出：被赢家取消（SendRequest 阶段），不计失败不 failover。
@@ -1890,6 +1906,9 @@ func TryUpstreamWithAllKeys(
 			capture := &usageCapture{ReadCloser: resp.Body, stream: strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream")}
 			resp.Body = capture
 			usage, err = handleSuccess(c, resp, upstreamCopy, apiKey, attemptBody)
+			if err != nil {
+				channelLogStore.Update(metricsKey, logRequestID, func(log *metrics.ChannelLog) { log.ErrorSource = diagnosticStreamErrorSource(err) })
+			}
 			if lifecycleTrace.finishFirstContentWait != nil {
 				lifecycleTrace.finishFirstContentWait()
 			}
