@@ -1406,11 +1406,12 @@ type CircuitBreakerConfig struct {
 }
 
 type Config struct {
-	EntryKeys       []EntryKey             `json:"entryKeys,omitempty"`
-	CodexAutoReview CodexAutoReviewMapping `json:"codexAutoReview,omitempty"`
-	ManagedAccounts []ManagedAccountConfig `json:"managedAccounts,omitempty"`
-	Upstream        []UpstreamConfig       `json:"upstream,omitempty"`
-	CurrentUpstream int                    `json:"currentUpstream,omitempty"` // 已废弃：旧格式兼容用
+	AdminCredentials []AdminCredential      `json:"adminCredentials,omitempty"`
+	EntryKeys        []EntryKey             `json:"entryKeys,omitempty"`
+	CodexAutoReview  CodexAutoReviewMapping `json:"codexAutoReview,omitempty"`
+	ManagedAccounts  []ManagedAccountConfig `json:"managedAccounts,omitempty"`
+	Upstream         []UpstreamConfig       `json:"upstream,omitempty"`
+	CurrentUpstream  int                    `json:"currentUpstream,omitempty"` // 已废弃：旧格式兼容用
 
 	// Responses 接口专用配置（独立于 /v1/messages）
 	ResponsesUpstream        []UpstreamConfig `json:"responsesUpstream,omitempty"`
@@ -1532,6 +1533,10 @@ func (cm *ConfigManager) GetConfig() Config {
 
 	// 深拷贝整个 Config 结构体
 	cloned := cm.config
+	cloned.AdminCredentials = make([]AdminCredential, len(cm.config.AdminCredentials))
+	for i, key := range cm.config.AdminCredentials {
+		cloned.AdminCredentials[i] = cloneAdminCredential(key)
+	}
 	cloned.EntryKeys = make([]EntryKey, len(cm.config.EntryKeys))
 	for i, key := range cm.config.EntryKeys {
 		cloned.EntryKeys[i] = cloneEntryKey(key)

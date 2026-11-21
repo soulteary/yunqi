@@ -416,3 +416,11 @@ PUT /api/entry-keys/:id
 POST /api/entry-keys/:id/rotate
 POST /v1/quote
 POST /:routePrefix/v1/quote
+GET /api/access/me
+GET /api/access/channels
+PUT /api/access/channels/:uid/state
+GET /api/admin-credentials
+POST /api/admin-credentials
+PUT /api/admin-credentials/:id
+POST /api/admin-credentials/:id/rotate
+GET /access

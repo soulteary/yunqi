@@ -11,7 +11,8 @@ import (
 )
 
 type EnvConfig struct {
-	ManagedProxyKeyLookup func(string) (EntryKey, bool) `json:"-"` // 只读持久化入口策略，启动时注入
+	ManagedAdminKeyLookup func(string) (AdminCredential, bool) `json:"-"`
+	ManagedProxyKeyLookup func(string) (EntryKey, bool)        `json:"-"` // 只读持久化入口策略，启动时注入
 	Port                  int
 	BindHost              string
 	Env                   string
@@ -256,13 +257,15 @@ func (c *EnvConfig) IsValidAdminAccessKey(providedKey string) bool {
 	if providedKey == "" {
 		return false
 	}
-	if c.AdminAccessKey != "" {
-		return secureCompare(providedKey, c.AdminAccessKey)
+	if c.IsStaticAdminAccessKey(providedKey) {
+		return true
 	}
-	if c.HasExtraProxyAccessKeys() {
-		return false
+	if c.ManagedAdminKeyLookup != nil {
+		if key, ok := c.ManagedAdminKeyLookup(providedKey); ok {
+			return key.ValidNow(time.Now())
+		}
 	}
-	return secureCompare(providedKey, c.ProxyAccessKey)
+	return false
 }
 
 // GetAdminAccessKey 获取显式或回退管理 API 密钥，认证判断请使用 IsValidAdminAccessKey
@@ -361,4 +364,15 @@ func parseProxyPrincipalIDs(raw string) map[string]string {
 		}
 	}
 	return ids
+}
+
+// IsStaticAdminAccessKey identifies the existing environment owner credential.
+func (c *EnvConfig) IsStaticAdminAccessKey(key string) bool {
+	if key == "" {
+		return false
+	}
+	if c.AdminAccessKey != "" {
+		return secureCompare(key, c.AdminAccessKey)
+	}
+	return !c.HasExtraProxyAccessKeys() && secureCompare(key, c.ProxyAccessKey)
 }
