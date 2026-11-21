@@ -156,10 +156,8 @@ func (o *StreamTimeoutObserver) markStreamActivityLocked(now time.Time) {
 	if now.IsZero() {
 		now = time.Now()
 	}
-	if o.firstContentAt.IsZero() {
-		o.markFirstContentLocked(now)
-		return
-	}
+	// Transport activity (metadata, comments, heartbeats) must not end TTFT.
+	// Only MarkFirstContent or a deliverable tool call establishes that clock.
 	if !o.lastStreamActivityAt.IsZero() {
 		o.maxStreamIdleMs = maxInt64(o.maxStreamIdleMs, now.Sub(o.lastStreamActivityAt).Milliseconds())
 	}
@@ -170,7 +168,7 @@ func (o *StreamTimeoutObserver) markToolCallActivityLocked(now time.Time) {
 	if now.IsZero() {
 		now = time.Now()
 	}
-	o.markStreamActivityLocked(now)
+	o.markFirstContentLocked(now)
 	if !o.lastToolCallActivityAt.IsZero() {
 		o.maxToolCallIdleMs = maxInt64(o.maxToolCallIdleMs, now.Sub(o.lastToolCallActivityAt).Milliseconds())
 	}
