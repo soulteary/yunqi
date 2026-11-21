@@ -1,6 +1,8 @@
 package autopilot
 
 import (
+	"encoding/json"
+	"github.com/soulteary/yunqi/internal/redaction"
 	"net/http"
 	"strconv"
 	"time"
@@ -113,7 +115,11 @@ func handleStateEventsStream(mgr *Manager) fiber.Handler {
 					return nil
 				}
 				_ = conn.SetWriteDeadline(time.Now().Add(stateEventsStreamWriteTimeout))
-				if err := conn.WriteJSON(ev); err != nil {
+				payload, err := json.Marshal(ev)
+				if err != nil {
+					return nil
+				}
+				if err := conn.WriteMessage(websocket.TextMessage, redaction.JSON(payload)); err != nil {
 					return nil
 				}
 			}

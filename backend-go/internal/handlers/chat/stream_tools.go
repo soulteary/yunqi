@@ -3,6 +3,7 @@ package chat
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/soulteary/yunqi/internal/redaction"
 	"net/http"
 	"strings"
 	"time"
@@ -94,7 +95,7 @@ func writeChatStreamAbortError(c fiber.Ctx, flusher http.Flusher) {
 		},
 	}
 	chunkBytes, _ := json.Marshal(errChunk)
-	_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(chunkBytes))
+	_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(redaction.ErrorJSON(chunkBytes)))
 	_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: [DONE]\n\n")
 	if flusher != nil {
 		flusher.Flush()
@@ -137,6 +138,7 @@ func streamPassthrough(
 	var totalUsage *types.Usage
 	buf := make([]byte, 32*1024)
 	var remainder string
+	lineRedactor := &redaction.SSELineRedactor{}
 	// writtenTail 记录已写给客户端的最后两个字节，用于 EOF 时判断最后一条事件是否
 	// 已经有空行收尾（上游以 `data: X\n` 单换行结束时需要补一个空行才算派发）。
 	var writtenTail string
@@ -207,13 +209,24 @@ func streamPassthrough(
 					}
 				}
 			}
-			_, _ = httpbridge.Writer(c).Write(chunk)
-			if flusher != nil {
-				flusher.Flush()
+			if len(completeLines) > 0 {
+				for i, line := range completeLines {
+					completeLines[i] = lineRedactor.Line(line)
+				}
+				forwarded := strings.Join(completeLines, "\n") + "\n"
+				_, _ = httpbridge.Writer(c).Write([]byte(forwarded))
+				if flusher != nil {
+					flusher.Flush()
+				}
+				writtenTail = lastBytes(forwarded, 2)
 			}
-			writtenTail = lastBytes(data, 2)
 		}
 		if readErr != nil {
+			if remainder != "" {
+				forwarded := lineRedactor.Line(remainder)
+				_, _ = httpbridge.Writer(c).Write([]byte(forwarded))
+				writtenTail = lastBytes(forwarded, 2)
+			}
 			flushCompletePassthroughRemainder(c, flusher, remainder, writtenTail)
 			break
 		}
@@ -629,7 +642,7 @@ func streamResponsesToChat(
 // writeChatSSEChunk 将 Chat chunk 写为 SSE 格式并 flush。
 func writeChatSSEChunk(c fiber.Ctx, flusher http.Flusher, chunk map[string]interface{}) {
 	chunkBytes, _ := json.Marshal(chunk)
-	_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(chunkBytes))
+	_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(redaction.ErrorJSON(chunkBytes)))
 	if flusher != nil {
 		flusher.Flush()
 	}
@@ -682,7 +695,7 @@ func processClaudeChatStreamLine(c fiber.Ctx, flusher http.Flusher, model string
 				}},
 			}
 			chunkBytes, _ := json.Marshal(chatChunk)
-			_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(chunkBytes))
+			_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(redaction.ErrorJSON(chunkBytes)))
 			if flusher != nil {
 				flusher.Flush()
 			}
@@ -702,7 +715,7 @@ func processClaudeChatStreamLine(c fiber.Ctx, flusher http.Flusher, model string
 				}},
 			}
 			chunkBytes, _ := json.Marshal(chatChunk)
-			_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(chunkBytes))
+			_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(redaction.ErrorJSON(chunkBytes)))
 			if flusher != nil {
 				flusher.Flush()
 			}
@@ -730,7 +743,7 @@ func processClaudeChatStreamLine(c fiber.Ctx, flusher http.Flusher, model string
 			}
 		}
 		chunkBytes, _ := json.Marshal(stopChunk)
-		_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(chunkBytes))
+		_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(redaction.ErrorJSON(chunkBytes)))
 		if flusher != nil {
 			flusher.Flush()
 		}

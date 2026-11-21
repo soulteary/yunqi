@@ -20,6 +20,7 @@ import (
 	"github.com/soulteary/yunqi/internal/logger"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/middleware"
+	"github.com/soulteary/yunqi/internal/redaction"
 	"github.com/soulteary/yunqi/internal/telemetry"
 	"github.com/soulteary/yunqi/internal/utils"
 )
@@ -173,6 +174,17 @@ func GetEffectiveRequestBody(c fiber.Ctx, fallback []byte) []byte {
 
 // PassthroughResponse 直接将上游响应转发给客户端，不在内存中整包缓存。
 func PassthroughResponse(c fiber.Ctx, resp *http.Response) error {
+	if resp.StatusCode >= 400 {
+		body, err := readUpstreamErrorBody(httpbridge.Request(c).Context(), resp, 10*time.Second)
+		if err != nil {
+			body = []byte(`{"error":{"type":"upstream_error","message":"Upstream error response could not be safely read"}}`)
+		}
+		utils.ForwardResponseHeaders(resp.Header, httpbridge.Writer(c))
+		httpbridge.Writer(c).Header().Del("Content-Length")
+		httpbridge.Writer(c).Header().Del("Content-Encoding")
+		httpbridge.Data(c, resp.StatusCode, "application/json; charset=utf-8", redaction.JSON(body))
+		return nil
+	}
 	utils.ForwardResponseHeaders(resp.Header, httpbridge.Writer(c))
 	utils.ForwardContentType(resp.Header, httpbridge.Writer(c))
 	httpbridge.Status(c, resp.StatusCode)
@@ -183,7 +195,7 @@ func PassthroughResponse(c fiber.Ctx, resp *http.Response) error {
 // PassthroughJSONResponse 在透传响应给客户端的同时，用流式 Decoder 尝试解析 JSON。
 // 解析失败时会继续排空剩余响应体，确保客户端仍收到完整响应。
 func PassthroughJSONResponse(c fiber.Ctx, resp *http.Response, target interface{}) error {
-	if target == nil {
+	if target == nil || resp.StatusCode >= 400 {
 		return PassthroughResponse(c, resp)
 	}
 
@@ -249,6 +261,7 @@ func SendRequest(req *http.Request, upstream *config.UpstreamConfig, envCfg *con
 
 // SendRequestWithLifecycleTrace 发送 HTTP 请求到上游，并可记录连接取得与首个响应字节时间。
 func SendRequestWithLifecycleTrace(req *http.Request, upstream *config.UpstreamConfig, envCfg *config.EnvConfig, isStream bool, apiType string, lifecycleTrace *RequestLifecycleTrace) (*http.Response, error) {
+	redaction.ObserveRequest(req)
 	clientManager := httpclient.GetManager()
 
 	var client *http.Client
