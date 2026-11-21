@@ -770,36 +770,35 @@ func (s *ChannelScheduler) SelectChannelWithOptions(ctx context.Context, opts Se
 	}
 
 	for _, skipped := range softSkipped {
-		if skipped.upstream == nil || !s.channelIsRuntimeAvailable(skipped.upstream, kind, skipped.channel.Index, "") {
+		route := normalizedChannelRoute(skipped.channel, kind)
+		if skipped.upstream == nil || !s.channelIsRuntimeAvailable(skipped.upstream, ChannelKind(route.Kind), route.Index, "") {
 			continue
 		}
 		prefix := kindSchedulerLogPrefix(kind)
 		log.Printf("[%s-RateLimit] 所有低水位候选不可用，回退选择高水位渠道: [%d] %s scope=%s usage=%.0f%%",
 			prefix, skipped.channel.Index, skipped.upstream.Name, skipped.scope, skipped.ratio*100)
-		return finish(skipped.upstream, skipped.channel.Index, "rate_limit_pressure"), nil
+		return finish(skipped.upstream, route.Index, "rate_limit_pressure"), nil
 	}
 
 	// 配额饱和回退：所有非饱和渠道不可用时，尝试配额饱和的渠道（fail-open）。
 	// 确保不会因为配额数据缺失或不准确而阻断全部调度。
 	for _, sunk := range quotaSunk {
-		if sunk.upstream == nil || !s.channelIsRuntimeAvailable(sunk.upstream, kind, sunk.channel.Index, "") {
+		route := normalizedChannelRoute(sunk.channel, kind)
+		if sunk.upstream == nil || !s.channelIsRuntimeAvailable(sunk.upstream, ChannelKind(route.Kind), route.Index, "") {
 			continue
 		}
 		prefix := kindSchedulerLogPrefix(kind)
 		log.Printf("[%s-Quota] 所有非饱和渠道不可用，回退选择配额饱和渠道: [%d] %s truth=%s",
 			prefix, sunk.channel.Index, sunk.upstream.Name, sunk.scope)
-		return finish(sunk.upstream, sunk.channel.Index, "quota_saturated_fallback"), nil
+		return finish(sunk.upstream, route.Index, "quota_saturated_fallback"), nil
 	}
 
 	// 3. 所有健康渠道都失败，选择失败率最低的作为降级
-	result, err := s.selectFallbackChannelWithRouteRecord(activeChannels, failedChannels, failedRoutes, kind, !opts.DryRun)
+	// Finalize every selection through the same path, including the lowest-failure
+	// fallback, so execution pins, overflow flags and the decision observer survive.
+	result, err := s.selectFallbackChannelWithRouteRecord(activeChannels, failedChannels, failedRoutes, kind, false)
 	if result != nil {
-		channelName := ""
-		if result.Upstream != nil {
-			channelName = result.Upstream.Name
-		}
-		trace.selectChannel(result.Route, channelName, result.Reason)
-		result.Trace = trace
+		result = finish(result.Upstream, result.ChannelIndex, result.Reason)
 	}
 	if err != nil {
 		err = traceErr(err)
