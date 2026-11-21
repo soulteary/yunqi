@@ -187,12 +187,12 @@ func racingClaimClientCommit(c fiber.Ctx) bool {
 		}
 	}
 	if !gate.ClaimBy(branchID) {
-		if bw, ok := httpbridge.Writer(c).(*racingBranchWriter); ok {
+		if bw, ok := findRacingBranchWriter(httpbridge.Writer(c)); ok {
 			bw.Discard()
 		}
 		return false
 	}
-	if bw, ok := httpbridge.Writer(c).(*racingBranchWriter); ok {
+	if bw, ok := findRacingBranchWriter(httpbridge.Writer(c)); ok {
 		bw.Commit()
 	}
 	// 仅实际竞速（已有对手分支注册）才补记 won：无影子的独占交付不是竞速获胜。

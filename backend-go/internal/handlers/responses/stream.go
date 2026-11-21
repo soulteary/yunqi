@@ -1133,6 +1133,9 @@ func writeResponsesContentText(buf *bytes.Buffer, content interface{}) {
 // hasUpstreamTerminalEvent recognizes protocol completion, not transport markers.
 func hasUpstreamTerminalEvent(line, protocol string) bool {
 	raw := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+	if raw == "[DONE]" && protocol != "responses" && protocol != "claude" && protocol != "gemini" {
+		return true
+	}
 	var event map[string]interface{}
 	if json.Unmarshal([]byte(raw), &event) != nil {
 		return false
@@ -1149,7 +1152,7 @@ func hasUpstreamTerminalEvent(line, protocol string) bool {
 		candidates, _ := event["candidates"].([]interface{})
 		for _, candidate := range candidates {
 			if obj, ok := candidate.(map[string]interface{}); ok {
-				if reason, ok := obj["finishReason"].(string); ok && reason != "" {
+				if reason, ok := obj["finishReason"].(string); ok && types.GeminiFinishReasonTerminal(reason) {
 					return true
 				}
 			}

@@ -2,6 +2,8 @@ package common
 
 import (
 	"bufio"
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -29,7 +31,7 @@ func TestClientTCPDisconnectLeavesSharedKeyUsable(t *testing.T) {
 	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		upstreamRequests.Add(1)
 		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = io.WriteString(w, "data: upstream healthy\n\n")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"finish_reason\":\"stop\"}]}\n\n")
 	}))
 	defer upstreamServer.Close()
 	cm, sc, mm, cleanup := newTestFailoverDependencies(t, config.UpstreamConfig{
@@ -74,6 +76,7 @@ func TestClientTCPDisconnectLeavesSharedKeyUsable(t *testing.T) {
 					_, err := io.WriteString(writer, strings.Repeat("x", 64*1024))
 					return nil, err
 				}
+				_, _ = io.Copy(io.Discard, resp.Body)
 				_, err := io.WriteString(writer, "data: complete\n\n")
 				return &types.Usage{InputTokens: 2, OutputTokens: 1}, err
 			},
@@ -130,7 +133,7 @@ func TestClientTCPDisconnectLeavesSharedKeyUsable(t *testing.T) {
 		_ = tcp.Close()
 		_ = resp.Body.Close()
 		canceled := awaitFinished()
-		if !canceled.handled || canceled.key != "" || !isClientWriteDisconnect(canceled.err) {
+		if !canceled.handled || canceled.key != "" || !isClientWriteDisconnect(canceled.err) && !errors.Is(canceled.err, context.Canceled) {
 			t.Fatalf("round %d: reset produced %#v, want handled client write disconnect", round, canceled)
 		}
 		if cm.IsKeyFailed(apiKey, "Messages") || urlFailures.Load() != 0 {

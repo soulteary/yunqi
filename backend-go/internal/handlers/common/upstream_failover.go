@@ -1885,7 +1885,11 @@ func TryUpstreamWithAllKeys(
 			writeEchoMappingHeaders(c, cfgManager, appliedMappedModel, actualAttemptModel, model)
 			capture := &usageCapture{ReadCloser: resp.Body, stream: strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream")}
 			resp.Body = capture
-			usage, err = handleSuccess(c, resp, upstreamCopy, apiKey, attemptBody)
+			if isStream {
+				usage, err = withStreamTerminalGuard(c, resp, providers.ActualServiceType(c, upstreamCopy.ServiceType), apiType, func() (*types.Usage, error) { return handleSuccess(c, resp, upstreamCopy, apiKey, attemptBody) })
+			} else {
+				usage, err = handleSuccess(c, resp, upstreamCopy, apiKey, attemptBody)
+			}
 			if lifecycleTrace.finishFirstContentWait != nil {
 				lifecycleTrace.finishFirstContentWait()
 			}

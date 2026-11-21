@@ -77,7 +77,7 @@ func TestUpstreamTerminalContract(t *testing.T) {
 		{"gemini", `data: {"candidates":[{"content":{"parts":[{"text":"hi"}]}}]}`, false},
 		{"openai", `data: {"choices":[{"finish_reason":"stop"}]}`, true},
 		{"openai", `data: {"choices":[{"delta":{"content":"hi"},"finish_reason":null}]}`, false},
-		{"openai", `data: [DONE]`, false},
+		{"openai", `data: [DONE]`, true},
 	} {
 		if got := hasUpstreamTerminalEvent(tc.line, tc.protocol); got != tc.want {
 			t.Fatalf("%s %s: %v", tc.protocol, tc.line, got)
@@ -87,7 +87,7 @@ func TestUpstreamTerminalContract(t *testing.T) {
 
 func TestConvertedStreamEOFDoesNotComplete(t *testing.T) {
 	for protocol, raw := range map[string]string{
-		"openai": "data: {\"id\":\"r\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hello\"}}]}\n\ndata: {\"id\":\"r\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" world\"}}]}\n\ndata: [DONE]\n\n",
+		"openai": "data: {\"id\":\"r\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hello\"}}]}\n\ndata: {\"id\":\"r\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" world\"}}]}\n\n",
 		"claude": "data: {\"type\":\"message_start\",\"message\":{\"id\":\"r\",\"model\":\"m\"}}\n\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hello\"}}\n\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\" world\"}}\n\n",
 		"gemini": "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"hello\"}]}}]}\n\ndata: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\" world\"}]}}]}\n\n",
 	} {
