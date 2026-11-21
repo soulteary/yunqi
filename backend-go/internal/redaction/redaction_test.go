@@ -3,6 +3,7 @@ package redaction
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -131,5 +132,111 @@ func TestMixedSSEBatchOnlyRedactsErrorEvent(t *testing.T) {
 	safe := SSEErrorEvent(success + failure)
 	if !strings.HasPrefix(safe, success) || strings.Count(safe, oddKey) != 1 || !strings.Contains(safe, Mask) {
 		t.Fatalf("mixed stream semantics changed: %s", safe)
+	}
+}
+
+func assertRegistryBounds(t *testing.T) {
+	t.Helper()
+	stats := RegistryStats()
+	if stats.Credentials > MaxCredentials || stats.CredentialBytes > MaxCredentialBytes || stats.MatcherEntries > MaxMatcherEntries || stats.MatcherBytes > MaxMatcherBytes {
+		t.Fatalf("registry exceeded bounds: %+v", stats)
+	}
+}
+func TestCredentialRegistryContinuousRotationIsBoundedAndFailClosed(t *testing.T) {
+	Configure(nil)
+	defer Configure(nil)
+	for start := 0; start < MaxCredentials+64; start += 64 {
+		var batch []string
+		for i := 0; i < 64; i++ {
+			batch = append(batch, fmt.Sprintf("rotation-secret-%06d", start+i))
+		}
+		Add(batch)
+		assertRegistryBounds(t)
+	}
+	stats := RegistryStats()
+	if !stats.FailClosed || stats.Reason != "credential_count" {
+		t.Fatalf("rotation did not fail closed: %+v", stats)
+	}
+	const fresh = "never-stored!new-credential=private"
+	Add([]string{fresh})
+	if safe := String("provider echoed " + fresh); strings.Contains(safe, fresh) || !strings.Contains(safe, CapacityMask) {
+		t.Fatalf("new credential leaked at capacity: %q", safe)
+	}
+	event := SSEErrorEvent("event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"message\":\"" + fresh + "\"}}}\n\n")
+	if strings.Contains(event, fresh) || !strings.Contains(event, `"type":"response.failed"`) {
+		t.Fatalf("capacity mode leaked or broke protocol tag: %s", event)
+	}
+	success := []byte(`{"type":"response.output_text.delta","delta":"` + fresh + `"}`)
+	if !bytes.Equal(ErrorJSON(success), success) {
+		t.Fatal("capacity mode changed successful model output")
+	}
+}
+func TestCredentialRegistryByteAndSingleCredentialLimits(t *testing.T) {
+	for _, test := range []struct {
+		name, reason string
+		values       []string
+	}{
+		{"single", "single_credential_bytes", []string{strings.Repeat("private", MaxSingleCredentialBytes/7+2)}},
+		{"raw total", "credential_bytes", func() []string {
+			var values []string
+			for i := 0; i < MaxCredentialBytes/1024+1; i++ {
+				values = append(values, fmt.Sprintf("%08d", i)+strings.Repeat("x", 1016))
+			}
+			return values
+		}()},
+		{"encoded total", "matcher_bytes", func() []string {
+			var values []string
+			for i := 0; i < 32; i++ {
+				values = append(values, fmt.Sprintf("%02d", i)+strings.Repeat("\x01", MaxSingleCredentialBytes-2))
+			}
+			return values
+		}()},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			Configure(nil)
+			defer Configure(nil)
+			Add(test.values)
+			assertRegistryBounds(t)
+			stats := RegistryStats()
+			if !stats.FailClosed || stats.Reason != test.reason {
+				t.Fatalf("invalid capacity result: %+v", stats)
+			}
+			if String(test.values[len(test.values)-1]) != CapacityMask {
+				t.Fatal("oversized credential was ignored rather than hidden")
+			}
+		})
+	}
+}
+func TestFailClosedJSONRetainsBooleanFeedbackAndPublicErrorTag(t *testing.T) {
+	Configure(nil)
+	defer Configure(nil)
+	Add([]string{strings.Repeat("x", MaxSingleCredentialBytes+1)})
+	safe := JSON([]byte(`{"type":"error","persisted":false,"message":"unregistered secret","details":1234567890123456789}`))
+	if !bytes.Contains(safe, []byte(`"type":"error"`)) || !bytes.Contains(safe, []byte(`"persisted":false`)) || bytes.Contains(safe, []byte("unregistered secret")) || bytes.Contains(safe, []byte("1234567890123456789")) {
+		t.Fatalf("unsafe or broken fail-closed feedback: %s", safe)
+	}
+}
+
+func TestAttemptedCredentialCapacityFailsClosedWithoutKeepingOversizedValue(t *testing.T) {
+	Configure(nil)
+	defer Configure(nil)
+	request, _ := http.NewRequest(http.MethodGet, "https://example.test", nil)
+	oversized := strings.Repeat("private", MaxSingleCredentialBytes/7+2)
+	request.Header.Set("Authorization", "Bearer "+oversized)
+	ObserveRequest(request)
+	stats := RegistryStats()
+	if !stats.FailClosed || stats.Credentials != 0 || stats.CredentialBytes != 0 || stats.MatcherBytes != 0 {
+		t.Fatalf("oversized attempted credential was retained: %+v", stats)
+	}
+	if safe := JSON([]byte(`{"type":"error","message":"` + oversized + `"}`)); bytes.Contains(safe, []byte("privateprivate")) {
+		t.Fatal("attempted credential leaked after overflow")
+	}
+	Configure([]string{oversized})
+	if !RegistryStats().FailClosed {
+		t.Fatal("startup configuration bypassed the single-value cap")
+	}
+	Configure(nil)
+	if RegistryStats().FailClosed || String("ordinary diagnostic") != "ordinary diagnostic" {
+		t.Fatal("explicit fresh startup registry could not recover")
 	}
 }

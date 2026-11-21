@@ -17,12 +17,23 @@ import (
 )
 
 const Mask = "[REDACTED]"
+const CapacityMask = "[REDACTED: credential registry capacity exceeded]"
+const MaxCredentials = 4096
+const MaxCredentialBytes = 512 * 1024
+const MaxSingleCredentialBytes = 16 * 1024
+const MaxMatcherEntries = 16 * 1024
+const MaxMatcherBytes = 2 * 1024 * 1024
 
 type snapshot struct {
-	values   []string
-	replacer *strings.Replacer
-	short    []string
-	known    map[string]bool
+	values       []string
+	replacer     *strings.Replacer
+	short        []string
+	known        map[string]bool
+	rawBytes     int
+	matcherBytes int
+	matcherCount int
+	failClosed   bool
+	reason       string
 }
 
 var current atomic.Pointer[snapshot]
@@ -45,36 +56,116 @@ func Configure(values []string) {
 func Add(values []string) {
 	updateMu.Lock()
 	defer updateMu.Unlock()
-	if old := current.Load(); old != nil {
-		fresh := false
-		for _, value := range values {
-			if value != "" && !old.known[value] {
-				fresh = true
-				break
-			}
+	old := current.Load()
+	if old != nil && old.failClosed {
+		return
+	}
+	seen := make(map[string]bool)
+	var merged []string
+	total := 0
+	if old != nil {
+		seen = old.known
+		total = old.rawBytes
+	}
+	// Inspect new values before cloning/building aliases. No unbounded caller slice
+	// is appended to retained state, including a hostile validation credential.
+	fresh := make([]string, 0)
+	newSeen := make(map[string]bool)
+	count := len(seen)
+	for _, value := range values {
+		if value == "" || seen[value] || newSeen[value] {
+			continue
 		}
-		if !fresh {
+		if len(value) > MaxSingleCredentialBytes {
+			closeRegistry("single_credential_bytes")
 			return
 		}
-		values = append(append([]string(nil), old.values...), values...)
+		if count+len(fresh)+1 > MaxCredentials {
+			closeRegistry("credential_count")
+			return
+		}
+		if total+len(value) > MaxCredentialBytes {
+			closeRegistry("credential_bytes")
+			return
+		}
+		total += len(value)
+		newSeen[value] = true
+		fresh = append(fresh, value)
 	}
-	store(values)
+	if len(fresh) == 0 {
+		return
+	}
+	if old != nil {
+		merged = append(merged, old.values...)
+	}
+	merged = append(merged, fresh...)
+	store(merged)
 }
+func closeRegistry(reason string) { current.Store(&snapshot{failClosed: true, reason: reason}) }
+
+type RegistryStatistics struct {
+	Credentials     int    `json:"credentials"`
+	CredentialBytes int    `json:"credentialBytes"`
+	MatcherEntries  int    `json:"matcherEntries"`
+	MatcherBytes    int    `json:"matcherBytes"`
+	FailClosed      bool   `json:"failClosed"`
+	Reason          string `json:"reason,omitempty"`
+}
+
+func RegistryStats() RegistryStatistics {
+	if state := current.Load(); state != nil {
+		return RegistryStatistics{len(state.values), state.rawBytes, state.matcherCount, state.matcherBytes, state.failClosed, state.reason}
+	}
+	return RegistryStatistics{}
+}
+func capacityText(value string) string {
+	if value == "" {
+		return ""
+	}
+	if strings.HasSuffix(value, "\n") {
+		return CapacityMask + "\n"
+	}
+	return CapacityMask
+}
+
 func store(values []string) {
 	seen := map[string]bool{}
 	rawSeen := map[string]bool{}
-	rawValues := make([]string, 0, len(values))
-	unique := make([]string, 0, len(values))
+	rawValues := make([]string, 0, min(len(values), MaxCredentials))
+	unique := make([]string, 0, min(len(values), MaxCredentials))
+	rawBytes, matcherBytes := 0, 0
 	for _, value := range values {
 		if value == "" || rawSeen[value] {
 			continue
 		}
+		if len(value) > MaxSingleCredentialBytes {
+			closeRegistry("single_credential_bytes")
+			return
+		}
+		if len(rawValues)+1 > MaxCredentials {
+			closeRegistry("credential_count")
+			return
+		}
+		if rawBytes+len(value) > MaxCredentialBytes {
+			closeRegistry("credential_bytes")
+			return
+		}
+		rawBytes += len(value)
 		rawSeen[value] = true
 		rawValues = append(rawValues, value)
 		quoted, _ := json.Marshal(value)
 		variants := []string{value, url.QueryEscape(value), url.PathEscape(value), string(quoted[1 : len(quoted)-1])}
 		for _, variant := range variants {
 			if !seen[variant] {
+				if len(unique)+1 > MaxMatcherEntries {
+					closeRegistry("matcher_entries")
+					return
+				}
+				if matcherBytes+len(variant) > MaxMatcherBytes {
+					closeRegistry("matcher_bytes")
+					return
+				}
+				matcherBytes += len(variant)
 				seen[variant] = true
 				unique = append(unique, variant)
 			}
@@ -90,10 +181,13 @@ func store(values []string) {
 			pairs = append(pairs, value, Mask)
 		}
 	}
-	current.Store(&snapshot{values: rawValues, replacer: strings.NewReplacer(pairs...), short: short, known: rawSeen})
+	current.Store(&snapshot{values: rawValues, replacer: strings.NewReplacer(pairs...), short: short, known: rawSeen, rawBytes: rawBytes, matcherBytes: matcherBytes, matcherCount: len(unique)})
 }
 func String(value string) string {
 	if state := current.Load(); state != nil {
+		if state.failClosed {
+			return capacityText(value)
+		}
 		value = state.replacer.Replace(value)
 		for _, key := range state.short {
 			value = replaceShortToken(value, key)
@@ -137,7 +231,7 @@ func sensitiveField(key string) bool {
 	return strings.HasSuffix(key, "token")
 }
 func ObserveJSON(data []byte) {
-	if !enabled.Load() {
+	if !enabled.Load() || RegistryStats().FailClosed {
 		return
 	}
 	var value any
@@ -181,6 +275,11 @@ func sanitize(value any) (any, bool) {
 	case string:
 		safe := String(v)
 		return safe, safe != v
+	case json.Number:
+		safe := String(v.String())
+		if safe != v.String() {
+			return safe, true
+		}
 	case []any:
 		for i := range v {
 			safe, modified := sanitize(v[i])
@@ -189,6 +288,9 @@ func sanitize(value any) (any, bool) {
 		}
 	case map[string]any:
 		for key, item := range v {
+			if RegistryStats().FailClosed && key == "type" && publicProtocolType(item) {
+				continue
+			}
 			if sensitiveField(key) && item != nil {
 				if text, ok := item.(string); !ok || text != Mask {
 					v[key] = Mask
@@ -308,7 +410,7 @@ func (w writer) Close() error {
 // unsaved validation credentials and query-authenticated Gemini requests. Ordinary
 // forwarded client headers/cookies are not retained as credential candidates.
 func ObserveRequest(req *http.Request) {
-	if !enabled.Load() || req == nil {
+	if !enabled.Load() || req == nil || RegistryStats().FailClosed {
 		return
 	}
 	var values []string
@@ -316,10 +418,11 @@ func ObserveRequest(req *http.Request) {
 		if value == "" {
 			return
 		}
-		values = append(values, value)
 		if parts := strings.Fields(value); len(parts) == 2 && (strings.EqualFold(parts[0], "Bearer") || strings.EqualFold(parts[0], "Basic")) {
 			values = append(values, parts[1])
+			return
 		}
+		values = append(values, value)
 	}
 	if username, password, ok := req.BasicAuth(); ok {
 		add(username)
@@ -348,4 +451,16 @@ func ObserveRequest(req *http.Request) {
 		}
 	}
 	Add(values)
+}
+
+func publicProtocolType(value any) bool {
+	text, ok := value.(string)
+	if !ok {
+		return false
+	}
+	switch text {
+	case "error", "stream_error", "response.error", "response.failed", "response.incomplete", "invalid_request_error", "upstream_error", "api_error", "authentication_error", "permission_error", "rate_limit_error", "overloaded_error":
+		return true
+	}
+	return false
 }
