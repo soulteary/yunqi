@@ -19,6 +19,9 @@ import (
 
 // UpstreamConfig 上游配置
 type UpstreamConfig struct {
+	// ResponsesClaudePrefixCache opts into one automatic multi-turn prefix breakpoint.
+	// Disabled by default; only Claude wire, and cache writes may incur provider charges.
+	ResponsesClaudePrefixCache bool `json:"responsesClaudePrefixCache,omitempty"`
 	// AccountUID 自动托管账号的稳定身份。一个 provider 账号下的多协议渠道共享该值。
 	AccountUID string `json:"accountUid,omitempty"`
 	// ChannelUID 渠道稳定身份标识，创建后不因渠道重排、改名、API Key 变更而改变。

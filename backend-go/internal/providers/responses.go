@@ -414,6 +414,12 @@ func (p *ResponsesProvider) buildProviderRequestBody(c fiber.Ctx, requestPath st
 			}
 		}
 
+		if upstream.ServiceType == "claude" && upstream.ResponsesClaudePrefixCache {
+			var original map[string]interface{}
+			if json.Unmarshal(bodyBytes, &original) == nil && !hasClaudeCacheControl(original) {
+				applyClaudePrefixCache(reqMap)
+			}
+		}
 		providerReq = convertedReq
 	}
 
