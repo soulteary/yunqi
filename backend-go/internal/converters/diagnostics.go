@@ -243,6 +243,9 @@ func schemaConstraintView(value interface{}, propertyNames bool) interface{} {
 		for key, child := range node {
 			if !propertyNames {
 				switch key {
+				case "enum":
+					out[key] = child // enum entries are literal JSON, not schemas.
+					continue
 				case "description", "title", "examples", "$schema", "default":
 					continue
 				case "required":
@@ -260,6 +263,10 @@ func schemaConstraintView(value interface{}, propertyNames bool) interface{} {
 						continue
 					}
 				}
+			}
+			if !propertyNames && key == "const" {
+				out[key] = child
+				continue
 			}
 			out[key] = schemaConstraintView(child, !propertyNames && (key == "properties" || key == "$defs" || key == "definitions"))
 		}

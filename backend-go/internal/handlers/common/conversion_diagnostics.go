@@ -13,6 +13,9 @@ import (
 const conversionReportKey = "protocolConversionReport"
 
 func recordFinalConversion(c fiber.Ctx, source []byte, request *http.Request, from, target string) error {
+	// Each attempt replaces the prior attempt diagnostic, including native paths.
+	httpbridge.Writer(c).Header().Del("X-Yunqi-Conversion")
+	httpbridge.SetValue(c, conversionReportKey, nil)
 	from = conversionProtocol(from)
 	target = conversionProtocol(target)
 	if request != nil {

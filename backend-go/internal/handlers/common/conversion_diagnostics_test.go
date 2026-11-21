@@ -111,3 +111,55 @@ func TestFinalWireProtocolUsesEndpointSuffixNotBaseURLPrefix(t *testing.T) {
 		}
 	}
 }
+
+func TestNativeFailoverClearsPriorConversionDiagnostic(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			http.Error(w, `{"error":{"message":"retry"}}`, 503)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"ok"}`))
+	}))
+	defer server.Close()
+	cm, sched, mm, cleanup := newTestFailoverDependencies(t, config.UpstreamConfig{Name: "audit", BaseURL: server.URL, APIKeys: []string{"test"}, Status: "active", ServiceType: "responses"})
+	defer cleanup()
+	up := &cm.GetConfig().Upstream[0]
+	raw := []byte(`{"model":"m","input":"hi","prompt_cache_options":{"prewarm":false}}`)
+	w := httptest.NewRecorder()
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(raw)))
+	for attempt := 0; attempt < 2; attempt++ {
+		path, body := "/v1/messages", `{"model":"m","messages":[]}`
+		if attempt == 1 {
+			path = "/v1/responses"
+			body = string(raw)
+		}
+		handled, _, _, _, _, err := TryUpstreamWithAllKeys(c, config.NewEnvConfig(), cm, sched, scheduler.ChannelKindResponses, "Responses", mm, up, []warmup.URLLatencyResult{{URL: up.BaseURL}}, raw, nil, false,
+			func(*config.UpstreamConfig, map[string]bool) (string, error) { return "test", nil },
+			func(fiber.Ctx, *config.UpstreamConfig, string) (*http.Request, error) {
+				return http.NewRequest(http.MethodPost, server.URL+path, strings.NewReader(body))
+			},
+			func(string) {}, func(string) {}, func(string) {},
+			func(fiber.Ctx, *http.Response, *config.UpstreamConfig, string, []byte) (*types.Usage, error) {
+				return nil, nil
+			}, "m", "", 0, nil)
+		if attempt == 0 {
+			if handled || !strings.Contains(w.Header().Get("X-Yunqi-Conversion"), "lossy") {
+				t.Fatalf("first failed conversion missing: handled=%v err=%v header=%v", handled, err, w.Header())
+			}
+		} else {
+			if !handled || err != nil || w.Header().Get("X-Yunqi-Conversion") != "" {
+				t.Fatalf("native retained diagnostic: handled=%v err=%v header=%v", handled, err, w.Header())
+			}
+			if report, _ := httpbridge.Value(c, conversionReportKey); report != nil {
+				t.Fatalf("stale context report %#v", report)
+			}
+		}
+	}
+	if calls != 2 {
+		t.Fatalf("expected actual failover calls, got %d", calls)
+	}
+}

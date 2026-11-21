@@ -80,3 +80,24 @@ func TestToolSchemaConstraintAndRepresentationDiagnostics(t *testing.T) {
 		t.Fatalf("equivalent representation mislabeled %#v %v", report, err)
 	}
 }
+
+func TestSchemaLiteralValuesAreNotSchemaMetadata(t *testing.T) {
+	for _, keyword := range []string{"enum", "const"} {
+		for _, field := range []string{"title", "description", "default", "examples"} {
+			a := map[string]interface{}{field: "A"}
+			b := map[string]interface{}{field: "B"}
+			var av, bv interface{} = a, b
+			if keyword == "enum" {
+				av = []interface{}{a}
+				bv = []interface{}{b}
+			}
+			left := schemaConstraintView(map[string]interface{}{keyword: av}, false)
+			right := schemaConstraintView(map[string]interface{}{keyword: bv}, false)
+			x, _ := json.Marshal(left)
+			y, _ := json.Marshal(right)
+			if string(x) == string(y) {
+				t.Fatalf("%s literal %s ignored", keyword, field)
+			}
+		}
+	}
+}
