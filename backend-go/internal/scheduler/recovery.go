@@ -270,7 +270,9 @@ func (s *ChannelScheduler) restoreKeysForKind(
 			},
 			func() bool {
 				latest := s.getUpstreamByIndex(idx, kind)
-				return latest != nil && upstream.Status == "suspended" && len(upstream.APIKeys) == 0 && latest.Status == "suspended"
+				// Restoring credentials must not undo an operator's explicit pause.
+				// Check the latest source, while retaining legacy source-less recovery.
+				return latest != nil && upstream.Status == "suspended" && len(upstream.APIKeys) == 0 && latest.Status == "suspended" && latest.SuspensionSource != config.SuspensionSourceManual
 			},
 			keysToRestore,
 			transitions.PublishChannelStatusEvent(s.eventBus.Load(), upstream.ChannelUID, upstream.Name, string(kind)),
