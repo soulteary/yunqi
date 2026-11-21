@@ -39,6 +39,27 @@ describe('渠道白名单保存', () => {
     mocks.updateChannelV2.mockReset().mockResolvedValue(undefined)
     mocks.updateManagedAccount.mockReset().mockResolvedValue({})
   })
+  it.each([false, true])('重排后同时保存白名单与 Responses 续接开关，autoManaged=%s', async autoManaged => {
+    const store = useChannelStore()
+    const mixed = {
+      ...original, index: 0, channelUid: 'chat', serviceType: 'openai',
+      responsesReasoningFold: false,
+      protocolRoutes: [
+        { kind: 'chat', index: 0, channelUid: 'chat', name: 'test', serviceType: 'openai' },
+        { ...routes[0]!, responsesReasoningFold: false },
+      ],
+    } as Channel
+    store.chatChannelsData = { channels: [{ ...mixed, channelUid: 'other' }, { ...mixed, index: 1 }], current: -1 }
+    const result = await store.saveChannel({
+      ...mixed, responsesReasoningFold: true,
+      protocolRoutes: [mixed.protocolRoutes![0]!, { ...mixed.protocolRoutes![1]!, supportedModels: [] }],
+    }, 0, { channelType: 'chat', autoManaged, accountUid: 'account', originalChannel: mixed })
+    expect(result.success).toBe(true)
+    expect(mocks.updateChannelV2.mock.calls.some(([uid]) => uid === 'other')).toBe(false)
+    expect(mocks.updateChannelV2.mock.calls.find(([uid]) => uid === 'chat')?.[1] ?? {}).not.toHaveProperty('responsesReasoningFold')
+    expect(mocks.updateChannelV2).toHaveBeenCalledWith('luna', { kind: 'responses', supportedModels: [] })
+    expect(mocks.updateChannelV2).toHaveBeenCalledWith('luna', { kind: 'responses', responsesReasoningFold: true })
+  })
   it.each([false, true])('普通/托管渠道均按 UID 保存每条路由，autoManaged=%s', async autoManaged => {
     const store = useChannelStore()
     const edited = { ...original, protocolRoutes: [routes[0]!, { ...routes[1]!, supportedModels: [] }] }

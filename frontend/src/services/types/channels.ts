@@ -122,6 +122,7 @@ export interface Channel {
   stripBillingHeader?: boolean // Messages 渠道：移除 billing header（默认：非官方 Anthropic 域名 true，官方域名 false）
   stripEmptyTextBlocks?: boolean // Claude 协议特定：转发前移除裸空 text content block（兼容严格校验的第三方上游）
   normalizeSystemRoleToTopLevel?: boolean // Claude 协议特定：将 messages 中 system 角色抽取回顶层 system 字段（兼容仅支持 user/assistant 的旧上游）
+  responsesReasoningFold?: boolean // Responses 推理自动续接（默认 false）
   codexNativeToolPassthrough?: boolean // Codex 原生工具透传（默认 true）
   codexToolCompat?: boolean // Codex 工具兼容（默认 true）
   normalizeNonstandardChatRoles?: boolean // OpenAI Chat 上游：将非标准 role 改写为 user（默认 true）
@@ -190,6 +191,7 @@ export interface ChannelProtocolRoute {
   upstreamKind?: ChannelKind
   index: number
   name: string
+  responsesReasoningFold?: boolean
   serviceType: string
   channelUid?: string
   status?: ChannelDisplayStatus

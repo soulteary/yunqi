@@ -33,7 +33,7 @@ const CHANNEL_PATCH_NORMALIZERS: Readonly<Record<string, (value: unknown) => unk
 }
 
 /** 账号接口（凭证池/名称/地址）或独立特例（website/remark）已承载的字段，不参与丢弃检测。 */
-const ACCOUNT_BORNE_FIELDS = new Set(['name', 'apiKeys', 'apiKeyConfigs', 'baseUrl', 'baseUrls', 'website', 'remark'])
+const ACCOUNT_BORNE_FIELDS = new Set(['name', 'apiKeys', 'apiKeyConfigs', 'baseUrl', 'baseUrls', 'website', 'remark', 'responsesReasoningFold'])
 
 /**
  * 比较托管账号渠道编辑前后的渠道级字段，返回需要经单卡更新下发的 patch（空对象=无变化）。

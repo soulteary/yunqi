@@ -394,6 +394,10 @@ export const useChannelStore = defineStore('channel', () => {
 
     if (editingChannelIndex !== null) {
       // 更新现有渠道
+      const primaryPatch = { ...channel }
+      if (targetTab !== 'responses' || channel.serviceType !== 'responses') {
+        delete primaryPatch.responsesReasoningFold
+      }
       let accountWarnings: string[] | undefined
       if (options?.autoManaged && options.accountUid) {
         const original = options.originalChannel
@@ -463,17 +467,17 @@ export const useChannelStore = defineStore('channel', () => {
           )
         }
       } else if (isChat) {
-        await updateChannelByType('chat', editingChannelIndex, channel, options?.originalChannel?.channelUid)
+        await updateChannelByType('chat', editingChannelIndex, primaryPatch, options?.originalChannel?.channelUid)
       } else if (isVectors) {
-        await updateChannelByType('vectors', editingChannelIndex, channel, options?.originalChannel?.channelUid)
+        await updateChannelByType('vectors', editingChannelIndex, primaryPatch, options?.originalChannel?.channelUid)
       } else if (isImages) {
-        await updateChannelByType('images', editingChannelIndex, channel, options?.originalChannel?.channelUid)
+        await updateChannelByType('images', editingChannelIndex, primaryPatch, options?.originalChannel?.channelUid)
       } else if (isGemini) {
-        await updateChannelByType('gemini', editingChannelIndex, channel, options?.originalChannel?.channelUid)
+        await updateChannelByType('gemini', editingChannelIndex, primaryPatch, options?.originalChannel?.channelUid)
       } else if (isResponses) {
-        await updateChannelByType('responses', editingChannelIndex, channel, options?.originalChannel?.channelUid)
+        await updateChannelByType('responses', editingChannelIndex, primaryPatch, options?.originalChannel?.channelUid)
       } else {
-        await updateChannelByType('messages', editingChannelIndex, channel, options?.originalChannel?.channelUid)
+        await updateChannelByType('messages', editingChannelIndex, primaryPatch, options?.originalChannel?.channelUid)
       }
       const original = options?.originalChannel
       const originalRoutes = original?.protocolRoutes?.length ? original.protocolRoutes : original ? [{
@@ -482,6 +486,21 @@ export const useChannelStore = defineStore('channel', () => {
       }] : []
       for (const update of buildProtocolModelLimitUpdates(originalRoutes, channel.protocolRoutes ?? [])) {
         await api.updateChannelV2(update.channelUid, { kind: update.kind, supportedModels: update.supportedModels })
+      }
+      const foldingRoutes = original?.protocolRoutes?.length ? original.protocolRoutes : original ? [{
+        kind: targetTab, upstreamKind: targetTab, serviceType: original.serviceType,
+        channelUid: original.channelUid, responsesReasoningFold: original.responsesReasoningFold,
+      }] : []
+      for (const route of foldingRoutes) {
+        if (route.kind !== 'responses' || route.serviceType !== 'responses' || !route.channelUid) continue
+        if (!!route.responsesReasoningFold === !!channel.responsesReasoningFold) continue
+        // 普通原生渠道的主保存已携带该字段；托管和混合协议渠道需逐路由补发。
+        if (!options?.autoManaged && targetTab === 'responses' && channel.serviceType === 'responses'
+            && route.channelUid === original?.channelUid) continue
+        await api.updateChannelV2(route.channelUid, {
+          kind: route.upstreamKind ?? route.kind,
+          responsesReasoningFold: !!channel.responsesReasoningFold,
+        })
       }
       return { success: true, message: t('store.channel.updated'), channelId: editingChannelIndex, ...(accountWarnings?.length ? { warnings: accountWarnings } : {}) }
     } else {
