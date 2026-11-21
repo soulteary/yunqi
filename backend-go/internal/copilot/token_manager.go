@@ -25,6 +25,13 @@ type cachedToken struct {
 	APIBaseURL string
 }
 
+type tokenRefresh struct {
+	done     chan struct{}
+	token    cachedToken
+	err      error
+	canceled bool
+}
+
 // TokenResponse 是 GitHub Copilot token exchange 的响应。
 type TokenResponse struct {
 	Token     string `json:"token"`
@@ -37,11 +44,12 @@ type TokenResponse struct {
 
 // TokenManager 将 GitHub OAuth token 换成短期 Copilot API token 并缓存。
 type TokenManager struct {
-	client   *http.Client
-	mu       sync.Mutex
-	cache    map[string]cachedToken
-	now      func() time.Time
-	tokenURL string
+	client     *http.Client
+	mu         sync.Mutex
+	cache      map[string]cachedToken
+	refreshing map[string]*tokenRefresh
+	now        func() time.Time
+	tokenURL   string
 }
 
 var defaultTokenManager = NewTokenManager(nil)
@@ -129,20 +137,68 @@ func (m *TokenManager) resolveToken(ctx context.Context, githubToken string, cli
 	}
 
 	key := tokenCacheKey(githubToken)
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	for {
+		if err := ctx.Err(); err != nil {
+			return "", "", err
+		}
+		m.mu.Lock()
+		now := m.now()
+		if cached, ok := m.cache[key]; ok && cached.Token != "" && now.Before(cached.RefreshAt) && now.Before(cached.ExpiresAt) {
+			m.mu.Unlock()
+			if err := ctx.Err(); err != nil {
+				return "", "", err
+			}
+			return cached.Token, cached.APIBaseURL, nil
+		}
+		if pending := m.refreshing[key]; pending != nil {
+			m.mu.Unlock()
+			select {
+			case <-ctx.Done():
+				return "", "", ctx.Err()
+			case <-pending.done:
+				if err := ctx.Err(); err != nil {
+					return "", "", err
+				}
+				// A canceled leader does not cancel other callers for this credential.
+				if pending.canceled {
+					continue
+				}
+				return pending.token.Token, pending.token.APIBaseURL, pending.err
+			}
+		}
+		if m.refreshing == nil {
+			m.refreshing = make(map[string]*tokenRefresh)
+		}
+		pending := &tokenRefresh{done: make(chan struct{})}
+		m.refreshing[key] = pending
+		m.mu.Unlock()
 
-	now := m.now()
-	if cached, ok := m.cache[key]; ok && cached.Token != "" && now.Before(cached.RefreshAt) && now.Before(cached.ExpiresAt) {
-		return cached.Token, cached.APIBaseURL, nil
+		token, err := m.refreshToken(ctx, githubToken, client)
+		canceled := false
+		if ctx.Err() != nil {
+			token, err, canceled = cachedToken{}, ctx.Err(), true
+		}
+		m.mu.Lock()
+		if err == nil {
+			m.cache[key] = token
+		}
+		pending.token, pending.err, pending.canceled = token, err, canceled
+		delete(m.refreshing, key)
+		close(pending.done)
+		m.mu.Unlock()
+		return token.Token, token.APIBaseURL, err
 	}
+}
 
+// Network I/O is outside the cache lock; only callers for this credential wait.
+func (m *TokenManager) refreshToken(ctx context.Context, githubToken string, client *http.Client) (cachedToken, error) {
+	now := m.now()
 	tokenResp, err := m.exchange(ctx, githubToken, client)
 	if err != nil {
-		return "", "", err
+		return cachedToken{}, err
 	}
 	if tokenResp.Token == "" {
-		return "", "", fmt.Errorf("GitHub Copilot token exchange 未返回 token")
+		return cachedToken{}, fmt.Errorf("GitHub Copilot token exchange 未返回 token")
 	}
 
 	expiresAt := time.Unix(tokenResp.ExpiresAt, 0)
@@ -165,13 +221,12 @@ func (m *TokenManager) resolveToken(ctx context.Context, githubToken string, cli
 		apiBaseURL = DefaultAPIBaseURL
 	}
 
-	m.cache[key] = cachedToken{
+	return cachedToken{
 		Token:      tokenResp.Token,
 		ExpiresAt:  expiresAt,
 		RefreshAt:  refreshAt,
 		APIBaseURL: apiBaseURL,
-	}
-	return tokenResp.Token, apiBaseURL, nil
+	}, nil
 }
 
 func (m *TokenManager) exchange(ctx context.Context, githubToken string, client *http.Client) (*TokenResponse, error) {
