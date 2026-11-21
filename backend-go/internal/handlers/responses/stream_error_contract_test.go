@@ -62,7 +62,7 @@ func TestLocalIncompleteHasGatewaySource(t *testing.T) {
 
 func TestResponsesConvertedGeminiFailureCannotBeFollowedBySuccess(t *testing.T) {
 	prefix := "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"hello\"}]}}]}\n\n"
-	raw := prefix + "data: {\"candidates\":[{\"finishReason\":\"SAFETY\"}]}\n\n"
+	raw := prefix + "data: {\"candidates\":[{\"content\":{\"parts\":[]},\"finishReason\":\"SAFETY\"}]}\n\n"
 	w := httptest.NewRecorder()
 	c, _ := httpbridge.TestContext(w)
 	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/responses", nil))
