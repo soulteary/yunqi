@@ -26,7 +26,7 @@ xcode-select --install
 
 ### 一键安装所有依赖
 
-项目根目录 Makefile 提供了 `make install`，可自动安装前端依赖、Go 模块和开发工具（Air 热重载、Wails 3）：
+项目根目录 Makefile 提供了 `make install`，可自动安装前端依赖、Go 模块和开发工具（Air 热重载）：
 
 ```bash
 make install

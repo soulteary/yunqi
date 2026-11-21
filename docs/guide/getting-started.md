@@ -1,6 +1,5 @@
 # 快速开始
 
-如果你希望通过桌面应用快速上手，可先阅读 [Yunqi Desktop 用户教程](/guide/desktop/)，按“安装 → 配置密钥 → 启动服务 → Agent 配置 → 添加渠道 → 验证请求”的路径完成基础配置。
 
 ## 安装
 
@@ -63,3 +62,7 @@ export PROXY_ACCESS_KEY=your-proxy-key
 ## 下一步
 
 前往 [客户端接入](/guide/clients/) 配置 Claude Code、Codex CLI / App 或 OpenCode；前往 [配置教程](/providers/) 了解如何配置各个 LLM 提供商。
+
+## Web console / Web 控制台
+
+启动服务后，在实际配置的地址和端口访问浏览器控制台。完成管理认证、添加并测试渠道后，通过「服务与接入」生成客户端配置。旧版桌面数据迁移见[迁移指南](./desktop/)。

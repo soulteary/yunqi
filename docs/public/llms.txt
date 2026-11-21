@@ -7,7 +7,7 @@ Yunqi provides unified proxy entry, built-in web admin, channel orchestration, f
 ## Getting Started
 
 - [Quick Start](https://soulteary.github.io/yunqi/en/guide/getting-started): Install, configure, and run Yunqi for the first time
-- [Yunqi Desktop](https://soulteary.github.io/yunqi/en/guide/desktop/): Desktop app with GUI for macOS, Windows, and Linux
+- [Web console and migration](https://soulteary.github.io/yunqi/en/guide/desktop/): Browser console, client setup and migration from older desktop installations
 - [Deployment](https://soulteary.github.io/yunqi/en/guide/deployment): Production deployment guide
 - [Environment Variables](https://soulteary.github.io/yunqi/en/guide/environment): All environment variables and defaults
 
@@ -41,4 +41,4 @@ Yunqi provides unified proxy entry, built-in web admin, channel orchestration, f
 - [Contributing](https://soulteary.github.io/yunqi/en/guide/contributing): How to contribute to the project
 - [Privacy Policy](https://soulteary.github.io/yunqi/en/guide/privacy): Data handling and privacy information
 - [Verification](https://soulteary.github.io/yunqi/en/guide/verification): Build verification and artifact checksums
-- [Desktop Troubleshooting](https://soulteary.github.io/yunqi/en/guide/desktop/troubleshooting): Common issues and solutions for Yunqi Desktop
+- [Web console troubleshooting](https://soulteary.github.io/yunqi/en/guide/desktop/troubleshooting): Web console and service deployment troubleshooting

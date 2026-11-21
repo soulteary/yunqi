@@ -1,6 +1,5 @@
 # Claude Code 接入 Yunqi
 
-如果你正在使用 **Yunqi Desktop**，可先在 [Agent Config](/guide/desktop/#agent-配置) 中写入本地 Yunqi 配置，再回到本页确认 Claude Code 的协议细节。
 
 ## 工作方式
 
@@ -73,7 +72,7 @@ Yunqi 会按更长的匹配键优先匹配。模型名和映射值以你实际�
 1. `ANTHROPIC_API_KEY` 是否等于 Yunqi 的 `PROXY_ACCESS_KEY`。
 2. Yunqi 启动时是否设置了正确的 `PROXY_ACCESS_KEY`。
 3. Shell 中是否存在旧的环境变量覆盖当前值。
-4. 若使用 Yunqi Desktop，可在托盘菜单或 **Gateway Monitor** 复制当前 `PROXY_ACCESS_KEY`。
+4. 使用部署时设置的 `PROXY_ACCESS_KEY`，不要误用单独配置的管理密钥。
 
 ### 配置后仍然请求官方 Claude
 

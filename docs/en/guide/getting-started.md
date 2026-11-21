@@ -1,6 +1,5 @@
 # Quick Start
 
-If you prefer the desktop app, start with the [Yunqi Desktop setup guide](/en/guide/desktop/) and follow **Install → Configure key → Start service → Agent configuration → Add channels → Verify requests**.
 
 ## Installation
 
@@ -61,3 +60,7 @@ From the admin console you can:
 ## Next Steps
 
 Head to [Client Setup](/en/guide/clients/) to configure Claude Code, Codex CLI / App, or OpenCode; head to [Provider Setup](/en/providers/) to configure each LLM provider.
+
+## Web console
+
+Open the configured service address and port in a browser. Sign in, add and test upstream channels, then use **Service & setup** to generate client configuration. For existing desktop installations see [migration](./desktop/).

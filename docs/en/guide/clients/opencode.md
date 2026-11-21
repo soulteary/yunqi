@@ -1,6 +1,5 @@
 # Connect OpenCode to Yunqi
 
-If you are using **Yunqi Desktop**, you can apply OpenCode settings from [Agent configuration](/en/guide/desktop/#agent-configuration) first, then return here to confirm the Chat endpoint and Base URL behavior.
 
 OpenCode can connect to Yunqi through OpenAI Chat-compatible configuration. Use the Yunqi **Chat** endpoint.
 
@@ -32,22 +31,9 @@ Model names, vision support, and special options differ by upstream. Finish the 
 
 ## 2. Configure OpenCode
 
-### Use Yunqi Desktop automation
+### Web console setup
 
-In **Agent Config → OpenCode**, keep the default **Yunqi local gateway** provider. Desktop maintains:
-
-- `~/.config/opencode/opencode.jsonc`: the OpenAI-compatible custom provider, for example `provider.yunqi.options.baseURL`
-- `~/.local/share/opencode/auth.json`: the matching provider API key, for example `auth.yunqi.key`
-
-In default Yunqi mode, the Base URL is:
-
-```text
-http://127.0.0.1:<current Yunqi port>/v1
-```
-
-Select `yunqi/<model>` in OpenCode. Requests enter Yunqi through the Chat protocol and are then routed by Yunqi Chat channels to your configured upstreams.
-
-Agent Config also offers direct providers, but only for currently supported OpenAI Chat-compatible domestic providers plus OpenCode Zen / OpenCode Go. For any other provider, add it manually using the official OpenCode custom-provider flow.
+Use **Service & setup** to generate client configuration, then merge it into the local configuration file.
 
 ### Manual setup
 

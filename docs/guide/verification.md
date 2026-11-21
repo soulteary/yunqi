@@ -2,7 +2,7 @@
 
 Yunqi 的正式 Release 使用 [Sigstore](https://www.sigstore.dev/) keyless signing 对 checksums 清单签名。通过验证签名，可以确认发布产物确实由 `BenedictKing/yunqi` 仓库的 GitHub Actions 工作流构建，而非被篡改或来自非官方渠道。
 
-Windows GitHub 安装器同时使用 SignPath Foundation 做 Authenticode 代码签名。Sigstore 用于验证 Release 清单和 CI 来源，Authenticode 用于让 Windows 验证安装包发布者和文件完整性。
+Windows 服务二进制同时使用 SignPath Foundation 做 Authenticode 代码签名。Sigstore 用于验证 Release 清单和 CI 来源，Authenticode 用于让 Windows 验证安装包发布者和文件完整性。
 
 ## 工作原理
 
@@ -45,14 +45,6 @@ choco install cosign
 
 - `checksums.txt` — 全平台 SHA256 清单
 - `checksums.txt.sigstore.json` — 对应的 Sigstore 签名 bundle
-
-如果只需要验证单个平台，也可使用 `checksums-{platform}.txt` 和 `checksums-{platform}.txt.sigstore.json`：
-
-| 平台 | 清单文件 | 签名 bundle |
-|------|---------|-------------|
-| macOS | `checksums-macos.txt` | `checksums-macos.txt.sigstore.json` |
-| Windows | `checksums-windows.txt` | `checksums-windows.txt.sigstore.json` |
-| Linux | `checksums-linux.txt` | `checksums-linux.txt.sigstore.json` |
 
 ### 2. 验证 checksums 清单签名
 
@@ -97,11 +89,10 @@ shasum -a 256 yunqi-darwin-arm64
 
 ### 4. 验证 Windows Authenticode 签名
 
-Windows GitHub 安装包可用 PowerShell 验证 SignPath 代码签名：
+Windows 服务二进制可用 PowerShell 验证 SignPath 代码签名：
 
 ```powershell
-$version = "2.7.12"  # 替换为要验证的版本（不含 v）
-$signature = Get-AuthenticodeSignature ".\Yunqi-Desktop-$version-windows-amd64-setup.exe"
+$signature = Get-AuthenticodeSignature ".\yunqi-windows-amd64.exe"
 $signature.Status
 $signature.SignerCertificate.Subject
 ```
@@ -124,11 +115,7 @@ $signature.SignerCertificate.Subject
 |------|------|
 | `checksums.txt` | 全平台所有产物的 SHA256 哈希列表（`sha256sum` 格式） |
 | `checksums.txt.sigstore.json` | Sigstore bundle：包含签名、OIDC 证书、Rekor 透明度日志条目 |
-| `checksums-{platform}.txt` | 单平台 SHA256 清单 |
-| `checksums-{platform}.txt.sigstore.json` | 单平台 Sigstore bundle |
-| `{artifact}.sha256` | 单个产物的 SHA256（仅含 hex hash，供 updater 自动校验） |
-| `Yunqi-Desktop-*-windows-*-setup.exe` | SignPath Authenticode 签名的 Windows GitHub 安装包 |
-| `Yunqi-Desktop-*-windows-*-store.msix` | Windows Store/MSIX 提交与验证包，公开安装优先使用 Microsoft Store |
+| `{artifact}.sha256` | 单个产物的 SHA256（仅含 hex hash） |
 
 ## 了解更多
 
@@ -136,3 +123,5 @@ $signature.SignerCertificate.Subject
 - [cosign 文档](https://docs.sigstore.dev/cosign/)
 - [Rekor 透明度日志](https://docs.sigstore.dev/logging/overview/)
 - [SLSA 供应链安全框架](https://slsa.dev/)
+
+当前产物为 `yunqi-{linux,darwin,windows}-{amd64,arm64}`（Windows 后缀 `.exe`）以及对应校验文件。旧桌面安装包及 MSIX 不再生成。

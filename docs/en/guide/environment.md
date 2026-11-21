@@ -115,15 +115,11 @@ Install the local CA:
 mkcert -install
 ```
 
-Choose the certificate directory based on how Yunqi is deployed. For Yunqi Desktop installers, prefer the actual **Data dir** shown in **Gateway Monitor**; the table lists common defaults:
+Choose the certificate directory according to the service deployment and configure its path in the deployment environment.
 
 | Scenario | Suggested certificate directory |
 | --- | --- |
 | Source development | `backend-go/.config/certs` |
-| Yunqi Desktop macOS installer | `~/Library/Application Support/yunqi-desktop/certs` |
-| Yunqi Desktop Linux installer | `~/.local/state/yunqi/certs` |
-| Yunqi Desktop Windows GitHub installer | `%APPDATA%\yunqi-desktop\certs` |
-| Yunqi Desktop Windows Store/MSIX | `%LOCALAPPDATA%\Packages\<package-family>\LocalCache\Roaming\yunqi-desktop\certs` |
 | Linux systemd service | `/etc/yunqi/certs` |
 | macOS launchd manual service | `~/yunqi/certs` |
 | Windows NSSM service | `C:\yunqi\certs` |
@@ -140,10 +136,10 @@ mkcert \
   "localhost" "127.0.0.1" "::1"
 ```
 
-Windows PowerShell example. For the Store/MSIX build, check **Data dir** in **Gateway Monitor** first, then set `$certDir` to the `certs` subdirectory under that path:
+Windows PowerShell example: keep certificates in the service deployment directory and use the same paths in its environment.
 
 ```powershell
-$certDir = "$env:APPDATA\yunqi-desktop\certs"
+$certDir = "C:\yunqi\certs"
 New-Item -ItemType Directory -Force $certDir
 
 mkcert `
@@ -164,7 +160,6 @@ TLS_KEY_FILE=/absolute/path/to/localhost-key.pem
 The `.env` location depends on how Yunqi is started:
 
 - Source development: usually `backend-go/.env`.
-- Yunqi Desktop installer: edit it in **Environment Params**; the backend process working directory is the desktop data directory.
 - Linux systemd: usually `/opt/yunqi/.env` from `EnvironmentFile`, unless the service file points elsewhere.
 - macOS launchd / Windows NSSM: if you pass settings through service environment variables, configure `ENABLE_HTTPS`, `TLS_AUTO_CERT`, `TLS_CERT_FILE`, and `TLS_KEY_FILE` in that service configuration.
 

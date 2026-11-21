@@ -10,7 +10,7 @@ Yunqi 项目维护者不会从用户自托管的 Yunqi 实例收集以下数据�
 - API Key、访问密钥或上游服务凭据
 - 渠道配置、模型配置或代理配置
 - 用户、设备或使用统计数据
-- 桌面端本地配置
+- 浏览器控制台的本地偏好与认证状态
 
 ## 代理请求如何处理
 
@@ -31,26 +31,20 @@ Yunqi 的日志由部署者控制。根据部署方式和配置不同，以下�
 - Yunqi 服务日志
 - 访问日志和错误日志
 - 反向代理、容器平台或系统服务日志
-- 桌面端本地配置文件
+- 浏览器控制台的本地偏好与认证状态
 
 这些数据不会上传给 Yunqi 项目维护者。部署者应自行管理日志保留、访问权限和密钥保护策略。
 
-## 桌面客户端
-
-Yunqi Desktop 的配置保存在用户本地设备上。项目维护者不会收集桌面端的配置、密钥或使用数据。
-
-GitHub 安装包版可能会访问 GitHub Releases 以检查或下载更新。此类访问可能受 GitHub 自身的日志记录和隐私政策约束。
-
-Microsoft Store 版由 Microsoft Store 处理安装、签名和更新，不使用应用内 GitHub Releases 更新器；Store 访问和更新日志由 Microsoft 按其政策处理。
 
 ## 文档站和下载
 
 访问 Yunqi 文档站、GitHub 仓库或 GitHub Releases 时，托管平台可能会产生基础访问日志。这些日志由对应平台处理，不由 Yunqi 自托管实例生成。
 
-## 代码签名
-
-Yunqi Desktop 的 GitHub Release 产物提供 SHA256 与 Sigstore checksums 校验；Windows GitHub 安装器使用 SignPath Foundation 进行代码签名。Microsoft Store 版由 Store 上架流程处理签名。代码签名用于帮助用户验证应用来源和完整性，不代表 Yunqi 项目收集用户数据。
 
 ## 联系方式
 
 如发现隐私相关问题，请通过 GitHub Issues 或安全披露渠道联系项目维护者。
+
+## Browser console / 浏览器控制台
+
+管理凭据与偏好按现有认证机制保存在浏览器本地存储中。版本检查会访问 GitHub Releases；客户端配置生成在浏览器内完成，导出的运行诊断使用字段白名单，不包含访问密钥、上游凭据或请求正文。发布产物提供 SHA256 校验文件。

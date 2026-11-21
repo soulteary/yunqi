@@ -4,7 +4,7 @@
 - **始终使用简体中文回复**。
 - 遵循 SOLID / KISS / DRY / YAGNI；优先修复根因，避免无关重构。
 - **禁止停止或杀掉本项目正在运行的服务进程**；默认用户已通过开发命令启动服务，如需让代码生效，只能提示用户手动重启或使用用户明确指定的安全方式。
-- 修改文档时，优先以以下文件为事实源：`VERSION`、`Makefile`、`backend-go/Makefile`、`frontend/package.json`、`backend-go/main.go`。
+- 修改文档时，优先以以下文件为事实源：`VERSION`、`Makefile`、`backend-go/Makefile`、`frontend/package.json`、`backend-go/main.go`、`backend-go/bootstrap*.go`、`backend-go/routes*.go`。
 
 ## 项目概览
 - Yunqi 是一个多上游 AI API 代理与协议转换网关，当前正式支持六类渠道：`messages`、`chat`、`responses`、`gemini`、`images`、`vectors`。
@@ -33,7 +33,7 @@
 - 配置/密钥：`.env` / `.json` 只提交示例文件或文档化内容，禁止提交真实密钥。
 
 ## 路由与能力边界
-- 实际代理与管理路由以 `backend-go/main.go` 为准。
+- 实际代理与管理路由以 `backend-go/routes*.go` 为准。
 - 常见代理入口包括：
   - `/v1/messages`
   - `/v1/chat/completions`
@@ -59,3 +59,7 @@
 - `.config/config.json` 支持热重载；修改 `backend-go/.env` 后需要重启服务。
 - 代理端点统一鉴权（`x-api-key` / `Authorization: Bearer`）；生产环境不建议依赖 query `key`。
 - 记录或展示日志时注意脱敏，尤其是 API Key、Authorization 头和 multipart 请求内容。
+
+## Web-only 产品边界
+
+Wails 桌面外壳已移除。唯一前端为 `frontend/`；构建与发布仅面向服务二进制和容器。客户端文件由用户手动合并配置，进程生命周期由部署工具管理。原桌面目录只用于说明旧版数据迁移，不得作为新构建依赖。

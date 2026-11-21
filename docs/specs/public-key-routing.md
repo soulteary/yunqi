@@ -1,5 +1,6 @@
 # 公开与临时 Key 优先消耗设计
 
+> 历史设计记录：文中的桌面实现与 Agent Config 描述仅反映迁移前状态。当前产品只维护 `frontend/` Web 控制台；桌面外壳、原生文件配置与 MSIX 已移除。
 > 状态：已实现（运行时语义 + 前后端对接）
 > 范围：Key 级成本、消耗策略、EndpointPolicy、FastDecay、管理 API 与 Web UI
 > 关键提交：`4509aeda` feat(autopilot): 实现 public-key-routing 运行时语义

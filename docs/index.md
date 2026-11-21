@@ -9,7 +9,7 @@ hero:
       text: 快速开始
       link: /guide/getting-started
     - theme: alt
-      text: 桌面端上手
+      text: Web 控制台与迁移
       link: /guide/desktop/
     - theme: alt
       text: 客户端接入

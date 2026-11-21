@@ -26,7 +26,7 @@ xcode-select --install
 
 ### Install All Dependencies at Once
 
-The root Makefile provides `make install` to automatically install frontend dependencies, Go modules, and development tools (Air hot-reload, Wails 3):
+The root Makefile provides `make install` to automatically install frontend dependencies, Go modules, and development tools (Air hot-reload):
 
 ```bash
 make install

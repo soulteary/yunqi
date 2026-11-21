@@ -126,20 +126,16 @@ scoop install mkcert
 mkcert -install
 ```
 
-生成证书时，先按部署方式选择证书目录。Yunqi Desktop 安装包请优先以 **Gateway Monitor** 显示的 **Data dir** 为准，下面是常见默认位置：
+生成证书时，按部署方式选择证书目录，并通过部署环境配置证书路径。
 
 | 场景 | 建议证书目录 |
 | --- | --- |
 | 源码开发 | `backend-go/.config/certs` |
-| Yunqi Desktop macOS 安装包 | `~/Library/Application Support/yunqi-desktop/certs` |
-| Yunqi Desktop Linux 安装包 | `~/.local/state/yunqi/certs` |
-| Yunqi Desktop Windows GitHub 安装包 | `%APPDATA%\yunqi-desktop\certs` |
-| Yunqi Desktop Windows Store/MSIX | `%LOCALAPPDATA%\Packages\<package-family>\LocalCache\Roaming\yunqi-desktop\certs` |
 | Linux systemd 服务 | `/etc/yunqi/certs` |
 | macOS launchd 手动服务 | `~/yunqi/certs` |
 | Windows NSSM 服务 | `C:\yunqi\certs` |
 
-源码开发或 macOS/Linux 安装包可用以下命令，把 `CERT_DIR` 替换为上表中的实际目录。示例会先展开为绝对路径，复制到 `.env` 时也应使用输出后的绝对路径：
+源码开发或 macOS/Linux 服务部署可用以下命令，把 `CERT_DIR` 替换为上表中的实际目录。示例会先展开为绝对路径，复制到 `.env` 时也应使用输出后的绝对路径：
 
 ```bash
 CERT_DIR="$(pwd)/backend-go/.config/certs"
@@ -151,10 +147,10 @@ mkcert \
   "localhost" "127.0.0.1" "::1"
 ```
 
-Windows PowerShell 示例。若使用 Store/MSIX 版本，请先在 **Gateway Monitor** 查看 **Data dir**，再把 `$certDir` 改成该目录下的 `certs` 子目录：
+Windows PowerShell 示例：证书保存在服务部署目录下，路径应与实际环境配置一致。
 
 ```powershell
-$certDir = "$env:APPDATA\yunqi-desktop\certs"
+$certDir = "C:\yunqi\certs"
 New-Item -ItemType Directory -Force $certDir
 
 mkcert `
@@ -175,7 +171,6 @@ TLS_KEY_FILE=/absolute/path/to/localhost-key.pem
 `.env` 的位置取决于启动方式：
 
 - 源码开发：通常是 `backend-go/.env`。
-- Yunqi Desktop 安装包：在 **Environment Params** 中编辑；后端进程工作目录是桌面端数据目录。
 - Linux systemd：通常是 `EnvironmentFile` 指向的 `/opt/yunqi/.env`，也可能由服务文件改成其他路径。
 - macOS launchd / Windows NSSM：若通过服务环境变量传入配置，应在对应服务配置中设置 `ENABLE_HTTPS`、`TLS_AUTO_CERT`、`TLS_CERT_FILE`、`TLS_KEY_FILE`。
 
