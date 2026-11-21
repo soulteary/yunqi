@@ -36,7 +36,33 @@ export class ApiClient {
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async request(url: string, options: RequestInit = {}): Promise<any> {
+  async request(url: string, options: RequestInit = {}, timeoutMs?: number): Promise<any> {
+    if (timeoutMs === undefined) return this.sendRequest(url, options)
+
+    const controller = new AbortController()
+    const callerSignal = options.signal
+    const abortFromCaller = () => controller.abort(callerSignal?.reason)
+    if (callerSignal?.aborted) abortFromCaller()
+    else callerSignal?.addEventListener('abort', abortFromCaller, { once: true })
+    const timeout = setTimeout(() => {
+      controller.abort(new DOMException(`Request timed out after ${timeoutMs}ms`, 'TimeoutError'))
+    }, timeoutMs)
+
+    try {
+      // Await body parsing as well as response headers before releasing the deadline.
+      return await this.sendRequest(url, { ...options, signal: controller.signal })
+    } catch (error) {
+      // Body readers may report AbortError even when the request deadline supplied a TimeoutError.
+      if (controller.signal.aborted) throw controller.signal.reason
+      throw error
+    } finally {
+      clearTimeout(timeout)
+      callerSignal?.removeEventListener('abort', abortFromCaller)
+    }
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private async sendRequest(url: string, options: RequestInit): Promise<any> {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       ...(options.headers as Record<string, string>)
