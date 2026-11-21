@@ -206,6 +206,7 @@ func LinkInternal(ctx context.Context, correlationID, internalTraceUID string) {
 	if ctx == nil {
 		return
 	}
+	DiagnosticsFromContext(ctx).link(correlationID, internalTraceUID)
 	span := trace.SpanFromContext(ctx)
 	if id := safeID(correlationID); id != "" {
 		span.SetAttributes(attribute.String("yunqi.request.correlation_id", id))

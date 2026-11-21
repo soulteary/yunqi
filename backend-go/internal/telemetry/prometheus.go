@@ -25,11 +25,13 @@ type requestSeries struct {
 	canceled uint64
 }
 type Registry struct {
-	tracing  *Tracing
-	events   map[string]uint64
-	mu       sync.Mutex
-	requests map[string]*requestSeries
-	active   map[string]int64
+	tracing         *Tracing
+	diagnostics     map[string]*Diagnostics
+	diagnosticOrder []string
+	events          map[string]uint64
+	mu              sync.Mutex
+	requests        map[string]*requestSeries
+	active          map[string]int64
 }
 
 func NewRegistry() *Registry {
@@ -68,6 +70,10 @@ func (r *Registry) Middleware() fiber.Handler {
 		}
 		traceCtx, endTrace := r.startServerTrace(req.Context(), req.Header, kind, req.Method)
 		timingCtx, timeline := WithTiming(traceCtx)
+		timingCtx, diagnostic := r.startDiagnostics(timingCtx, kind, timeline)
+		if diagnostic != nil {
+			httpbridge.Writer(c).Header().Set("X-Yunqi-Request-Id", DiagnosticRequestID(timingCtx))
+		}
 		if id := TraceID(timingCtx); id != "" {
 			httpbridge.Writer(c).Header().Set("X-Yunqi-Trace-Id", id)
 		}
@@ -104,6 +110,7 @@ func (r *Registry) Middleware() fiber.Handler {
 			}
 			r.mu.Unlock()
 			timeline.Finish()
+			diagnostic.Finish(code, req.Context().Err() != nil)
 			endTrace(code, timeline.Snapshot())
 			if p != nil {
 				panic(p)

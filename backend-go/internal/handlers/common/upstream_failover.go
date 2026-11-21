@@ -1098,6 +1098,7 @@ func TryUpstreamWithAllKeys(
 					endQueue()
 					if rlErr != nil {
 						telemetry.Event(httpbridge.Request(c).Context(), "limiter", "scope")
+						recordLocalDiagnostic(c, upstream.ChannelUID, selection.KeyUID, apiKey, executionAPIType, "limiter", "gateway")
 						lastError = rlErr
 						RequestLogf(c, "[%s-RateLimit] 渠道限速器拦截: %v，尝试下一个 Key/渠道", apiType, rlErr)
 						failedKeys[apiKey] = true
@@ -1112,6 +1113,7 @@ func TryUpstreamWithAllKeys(
 					endQueue()
 					if rlErr != nil {
 						telemetry.Event(httpbridge.Request(c).Context(), "limiter", "scope")
+						recordLocalDiagnostic(c, upstream.ChannelUID, selection.KeyUID, apiKey, executionAPIType, "limiter", "gateway")
 						lastError = rlErr
 						RequestLogf(c, "[%s-RateLimit] Key/Quota 限速器拦截: scope=%s, err=%v，尝试下一个 Key/渠道", apiType, selection.LimiterScope, rlErr)
 						failedKeys[apiKey] = true
@@ -1134,6 +1136,8 @@ func TryUpstreamWithAllKeys(
 
 			req, err := buildRequest(c, upstreamCopy, apiKey)
 			if err != nil {
+				_ = recordFinalConversion(c, requestBody, nil, apiType, upstreamCopy.ServiceType)
+				recordLocalDiagnostic(c, upstream.ChannelUID, selection.KeyUID, apiKey, executionAPIType, "build", "gateway")
 				// buildRequest 失败通常是客户端参数问题或本地构建错误
 				// 不应污染熔断统计，直接返回错误
 				RequestLogf(c, "[%s-BuildRequest] 请求构建失败: %v", apiType, err)
@@ -1144,6 +1148,9 @@ func TryUpstreamWithAllKeys(
 			// 该步骤位于 provider 转换之后，因此跨协议路由不会再丢失 effort。
 			if resolvedAttemptTarget != nil {
 				applyResolvedEffortToProviderRequest(req, resolvedAttemptTarget, upstreamCopy, executionKind)
+			}
+			if err := recordFinalConversion(c, requestBody, req, apiType, upstreamCopy.ServiceType); err != nil {
+				return false, "", 0, nil, nil, err
 			}
 			originalReasoningEffort := extractReasoningEffortForLog(requestBody)
 			actualAttemptModel, actualReasoningEffort := extractActualRequestLogDetails(req)
@@ -1237,6 +1244,12 @@ func TryUpstreamWithAllKeys(
 			// interfaceType 记录实际执行协议：联邦 sibling 必须归属到 chat/responses，
 			// 否则日志会把 chat 上的尝试错误地展示成 messages 渠道的尝试。
 			logOpts = append(logOpts, func(log *metrics.ChannelLog) {
+				log.Diagnostics = telemetry.DiagnosticsFromContext(httpbridge.Request(c).Context())
+				log.ChannelUID = upstream.ChannelUID
+				log.KeyUID = selection.KeyUID
+				if log.KeyUID == "" {
+					log.KeyUID = diagnosticKeyUID(apiKey)
+				}
 				log.TimingSource = telemetry.Timing(httpbridge.Request(c).Context())
 				log.OTLPTraceID = telemetry.TraceID(httpbridge.Request(c).Context())
 			})
@@ -1334,6 +1347,9 @@ func TryUpstreamWithAllKeys(
 					model, actualAttemptModel, mappingNote, utils.MaskAPIKey(apiKey))
 			}
 			resp, err := SendRequestWithLifecycleTrace(req, requestUpstream, envCfg, isStream, apiType, lifecycleTrace)
+			if resp != nil {
+				channelLogStore.Update(metricsKey, logRequestID, func(log *metrics.ChannelLog) { log.UpstreamRequestID = diagnosticUpstreamRequestID(resp.Header) })
+			}
 			if err != nil {
 				lastError = err
 				// 竞速败出：被赢家取消（SendRequest 阶段），不计失败不 failover。
@@ -1890,6 +1906,9 @@ func TryUpstreamWithAllKeys(
 			capture := &usageCapture{ReadCloser: resp.Body, stream: strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream")}
 			resp.Body = capture
 			usage, err = handleSuccess(c, resp, upstreamCopy, apiKey, attemptBody)
+			if err != nil {
+				channelLogStore.Update(metricsKey, logRequestID, func(log *metrics.ChannelLog) { log.ErrorSource = diagnosticStreamErrorSource(err) })
+			}
 			if lifecycleTrace.finishFirstContentWait != nil {
 				lifecycleTrace.finishFirstContentWait()
 			}

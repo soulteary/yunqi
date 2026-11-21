@@ -223,6 +223,9 @@ func HandleMultiChannelFailoverWithSelectionFilter(
 		}
 		selection, err := channelScheduler.SelectChannelWithOptions(httpbridge.Request(c).Context(), selectionOpts)
 		if err != nil {
+			telemetry.DiagnosticsFromContext(httpbridge.Request(c).Context()).Event("selection", "failed", "")
+		}
+		if err != nil {
 			// 上下文溢出的跨协议重定向已前移到调度器内部（容量错误分支注入
 			// OverflowRedirect 候选），外壳不再二次改写模型。
 			if failedAttempts > 0 && localEgressFailures == failedAttempts {
