@@ -1,9 +1,12 @@
 package types
 
+import "encoding/json"
+
 // ============== Responses API 类型定义 ==============
 
 // ResponsesRequest Responses API 请求
 type ResponsesRequest struct {
+	Text               json.RawMessage          `json:"text,omitempty"`
 	Model              string                   `json:"model"`
 	Instructions       string                   `json:"instructions,omitempty"` // 系统指令（映射为 system message）
 	Input              interface{}              `json:"input"`                  // string 或 []ResponsesItem

@@ -29,6 +29,9 @@ func (c *ResponsesPassthroughConverter) ToProviderRequest(sess *session.Session,
 		"user":                 req.User,
 		"stream_options":       req.StreamOptions,
 	}
+	if len(req.Text) > 0 {
+		reqMap["text"] = req.Text
+	}
 	if req.MaxTokens > 0 {
 		reqMap["max_tokens"] = req.MaxTokens
 	}

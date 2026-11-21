@@ -2,6 +2,7 @@ package converters
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -48,6 +49,18 @@ func ResponsesToGeminiRequest(sess *session.Session, req *types.ResponsesRequest
 
 	// 4. 转换生成配置
 	geminiReq.GenerationConfig = &types.GeminiGenerationConfig{}
+	raw, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+	format, err := ClaudeStructuredOutput(raw)
+	if err != nil {
+		return nil, err
+	}
+	if len(format) > 0 {
+		geminiReq.GenerationConfig.ResponseMimeType = "application/json"
+		geminiReq.GenerationConfig.ResponseJSONSchema = json.RawMessage(gjson.GetBytes(format, "schema").Raw)
+	}
 	if req.MaxTokens > 0 {
 		geminiReq.GenerationConfig.MaxOutputTokens = req.MaxTokens
 	}

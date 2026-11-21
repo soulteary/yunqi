@@ -245,6 +245,7 @@ func sanitizeGeminiToolSchema(v interface{}) interface{} {
 
 // GeminiGenerationConfig 生成配置
 type GeminiGenerationConfig struct {
+	ResponseJSONSchema json.RawMessage       `json:"responseJsonSchema,omitempty"`
 	Temperature        *float64              `json:"temperature,omitempty"`
 	TopP               *float64              `json:"topP,omitempty"`
 	TopK               *int                  `json:"topK,omitempty"`

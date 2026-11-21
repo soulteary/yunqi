@@ -606,3 +606,18 @@ func TestInjectGeminiThoughtSignatures(t *testing.T) {
 		})
 	}
 }
+
+func TestChatClaudeStructuredOutput(t *testing.T) {
+	raw := []byte(`{"messages":[],"response_format":{"type":"json_schema","json_schema":{"name":"r","schema":{"type":"object","properties":{"z":{"type":"string"}},"additionalProperties":false}}}}`)
+	got, err := convertChatToClaudeRequest(raw, "m", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, ok := got["output_config"].(map[string]interface{})
+	if !ok || config["format"] == nil {
+		t.Fatalf("missing format: %#v", got)
+	}
+	if _, err := convertChatToClaudeRequest([]byte(`{"response_format":{"type":"json_object"}}`), "m", false); err == nil {
+		t.Fatal("unsupported format silently dropped")
+	}
+}

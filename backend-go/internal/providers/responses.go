@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 	"io"
 	"log"
 	"net/http"
@@ -117,6 +119,29 @@ func (p *ResponsesProvider) ConvertBodyToProviderRequest(
 	reqBody, err := utils.MarshalJSONNoEscape(providerReq)
 	if err != nil {
 		return nil, bodyBytes, fmt.Errorf("序列化请求失败: %w", err)
+	}
+
+	// Keep the original schema bytes after generic map normalization, which sorts
+	// property keys. This is semantically relevant to structured output order.
+	schema := gjson.GetBytes(bodyBytes, "text.format.schema")
+	if !schema.Exists() {
+		schema = gjson.GetBytes(bodyBytes, "response_format.json_schema.schema")
+	}
+	if schema.IsObject() {
+		path := ""
+		switch upstream.ServiceType {
+		case "claude":
+			path = "output_config.format.schema"
+		case "openai":
+			path = "response_format.json_schema.schema"
+		case "gemini":
+			path = "generationConfig.responseJsonSchema"
+		case "responses":
+			path = "text.format.schema"
+		}
+		if path != "" {
+			reqBody, _ = sjson.SetRawBytes(reqBody, path, []byte(schema.Raw))
+		}
 	}
 
 	targetURL, err := p.buildRequestURL(upstream, reqBodyForURL)
@@ -241,7 +266,12 @@ func (p *ResponsesProvider) buildProviderRequestBody(c fiber.Ctx, requestPath st
 		}
 		config.NormalizeReasoningObjectForUpstream(reqMap, upstream)
 		if upstream.TextVerbosity != "" {
-			reqMap["text"] = map[string]interface{}{"verbosity": upstream.TextVerbosity}
+			text, _ := reqMap["text"].(map[string]interface{})
+			if text == nil {
+				text = map[string]interface{}{}
+			}
+			text["verbosity"] = upstream.TextVerbosity
+			reqMap["text"] = text
 		}
 		if upstream.FastMode {
 			reqMap["service_tier"] = "priority"
@@ -340,7 +370,12 @@ func (p *ResponsesProvider) buildProviderRequestBody(c fiber.Ctx, requestPath st
 			}
 			config.NormalizeReasoningObjectForUpstream(reqMap, upstream)
 			if upstream.TextVerbosity != "" {
-				reqMap["text"] = map[string]interface{}{"verbosity": upstream.TextVerbosity}
+				text, _ := reqMap["text"].(map[string]interface{})
+				if text == nil {
+					text = map[string]interface{}{}
+				}
+				text["verbosity"] = upstream.TextVerbosity
+				reqMap["text"] = text
 			}
 			if upstream.FastMode {
 				reqMap["service_tier"] = "priority"
