@@ -102,6 +102,8 @@ func runService(cliOpts cliOptions) {
 		log.Fatalf("初始化日志系统失败: %v", err)
 	}
 
+	// Candidate keys must be observed before initial parsing/validation can log.
+	initializeCredentialRedaction(envCfg)
 	cfgManager, err := config.NewConfigManager(paths.ConfigPath, paths.BackupDir)
 	if err != nil {
 		log.Fatalf("初始化配置管理器失败: %v", err)

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/soulteary/yunqi/internal/redaction"
 	"log"
 	"net/http"
 	"strings"
@@ -1102,7 +1103,7 @@ func ProcessStreamEvent(
 
 	// 转发给客户端（已截断的流不再转发后续事件）
 	if !ctx.ClientGone && !ctx.ToolUseTruncated {
-		if _, err := w.Write([]byte(eventToSend)); err != nil {
+		if _, err := w.Write([]byte(redaction.SSEErrorEvent(eventToSend))); err != nil {
 			ctx.ClientGone = true
 			if !IsClientDisconnectError(err) {
 				RequestLogf(c, "[Messages-Stream] 警告: 写入错误: %v", err)

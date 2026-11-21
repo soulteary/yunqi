@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/soulteary/yunqi/internal/redaction"
 	"net/http"
 	"strings"
 	"time"
@@ -577,7 +578,7 @@ func geminiAbortRepetitionLoop(c fiber.Ctx, flusher http.Flusher, progress *comm
 		},
 	}
 	chunkBytes, _ := json.Marshal(errPayload)
-	_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(chunkBytes))
+	_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(redaction.ErrorJSON(chunkBytes)))
 	if flusher != nil {
 		flusher.Flush()
 	}
@@ -648,10 +649,10 @@ func streamGeminiToGemini(
 				}
 			}
 			lastWasDataLine = true
-			_, _ = fmt.Fprintf(httpbridge.Writer(c), "%s\n", line)
+			_, _ = fmt.Fprintf(httpbridge.Writer(c), "%s\n", redaction.SSEErrorEvent(line))
 		} else if line != "" {
 			lastWasDataLine = false
-			_, _ = fmt.Fprintf(httpbridge.Writer(c), "%s\n", line)
+			_, _ = fmt.Fprintf(httpbridge.Writer(c), "%s\n", redaction.SSEErrorEvent(line))
 		} else {
 			lastWasDataLine = false
 			_, _ = fmt.Fprintf(httpbridge.Writer(c), "\n")
@@ -746,7 +747,7 @@ func streamClaudeToGemini(
 					},
 				}
 				chunkBytes, _ := json.Marshal(geminiChunk)
-				_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(chunkBytes))
+				_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(redaction.ErrorJSON(chunkBytes)))
 				if flusher != nil {
 					flusher.Flush()
 				}
@@ -772,7 +773,7 @@ func streamClaudeToGemini(
 				}
 
 				chunkBytes, _ := json.Marshal(geminiChunk)
-				_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(chunkBytes))
+				_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(redaction.ErrorJSON(chunkBytes)))
 				if flusher != nil {
 					flusher.Flush()
 				}
@@ -808,7 +809,7 @@ func streamClaudeToGemini(
 					},
 				}
 				chunkBytes, _ := json.Marshal(geminiChunk)
-				_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(chunkBytes))
+				_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(redaction.ErrorJSON(chunkBytes)))
 				if flusher != nil {
 					flusher.Flush()
 				}
@@ -896,7 +897,7 @@ func streamOpenAIToGemini(
 					},
 				}
 				chunkBytes, _ := json.Marshal(geminiChunk)
-				_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(chunkBytes))
+				_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(redaction.ErrorJSON(chunkBytes)))
 				if flusher != nil {
 					flusher.Flush()
 				}
@@ -926,7 +927,7 @@ func streamOpenAIToGemini(
 					},
 				}
 				chunkBytes, _ := json.Marshal(geminiChunk)
-				_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(chunkBytes))
+				_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(redaction.ErrorJSON(chunkBytes)))
 				if flusher != nil {
 					flusher.Flush()
 				}
@@ -957,7 +958,7 @@ func streamOpenAIToGemini(
 			}
 
 			chunkBytes, _ := json.Marshal(geminiChunk)
-			_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(chunkBytes))
+			_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(redaction.ErrorJSON(chunkBytes)))
 			if flusher != nil {
 				flusher.Flush()
 			}
@@ -984,7 +985,7 @@ func streamOpenAIToGemini(
 			}
 
 			chunkBytes, _ := json.Marshal(geminiChunk)
-			_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(chunkBytes))
+			_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(redaction.ErrorJSON(chunkBytes)))
 			if flusher != nil {
 				flusher.Flush()
 			}
@@ -1001,7 +1002,7 @@ func streamOpenAIToGemini(
 				},
 			}
 			chunkBytes, _ := json.Marshal(geminiChunk)
-			_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(chunkBytes))
+			_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", string(redaction.ErrorJSON(chunkBytes)))
 			if flusher != nil {
 				flusher.Flush()
 			}

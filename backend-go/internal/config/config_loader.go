@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/soulteary/yunqi/internal/redaction"
 	"log"
 	"os"
 	"path/filepath"
@@ -82,6 +83,7 @@ func (cm *ConfigManager) loadConfig() error {
 
 	var loaded Config
 	autopilotDecodeFallback := false
+	redaction.ObserveJSON(data)
 	if err := json.Unmarshal(data, &loaded); err != nil {
 		fallback, fallbackErr := decodeConfigWithDefaultAutopilot(data)
 		if fallbackErr != nil {
@@ -1520,6 +1522,7 @@ func (cm *ConfigManager) saveConfigLocked(config Config) error {
 	if err := writeConfigAtomically(cm.configFile, data); err != nil { // 仅所有者可读写，保护敏感配置
 		return err
 	}
+	redaction.ObserveJSON(data)
 	cm.recordSelfWrite(data)
 	cm.config = config
 	cm.publishLogicalChannelRebuilt()
