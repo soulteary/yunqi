@@ -2,6 +2,7 @@ package config
 
 import (
 	"crypto/subtle"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -18,6 +19,8 @@ type EnvConfig struct {
 	TLSAutoCert          bool
 	EnableWebUI          bool
 	UILanguage           string
+	ProxyPrincipalIDs    map[string]string // 可选 Key -> 稳定主体 ID，仅在认证后使用
+	ProxyMaxConcurrency  int               // 每个入口密钥并发上限，0 表示不限制
 	ProxyAccessKey       string
 	ExtraProxyAccessKeys []string // 额外代理访问密钥（仅用于代理 API，不授予管理权限）
 	AdminAccessKey       string   // 管理 API 独立密钥（可选，未设置时回退到 ProxyAccessKey）
@@ -76,6 +79,8 @@ func NewEnvConfig() *EnvConfig {
 		TLSAutoCert:          getEnv("TLS_AUTO_CERT", "true") != "false",
 		EnableWebUI:          getEnv("ENABLE_WEB_UI", "true") != "false",
 		UILanguage:           normalizeUILanguage(getEnv("APP_UI_LANGUAGE", "zh-CN")),
+		ProxyPrincipalIDs:    parseProxyPrincipalIDs(getEnv("PROXY_PRINCIPAL_IDS", "")),
+		ProxyMaxConcurrency:  max(0, getEnvAsInt("PROXY_MAX_CONCURRENCY", 0)),
 		ProxyAccessKey:       getEnv("PROXY_ACCESS_KEY", "your-proxy-access-key"),
 		ExtraProxyAccessKeys: parseExtraProxyAccessKeys(getEnv("EXTRA_PROXY_ACCESS_KEYS", "")),
 		AdminAccessKey:       getEnv("ADMIN_ACCESS_KEY", ""), // 空值时回退到 ProxyAccessKey
@@ -335,4 +340,18 @@ func clampInt(value, minVal, maxVal int) int {
 		return maxVal
 	}
 	return value
+}
+
+// parseProxyPrincipalIDs ignores invalid input; authentication still uses access keys.
+func parseProxyPrincipalIDs(raw string) map[string]string {
+	var ids map[string]string
+	if json.Unmarshal([]byte(raw), &ids) != nil {
+		return nil
+	}
+	for key, id := range ids {
+		if key == "" || strings.TrimSpace(id) == "" {
+			delete(ids, key)
+		}
+	}
+	return ids
 }
