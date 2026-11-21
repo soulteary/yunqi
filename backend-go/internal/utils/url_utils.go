@@ -37,7 +37,7 @@ func RedactURLCredentials(rawURL string) string {
 }
 
 // ValidateBaseURL 验证 baseURL 是否安全，防止 SSRF 攻击
-// 仅拦截云元数据服务（169.254.169.254），允许其他内网地址（支持 Ollama、内网部署）
+// 拦截已知云元数据地址，允许其他内网地址（支持 Ollama、内网部署）。
 func ValidateBaseURL(rawURL string) error {
 	if rawURL == "" {
 		return fmt.Errorf("baseURL 不能为空")
@@ -60,7 +60,7 @@ func ValidateBaseURL(rawURL string) error {
 	}
 
 	// 硬编码拦截云元数据服务（最关键的安全风险）
-	if host == "169.254.169.254" {
+	if IsMetadataHost(host) {
 		return fmt.Errorf("禁止访问云元数据服务")
 	}
 
@@ -72,7 +72,7 @@ func ValidateBaseURL(rawURL string) error {
 	}
 
 	for _, resolvedIP := range ips {
-		if resolvedIP.String() == "169.254.169.254" {
+		if IsMetadataIP(resolvedIP) {
 			return fmt.Errorf("域名 %s 解析到云元数据服务", host)
 		}
 	}
@@ -252,3 +252,18 @@ func EquivalentBaseURLVariants(rawURL, serviceType string) []string {
 // 组播
 
 // 检查 localhost 域名
+
+// isMetadataHost also rejects well-known aliases before DNS resolution.
+func IsMetadataHost(host string) bool {
+	host = strings.TrimSuffix(strings.ToLower(host), ".")
+	switch host {
+	case "metadata.google.internal", "metadata.goog", "instance-data", "instance-data.ec2.internal":
+		return true
+	}
+	return IsMetadataIP(net.ParseIP(strings.Split(host, "%")[0]))
+}
+
+// IsMetadataIP identifies cloud metadata IPs while permitting other private addresses.
+func IsMetadataIP(ip net.IP) bool {
+	return ip != nil && (ip.Equal(net.ParseIP("169.254.169.254")) || ip.Equal(net.ParseIP("fd00:ec2::254")) || ip.Equal(net.ParseIP("100.100.100.200")))
+}
