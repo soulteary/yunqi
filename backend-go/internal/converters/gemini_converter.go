@@ -12,6 +12,11 @@ import (
 
 // GeminiToClaudeRequest 将 Gemini 请求转换为 Claude Messages API 格式
 func GeminiToClaudeRequest(geminiReq *types.GeminiRequest, model string) (map[string]interface{}, error) {
+	normalized, normalizeErr := normalizeGeminiToolIDs(geminiReq)
+	if normalizeErr != nil {
+		return nil, normalizeErr
+	}
+	geminiReq = normalized
 	claudeReq := map[string]interface{}{
 		"model": model,
 	}
@@ -90,6 +95,11 @@ func GeminiToClaudeRequest(geminiReq *types.GeminiRequest, model string) (map[st
 
 // GeminiToOpenAIRequest 将 Gemini 请求转换为 OpenAI Chat Completions 格式
 func GeminiToOpenAIRequest(geminiReq *types.GeminiRequest, model string) (map[string]interface{}, error) {
+	normalized, normalizeErr := normalizeGeminiToolIDs(geminiReq)
+	if normalizeErr != nil {
+		return nil, normalizeErr
+	}
+	geminiReq = normalized
 	openaiReq := map[string]interface{}{
 		"model": model,
 	}

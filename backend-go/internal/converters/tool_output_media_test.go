@@ -170,3 +170,65 @@ func TestGeminiNativeParallelResultsPreserveIDs(t *testing.T) {
 		t.Fatalf("Responses pairing lost %s", body)
 	}
 }
+
+func TestGeminiNativeMissingIDsPairByNameFIFO(t *testing.T) {
+	for _, count := range []int{1, 2} {
+		req := types.GeminiRequest{Contents: []types.GeminiContent{{Role: "model"}, {Role: "user"}}}
+		for i := 0; i < count; i++ {
+			req.Contents[0].Parts = append(req.Contents[0].Parts, types.GeminiPart{FunctionCall: &types.GeminiFunctionCall{Name: "same", Args: map[string]interface{}{}}})
+			req.Contents[1].Parts = append(req.Contents[1].Parts, types.GeminiPart{FunctionResponse: &types.GeminiFunctionResponse{Name: "same", Response: map[string]interface{}{"output": i}}})
+		}
+		chat, err := GeminiToOpenAIRequest(&req, "m")
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := json.Marshal(chat)
+		r := gjson.ParseBytes(body)
+		calls := r.Get("messages.0.tool_calls").Array()
+		messages := r.Get("messages").Array()
+		seen := map[string]bool{}
+		for i := 0; i < count; i++ {
+			id := calls[i].Get("id").String()
+			if id == "" || seen[id] || messages[i+1].Get("tool_call_id").String() != id {
+				t.Fatalf("missing/FIFO IDs broken %s", body)
+			}
+			seen[id] = true
+		}
+		claude, err := GeminiToClaudeRequest(&req, "m")
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ = json.Marshal(claude)
+		r = gjson.ParseBytes(body)
+		calls = r.Get("messages.0.content").Array()
+		results := r.Get("messages.1.content").Array()
+		for i := 0; i < count; i++ {
+			if calls[i].Get("id").String() != results[i].Get("tool_use_id").String() {
+				t.Fatalf("Claude unmatched %s", body)
+			}
+		}
+		responses, err := GeminiToResponsesRequest(&req, "m")
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ = json.Marshal(responses)
+		items := gjson.GetBytes(body, "input").Array()
+		for i := 0; i < count; i++ {
+			if items[i].Get("call_id").String() != items[count+i].Get("call_id").String() {
+				t.Fatalf("Responses unmatched %s", body)
+			}
+		}
+		if req.Contents[0].Parts[0].FunctionCall.ID != "" || req.Contents[1].Parts[0].FunctionResponse.ID != "" {
+			t.Fatal("caller history mutated")
+		}
+	}
+}
+
+func TestGeminiNativeMissingIDWithoutMatchingCallIsRejected(t *testing.T) {
+	req := &types.GeminiRequest{Contents: []types.GeminiContent{{Role: "user", Parts: []types.GeminiPart{{FunctionResponse: &types.GeminiFunctionResponse{Name: "orphan", Response: map[string]interface{}{"output": "value"}}}}}}}
+	for _, convert := range []func(*types.GeminiRequest, string) (map[string]interface{}, error){GeminiToOpenAIRequest, GeminiToClaudeRequest, GeminiToResponsesRequest} {
+		if _, err := convert(req, "m"); err == nil {
+			t.Fatal("unpaired result silently accepted")
+		}
+	}
+}

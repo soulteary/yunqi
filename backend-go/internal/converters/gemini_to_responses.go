@@ -14,6 +14,11 @@ import (
 
 // GeminiToResponsesRequest 将 Gemini 请求转换为 Responses 格式
 func GeminiToResponsesRequest(geminiReq *types.GeminiRequest, modelName string) (map[string]interface{}, error) {
+	normalized, normalizeErr := normalizeGeminiToolIDs(geminiReq)
+	if normalizeErr != nil {
+		return nil, normalizeErr
+	}
+	geminiReq = normalized
 	responsesReq := map[string]interface{}{
 		"model": modelName,
 	}

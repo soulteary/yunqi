@@ -671,6 +671,7 @@ func TestGeminiResponsesRoundtrip_FunctionResponseObjectShape(t *testing.T) {
 				Parts: []types.GeminiPart{
 					{
 						FunctionResponse: &types.GeminiFunctionResponse{
+							ID:   "weather_call",
 							Name: "weather_call",
 							Response: map[string]interface{}{
 								"temperature": 72,
