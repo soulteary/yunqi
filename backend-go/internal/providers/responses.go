@@ -25,7 +25,9 @@ import (
 
 // ResponsesProvider Responses API 提供商
 type ResponsesProvider struct {
-	SessionManager *session.SessionManager
+	SessionManager  *session.SessionManager
+	CopilotResolver *copilot.EndpointResolver
+	wireProvider    Provider
 }
 
 // responsesStreamToolState 保存一个 Responses function_call 的独立流状态。
@@ -62,10 +64,50 @@ func (p *ResponsesProvider) ConvertBodyToProviderRequest(
 	bodyBytes []byte,
 	requestPath string,
 ) (*http.Request, []byte, error) {
+	p.wireProvider = nil
 	if p.SessionManager == nil {
 		p.SessionManager = newDefaultSessionManager()
 	}
 
+	identity := upstream.ServiceType
+	requestAPIKey := apiKey
+	copilotTarget := ""
+	if identity == "copilot" {
+		var model struct {
+			Model string `json:"model"`
+		}
+		if err := json.Unmarshal(bodyBytes, &model); err != nil {
+			return nil, bodyBytes, err
+		}
+		resolver := p.CopilotResolver
+		if resolver == nil {
+			resolver = copilot.DefaultEndpointResolver()
+		}
+		token, baseURL, protocol, endpoint, err := resolver.Resolve(httpbridge.Request(c).Context(), apiKey, upstream.ProxyURL, model.Model, upstream.CopilotProtocol)
+		if err != nil {
+			return nil, bodyBytes, err
+		}
+		requestAPIKey = token
+		copilotTarget = baseURL + endpoint
+		wire := "responses"
+		switch protocol {
+		case "chat":
+			wire = "openai"
+		case "messages":
+			wire = "claude"
+		}
+		copy := *upstream
+		copy.ServiceType = wire
+		upstream = &copy
+		httpbridge.SetValue(c, "copilot_wire_service_type", wire)
+		if wire != "responses" {
+			p.wireProvider = GetProvider(wire)
+		}
+	}
+
+	if identity == "copilot" && copilotHasUnsupportedMedia(bodyBytes, requestPath, upstream.ServiceType) {
+		return nil, bodyBytes, fmt.Errorf("Copilot cross-protocol request contains unsupported media; use a native endpoint")
+	}
 	providerReq, reqBodyForURL, err := p.buildProviderRequestBody(c, requestPath, bodyBytes, upstream)
 	if err != nil {
 		return nil, bodyBytes, err
@@ -81,16 +123,8 @@ func (p *ResponsesProvider) ConvertBodyToProviderRequest(
 		return nil, bodyBytes, err
 	}
 
-	requestAPIKey := apiKey
-	if upstream.ServiceType == "copilot" {
-		copilotToken, copilotBaseURL, err := copilot.ResolveTokenWithProxy(httpbridge.Request(c).Context(), apiKey, upstream.ProxyURL)
-		if err != nil {
-			return nil, bodyBytes, fmt.Errorf("获取 GitHub Copilot token 失败: %w", err)
-		}
-		requestAPIKey = copilotToken
-		if copilotBaseURL != "" {
-			targetURL = strings.TrimRight(copilotBaseURL, "/") + "/responses"
-		}
+	if copilotTarget != "" {
+		targetURL = copilotTarget
 	}
 
 	req, err := http.NewRequestWithContext(httpbridge.Request(c).Context(), http.MethodPost, targetURL, bytes.NewReader(reqBody))
@@ -123,7 +157,7 @@ func (p *ResponsesProvider) ConvertBodyToProviderRequest(
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	if upstream.ServiceType == "copilot" {
+	if identity == "copilot" {
 		utils.ApplyCustomHeadersProtected(req.Header, upstream.CustomHeaders, utils.CopilotProtectedHeaders)
 		copilot.ApplyRuntimeHeaders(req.Header, requestAPIKey)
 	} else {
@@ -134,10 +168,50 @@ func (p *ResponsesProvider) ConvertBodyToProviderRequest(
 }
 
 func (p *ResponsesProvider) buildProviderRequestBody(c fiber.Ctx, requestPath string, bodyBytes []byte, upstream *config.UpstreamConfig) (interface{}, []byte, error) {
+	if strings.HasSuffix(requestPath, "/chat/completions") {
+		if upstream.ServiceType == "openai" {
+			var native map[string]interface{}
+			if err := json.Unmarshal(bodyBytes, &native); err != nil {
+				return nil, nil, err
+			}
+			return native, bodyBytes, nil
+		}
+		var chat map[string]interface{}
+		if err := json.Unmarshal(bodyBytes, &chat); err != nil {
+			return nil, nil, err
+		}
+		converters.DowngradeDeveloperRoleToSystem(chat)
+		normalized, err := utils.MarshalJSONNoEscape(chat)
+		if err != nil {
+			return nil, nil, err
+		}
+		bodyBytes = converters.ConvertChatRequestToResponsesRequest(normalized)
+		requestPath = "/v1/responses"
+	}
+
 	if strings.HasSuffix(requestPath, "/v1/messages") {
+		if upstream.ServiceType == "claude" {
+			var native map[string]interface{}
+			if err := json.Unmarshal(bodyBytes, &native); err != nil {
+				return nil, nil, err
+			}
+			return native, bodyBytes, nil
+		}
 		responsesReq, err := p.buildResponsesRequestFromClaude(c, bodyBytes, upstream)
 		if err != nil {
 			return nil, nil, fmt.Errorf("解析 Claude Messages 请求失败: %w", err)
+		}
+		if upstream.ServiceType != "responses" && upstream.ServiceType != "copilot" {
+			encoded, err := json.Marshal(responsesReq)
+			if err != nil {
+				return nil, nil, err
+			}
+			var typed types.ResponsesRequest
+			if err := json.Unmarshal(encoded, &typed); err != nil {
+				return nil, nil, err
+			}
+			converted, err := converters.NewConverter(upstream.ServiceType).ToProviderRequest(&session.Session{}, &typed)
+			return converted, bodyBytes, err
 		}
 		return responsesReq, bodyBytes, nil
 	}
@@ -566,6 +640,9 @@ func (p *ResponsesProvider) buildTargetURL(upstream *config.UpstreamConfig) stri
 
 // ConvertToClaudeResponse 将上游响应转换为 Claude 响应
 func (p *ResponsesProvider) ConvertToClaudeResponse(providerResp *types.ProviderResponse) (*types.ClaudeResponse, error) {
+	if p.wireProvider != nil {
+		return p.wireProvider.ConvertToClaudeResponse(providerResp)
+	}
 	var responsesResp map[string]interface{}
 	if err := json.Unmarshal(providerResp.Body, &responsesResp); err != nil {
 		return nil, err
@@ -688,6 +765,9 @@ func (p *ResponsesProvider) ConvertToResponsesResponse(
 
 // HandleStreamResponse 处理流式响应
 func (p *ResponsesProvider) HandleStreamResponse(body io.ReadCloser) (<-chan string, <-chan error, error) {
+	if p.wireProvider != nil {
+		return p.wireProvider.HandleStreamResponse(body)
+	}
 	eventChan := make(chan string, 100)
 	errChan := make(chan error, 1)
 
@@ -1798,4 +1878,48 @@ func extractRawToolsFromRequest(bodyBytes []byte) []interface{} {
 	}
 	rawTools, _ := reqMap["tools"].([]interface{})
 	return rawTools
+}
+
+// Keep native payloads intact, and preserve only the cross-wire image directions
+// already implemented by the existing converters. Other media must never disappear.
+func copilotHasUnsupportedMedia(body []byte, path, wire string) bool {
+	native := (strings.HasSuffix(path, "/messages") && wire == "claude") || (strings.HasSuffix(path, "/chat/completions") && wire == "openai") || (strings.HasSuffix(path, "/responses") && wire == "responses")
+	if native {
+		return false
+	}
+	allowImages := (strings.HasSuffix(path, "/chat/completions") && wire == "responses") || (strings.HasSuffix(path, "/responses") && wire == "openai")
+	var request map[string]interface{}
+	if json.Unmarshal(body, &request) != nil {
+		return false
+	}
+	var unsupported func(interface{}) bool
+	unsupported = func(value interface{}) bool {
+		switch value := value.(type) {
+		case map[string]interface{}:
+			kind, _ := value["type"].(string)
+			switch kind {
+			case "image_url", "input_image":
+				return !allowImages
+			case "image", "document", "file", "input_file", "input_audio", "audio", "audio_url", "input_video", "video":
+				return true
+			case "tool_use", "function_call", "function_call_output", "reasoning", "item_reference":
+				// Tool arguments/results are opaque application data, not content blocks.
+				return false
+			case "text", "input_text", "output_text", "thinking":
+				return false
+			case "", "message", "tool_result":
+				return unsupported(value["content"])
+			default:
+				return true
+			}
+		case []interface{}:
+			for _, child := range value {
+				if unsupported(child) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	return unsupported(request["messages"]) || unsupported(request["input"])
 }

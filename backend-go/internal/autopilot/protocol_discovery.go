@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/copilot"
 	"github.com/soulteary/yunqi/internal/httpclient"
 	"github.com/soulteary/yunqi/internal/utils"
 )
@@ -104,6 +105,32 @@ func (r *AutoDiscoveryRunner) discoverEndpointProtocols(
 	if channel == nil || result == nil || !result.ProtocolOk {
 		return
 	}
+	if channel.ServiceType == "copilot" {
+		ensureProtocolDiscoveryMaps(result)
+		for _, protocol := range []string{"responses", "chat", "messages"} {
+			delete(result.ProtocolModels, protocol)
+			attempted := 0
+			for _, model := range result.Models {
+				if _, _, err := copilot.SelectEndpoint(result.ModelDetails, model, protocol); err != nil {
+					continue
+				}
+				if attempted >= protocolDiscoveryMaxModels || ctx.Err() != nil {
+					break
+				}
+				attempted++
+				probeCtx, cancel := context.WithTimeout(ctx, protocolDiscoveryProbeTimeout)
+				attempt := r.probeProtocolModel(probeCtx, channel, baseURL, apiKey, protocol, model)
+				cancel()
+				if attempt.outcome == protocolProbeSuccess {
+					result.ProtocolModels[protocol] = append(result.ProtocolModels[protocol], model)
+				}
+			}
+			result.ProtocolDiscoveredAt[protocol] = time.Now().UTC()
+			result.ProtocolDiscoverySource[protocol] = "copilot_models_endpoint_probe"
+		}
+		return
+	}
+
 	ensureConfiguredProtocolDiscovery(channel, result)
 
 	// 原生兄弟协议集合：同逻辑渠道组内其他渠道的原生协议 -> 兄弟渠道 UID。
@@ -495,7 +522,7 @@ func (r *AutoDiscoveryRunner) sharedUpstreamModels(channel *config.UpstreamConfi
 }
 
 func ensureConfiguredProtocolDiscovery(channel *config.UpstreamConfig, result *EndpointDiscoveryResult) {
-	if channel == nil || result == nil || !result.ProtocolOk {
+	if channel == nil || result == nil || !result.ProtocolOk || channel.ServiceType == "copilot" {
 		return
 	}
 	ensureProtocolDiscoveryMaps(result)
@@ -620,6 +647,19 @@ func (r *AutoDiscoveryRunner) probeProtocolModel(
 	if err != nil {
 		return protocolProbeAttempt{outcome: protocolProbeFailed, err: err}
 	}
+	copilotToken := ""
+	if channel.ServiceType == "copilot" {
+		resolver := r.copilotResolver
+		if resolver == nil {
+			resolver = copilot.DefaultEndpointResolver()
+		}
+		token, origin, _, endpoint, err := resolver.Resolve(ctx, apiKey, channel.ProxyURL, model, protocol)
+		if err != nil {
+			return protocolProbeAttempt{outcome: protocolProbeFailed, err: err}
+		}
+		copilotToken = token
+		requestURL = origin + endpoint
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, requestURL, bytes.NewReader(body))
 	if err != nil {
 		return protocolProbeAttempt{outcome: protocolProbeFailed, err: fmt.Errorf("构建 %s 探测请求失败: %w", protocol, err)}
@@ -637,7 +677,12 @@ func (r *AutoDiscoveryRunner) probeProtocolModel(
 		req.Header.Set("Originator", "codex_cli_rs")
 		req.Header.Set("User-Agent", "codex_cli_rs/0.111.0")
 	}
-	utils.ApplyCustomHeaders(req.Header, channel.CustomHeaders)
+	if copilotToken != "" {
+		utils.ApplyCustomHeadersProtected(req.Header, channel.CustomHeaders, utils.CopilotProtectedHeaders)
+		copilot.ApplyRuntimeHeaders(req.Header, copilotToken)
+	} else {
+		utils.ApplyCustomHeaders(req.Header, channel.CustomHeaders)
+	}
 
 	client := r.client
 	if client == nil {

@@ -412,7 +412,7 @@ func handleNormalResponse(
 
 	// 流式桥接：上游实际返回 SSE（仅接受流式渠道的兼容改写）时合成回非流式体，
 	// 后续 ConvertToClaudeResponse 转换与原生非流式路径完全一致。
-	bodyBytes, err := common.ReadUpstreamNonStreamBody(c, resp, upstream.ServiceType)
+	bodyBytes, err := common.ReadUpstreamNonStreamBody(c, resp, providers.ActualServiceType(c, upstream.ServiceType))
 	if err != nil {
 		httpbridge.JSON(c, 500, fiber.Map{"error": "Failed to read response"})
 		return nil, err

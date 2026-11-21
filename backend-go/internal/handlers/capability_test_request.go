@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/copilot"
 	"github.com/soulteary/yunqi/internal/errutil"
 	"github.com/soulteary/yunqi/internal/handlers/common"
 	"github.com/soulteary/yunqi/internal/metrics"
@@ -191,7 +192,13 @@ func capabilityTestBaseURL(channel *config.UpstreamConfig) string {
 	return urls[0]
 }
 
+var capabilityCopilotResolver = copilot.DefaultEndpointResolver()
+
 func buildTestRequestWithModel(protocol string, channel *config.UpstreamConfig, model string, cfgManagers ...*config.ConfigManager) (*http.Request, error) {
+	return buildTestRequestWithModelContext(context.Background(), protocol, channel, model, cfgManagers...)
+}
+
+func buildTestRequestWithModelContext(ctx context.Context, protocol string, channel *config.UpstreamConfig, model string, cfgManagers ...*config.ConfigManager) (*http.Request, error) {
 	cfgManager := firstCapabilityProbeConfigManager(cfgManagers)
 	globalCapabilities := capabilityProbeGlobalCapabilities(cfgManager)
 	baseURL := capabilityTestBaseURL(channel)
@@ -222,7 +229,13 @@ func buildTestRequestWithModel(protocol string, channel *config.UpstreamConfig, 
 		if !exists {
 			return nil, unsupportedCompositePathErr(from, to)
 		}
-		requestURL, body, headerProtocol, err = builder(channel, apiKey, model, globalCapabilities)
+		probeChannel := channel
+		if channel.ServiceType == "copilot" {
+			copy := *channel
+			copy.ServiceType = providerServiceTypeForProtocol(to)
+			probeChannel = &copy
+		}
+		requestURL, body, headerProtocol, err = builder(probeChannel, apiKey, model, globalCapabilities)
 		if err != nil {
 			return nil, fmt.Errorf("build composite request failed: %w", err)
 		}
@@ -298,7 +311,17 @@ func buildTestRequestWithModel(protocol string, channel *config.UpstreamConfig, 
 		body, claudeCodeSessionID = ensureClaudeCodeProbeBody(body)
 	}
 
-	req, err := http.NewRequest("POST", requestURL, bytes.NewReader(body))
+	copilotToken := ""
+	if channel.ServiceType == "copilot" {
+		token, origin, _, endpoint, err := capabilityCopilotResolver.Resolve(ctx, apiKey, channel.ProxyURL, model, headerProtocol)
+		if err != nil {
+			return nil, err
+		}
+		copilotToken = token
+		requestURL = origin + endpoint
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", requestURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("create request failed: %w", err)
 	}
@@ -322,6 +345,11 @@ func buildTestRequestWithModel(protocol string, channel *config.UpstreamConfig, 
 		for key, value := range channel.CustomHeaders {
 			req.Header.Set(key, value)
 		}
+	}
+
+	if copilotToken != "" {
+		utils.ApplyCustomHeadersProtected(req.Header, channel.CustomHeaders, utils.CopilotProtectedHeaders)
+		copilot.ApplyRuntimeHeaders(req.Header, copilotToken)
 	}
 
 	return req, nil

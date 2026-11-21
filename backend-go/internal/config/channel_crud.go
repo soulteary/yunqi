@@ -138,6 +138,9 @@ func (cm *ConfigManager) addUpstreamCommonLocked(k ChannelKindConfig, upstream U
 		upstream.Status = "active"
 	}
 
+	if err := validateCopilotProtocol(upstream.CopilotProtocol); err != nil {
+		return err
+	}
 	upstream.ServiceType = normalizeUpstreamServiceType(upstream.ServiceType, k.DefaultServiceType)
 	if k.ValidateServiceType != nil {
 		if err := k.ValidateServiceType(upstream.ServiceType); err != nil {
@@ -223,6 +226,12 @@ func (cm *ConfigManager) updateUpstreamCommonLocked(k ChannelKindConfig, index i
 		}
 	}
 
+	if updates.CopilotProtocol != nil {
+		if err := validateCopilotProtocol(*updates.CopilotProtocol); err != nil {
+			return false, err
+		}
+	}
+
 	if k.UpdateCapabilityValidation != nil {
 		if err := k.UpdateCapabilityValidation(updates); err != nil {
 			return false, err
@@ -239,6 +248,9 @@ func (cm *ConfigManager) updateUpstreamCommonLocked(k ChannelKindConfig, index i
 	}
 	if updates.BaseURLs != nil {
 		upstream.BaseURLs = deduplicateBaseURLs(updates.BaseURLs, serviceType)
+	}
+	if updates.CopilotProtocol != nil {
+		upstream.CopilotProtocol = *updates.CopilotProtocol
 	}
 	if updates.ServiceType != nil {
 		upstream.ServiceType = serviceType
@@ -904,4 +916,13 @@ func cloneTimeValue(v *time.Time) *time.Time {
 	}
 	copied := *v
 	return &copied
+}
+
+func validateCopilotProtocol(protocol string) error {
+	switch protocol {
+	case "", "responses", "chat", "messages":
+		return nil
+	default:
+		return fmt.Errorf("无效的 Copilot HTTP 协议: %s", protocol)
+	}
 }

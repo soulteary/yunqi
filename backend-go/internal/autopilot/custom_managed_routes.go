@@ -26,7 +26,12 @@ func buildCustomManagedProtocolRoute(
 	seed.AccountUID = accountUID
 	seed.ChannelUID = config.GenerateChannelUID()
 	seed.ProviderID = ""
-	seed.ServiceType = kindToDefaultServiceType(kind)
+	if seed.ServiceType == "copilot" {
+		seed.CopilotProtocol = kind
+	} else {
+		seed.ServiceType = kindToDefaultServiceType(kind)
+		seed.CopilotProtocol = ""
+	}
 	seed.Name = customAutoAddRouteName(baseName, kind, multiRoute)
 	seed.Status = "active"
 	seed.AutoManaged = true
