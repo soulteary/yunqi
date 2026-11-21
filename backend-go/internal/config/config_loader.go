@@ -1492,7 +1492,7 @@ func (cm *ConfigManager) saveConfigLocked(config Config) error {
 	// hydrateManagedAccountCredentials 从这里补 Key,必须有源才不丢。幂等可重跑。
 	syncManagedAccountCredentialsFromChannels(&config)
 	// Phase B.2：落盘 + 提交到 cm.config 后，发布 logical_channel_rebuilt 事件。
-	defer cm.publishLogicalChannelRebuilt()
+
 	persisted := config.deepCopy()
 	syncManagedAccountCredentialsFromChannels(&persisted)
 	persisted.stripManagedChannelSecrets()
@@ -1522,6 +1522,7 @@ func (cm *ConfigManager) saveConfigLocked(config Config) error {
 	}
 	cm.recordSelfWrite(data)
 	cm.config = config
+	cm.publishLogicalChannelRebuilt()
 	cm.publishUpstreamChangeIfChanged(&snapshotBeforeWrite)
 	return nil
 }
