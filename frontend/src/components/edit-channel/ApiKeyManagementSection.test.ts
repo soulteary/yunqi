@@ -12,12 +12,17 @@ const apiMocks = vi.hoisted(() => ({
   getManagedAccounts: vi.fn(),
   setKimiConsoleToken: vi.fn(),
   sha256KeyHash: vi.fn(),
+  requestCopilotDeviceCode: vi.fn(),
+  pollCopilotAccessToken: vi.fn(),
 }))
 
 vi.mock('../../services/api', () => ({
   api: apiMocks,
   ApiError: class extends Error {},
   ApiService: class {
+    requestCopilotDeviceCode = apiMocks.requestCopilotDeviceCode
+    pollCopilotAccessToken = apiMocks.pollCopilotAccessToken
+
     async patchKeyMultiplier(...args: unknown[]) {
       return apiMocks.patchKeyMultiplier(...args)
     }
@@ -139,6 +144,21 @@ describe('ApiKeyManagementSection', () => {
       usage: { validatedAt: '2026-08-13T00:00:00Z' },
     })
     apiMocks.sha256KeyHash.mockResolvedValue('hash-stub')
+  })
+
+  it('forwards Copilot proxy and authorized Key updates through the existing editor contract', async () => {
+    vi.spyOn(window, 'open').mockReturnValue(null)
+    apiMocks.requestCopilotDeviceCode.mockResolvedValue({ deviceCode: 'device', userCode: 'code', verificationUri: 'https://github.com/login/device' })
+    apiMocks.pollCopilotAccessToken.mockResolvedValue({ accessToken: 'new-oauth-key' })
+    const wrapper = mountSection({ serviceType: 'copilot', proxyUrl: 'http://localhost:8080' })
+    const proxy = wrapper.findAll('input').find(input => input.attributes('placeholder') === 'channelEditor.transport.proxyUrl.placeholder')!
+    await proxy.setValue('http://localhost:9090')
+    expect(wrapper.emitted('update:proxyUrl')).toEqual([['http://localhost:9090']])
+    const authorize = wrapper.findAll('button').find(button => button.text().endsWith('copilotOAuth.button'))!
+    await authorize.trigger('click')
+    await vi.waitFor(() => expect(wrapper.emitted('update:apiKeys')).toEqual([[['sk-1', 'new-oauth-key']]]))
+    wrapper.unmount()
+    vi.restoreAllMocks()
   })
 
   it('renders opportunistic chip on key row', async () => {
