@@ -33,6 +33,7 @@ func Event(ctx context.Context, event, outcome string) {
 	if !allowed[outcome] {
 		outcome = "other"
 	}
+	DiagnosticsFromContext(ctx).Event(event, outcome, "")
 	traceEvent(ctx, event, outcome)
 	r := binding.registry
 	r.mu.Lock()

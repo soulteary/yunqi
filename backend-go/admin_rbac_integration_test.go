@@ -36,7 +36,7 @@ func TestAdminRolesProtectLegacySecretsAndScopedOperations(t *testing.T) {
 		if w.Code != 200 || !strings.Contains(w.Body.String(), "ch_owned") || strings.Contains(w.Body.String(), "ch_other") || strings.Contains(w.Body.String(), "secret-provider-key") || strings.Contains(w.Body.String(), "private.example") {
 			t.Fatalf("unsafe scoped inventory %s: %d %s", role, w.Code, w.Body.String())
 		}
-		for _, path := range []string{"/api/chat/channels", "/api/channels/export", "/api/entry-keys", "/api/admin-credentials"} {
+		for _, path := range []string{"/api/chat/channels", "/api/channels/export", "/api/entry-keys", "/api/admin-credentials", "/api/reports/request-timeline/req_example"} {
 			if got := invoke("GET", path, "key-"+role, ""); got.Code != 403 {
 				t.Fatalf("legacy bypass %s %s: %d %s", role, path, got.Code, got.Body.String())
 			}
