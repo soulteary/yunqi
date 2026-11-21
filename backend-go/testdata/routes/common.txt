@@ -426,6 +426,7 @@ POST /api/admin-credentials
 PUT /api/admin-credentials/:id
 POST /api/admin-credentials/:id/rotate
 GET /access
+GET /api/reports/request-timeline/:id
 GET /api/identity-proxy
 PUT /api/identity-proxy
 POST /api/identity-proxy/sessions/revoke

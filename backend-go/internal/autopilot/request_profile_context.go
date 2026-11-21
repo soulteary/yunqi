@@ -1,11 +1,15 @@
 package autopilot
 
-import "context"
+import (
+	"context"
+	"github.com/soulteary/yunqi/internal/telemetry"
+)
 
 type requestProfileContextKey struct{}
 
 // ContextWithRequestProfile 将请求画像按值写入 context，避免下游修改共享指针。
 func ContextWithRequestProfile(ctx context.Context, profile RequestProfile) context.Context {
+	profile.OTLPTraceID = telemetry.TraceID(ctx)
 	return context.WithValue(ctx, requestProfileContextKey{}, profile)
 }
 
@@ -15,5 +19,8 @@ func RequestProfileFromContext(ctx context.Context) (RequestProfile, bool) {
 		return RequestProfile{}, false
 	}
 	profile, ok := ctx.Value(requestProfileContextKey{}).(RequestProfile)
+	if ok && profile.OTLPTraceID == "" {
+		profile.OTLPTraceID = telemetry.TraceID(ctx)
+	}
 	return profile, ok
 }

@@ -446,6 +446,11 @@ func (p *ResponsesProvider) buildResponsesRequestFromClaude(c fiber.Ctx, bodyByt
 	if err := json.Unmarshal(bodyBytes, &claudeReq); err != nil {
 		return nil, err
 	}
+	for _, tool := range claudeReq.Tools {
+		if strings.HasPrefix(tool.Type, "web_search_") {
+			return nil, fmt.Errorf("hosted Claude web search cannot be converted to a client function tool; use a native Claude channel")
+		}
+	}
 
 	input := make([]map[string]interface{}, 0, len(claudeReq.Messages))
 	for _, msg := range claudeReq.Messages {
@@ -476,6 +481,9 @@ func (p *ResponsesProvider) buildResponsesRequestFromClaude(c fiber.Ctx, bodyByt
 				if !ok {
 					continue
 				}
+				if converters.HasClaudeSearchAttribution(block) && c != nil {
+					httpbridge.Header(c, "X-Yunqi-Search-Conversion", "source_blocks_preserved_as_text")
+				}
 				switch block["type"] {
 				case "thinking":
 					if thinking, ok := block["thinking"].(string); ok && thinking != "" {
@@ -489,11 +497,17 @@ func (p *ResponsesProvider) buildResponsesRequestFromClaude(c fiber.Ctx, bodyByt
 						})
 					}
 				case "text":
-					if text, ok := block["text"].(string); ok && text != "" {
+					text, _ := block["text"].(string)
+					text += converters.ClaudeSearchSourceText(block)
+					if text != "" {
 						contentBlocks = append(contentBlocks, map[string]interface{}{
 							"type": responsesTextContentType(role),
 							"text": text,
 						})
+					}
+				case "search_result", "web_search_tool_result":
+					if text := converters.ClaudeSearchSourceText(block); text != "" {
+						contentBlocks = append(contentBlocks, map[string]interface{}{"type": responsesTextContentType(role), "text": text})
 					}
 				case "tool_use":
 					flushMessage()
@@ -608,6 +622,9 @@ func extractClaudeToolResult(content interface{}) string {
 			block, ok := item.(map[string]interface{})
 			if !ok {
 				continue
+			}
+			if sources := converters.ClaudeSearchSourceText(block); sources != "" {
+				parts = append(parts, sources)
 			}
 			if text, ok := block["text"].(string); ok && text != "" {
 				parts = append(parts, text)

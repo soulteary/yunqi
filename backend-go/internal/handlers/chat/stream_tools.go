@@ -10,6 +10,7 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/converters"
 	"github.com/soulteary/yunqi/internal/handlers/common"
 	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/httpclient"
@@ -669,6 +670,10 @@ func processClaudeChatStreamLine(c fiber.Ctx, flusher http.Flusher, model string
 
 	eventType, _ := event["type"].(string)
 	switch eventType {
+	case "content_block_start":
+		if block, ok := event["content_block"].(map[string]interface{}); ok {
+			emitClaudeSearchTextToChat(c, flusher, model, converters.ClaudeSearchSourceText(block))
+		}
 	case "content_block_delta":
 		delta, ok := event["delta"].(map[string]interface{})
 		if !ok {
@@ -676,6 +681,10 @@ func processClaudeChatStreamLine(c fiber.Ctx, flusher http.Flusher, model string
 		}
 		deltaType, _ := delta["type"].(string)
 		switch deltaType {
+		case "citations_delta":
+			if citation, ok := delta["citation"].(map[string]interface{}); ok {
+				emitClaudeSearchTextToChat(c, flusher, model, converters.ClaudeCitationSourceText(citation))
+			}
 		case "thinking_delta":
 			thinking, _ := delta["thinking"].(string)
 			if thinking == "" {
@@ -893,4 +902,16 @@ func hasThoughtSignature(toolCall map[string]interface{}) bool {
 	}
 	sig, ok := google["thought_signature"].(string)
 	return ok && sig != ""
+}
+
+func emitClaudeSearchTextToChat(c fiber.Ctx, flusher http.Flusher, model, text string) {
+	if text == "" {
+		return
+	}
+	chunk := map[string]interface{}{"id": "chatcmpl-claude", "object": "chat.completion.chunk", "created": time.Now().Unix(), "model": model, "choices": []map[string]interface{}{{"index": 0, "delta": map[string]interface{}{"content": text}, "finish_reason": nil}}}
+	raw, _ := json.Marshal(chunk)
+	_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", raw)
+	if flusher != nil {
+		flusher.Flush()
+	}
 }
