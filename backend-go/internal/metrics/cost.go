@@ -142,3 +142,9 @@ func ApplyEffectiveCostMultiplier(listCostUSD float64, multiplier float64) float
 	}
 	return listCostUSD * multiplier
 }
+
+// CalculateTokenCostUSDWithPricingAndStatus returns the known price and whether
+// the configured prices cover all supplied token dimensions.
+func CalculateTokenCostUSDWithPricingAndStatus(pricing *config.ModelPricing, input, output, creation, read int64) (float64, bool) {
+	return calcCostWithPricing(pricing, input, output, creation, read), pricingCoversTokenUsage(pricing, input, output, creation, read)
+}
