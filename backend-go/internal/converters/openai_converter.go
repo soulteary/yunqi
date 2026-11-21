@@ -111,6 +111,9 @@ func (c *OpenAIChatConverter) ToProviderRequest(sess *session.Session, req *type
 			}
 		}
 	}
+	if choice, exists := openaiReq["tool_choice"]; exists {
+		openaiReq["tool_choice"] = responsesToolChoiceToOpenAIChat(choice)
+	}
 	if req.ParallelToolCalls != nil {
 		if _, hasTools := openaiReq["tools"]; hasTools {
 			openaiReq["parallel_tool_calls"] = *req.ParallelToolCalls
@@ -126,6 +129,26 @@ func (c *OpenAIChatConverter) ToProviderRequest(sess *session.Session, req *type
 	}
 
 	return openaiReq, nil
+}
+
+// responsesToolChoiceToOpenAIChat converts Responses' flat named function choice
+// to Chat Completions' nested shape, independently of Codex compatibility.
+func responsesToolChoiceToOpenAIChat(choice interface{}) interface{} {
+	object, ok := choice.(map[string]interface{})
+	if !ok || object["type"] != "function" {
+		return choice
+	}
+	if _, nested := object["function"]; nested {
+		return choice
+	}
+	name, ok := object["name"].(string)
+	if !ok || name == "" {
+		return choice
+	}
+	return map[string]interface{}{
+		"type":     "function",
+		"function": map[string]interface{}{"name": name},
+	}
 }
 
 // FromProviderResponse 将 OpenAI Chat 响应转换为 Responses 格式
