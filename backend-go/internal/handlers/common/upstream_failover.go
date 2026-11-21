@@ -506,6 +506,9 @@ func TryUpstreamWithAllKeys(
 	channelLogStore *metrics.ChannelLogStore,
 	opts ...TryUpstreamOption,
 ) (handled bool, successKey string, successBaseURLIdx int, failoverErr *FailoverError, usage *types.Usage, lastError error) {
+	if upstream != nil && !middleware.AuthorizeProxyRoute(c, envCfg, model, upstream.ChannelUID) {
+		return true, "", 0, nil, nil, nil
+	}
 	if upstream == nil || len(upstream.APIKeys) == 0 {
 		return false, "", 0, nil, nil, nil
 	}
@@ -1001,6 +1004,9 @@ func TryUpstreamWithAllKeys(
 			// 例如 Kimi K3/K2.7-code/K2.6 的 temperature/top_p/n 等为固定值，传入即 400。
 			// 约束数据随 model-registry 走 presetstore 刷新链路，运营者更新 JSON 即可生效，
 			// 不需要重新编译发版。
+			if !middleware.AuthorizeProxyRoute(c, envCfg, attemptModel, upstream.ChannelUID) {
+				return true, "", 0, nil, nil, nil
+			}
 			if paramCap := config.ResolveUpstreamCapability(attemptModel, upstream, cfgManager.UpstreamModelCapabilitiesSnapshot()); paramCap.Capability.ParamConstraints != nil {
 				if stripped, applied := ApplyKnownParamConstraints(attemptBody, paramCap.Capability.ParamConstraints); len(applied) > 0 {
 					attemptBody = stripped
