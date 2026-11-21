@@ -10,7 +10,7 @@ import (
 // completion, token limits, and explicit safety refusals that remain visible.
 func GeminiFinishReasonFailed(reason string) bool {
 	switch reason {
-	case "", "STOP", "MAX_TOKENS", "SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "IMAGE_SAFETY", "IMAGE_PROHIBITED_CONTENT":
+	case "", "FINISH_REASON_UNSPECIFIED", "STOP", "MAX_TOKENS", "SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "IMAGE_SAFETY", "IMAGE_PROHIBITED_CONTENT":
 		return false
 	default:
 		return true
@@ -48,4 +48,9 @@ func ValidateGeminiFinishReasons(data []byte) error {
 		}
 	}
 	return nil
+}
+
+// GeminiFinishReasonTerminal excludes the standard placeholder/default enum.
+func GeminiFinishReasonTerminal(reason string) bool {
+	return reason != "" && reason != "FINISH_REASON_UNSPECIFIED"
 }

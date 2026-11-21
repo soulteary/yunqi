@@ -337,7 +337,7 @@ func GeminiResponseToResponses(geminiResp map[string]interface{}, sessionID stri
 // geminiFinishReasonToResponsesStatus 将 Gemini finishReason 转换为 Responses status
 func geminiFinishReasonToResponsesStatus(finishReason string) string {
 	switch finishReason {
-	case "", "STOP":
+	case "", "FINISH_REASON_UNSPECIFIED", "STOP":
 		return "completed"
 	case "MAX_TOKENS":
 		return "incomplete"
@@ -541,7 +541,7 @@ func ConvertGeminiStreamToResponses(ctx context.Context, modelName string, origi
 		}
 
 		// 处理 finishReason
-		if finishReason := candidate.Get("finishReason"); finishReason.Exists() && finishReason.String() != "" {
+		if finishReason := candidate.Get("finishReason"); finishReason.Exists() && types.GeminiFinishReasonTerminal(finishReason.String()) {
 			// 先处理 usage（如果在同一 chunk 中）
 			if usage := root.Get("usageMetadata"); usage.Exists() {
 				st.UsageSeen = true

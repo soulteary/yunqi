@@ -60,3 +60,18 @@ func TestGeminiFinishOnlyTailFramesAreNotIgnored(t *testing.T) {
 		}
 	}
 }
+
+func TestGeminiUnspecifiedFinishWaitsForRealTerminal(t *testing.T) {
+	var state any
+	first := ConvertGeminiStreamToResponses(context.Background(), "m", nil, nil, []byte(`data: {"candidates":[{"content":{"parts":[{"text":"hello"}]},"finishReason":"FINISH_REASON_UNSPECIFIED"}]}`), &state)
+	joined := strings.Join(first, "")
+	for _, terminal := range []string{"response.completed", "response.failed", "response.incomplete"} {
+		if strings.Contains(joined, terminal) {
+			t.Fatalf("placeholder completed before real terminal: %s", joined)
+		}
+	}
+	final := ConvertGeminiStreamToResponses(context.Background(), "m", nil, nil, []byte(`data: {"candidates":[{"finishReason":"STOP"}]}`), &state)
+	if !strings.Contains(strings.Join(final, ""), "event: response.completed\n") {
+		t.Fatalf("STOP after placeholder did not complete: %v", final)
+	}
+}

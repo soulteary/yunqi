@@ -125,3 +125,11 @@ func TestGeminiInvalidFinishReasonTypesFailAtEveryStage(t *testing.T) {
 		})
 	}
 }
+
+func TestGeminiUnspecifiedFinishDoesNotFailPreflight(t *testing.T) {
+	raw := "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"hello\"}]},\"finishReason\":\"FINISH_REASON_UNSPECIFIED\"}]}\n\ndata: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\" world\"}]},\"finishReason\":\"STOP\"}]}\n\n"
+	resp := &http.Response{Body: io.NopCloser(strings.NewReader(raw))}
+	if _, _, _, err := preflightGeminiStream(resp, "gemini", common.StreamPreflightTimeouts{}); err != nil {
+		t.Fatalf("placeholder retried: %v", err)
+	}
+}
