@@ -37,6 +37,11 @@ func (c *OpenAIChatConverter) ToProviderRequest(sess *session.Session, req *type
 			openaiReq["response_format"] = json.RawMessage(format.Raw)
 		}
 	}
+	for key, value := range map[string]json.RawMessage{"prompt_cache_key": req.PromptCacheKey, "prompt_cache_options": req.PromptCacheOptions, "prompt_cache_retention": req.PromptCacheRetention} {
+		if len(value) > 0 {
+			openaiReq[key] = value
+		}
+	}
 	// 复制其他参数
 	if req.MaxTokens > 0 {
 		openaiReq["max_tokens"] = req.MaxTokens

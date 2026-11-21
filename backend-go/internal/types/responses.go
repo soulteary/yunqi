@@ -26,6 +26,11 @@ type ResponsesRequest struct {
 	ToolChoice         interface{}              `json:"tool_choice,omitempty"`         // string 或 object
 	ParallelToolCalls  *bool                    `json:"parallel_tool_calls,omitempty"` // 是否允许并行工具调用
 
+	// 保留原始 JSON，区分未传、null、false 和 0；不推断供应商 TTL。
+	PromptCacheKey       json.RawMessage `json:"prompt_cache_key,omitempty"`
+	PromptCacheOptions   json.RawMessage `json:"prompt_cache_options,omitempty"`
+	PromptCacheRetention json.RawMessage `json:"prompt_cache_retention,omitempty"`
+
 	// TransformerMetadata 转换器元数据（仅内存使用，不序列化）
 	// 用于在单次请求的转换流程中保留原始格式信息，如 system 数组格式等
 	// 注意：此字段不会通过 JSON 序列化保留，仅在同一请求处理链中有效

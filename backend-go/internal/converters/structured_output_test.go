@@ -54,7 +54,7 @@ func TestClaudeStructuredOutputRejectsUnsupported(t *testing.T) {
 }
 
 func TestGeminiJSONObjectStructuredOutput(t *testing.T) {
-	req := &types.ResponsesRequest{Input:"hello", Text: json.RawMessage(`{"format":{"type":"json_object"}}`)}
+	req := &types.ResponsesRequest{Input: "hello", Text: json.RawMessage(`{"format":{"type":"json_object"}}`)}
 	converted, err := ResponsesToGeminiRequest(&session.Session{}, req, "m")
 	if err != nil {
 		t.Fatal(err)

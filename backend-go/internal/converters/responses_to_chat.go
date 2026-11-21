@@ -41,6 +41,8 @@ func ConvertResponsesToOpenAIChatRequest(modelName string, inputRawJSON []byte, 
 			out, _ = sjson.SetRaw(out, "response_format", format.Raw)
 		}
 	}
+	out = copyOpenAICacheFields(root, out)
+
 	// 设置 model
 	out, _ = sjson.Set(out, "model", modelName)
 
@@ -464,6 +466,8 @@ func ConvertChatRequestToResponsesRequest(chatBody []byte) []byte {
 			out, _ = sjson.SetRaw(out, "text.format", format.Raw)
 		}
 	}
+	out = copyOpenAICacheFields(root, out)
+
 	// model
 	if model := root.Get("model"); model.Exists() {
 		out, _ = sjson.Set(out, "model", model.String())
@@ -864,4 +868,16 @@ func ConvertResponsesResponseToChatResponse(responsesBody []byte, model string) 
 func jsonString(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b)
+}
+
+// copyOpenAICacheFields preserves field presence and exact JSON values between
+// OpenAI protocols. Cache policy is never translated to another vendor's TTL.
+func copyOpenAICacheFields(root gjson.Result, out string) string {
+	for _, key := range []string{"prompt_cache_key", "prompt_cache_options", "prompt_cache_retention"} {
+		value := root.Get(key)
+		if value.Exists() || value.Raw == "null" {
+			out, _ = sjson.SetRaw(out, key, value.Raw)
+		}
+	}
+	return out
 }
