@@ -18,6 +18,20 @@ const baseChannel = {
 } as unknown as Channel
 
 describe('buildManagedChannelPatch', () => {
+  it('保留未提供的出口字段，显式 null/false 才清除', () => {
+    const original = { ...baseChannel, outboundNetwork: { proxyMode: 'direct' as const }, proxyPreferDirect: true }
+    expect(buildManagedChannelPatch(original, { ...baseChannel })).toEqual({})
+    expect(buildManagedChannelPatch(original, { ...original, outboundNetwork: null, proxyPreferDirect: false }))
+      .toEqual({ outboundNetwork: null, proxyPreferDirect: false })
+  })
+
+  it('出口配置按结构比较，DNS 数组变化才提交', () => {
+    const original = { ...baseChannel, outboundNetwork: { dns: { mode: 'bound' as const, servers: ['127.0.0.1:53'] } } }
+    expect(buildManagedChannelPatch(original, structuredClone(original))).toEqual({})
+    const outboundNetwork = { dns: { mode: 'bound', servers: ['127.0.0.2:53'] } }
+    expect(buildManagedChannelPatch(original, { ...original, outboundNetwork })).toEqual({ outboundNetwork })
+    expect(listDroppedManagedChannelFields(original, { ...original, outboundNetwork, proxyPreferDirect: true })).toEqual([])
+  })
   it('无变化时返回空对象', () => {
     expect(buildManagedChannelPatch(baseChannel, { ...baseChannel })).toEqual({})
   })

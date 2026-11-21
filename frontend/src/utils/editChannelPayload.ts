@@ -9,6 +9,7 @@ export const EDIT_CHANNEL_PAYLOAD_KEYS = [
   'rateLimitRpm', 'rateLimitWindowMinutes', 'rateLimitMaxConcurrent', 'rateLimitAutoFromHeaders',
   'autoBlacklistBalance', 'normalizeMetadataUserId', 'stripBillingHeader', 'normalizeSystemRoleToTopLevel',
   'responsesReasoningFold', 'codexToolCompat', 'stripCodexClientTools', 'convertImageUrlToB64Json', 'tags', 'racing',
+  'proxyPreferDirect', 'outboundNetwork',
 ] as const
 
 export function extractEditChannelPayloadFields(channel: Channel): Record<string, unknown> {
