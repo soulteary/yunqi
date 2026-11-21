@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/converters"
 	"github.com/soulteary/yunqi/internal/handlers/chat"
 	"github.com/soulteary/yunqi/internal/handlers/gemini"
 	"github.com/soulteary/yunqi/internal/httpbridge"
@@ -39,16 +40,18 @@ type Effect struct {
 	Status string `json:"status"`
 }
 type Result struct {
-	Mode           string            `json:"mode"`
-	SourceProtocol string            `json:"sourceProtocol"`
-	TargetProtocol string            `json:"targetProtocol"`
-	Method         string            `json:"method"`
-	URL            string            `json:"url"`
-	Headers        map[string]string `json:"headers"`
-	Body           json.RawMessage   `json:"body,omitempty"`
-	BodyOmitted    bool              `json:"bodyOmitted"`
-	Effects        []Effect          `json:"effects"`
-	Boundaries     []string          `json:"boundaries"`
+	Conversion     converters.ConversionReport `json:"conversion"`
+	Blocked        bool                        `json:"blocked"`
+	Mode           string                      `json:"mode"`
+	SourceProtocol string                      `json:"sourceProtocol"`
+	TargetProtocol string                      `json:"targetProtocol"`
+	Method         string                      `json:"method"`
+	URL            string                      `json:"url"`
+	Headers        map[string]string           `json:"headers"`
+	Body           json.RawMessage             `json:"body,omitempty"`
+	BodyOmitted    bool                        `json:"bodyOmitted"`
+	Effects        []Effect                    `json:"effects"`
+	Boundaries     []string                    `json:"boundaries"`
 }
 
 func ApplyDraft(up config.UpstreamConfig, draft map[string]json.RawMessage) (config.UpstreamConfig, error) {
@@ -107,6 +110,8 @@ func Build(up config.UpstreamConfig, input Input) (Result, error) {
 		return result, err
 	}
 	result.TargetProtocol = targetProtocol(runtime.ServiceType)
+	result.Conversion, err = converters.AnalyzeConversion(input.Body, body, input.Protocol, result.TargetProtocol)
+	result.Blocked = err != nil && input.Protocol != result.TargetProtocol
 	result.Mode = "conversion"
 	if input.Protocol == result.TargetProtocol {
 		result.Mode = "native_with_compatibility"
@@ -190,10 +195,7 @@ func safeURL(u *url.URL, key string) string {
 	copy.User = nil
 	q := copy.Query()
 	for name := range q {
-		lower := strings.ToLower(name)
-		if strings.Contains(lower, "key") || strings.Contains(lower, "token") || strings.Contains(lower, "secret") {
-			q.Set(name, redaction.Mask)
-		}
+		q.Set(name, redaction.Mask)
 	}
 	copy.RawQuery = q.Encode()
 	value := copy.String()

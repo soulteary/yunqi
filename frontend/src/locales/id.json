@@ -1670,6 +1670,9 @@
       "no_effect_for_sample": "No visible effect for this sample",
       "default_or_unset": "Unset or default value",
       "overridden_by_managed_policy": "Overridden by managed channel runtime policy"
-    }
+    },
+    "blocked": "The runtime conversion guard would reject this request. Resolve the diagnostics before sending.",
+    "conversionQuality": "Conversion quality within reported coverage",
+    "coverage": "Audited coverage (not all fields)"
   }
 }

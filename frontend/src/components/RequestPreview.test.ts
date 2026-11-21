@@ -10,7 +10,7 @@ const pass = defineComponent({ template: '<div><slot /></div>' })
 function render() {
  return mount(RequestPreview, { props: { channelUid: 'ch_test', channelType: 'chat', draft: { serviceType: 'openai', fastMode: false, apiKeys: ['private'] } }, global: { stubs: { VExpansionPanels: pass, VExpansionPanel: pass, VExpansionPanelText: pass, VAlert: pass, VSelect: pass, VTextField: pass, VTextarea: pass, VList: pass, VListItem: pass, VBtn: { template: '<button><slot /></button>' } } } })
 }
-const result = { mode: 'native_with_compatibility', sourceProtocol: 'chat', targetProtocol: 'chat', method: 'POST', url: 'https://example.test/v1/chat/completions', headers: { Authorization: '[REDACTED]' }, body: { model: 'sample' }, effects: [], boundaries: [], bodyOmitted: false }
+const result = { conversion: { quality: 'partial', coverage: ['structured_output'], diagnostics: [], steps: [] }, blocked: false, mode: 'native_with_compatibility', sourceProtocol: 'chat', targetProtocol: 'chat', method: 'POST', url: 'https://example.test/v1/chat/completions', headers: { Authorization: '[REDACTED]' }, body: { model: 'sample' }, effects: [], boundaries: [], bodyOmitted: false }
 describe('request preview', () => {
  beforeEach(() => { vi.clearAllMocks() })
  it('sends only explicit sample/draft options after click and clears stale result on edits', async () => {

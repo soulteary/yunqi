@@ -6,6 +6,8 @@ export interface RequestPreviewInput {
   draft?: Record<string, unknown>
 }
 export interface RequestPreviewResult {
+  conversion: { quality: string; coverage: string[]; diagnostics: { field: string; action: string; code: string }[]; steps: { from: string; to: string }[] }
+  blocked: boolean
   mode: string
   sourceProtocol: string
   targetProtocol: string

@@ -1670,6 +1670,9 @@
       "no_effect_for_sample": "当前示例未观察到变化",
       "default_or_unset": "未设置或使用默认值",
       "overridden_by_managed_policy": "已被托管渠道运行策略覆盖"
-    }
+    },
+    "blocked": "实际转换保护会拒绝此请求，请先处理下方诊断。",
+    "conversionQuality": "已覆盖范围内的转换质量",
+    "coverage": "检测覆盖范围（不代表所有字段）"
   }
 }

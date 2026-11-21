@@ -10,7 +10,11 @@
         <v-alert v-if="error" type="error" variant="tonal" class="mt-3">{{ error }}</v-alert>
         <template v-if="result">
           <p class="mt-3">{{ t(`requestPreview.mode.${result.mode}`) }} · {{ result.sourceProtocol }} → {{ result.targetProtocol }}</p>
+          <v-alert v-if="result.blocked" type="error" variant="tonal">{{ t('requestPreview.blocked') }}</v-alert>
+          <p>{{ t('requestPreview.conversionQuality') }}: {{ result.conversion.quality }}</p>
+          <p class="text-caption">{{ t('requestPreview.coverage') }}: {{ result.conversion.coverage.join(', ') }}</p>
           <v-list density="compact">
+            <v-list-item v-for="(diagnostic, index) in result.conversion.diagnostics" :key="`diagnostic-${index}`" :title="diagnostic.field" :subtitle="`${diagnostic.action} · ${diagnostic.code}`" />
             <v-list-item v-for="effect in result.effects" :key="effect.field" :title="effect.field" :subtitle="t(`requestPreview.effect.${effect.status}`)" />
           </v-list>
           <p class="text-caption">{{ t('requestPreview.sampleBoundary') }}</p>
