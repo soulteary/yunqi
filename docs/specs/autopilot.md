@@ -216,8 +216,6 @@ Autopilot 是 Yunqi 的智能路由与渠道托管子系统，由 Manager + Smar
 | 工具 | 用途 |
 |---|---|
 | `benchmark-report` | 独立的渠道无关 benchmark 场景选型报告 CLI，不依赖运行中的后端（详见 §5.7） |
-| `cc-sim` | 请求模拟 |
-| `stream_verify` | 流式响应验证 |
 
 ## 3. 核心结构体
 
@@ -658,6 +656,8 @@ health(40) > fastDecay(25) > successRate(20) > latency(10) > cost(5)
 提交：`a4bf60be`、`2fb72449`、`3d58615a`、`a3429e8f`、`179c9580`
 
 - 位置 `backend-go/cmd/benchmark-report/main.go`，用法 `benchmark-report -config <config.json>`（默认 `.config/config.json`）。不依赖运行中的后端：in-memory SQLite 作 ModelProfileStore + 合成渠道 `ch_synthetic_registry`。
+- 配置以只读快照加载：原文件必须存在且可读取；默认值与迁移仅作用于私有临时副本（目录 0700、文件 0600），正常结束或加载失败时删除副本。不会创建、迁移、监听或备份原配置；报告写入 stdout，供基准刷新脚本捕获。
+- 从仓库根目录编译：`cd backend-go && go build -o benchmark-report ./cmd/benchmark-report`；CLI 二进制为本地产物，不纳入版本管理。
 - 候选池由 presetstore 默认快照的 `BenchmarkProfiles` 按 CanonicalModel 去重合成（`Source="synthetic_registry"`，不注入 upstreamCapabilities 的正则 patterns 防正则串泄漏），再用 `config.BuiltinUpstreamModelCapabilities` 补齐上下文/effort/能力布尔。
 - 6 个固定场景（`benchmark_report.go:73`）：worker/balanced、supervisor/quality_first、lightweight/cost_first、long_context ctx≥200k、long_context ctx≥1M、worker/balanced coding。每场景跑一次与真实路由一致的 frontier 选型，失败回退 `betterRankedModel` 链并标注 `fallback:`。
 - 输出：`[BenchmarkSelectionReport]` 每场景一行 + Top 5 ASCII 表（`# / model / effort / bench / cost / tier`）。无实测证据时 bench 列渲染 `-` 且选中行带 `bench_evidence=none`。
