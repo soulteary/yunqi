@@ -1,6 +1,9 @@
 package common
 
 import (
+	"bytes"
+	"io"
+	"net/http"
 	"testing"
 
 	"github.com/soulteary/yunqi/internal/autopilot"
@@ -175,5 +178,44 @@ func TestRewriteOutboundEffort_ByChannelKind(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestFinalProviderEffortPreservesSchemaBytes(t *testing.T) {
+	schema := `{"type":"object","properties":{"z":{"type":"string"},"a":{"enum":[{"title":"literal"}]}},"required":["z","a"],"additionalProperties":false}`
+	for _, tc := range []struct {
+		body, path, service string
+		kind                scheduler.ChannelKind
+	}{
+		{`{"messages":[],"output_config":{"format":{"type":"json_schema","schema":` + schema + `}}}`, "output_config.format.schema", "claude", scheduler.ChannelKindMessages},
+		{`{"messages":[],"response_format":{"type":"json_schema","json_schema":{"schema":` + schema + `}}}`, "response_format.json_schema.schema", "openai", scheduler.ChannelKindChat},
+		{`{"input":[],"text":{"format":{"type":"json_schema","schema":` + schema + `}}}`, "text.format.schema", "responses", scheduler.ChannelKindResponses},
+		{`{"contents":[],"generationConfig":{"responseJsonSchema":` + schema + `}}`, "generationConfig.responseJsonSchema", "gemini", scheduler.ChannelKindGemini},
+		{`{"messages":[],"tools":[{"type":"function","function":{"name":"t","parameters":` + schema + `}}]}`, "tools.0.function.parameters", "openai", scheduler.ChannelKindChat},
+	} {
+		req, err := http.NewRequest(http.MethodPost, "https://example.invalid", bytes.NewBufferString(tc.body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		target := &autopilot.ResolvedRouteTarget{Model: "unknown-model", Effort: autopilot.EffortHigh, EffortDecided: true}
+		if !applyResolvedEffortToProviderRequest(req, target, &config.UpstreamConfig{ServiceType: tc.service}, tc.kind) {
+			t.Fatalf("effort not applied for %s", tc.service)
+		}
+		sent, err := io.ReadAll(req.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		replay, err := req.GetBody()
+		if err != nil {
+			t.Fatal(err)
+		}
+		again, err := io.ReadAll(replay)
+		_ = replay.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if gjson.GetBytes(sent, tc.path).Raw != schema || !bytes.Equal(sent, again) || int64(len(sent)) != req.ContentLength {
+			t.Fatalf("schema order/replay altered for %s: %s", tc.path, sent)
+		}
 	}
 }

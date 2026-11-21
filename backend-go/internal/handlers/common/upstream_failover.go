@@ -2985,7 +2985,7 @@ func rewriteOutboundEffort(body []byte, target *autopilot.ResolvedRouteTarget, u
 	if err != nil {
 		return body, false
 	}
-	return effortBody, true
+	return preserveOutboundSchemaBytes(body, effortBody), true
 }
 
 // applyResolvedEffortToProviderRequest 原地更新最终出站 HTTP 请求并保持 GetBody 可重放。
