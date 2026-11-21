@@ -3,6 +3,7 @@
 package telemetry
 
 import (
+	"context"
 	"fmt"
 	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/httpbridge"
@@ -24,6 +25,7 @@ type requestSeries struct {
 	canceled uint64
 }
 type Registry struct {
+	events   map[string]uint64
 	mu       sync.Mutex
 	requests map[string]*requestSeries
 	active   map[string]int64
@@ -63,6 +65,7 @@ func (r *Registry) Middleware() fiber.Handler {
 		if kind == "" {
 			return c.Next()
 		}
+		httpbridge.SetRequest(c, req.WithContext(context.WithValue(req.Context(), metricContextKey{}, requestMetricContext{r, kind})))
 		start := time.Now()
 		r.mu.Lock()
 		r.active[kind]++
@@ -123,6 +126,10 @@ func (r *Registry) WritePrometheus(w io.Writer) {
 	for key, value := range r.active {
 		active[key] = value
 	}
+	events := make(map[string]uint64, len(r.events))
+	for key, value := range r.events {
+		events[key] = value
+	}
 	r.mu.Unlock()
 	keys := make([]string, 0, len(requests))
 	for key := range requests {
@@ -157,6 +164,7 @@ func (r *Registry) WritePrometheus(w io.Writer) {
 	for _, kind := range kinds {
 		_, _ = fmt.Fprintf(w, "yunqi_proxy_inflight{endpoint=%q} %d\n", kind, active[kind])
 	}
+	writeEvents(w, events)
 	var mem runtime.MemStats
 	runtime.ReadMemStats(&mem)
 	_, _ = fmt.Fprintf(w, "# HELP yunqi_runtime_goroutines Current Go goroutines.\n# TYPE yunqi_runtime_goroutines gauge\nyunqi_runtime_goroutines %d\n# HELP yunqi_runtime_heap_alloc_bytes Current Go heap allocation.\n# TYPE yunqi_runtime_heap_alloc_bytes gauge\nyunqi_runtime_heap_alloc_bytes %d\n", runtime.NumGoroutine(), mem.HeapAlloc)

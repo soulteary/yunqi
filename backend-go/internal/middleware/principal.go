@@ -8,6 +8,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/httpbridge"
+	"github.com/soulteary/yunqi/internal/telemetry"
 )
 
 // ContextKeyPrincipalID is a full cryptographic identity, never a display mask.
@@ -52,6 +53,7 @@ func ProxyAdmissionMiddleware(env *config.EnvConfig) fiber.Handler {
 		gate.mu.Lock()
 		if gate.active[id] >= limit {
 			gate.mu.Unlock()
+			telemetry.Event(httpbridge.Request(c).Context(), "limiter", "concurrency")
 			httpbridge.Writer(c).Header().Set("Retry-After", "1")
 			httpbridge.JSON(c, http.StatusTooManyRequests, fiber.Map{"error": "proxy_concurrency_exceeded"})
 			httpbridge.Abort(c)

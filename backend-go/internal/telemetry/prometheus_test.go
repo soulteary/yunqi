@@ -101,3 +101,27 @@ func TestSlowScrapeDoesNotBlockRequestMetrics(t *testing.T) {
 	close(w.release)
 	<-done
 }
+func TestEventLabelsAreBoundedAndUseRequestRegistry(t *testing.T) {
+	r := NewRegistry()
+	app := httpbridge.NewApp()
+	app.Use(r.Middleware())
+	app.Post("/v1/responses", func(c fiber.Ctx) error {
+		Event(httpbridge.Request(c).Context(), "failover", "http_error")
+		Event(httpbridge.Request(c).Context(), "limiter", "secret-key")
+		Event(httpbridge.Request(c).Context(), "sse_terminal", "completed")
+		Event(httpbridge.Request(c).Context(), "unknown-secret-event", "secret")
+		return nil
+	})
+	httpbridge.Handler(app).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("POST", "/v1/responses", nil))
+	var out bytes.Buffer
+	r.WritePrometheus(&out)
+	s := out.String()
+	for _, entry := range []string{`yunqi_failover_decisions_total{endpoint="responses",outcome="http_error"} 1`, `yunqi_limiter_rejections_total{endpoint="responses",outcome="other"} 1`, `yunqi_sse_terminals_total{endpoint="responses",outcome="completed"} 1`} {
+		if !strings.Contains(s, entry) {
+			t.Fatal(s)
+		}
+	}
+	if strings.Contains(s, "secret") {
+		t.Fatal("unbounded event labels")
+	}
+}
