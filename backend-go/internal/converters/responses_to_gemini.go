@@ -446,14 +446,8 @@ func ConvertGeminiStreamToResponses(ctx context.Context, modelName string, origi
 
 	for _, candidate := range candidates.Array() {
 		content := candidate.Get("content")
-		if !content.Exists() {
-			continue
-		}
 
 		parts := content.Get("parts")
-		if !parts.Exists() || !parts.IsArray() {
-			continue
-		}
 
 		for _, part := range parts.Array() {
 			// 处理文本内容

@@ -49,3 +49,14 @@ func TestGeminiInvalidFinishReasonTypesCannotCompleteResponses(t *testing.T) {
 		}
 	}
 }
+
+func TestGeminiFinishOnlyTailFramesAreNotIgnored(t *testing.T) {
+	for _, tc := range []struct{ reason, terminal string }{{`"STOP"`, "response.completed"}, {`"MAX_TOKENS"`, "response.incomplete"}, {`"SAFETY"`, "response.failed"}, {`"MALFORMED_RESPONSE"`, "response.failed"}, {`42`, "response.failed"}} {
+		var state any
+		ConvertGeminiStreamToResponses(context.Background(), "m", nil, nil, []byte(`data: {"candidates":[{"content":{"parts":[{"text":"hello"}]}}]}`), &state)
+		events := ConvertGeminiStreamToResponses(context.Background(), "m", nil, nil, []byte(`data: {"candidates":[{"finishReason":`+tc.reason+`}]}`), &state)
+		if !strings.Contains(strings.Join(events, ""), "event: "+tc.terminal+"\n") {
+			t.Fatalf("ignored finish-only %s: %v", tc.reason, events)
+		}
+	}
+}
