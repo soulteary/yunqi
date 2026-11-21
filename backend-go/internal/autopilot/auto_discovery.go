@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/copilot"
 	"github.com/soulteary/yunqi/internal/eventbus"
 	"github.com/soulteary/yunqi/internal/httpclient"
 	"github.com/soulteary/yunqi/internal/utils"
@@ -42,22 +43,23 @@ const (
 
 // EndpointDiscoveryResult 单个 (baseURL, key) 端点的发现结果。
 type EndpointDiscoveryResult struct {
-	KeyMask                  string               `json:"keyMask"`
-	BaseURL                  string               `json:"baseUrl"`
-	ModelsCount              int                  `json:"modelsCount"`
-	Models                   []string             `json:"models,omitempty"`
-	ProtocolOk               bool                 `json:"protocolOk"`
-	ErrorMessage             string               `json:"errorMessage,omitempty"`
-	ModelDiscoverySource     string               `json:"modelDiscoverySource,omitempty"`
-	ModelDiscoveryMessage    string               `json:"modelDiscoveryMessage,omitempty"`
-	ModelsDiscoveredAt       *time.Time           `json:"modelsDiscoveredAt,omitempty"`
-	ProtocolModels           map[string][]string  `json:"protocolModels,omitempty"`
-	ProtocolDiscoveredAt     map[string]time.Time `json:"protocolDiscoveredAt,omitempty"`
-	ProtocolDiscoverySource  map[string]string    `json:"protocolDiscoverySource,omitempty"`
-	ProtocolDiscoveryMessage map[string]string    `json:"protocolDiscoveryMessage,omitempty"`
-	ProtocolDiscoveryError   map[string]string    `json:"protocolDiscoveryError,omitempty"`
-	apiKey                   string               `json:"-"`
-	credentialUID            string               `json:"-"`
+	KeyMask                  string                 `json:"keyMask"`
+	BaseURL                  string                 `json:"baseUrl"`
+	ModelsCount              int                    `json:"modelsCount"`
+	ModelDetails             []copilot.ModelDetails `json:"modelDetails,omitempty"`
+	Models                   []string               `json:"models,omitempty"`
+	ProtocolOk               bool                   `json:"protocolOk"`
+	ErrorMessage             string                 `json:"errorMessage,omitempty"`
+	ModelDiscoverySource     string                 `json:"modelDiscoverySource,omitempty"`
+	ModelDiscoveryMessage    string                 `json:"modelDiscoveryMessage,omitempty"`
+	ModelsDiscoveredAt       *time.Time             `json:"modelsDiscoveredAt,omitempty"`
+	ProtocolModels           map[string][]string    `json:"protocolModels,omitempty"`
+	ProtocolDiscoveredAt     map[string]time.Time   `json:"protocolDiscoveredAt,omitempty"`
+	ProtocolDiscoverySource  map[string]string      `json:"protocolDiscoverySource,omitempty"`
+	ProtocolDiscoveryMessage map[string]string      `json:"protocolDiscoveryMessage,omitempty"`
+	ProtocolDiscoveryError   map[string]string      `json:"protocolDiscoveryError,omitempty"`
+	apiKey                   string                 `json:"-"`
+	credentialUID            string                 `json:"-"`
 	// usedClientFingerprint 标记该端点裸请求被客户端指纹风控拒绝、
 	// 带 Claude Code 伪装头重试后成功；runDiscovery 据此学习渠道级标记。
 	usedClientFingerprint bool `json:"-"`
@@ -88,6 +90,7 @@ type DiscoveryTask struct {
 // 内存状态机：每个渠道同时只运行一个发现任务，重复触发会被拒绝。
 // 所有配置为空时零值即可用，不触发任何实际操作。
 type AutoDiscoveryRunner struct {
+	copilotResolver                *copilot.EndpointResolver
 	mu                             sync.Mutex
 	tasks                          map[string]*DiscoveryTask // channelUID -> task
 	store                          *ProfileStore             // nil 时不写画像，只记录结果
@@ -812,6 +815,7 @@ func (r *AutoDiscoveryRunner) discoverEndpointsWithCheckpoint(ctx context.Contex
 					KeyMask:                  utils.MaskAPIKey(key),
 					BaseURL:                  baseURL,
 					Models:                   cp.Models,
+					ModelDetails:             copilot.CloneModelDetails(cp.ModelDetails),
 					ModelsCount:              cp.ModelsCount,
 					ProtocolOk:               cp.ProtocolOk,
 					ModelDiscoverySource:     cp.ModelDiscoverySource,
@@ -861,6 +865,7 @@ func (r *AutoDiscoveryRunner) discoverEndpointsWithCheckpoint(ctx context.Contex
 				CredentialUID:            result.credentialUID,
 				BaseURL:                  canonicalBaseURL,
 				Models:                   append([]string(nil), result.Models...),
+				ModelDetails:             copilot.CloneModelDetails(result.ModelDetails),
 				ModelsCount:              result.ModelsCount,
 				ProtocolOk:               result.ProtocolOk,
 				Error:                    result.ErrorMessage,
@@ -1086,6 +1091,26 @@ func (r *AutoDiscoveryRunner) probeEndpoint(ctx context.Context, client *http.Cl
 	}
 	if channel == nil {
 		result.ErrorMessage = "渠道配置为空"
+		return result
+	}
+
+	if channel.ServiceType == "copilot" {
+		resolver := r.copilotResolver
+		if resolver == nil {
+			resolver = copilot.DefaultEndpointResolver()
+		}
+		_, _, details, err := resolver.Models(ctx, apiKey, channel.ProxyURL)
+		if err != nil {
+			result.ErrorMessage = err.Error()
+			return result
+		}
+		result.ModelDetails = details
+		for _, model := range details {
+			result.Models = append(result.Models, model.ID)
+		}
+		result.ModelsCount = len(result.Models)
+		result.ProtocolOk = true
+		setModelDiscoveryMetadata(&result, ModelDiscoverySourceModelsAPI, "Copilot models API endpoint metadata")
 		return result
 	}
 

@@ -99,6 +99,7 @@ func referencedCapabilities(v config.ChannelView, byUID map[string]config.Endpoi
 type CreateRequest struct {
 	Kind                    string                `json:"kind"` // messages|chat|responses|gemini|images|vectors
 	Name                    string                `json:"name"`
+	CopilotProtocol         string                `json:"copilotProtocol,omitempty"`
 	ServiceType             string                `json:"serviceType"`
 	BaseURL                 string                `json:"baseUrl"`
 	BaseURLs                []string              `json:"baseUrls"`
@@ -137,6 +138,7 @@ func (h *Handler) Create(c fiber.Ctx) error {
 	up := config.UpstreamConfig{
 		Name:                    req.Name,
 		ServiceType:             req.ServiceType,
+		CopilotProtocol:         req.CopilotProtocol,
 		BaseURL:                 req.BaseURL,
 		BaseURLs:                req.BaseURLs,
 		APIKeys:                 req.APIKeys,
@@ -169,6 +171,7 @@ func (h *Handler) Create(c fiber.Ctx) error {
 type UpdateRequest struct {
 	Kind                          *string                                   `json:"kind"`
 	Name                          *string                                   `json:"name"`
+	CopilotProtocol               *string                                   `json:"copilotProtocol"`
 	ServiceType                   *string                                   `json:"serviceType"`
 	BaseURL                       *string                                   `json:"baseUrl"`
 	BaseURLs                      []string                                  `json:"baseUrls"`
@@ -245,6 +248,7 @@ func (h *Handler) Update(c fiber.Ctx) error {
 	updates := config.UpstreamUpdate{
 		Name:                          req.Name,
 		ServiceType:                   req.ServiceType,
+		CopilotProtocol:               req.CopilotProtocol,
 		BaseURL:                       req.BaseURL,
 		BaseURLs:                      req.BaseURLs,
 		APIKeys:                       req.APIKeys,

@@ -10,7 +10,6 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/converters"
-	"github.com/soulteary/yunqi/internal/copilot"
 	"github.com/soulteary/yunqi/internal/handlers/common"
 	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/providers"
@@ -191,6 +190,17 @@ func buildProviderRequest(
 	model string,
 	isStream bool,
 ) (*http.Request, error) {
+	if upstream.ServiceType == "copilot" {
+		effectiveModel := extractRequestModel(bodyBytes, model)
+		chatBody, err := buildChatCompletionRequestBody(bodyBytes, effectiveModel, effectiveModel, upstream, true)
+		if err != nil {
+			return nil, err
+		}
+		provider := &providers.ResponsesProvider{}
+		req, _, err := provider.ConvertBodyToProviderRequest(c, upstream, apiKey, chatBody, "/v1/chat/completions")
+		return req, err
+	}
+
 	// 流式桥接改写：非流式客户端请求经仅接受流式渠道时强制以上游流式发送，
 	// 响应侧按 Content-Type 合成回非流式（见 common.ReadUpstreamNonStreamBody）。
 	// 本函数的 claude 分支从 isStream 参数而非请求体派生上游 stream 字段，
@@ -225,7 +235,7 @@ func buildProviderRequest(
 			url = fmt.Sprintf("%s/v1/chat/completions", strings.TrimRight(baseURL, "/"))
 		}
 
-	case "responses", "copilot":
+	case "responses":
 		// Responses/Copilot 上游：转换 Chat 格式为 Responses 格式
 		chatBody, err := buildChatCompletionRequestBody(bodyBytes, effectiveModel, mappedModel, upstream, true)
 		if err != nil {
@@ -237,27 +247,6 @@ func buildProviderRequest(
 		} else {
 			url = fmt.Sprintf("%s/v1/responses", strings.TrimRight(baseURL, "/"))
 		}
-		// copilot 使用 token exchange 返回的动态端点，而非渠道静态 baseURL
-		if upstream.ServiceType == "copilot" {
-			copilotToken, copilotBaseURL, err := copilot.ResolveTokenWithProxy(httpbridge.Request(c).Context(), apiKey, upstream.ProxyURL)
-			if err != nil {
-				return nil, fmt.Errorf("copilot token 交换失败: %w", err)
-			}
-			if copilotBaseURL != "" {
-				url = strings.TrimRight(copilotBaseURL, "/") + "/responses"
-			}
-			req, err := http.NewRequestWithContext(httpbridge.Request(c).Context(), "POST", url, bytes.NewReader(requestBody))
-			if err != nil {
-				return nil, err
-			}
-			req.Header = utils.PrepareUpstreamHeaders(c, req.URL.Host)
-			req.Header.Set("Content-Type", "application/json")
-			copilot.ApplyRuntimeHeaders(req.Header, copilotToken)
-			utils.ApplyCustomHeadersProtected(req.Header, upstream.CustomHeaders, utils.CopilotProtectedHeaders)
-			copilot.ApplyRuntimeHeaders(req.Header, copilotToken)
-			return req, nil
-		}
-
 	case "claude":
 		// Claude 上游：转换 OpenAI Chat 格式为 Claude Messages 格式
 		claudeReq, err := convertChatToClaudeRequest(bodyBytes, mappedModel, isStream)

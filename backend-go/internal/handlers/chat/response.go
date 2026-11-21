@@ -13,6 +13,7 @@ import (
 	"github.com/soulteary/yunqi/internal/errutil"
 	"github.com/soulteary/yunqi/internal/handlers/common"
 	"github.com/soulteary/yunqi/internal/httpbridge"
+	"github.com/soulteary/yunqi/internal/providers"
 	"github.com/soulteary/yunqi/internal/types"
 	"github.com/soulteary/yunqi/internal/utils"
 )
@@ -38,7 +39,7 @@ func handleSuccess(
 	defer errutil.IgnoreDeferred(resp.Body.Close)
 
 	// copilot 上游使用 Responses 协议，响应转换复用 responses 分支
-	upstreamType = normalizeResponseUpstreamType(upstreamType)
+	upstreamType = providers.ActualServiceType(c, upstreamType)
 
 	if isStream {
 		return handleStreamSuccess(c, resp, upstreamType, envCfg, startTime, model, timeouts)

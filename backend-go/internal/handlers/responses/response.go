@@ -33,6 +33,9 @@ func handleSuccess(
 	timeouts common.StreamPreflightTimeouts,
 ) (*types.Usage, error) {
 	defer errutil.IgnoreDeferred(resp.Body.Close)
+	// Copilot identifies the authenticated service, but its /responses endpoint
+	// uses native Responses framing and inclusive cached-input usage semantics.
+	upstreamType = providers.ActualServiceType(c, upstreamType)
 
 	isStream := originalReq != nil && originalReq.Stream
 

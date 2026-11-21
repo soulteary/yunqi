@@ -2174,6 +2174,7 @@ func appendCredentialsToCustomAccount(
 			return
 		}
 		upstream := buildCustomManagedProtocolRoute(config.UpstreamConfig{
+			ServiceType:     channels[0].Upstream.ServiceType,
 			BaseURL:         baseURLs[0],
 			BaseURLs:        append([]string(nil), baseURLs...),
 			APIKeys:         append([]string(nil), desiredKeys...),

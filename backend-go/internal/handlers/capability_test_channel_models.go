@@ -92,7 +92,15 @@ func fetchChannelRecognizedModels(ctx context.Context, channel *config.UpstreamC
 	}
 
 	if strings.EqualFold(strings.TrimSpace(channel.ServiceType), "copilot") {
-		return nil, fmt.Errorf("copilot 渠道不支持渠道模型列表探测")
+		_, _, details, err := capabilityCopilotResolver.Models(ctx, apiKey, channel.ProxyURL)
+		if err != nil {
+			return nil, err
+		}
+		models := make([]string, 0, len(details))
+		for _, model := range details {
+			models = append(models, model.ID)
+		}
+		return models, nil
 	}
 
 	modelsURL := buildCapabilityTestURL(baseURL, "/v1", "/models")

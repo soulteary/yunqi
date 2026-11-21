@@ -33,6 +33,7 @@ type UpstreamConfig struct {
 	DisabledAPIKeys       []DisabledKeyInfo                  `json:"disabledApiKeys,omitempty"`     // 被禁用的 API Key（持久化；额度类可定时恢复）
 	DisabledKeyModels     []DisabledKeyModelInfo             `json:"disabledKeyModels,omitempty"`   // 被限制的 (Key,模型) 组合（持久化，定时自动恢复）
 	DisabledGroupModels   []DisabledGroupModelInfo           `json:"disabledGroupModels,omitempty"` // 人工禁用的 (配额组,模型) 组合（持久化，不自动恢复）
+	CopilotProtocol       string                             `json:"copilotProtocol,omitempty"`     // Explicit HTTP wire protocol; serviceType retains OAuth identity.
 	ServiceType           string                             `json:"serviceType"`                   // gemini, openai, claude
 	AuthHeader            string                             `json:"authHeader,omitempty"`          // 认证头覆盖：auto(空)/bearer/x-api-key
 	ProviderID            string                             `json:"providerId,omitempty"`          // 来源 provider 模板 ID（如 mimo/deepseek），模板化添加时写入，用于回溯与预设引用
@@ -1297,6 +1298,7 @@ func (u *UpstreamConfig) GetEffectiveResponseHeaderTimeoutMs(fallbackMs int) int
 // UpstreamUpdate 用于部分更新 UpstreamConfig
 type UpstreamUpdate struct {
 	Name                     *string                            `json:"name"`
+	CopilotProtocol          *string                            `json:"copilotProtocol"`
 	ServiceType              *string                            `json:"serviceType"`
 	AuthHeader               *string                            `json:"authHeader"`
 	BaseURL                  *string                            `json:"baseUrl"`

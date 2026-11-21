@@ -111,7 +111,6 @@ func handleMultiChannel(
 	startTime time.Time,
 	isCompactionV2 bool,
 ) {
-	provider := &providers.ResponsesProvider{SessionManager: sessionManager}
 
 	cfg := cfgManager.GetConfig()
 	contextRequirement := common.BuildResponsesContextRequirement(bodyBytes, cfg.ContextRouting)
@@ -136,6 +135,15 @@ func handleMultiChannel(
 		responsesReq.Stream,
 		agentRole,
 		func(c fiber.Ctx, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
+			responsesReq := responsesReq
+			if responsesReq.TransformerMetadata != nil {
+				metadata := make(map[string]interface{}, len(responsesReq.TransformerMetadata))
+				for key, value := range responsesReq.TransformerMetadata {
+					metadata[key] = value
+				}
+				responsesReq.TransformerMetadata = metadata
+			}
+			provider := &providers.ResponsesProvider{SessionManager: sessionManager}
 			upstream := selection.Upstream
 			executionRoute := selection.Route
 

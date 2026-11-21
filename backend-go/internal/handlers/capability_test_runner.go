@@ -506,7 +506,7 @@ func executeModelTest(ctx context.Context, channel *config.UpstreamConfig, proto
 		StartedAt: startedAt.Format(time.RFC3339Nano),
 	}
 
-	req, err := buildTestRequestWithModel(protocol, channel, model, cfgManager)
+	req, err := buildTestRequestWithModelContext(ctx, protocol, channel, model, cfgManager)
 	if err != nil {
 		errMsg := fmt.Sprintf("build_request_failed: %v", err)
 		modelResult.Error = &errMsg

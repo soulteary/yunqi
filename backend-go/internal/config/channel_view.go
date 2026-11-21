@@ -182,14 +182,15 @@ func mergeMemberIntoBuilder(b *channelViewBuilder, m channelViewMember, now time
 	}
 
 	v.Protocols = append(v.Protocols, ProtocolFacadeView{
-		Kind:        m.kind,
-		ServiceType: serviceTypeOrFallback(u.ServiceType, m.kind),
-		ChannelUID:  u.ChannelUID,
-		Index:       m.index,
-		Enabled:     effectiveChannelStatus(u) == "active",
-		Status:      effectiveChannelStatus(u),
-		Priority:    u.Priority,
-		RoutePrefix: u.RoutePrefix,
+		Kind:            m.kind,
+		ServiceType:     serviceTypeOrFallback(u.ServiceType, m.kind),
+		CopilotProtocol: u.CopilotProtocol,
+		ChannelUID:      u.ChannelUID,
+		Index:           m.index,
+		Enabled:         effectiveChannelStatus(u) == "active",
+		Status:          effectiveChannelStatus(u),
+		Priority:        u.Priority,
+		RoutePrefix:     u.RoutePrefix,
 	})
 	v.MemberRoutes = append(v.MemberRoutes, ChannelRouteRefView{Kind: m.kind, Index: m.index, ChannelUID: u.ChannelUID})
 

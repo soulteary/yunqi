@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/copilot"
 	"github.com/soulteary/yunqi/internal/errutil"
 	"github.com/soulteary/yunqi/internal/handlers/common"
 	"github.com/soulteary/yunqi/internal/httpbridge"
@@ -133,9 +135,39 @@ func runCompatDiagnose(channel *config.UpstreamConfig, channelKind, apiKey, base
 }
 
 func runCompatDiagnoseWithProbeModel(channel *config.UpstreamConfig, channelKind, apiKey, baseURL, probeModel string) CompatDiagnoseResult {
+	if channel.ServiceType == "copilot" {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if probeModel == "" {
+			_, _, models, err := capabilityCopilotResolver.Models(ctx, apiKey, channel.ProxyURL)
+			if err != nil {
+				return CompatDiagnoseResult{Evidence: map[string]string{"copilotEndpoints": err.Error()}}
+			}
+			for _, model := range models {
+				if _, _, err := copilot.SelectEndpoint(models, model.ID, channel.CopilotProtocol); err == nil {
+					probeModel = model.ID
+					break
+				}
+			}
+			if probeModel == "" {
+				return CompatDiagnoseResult{Evidence: map[string]string{"copilotEndpoints": "no supported HTTP model endpoint"}}
+			}
+		}
+		_, _, protocol, _, err := capabilityCopilotResolver.Resolve(ctx, apiKey, channel.ProxyURL, probeModel, channel.CopilotProtocol)
+		if err != nil {
+			return CompatDiagnoseResult{Evidence: map[string]string{"copilotEndpoints": err.Error()}}
+		}
+		copy := *channel
+		copy.CopilotProtocol = protocol
+		channel = &copy
+	}
+
 	recs := make(map[string]bool)
 	evid := make(map[string]string)
-	urlRec := diagnoseBaseURLHashWithModel(channel, channelKind, apiKey, baseURL, probeModel)
+	var urlRec *URLRecommendation
+	if channel.ServiceType != "copilot" {
+		urlRec = diagnoseBaseURLHashWithModel(channel, channelKind, apiKey, baseURL, probeModel)
+	}
 	if urlRec != nil {
 		evid["baseUrl"] = urlRec.Reason
 	}
@@ -324,6 +356,9 @@ func probeBaseURLCandidateWithModel(channel *config.UpstreamConfig, channelKind,
 }
 
 func compatProbeProtocol(channel *config.UpstreamConfig, channelKind string) string {
+	if channel.ServiceType == "copilot" && channel.CopilotProtocol != "" {
+		return channel.CopilotProtocol
+	}
 	switch channelKind {
 	case "responses":
 		switch channel.ServiceType {
@@ -352,7 +387,15 @@ func compatProbeProtocol(channel *config.UpstreamConfig, channelKind string) str
 func shouldProbeImageGenerationTool(channel *config.UpstreamConfig, channelKind string) string {
 	if channelKind == "responses" {
 		switch channel.ServiceType {
-		case "responses", "copilot":
+		case "responses":
+			return "responses"
+		case "copilot":
+			if channel.CopilotProtocol == "chat" {
+				return "chat"
+			}
+			if channel.CopilotProtocol == "messages" {
+				return ""
+			}
 			return "responses"
 		}
 		return ""
@@ -571,6 +614,10 @@ func buildClaudeCompatRequest(baseURL string, body []byte, channel *config.Upstr
 	req.Header.Set("Content-Type", "application/json")
 	applyClaudeCodeProbeHeaders(req.Header, sessionID)
 	utils.SetAuthenticationHeaderWithOverride(req.Header, apiKey, channel.AuthHeader)
+	if channel.ServiceType == "copilot" {
+		return finishCopilotCompatRequest(req, body, channel, apiKey, "messages")
+	}
+
 	for k, v := range channel.CustomHeaders {
 		req.Header.Set(k, v)
 	}
@@ -589,6 +636,10 @@ func buildGeminiCompatRequest(baseURL, endpoint string, body []byte, channel *co
 	} else {
 		utils.SetGeminiAuthenticationHeader(req.Header, apiKey)
 	}
+	if channel.ServiceType == "copilot" {
+		return finishCopilotCompatRequest(req, body, channel, apiKey, "gemini")
+	}
+
 	for k, v := range channel.CustomHeaders {
 		req.Header.Set(k, v)
 	}
@@ -603,6 +654,10 @@ func buildOpenAIChatCompatRequest(baseURL string, body []byte, channel *config.U
 	}
 	req.Header.Set("Content-Type", "application/json")
 	utils.SetAuthenticationHeaderWithOverride(req.Header, apiKey, channel.AuthHeader)
+	if channel.ServiceType == "copilot" {
+		return finishCopilotCompatRequest(req, body, channel, apiKey, "chat")
+	}
+
 	for k, v := range channel.CustomHeaders {
 		req.Header.Set(k, v)
 	}
@@ -618,6 +673,10 @@ func buildResponsesCompatRequest(baseURL string, body []byte, channel *config.Up
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Originator", "codex_cli_rs")
 	utils.SetAuthenticationHeaderWithOverride(req.Header, apiKey, channel.AuthHeader)
+	if channel.ServiceType == "copilot" {
+		return finishCopilotCompatRequest(req, body, channel, apiKey, "responses")
+	}
+
 	for k, v := range channel.CustomHeaders {
 		req.Header.Set(k, v)
 	}
@@ -1034,4 +1093,30 @@ func analyzeGeminiSSE(lines []string) (bool, bool) {
 		}
 	}
 	return hasThoughtSignature, hasLeakage
+}
+
+// Copilot compatibility probes use the same explicit endpoint evidence and OAuth
+// identity as normal inference; ordinary providers retain their URL semantics.
+func finishCopilotCompatRequest(req *http.Request, body []byte, channel *config.UpstreamConfig, apiKey, protocol string) (*http.Request, error) {
+	var payload struct {
+		Model string `json:"model"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(req.Context(), 10*time.Second)
+	defer cancel()
+	token, baseURL, _, endpoint, err := capabilityCopilotResolver.Resolve(ctx, apiKey, channel.ProxyURL, payload.Model, protocol)
+	if err != nil {
+		return nil, err
+	}
+	target, err := url.Parse(baseURL + endpoint)
+	if err != nil {
+		return nil, err
+	}
+	req.URL = target
+	req.Host = ""
+	utils.ApplyCustomHeadersProtected(req.Header, channel.CustomHeaders, utils.CopilotProtectedHeaders)
+	copilot.ApplyRuntimeHeaders(req.Header, token)
+	return req, nil
 }

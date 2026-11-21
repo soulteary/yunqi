@@ -12,6 +12,7 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/copilot"
 	"github.com/soulteary/yunqi/internal/handlers/common"
 	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/httpclient"
@@ -149,12 +150,13 @@ type DiscoverySelectedModels struct {
 }
 
 type DiscoveryModelsResult struct {
-	Source     string                  `json:"source"`
-	URL        string                  `json:"url,omitempty"`
-	StatusCode int                     `json:"statusCode,omitempty"`
-	Items      []string                `json:"items"`
-	Selected   DiscoverySelectedModels `json:"selected"`
-	Warnings   []string                `json:"warnings,omitempty"`
+	ModelDetails []copilot.ModelDetails  `json:"modelDetails,omitempty"`
+	Source       string                  `json:"source"`
+	URL          string                  `json:"url,omitempty"`
+	StatusCode   int                     `json:"statusCode,omitempty"`
+	Items        []string                `json:"items"`
+	Selected     DiscoverySelectedModels `json:"selected"`
+	Warnings     []string                `json:"warnings,omitempty"`
 }
 
 type DiscoveryProtocolResult struct {
@@ -1256,6 +1258,10 @@ func discoverAutoTransientModelsWithFetchers(ctx context.Context, channel *confi
 }
 
 func discoverTransientModelsForCandidate(ctx context.Context, channel *config.UpstreamConfig, channelKind string, apiKey string, fetchers ChannelDiscoveryModelFetchers) DiscoveryModelsResult {
+	if channel.ServiceType == "copilot" {
+		return discoverTransientModels(ctx, channel, channelKind, apiKey)
+	}
+
 	fetcherKey, fetcher := selectDiscoveryModelsFetcher(channelKind, channel.ServiceType, fetchers)
 	if fetcher == nil {
 		return discoverTransientModels(ctx, channel, channelKind, apiKey)
@@ -1323,6 +1329,20 @@ func selectDiscoveryModelsFetcher(channelKind, serviceType string, fetchers Chan
 }
 
 func discoverTransientModels(ctx context.Context, channel *config.UpstreamConfig, channelKind string, apiKey string) DiscoveryModelsResult {
+	if channel.ServiceType == "copilot" {
+		_, baseURL, details, err := capabilityCopilotResolver.Models(ctx, apiKey, channel.ProxyURL)
+		result := DiscoveryModelsResult{Source: "copilot_models", URL: baseURL + "/models", ModelDetails: details}
+		if err != nil {
+			result.Warnings = []string{err.Error()}
+			return result
+		}
+		result.StatusCode = http.StatusOK
+		for _, model := range details {
+			result.Items = append(result.Items, model.ID)
+		}
+		return result
+	}
+
 	baseURL := capabilityTestBaseURL(channel)
 	if baseURL == "" {
 		return DiscoveryModelsResult{Source: "none", Warnings: []string{"base URL is empty"}}
