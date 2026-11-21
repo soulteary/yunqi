@@ -4,7 +4,7 @@
 
 ## 模块职责
 
-Vue 3 + Vuetify 3 Web 管理界面：渠道配置、能力测试、模型列表查询、拖拽排序、监控面板、主题切换。
+Vue 3 + Vuetify 4 Web 管理界面：渠道配置、能力测试、模型列表查询、拖拽排序、监控面板、主题切换。
 
 ## 启动命令
 
@@ -26,13 +26,18 @@ bun run preview   # 预览构建
 
 ## API 服务
 
-`src/services/api.ts` 封装后端交互，涵盖：
+`src/services/api.ts` 是兼容门面，保留 `api` 单例、默认导出和 `new ApiService()`。页面仍可沿用现有导入，不需要随内部文件移动修改调用方式。
 
-- 渠道 CRUD、排序、状态切换
-- 单渠道模型列表查询
-- 渠道能力测试
-- Dashboard / 指标 / 历史数据查询
-- 认证相关请求头管理
+- `src/services/api/client.ts`：统一请求处理，动态读取认证与语言，处理响应和 `ApiError`。
+- `src/services/api/channels/`：六类协议渠道的 CRUD、密钥、排序和状态管理。
+- `src/services/api/channel-management.ts`：稳定 UID 的 v2 与逻辑渠道操作。
+- 其他业务模块：能力测试、监控、健康、会话、订阅、账号、路由治理、成本和系统设置。
+- `src/services/types/`：按业务保存 DTO；共享协议枚举位于 `common.ts`，跨模块引用使用 `import type`。
+- `src/services/api-types.ts`、`console-types.ts`：保留旧类型导入路径；运行时常量只在所属模块定义一次。
+
+新增请求放到对应业务模块，统一经过 `ApiClient`。不要在业务模块重复读取密钥、实现响应解析或修改错误语义。门面的类型由同一份组合函数推导，新增模块只维护一次组合清单。
+
+`api-contract.test.ts` 固定六类渠道请求、历史默认值、可选字段、鉴权和错误解析行为；`__fixtures__/api-methods.json` 记录兼容的公共方法清单。新增或明确变更公共 API 时同步更新契约。
 
 ## 主题配置
 
