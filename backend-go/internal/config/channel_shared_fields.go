@@ -35,6 +35,11 @@ func sharedChannelUpdate(update UpstreamUpdate) *UpstreamUpdate {
 		MaxGroupMultiplier:          update.MaxGroupMultiplier,
 		Racing:                      update.Racing,
 	}
+	for _, field := range update.NullFields {
+		if sharedResetFields[field] {
+			shared.NullFields = append(shared.NullFields, field)
+		}
+	}
 	if reflect.DeepEqual(shared, UpstreamUpdate{}) {
 		return nil
 	}
