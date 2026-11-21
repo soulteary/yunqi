@@ -63,12 +63,14 @@ type Manager struct {
 	stopTimeout  time.Duration
 	now          func() time.Time
 
-	mu       sync.Mutex
-	running  bool
-	stopCh   chan struct{}
-	tasks    chan checkTask
-	wg       sync.WaitGroup
-	inFlight map[string]struct{}
+	mu             sync.Mutex
+	running        bool
+	lifetime       context.Context
+	cancelLifetime context.CancelFunc
+	stopCh         chan struct{}
+	tasks          chan checkTask
+	wg             sync.WaitGroup
+	inFlight       map[string]struct{}
 
 	// providerMemo 记录 auto 模式下各渠道上次识别成功的 provider（channelUID → provider），
 	// 下一轮优先复用，避免每轮对上游重复发全序列探测请求。进程内存态，重启后首轮全序列重建。
@@ -117,6 +119,7 @@ func (m *Manager) Start() {
 		return
 	}
 	m.running = true
+	m.lifetime, m.cancelLifetime = context.WithCancel(context.Background())
 	m.stopCh = make(chan struct{})
 	m.mu.Unlock()
 
@@ -141,6 +144,9 @@ func (m *Manager) Stop() {
 		return
 	}
 	m.running = false
+	if m.cancelLifetime != nil {
+		m.cancelLifetime()
+	}
 	close(m.stopCh)
 	m.mu.Unlock()
 
@@ -419,6 +425,9 @@ func (m *Manager) probeChannel(channelType string, channelIndex int) {
 	var agg balanceAggregate
 	var firstErr error
 	for _, apiKey := range keys {
+		if m.lifetimeContext().Err() != nil {
+			return
+		}
 		keyMask := utils.MaskAPIKey(apiKey)
 		probeReq := upstreamprobe.BalanceProbeRequest{
 			BaseURL:            u.BaseURL,
@@ -430,7 +439,10 @@ func (m *Manager) probeChannel(channelType string, channelIndex int) {
 			InsecureSkipVerify: u.InsecureSkipVerify,
 			Timeout:            policy.Timeout,
 		}
-		res := upstreamprobe.ProbeBalance(context.Background(), probeReq, policy.Provider, preferred)
+		res := upstreamprobe.ProbeBalance(m.lifetimeContext(), probeReq, policy.Provider, preferred)
+		if m.lifetimeContext().Err() != nil {
+			return
+		}
 		if httpclient.IsEgressError(res.Err) {
 			return
 		}
@@ -602,3 +614,13 @@ func (a *balanceAggregate) values() []quota.Value {
 }
 
 func floatPtr(v float64) *float64 { return &v }
+
+// lifetimeContext also supports direct unit probes before Start.
+func (m *Manager) lifetimeContext() context.Context {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.lifetime == nil {
+		return context.Background()
+	}
+	return m.lifetime
+}
