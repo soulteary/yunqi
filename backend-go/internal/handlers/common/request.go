@@ -20,6 +20,7 @@ import (
 	"github.com/soulteary/yunqi/internal/logger"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/middleware"
+	"github.com/soulteary/yunqi/internal/telemetry"
 	"github.com/soulteary/yunqi/internal/utils"
 )
 
@@ -99,8 +100,9 @@ func (b *LimitedLogBuffer) String() string {
 
 // RequestLifecycleTrace 用于记录上游 HTTP 请求生命周期关键节点。
 type RequestLifecycleTrace struct {
-	OnConnected         func()
-	OnFirstResponseByte func()
+	finishFirstContentWait func()
+	OnConnected            func()
+	OnFirstResponseByte    func()
 }
 
 // ReadRequestBody 读取并验证请求体大小
@@ -305,7 +307,13 @@ func SendRequestWithLifecycleTrace(req *http.Request, upstream *config.UpstreamC
 		}
 	}
 	req = withLifecycleTrace(req, lifecycleTrace)
-	return client.Do(req)
+	req, endNetwork := telemetry.NetworkTiming(req)
+	resp, err := client.Do(req)
+	endNetwork()
+	if err == nil && isStream && resp.StatusCode >= 200 && resp.StatusCode < 300 && lifecycleTrace != nil {
+		lifecycleTrace.finishFirstContentWait = telemetry.Phase(req.Context(), "upstream_first_content")
+	}
+	return resp, err
 }
 
 func withLifecycleTrace(req *http.Request, lifecycleTrace *RequestLifecycleTrace) *http.Request {

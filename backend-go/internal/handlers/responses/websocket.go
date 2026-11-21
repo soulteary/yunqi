@@ -344,6 +344,7 @@ func copyWebSocketRequestHeaders(src http.Header, dst http.Header) {
 }
 
 type responsesWebSocketWriter struct {
+	observeWrite func() func()
 	active       *webSocketActiveTurn
 	conn         *websocket.Conn
 	context      context.Context
@@ -368,6 +369,7 @@ func newResponsesWebSocketWriter(conn *websocket.Conn) *responsesWebSocketWriter
 	}
 }
 
+func (w *responsesWebSocketWriter) ObserveWrites(observe func() func()) { w.observeWrite = observe }
 func (w *responsesWebSocketWriter) Header() http.Header {
 	return w.header
 }
@@ -514,7 +516,12 @@ func (w *responsesWebSocketWriter) sendCurrentData() {
 		w.active.observe(data)
 	}
 	_ = w.conn.SetWriteDeadline(time.Now().Add(responsesWebSocketWriteTimeout))
+	endWrite := func() {}
+	if w.observeWrite != nil {
+		endWrite = w.observeWrite()
+	}
 	w.setWriteError(w.conn.WriteMessage(websocket.TextMessage, []byte(data)))
+	endWrite()
 	if w.writeErr == nil {
 		w.continuation.observe(data)
 	}
