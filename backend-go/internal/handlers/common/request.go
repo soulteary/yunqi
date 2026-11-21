@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
@@ -21,6 +22,7 @@ import (
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/middleware"
 	"github.com/soulteary/yunqi/internal/redaction"
+	"github.com/soulteary/yunqi/internal/requestscope"
 	"github.com/soulteary/yunqi/internal/telemetry"
 	"github.com/soulteary/yunqi/internal/utils"
 )
@@ -261,6 +263,20 @@ func SendRequest(req *http.Request, upstream *config.UpstreamConfig, envCfg *con
 
 // SendRequestWithLifecycleTrace 发送 HTTP 请求到上游，并可记录连接取得与首个响应字节时间。
 func SendRequestWithLifecycleTrace(req *http.Request, upstream *config.UpstreamConfig, envCfg *config.EnvConfig, isStream bool, apiType string, lifecycleTrace *RequestLifecycleTrace) (*http.Response, error) {
+	bound, binding, bindErr := requestscope.Bind(req.Context())
+	if bindErr != nil {
+		return nil, bindErr
+	}
+	req = req.WithContext(bound)
+	attempt, pricing, protocol, budgetErr := beginEntryBudget(req, upstream, envCfg)
+	if budgetErr != nil {
+		binding.Close()
+		return nil, budgetErr
+	}
+	var connected atomic.Bool
+	if attempt != nil {
+		req = req.WithContext(httptrace.WithClientTrace(req.Context(), budgetConnectTrace(&connected)))
+	}
 	redaction.ObserveRequest(req)
 	clientManager := httpclient.GetManager()
 
@@ -323,6 +339,23 @@ func SendRequestWithLifecycleTrace(req *http.Request, upstream *config.UpstreamC
 	req, endNetwork := telemetry.NetworkTiming(req)
 	resp, err := client.Do(req)
 	endNetwork()
+	if err != nil {
+		if attempt != nil {
+			if connected.Load() {
+				_ = attempt.Complete(nil, "transport_error_after_connection")
+			} else {
+				zero := int64(0)
+				_ = attempt.Complete(&zero, "not_connected")
+			}
+		}
+		binding.Close()
+		return resp, err
+	}
+	if attempt != nil {
+		capture := &usageCapture{ReadCloser: resp.Body, stream: strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream"), raw: make(map[string]json.RawMessage)}
+		resp.Body = &budgetResponseBody{capture: capture, attempt: attempt, pricing: pricing, protocol: protocol, status: resp.StatusCode}
+	}
+	resp.Body = requestscope.WrapBody(req.Context(), resp.Body, binding)
 	if err == nil && isStream && resp.StatusCode >= 200 && resp.StatusCode < 300 && lifecycleTrace != nil {
 		lifecycleTrace.finishFirstContentWait = telemetry.Phase(req.Context(), "upstream_first_content")
 	}

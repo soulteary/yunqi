@@ -430,3 +430,9 @@ GET /api/identity-proxy
 PUT /api/identity-proxy
 POST /api/identity-proxy/sessions/revoke
 POST /api/access/session/revoke
+GET /v1/budget
+GET /:routePrefix/v1/budget
+GET /api/budgets
+GET /api/budgets/:principal
+GET /api/budgets/:principal/requests/:request
+PUT /api/budgets

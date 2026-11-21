@@ -21,6 +21,7 @@ type usageCapture struct {
 	validJSON   bool
 	finalOutput *int
 	truncated   bool
+	terminal    bool
 	raw         map[string]json.RawMessage
 }
 
@@ -39,6 +40,8 @@ func (r *usageCapture) Read(p []byte) (int, error) {
 					r.overflow = false
 				} else if !r.overflow {
 					if len(r.pending) >= 256<<10 {
+						r.truncated = true
+						r.raw = nil
 						r.pending = nil
 						r.overflow = true
 					} else {
@@ -61,6 +64,10 @@ func (r *usageCapture) Read(p []byte) (int, error) {
 func (r *usageCapture) captureLine(line []byte) {
 	line = bytes.TrimSpace(line)
 	if bytes.HasPrefix(line, []byte("data:")) {
+		if bytes.Equal(bytes.TrimSpace(line[5:]), []byte("[DONE]")) {
+			r.terminal = true
+			return
+		}
 		r.captureJSON(bytes.TrimSpace(line[5:]))
 	}
 }
@@ -76,6 +83,17 @@ func (r *usageCapture) captureJSON(body []byte) {
 	r.validJSON = true
 	var eventType string
 	_ = json.Unmarshal(envelope["type"], &eventType)
+	if eventType == "response.completed" || eventType == "response.incomplete" || eventType == "response.failed" || eventType == "message_stop" {
+		r.terminal = true
+	}
+	if eventType == "message_delta" {
+		var delta struct {
+			StopReason string `json:"stop_reason"`
+		}
+		if json.Unmarshal(envelope["delta"], &delta) == nil && delta.StopReason != "" {
+			r.terminal = true
+		}
+	}
 	if eventType == "response.completed" {
 		var response struct {
 			Usage map[string]json.RawMessage `json:"usage"`
@@ -100,6 +118,33 @@ func (r *usageCapture) captureJSON(body []byte) {
 			}
 		}
 		return
+	}
+	if len(raw) > 0 {
+		if choices, ok := envelope["choices"]; ok {
+			var items []map[string]json.RawMessage
+			if json.Unmarshal(choices, &items) == nil {
+				if len(items) == 0 {
+					r.terminal = true
+				}
+				for _, item := range items {
+					var reason string
+					if json.Unmarshal(item["finish_reason"], &reason) == nil && reason != "" {
+						r.terminal = true
+					}
+				}
+			}
+		}
+		if candidates, ok := envelope["candidates"]; ok {
+			var items []map[string]json.RawMessage
+			if json.Unmarshal(candidates, &items) == nil {
+				for _, item := range items {
+					var reason string
+					if json.Unmarshal(item["finishReason"], &reason) == nil && reason != "" {
+						r.terminal = true
+					}
+				}
+			}
+		}
 	}
 	raw = types.SanitizeRawUsage(raw)
 	var usage map[string]json.RawMessage

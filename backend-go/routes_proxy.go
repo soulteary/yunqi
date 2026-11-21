@@ -3,6 +3,7 @@ package main
 import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/autopilot"
+	"github.com/soulteary/yunqi/internal/handlers"
 	"github.com/soulteary/yunqi/internal/handlers/alpha"
 	"github.com/soulteary/yunqi/internal/handlers/chat"
 	"github.com/soulteary/yunqi/internal/handlers/gemini"
@@ -13,6 +14,9 @@ import (
 )
 
 func (a *application) registerProxyRoutes(r *fiber.App) {
+	budget := handlers.CallerBudgetHandler(a.envCfg, a.cfgManager)
+	r.Get("/v1/budget", budget)
+	r.Get("/:routePrefix/v1/budget", budget)
 	quote := autopilot.CallerQuoteHandler(a.cfgManager, a.channelScheduler)
 	r.Post("/v1/quote", quote)
 	r.Post("/:routePrefix/v1/quote", quote)

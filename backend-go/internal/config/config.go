@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/soulteary/yunqi/internal/entrybudget"
 	"github.com/soulteary/yunqi/internal/eventbus"
 	"github.com/soulteary/yunqi/internal/statelog"
 	"github.com/soulteary/yunqi/internal/utils"
@@ -1411,6 +1412,7 @@ type CircuitBreakerConfig struct {
 }
 
 type Config struct {
+	PrincipalBudgets []entrybudget.Policy   `json:"principalBudgets,omitempty"`
 	IdentityProxy    *IdentityProxyConfig   `json:"identityProxy,omitempty"`
 	AdminCredentials []AdminCredential      `json:"adminCredentials,omitempty"`
 	EntryKeys        []EntryKey             `json:"entryKeys,omitempty"`
@@ -1539,6 +1541,7 @@ func (cm *ConfigManager) GetConfig() Config {
 
 	// 深拷贝整个 Config 结构体
 	cloned := cm.config
+	cloned.PrincipalBudgets = append([]entrybudget.Policy(nil), cm.config.PrincipalBudgets...)
 	if cm.config.IdentityProxy != nil {
 		value := cloneIdentityProxy(*cm.config.IdentityProxy)
 		cloned.IdentityProxy = &value

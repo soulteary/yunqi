@@ -1332,6 +1332,14 @@ func TryUpstreamWithAllKeys(
 			resp, err := SendRequestWithLifecycleTrace(req, requestUpstream, envCfg, isStream, apiType, lifecycleTrace)
 			if err != nil {
 				lastError = err
+				if isEntryBudgetError(err) {
+					measureRequestFinalize(c, func() {
+						metricsManager.RecordRequestFinalizeIgnored(currentBaseURL, apiKey, metricsServiceType, requestID)
+					})
+					channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, metricsServiceType, executionKind)
+					CompleteLog(channelLogStore, metricsKey, logRequestID, 0, false, "entry budget rejected", isRetryAttempt)
+					return false, "", 0, nil, nil, err
+				}
 				// 竞速败出：被赢家取消（SendRequest 阶段），不计失败不 failover。
 				if isRacingSuperseded(c, err) {
 					measureRequestFinalize(c, func() {

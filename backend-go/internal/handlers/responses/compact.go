@@ -341,6 +341,9 @@ func tryCompactWithKey(
 
 	resp, err := common.SendRequest(req, upstream, envCfg, false, "Responses")
 	if err != nil {
+		if budgetErr := compactBudgetError(err); budgetErr != nil {
+			return false, budgetErr
+		}
 		common.RequestLogf(c, "[Compact-Local] 原生 compact 请求失败，回退本地 compact: %v", err)
 		return tryLocalCompactWithKey(c, upstream, apiKey, bodyBytes, envCfg, cfgManager, sessionManager)
 	}
@@ -387,4 +390,13 @@ func buildCompactURL(upstream *config.UpstreamConfig) string {
 		return baseURL + "/responses/compact"
 	}
 	return baseURL + "/v1/responses/compact"
+}
+
+func compactBudgetError(err error) *compactError {
+	status, code, ok := common.EntryBudgetFailure(err)
+	if !ok {
+		return nil
+	}
+	body, _ := json.Marshal(map[string]interface{}{"error": map[string]string{"type": code, "message": "Request could not reserve its entry budget"}})
+	return &compactError{status: status, body: body, shouldFailover: false, err: err}
 }
