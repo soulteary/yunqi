@@ -3,6 +3,7 @@ package responses
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -157,24 +158,52 @@ func serveResponsesWebSocketBridgeLoop(
 	bridgeRouter http.Handler,
 	firstPayload []byte,
 ) {
+	// Read independently of HTTP/SSE processing so a disconnected client cancels
+	// even an upstream that has not sent headers or content yet.
+	ctx, cancel := context.WithCancel(httpbridge.Request(c).Context())
+	messages := make(chan webSocketClientMessage, 1)
+	readerDone := make(chan struct{})
+	go func() {
+		defer close(readerDone)
+		defer cancel()
+		for {
+			kind, body, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			select {
+			case messages <- webSocketClientMessage{kind, body}:
+			case <-ctx.Done():
+				return
+			default:
+				// Bound queued input to one pending turn rather than retaining arbitrary
+				// 32 MiB frames while inference is running. Control writes are concurrency-safe.
+				_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "too many queued requests"), time.Now().Add(time.Second))
+				return
+			}
+		}
+	}()
+	defer func() { cancel(); _ = conn.Close(); <-readerDone }()
 	payload := firstPayload
 	var continuation responsesWebSocketContinuation
 	for {
 		if payload == nil {
-			messageType, nextPayload, err := conn.ReadMessage()
-			if err != nil {
-				if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
-					closeWithWebSocketError(conn, http.StatusBadRequest, "websocket_read_error", err.Error())
-				}
+			var message webSocketClientMessage
+			select {
+			case <-ctx.Done():
 				return
+			case message = <-messages:
 			}
-			if messageType != websocket.TextMessage {
+			if message.kind != websocket.TextMessage {
 				closeWithWebSocketError(conn, http.StatusBadRequest, "invalid_message_type", "only text messages are supported")
 				return
 			}
-			payload = nextPayload
+			payload = message.body
 		}
 
+		if ctx.Err() != nil {
+			return
+		}
 		requestBody, warmup, err := normalizeWebSocketResponseCreatePayload(payload)
 		payload = nil
 		if err != nil {
@@ -189,9 +218,9 @@ func serveResponsesWebSocketBridgeLoop(
 		}
 
 		requestBody, input, replayable := continuation.prepare(requestBody)
-		turn, err := serveResponseCreateOverWebSocket(c, conn, bridgeRouter, requestBody)
+		turn, err := serveResponseCreateOverWebSocket(ctx, c, conn, bridgeRouter, requestBody)
 		if err != nil {
-			if isWebSocketClosed(err) {
+			if ctx.Err() != nil || errors.Is(err, context.Canceled) || isWebSocketClosed(err) {
 				return
 			}
 			_ = writeWebSocketError(conn, http.StatusInternalServerError, "stream_error", err.Error())
@@ -201,13 +230,21 @@ func serveResponsesWebSocketBridgeLoop(
 	}
 }
 
+type webSocketClientMessage struct {
+	kind int
+	body []byte
+}
+
 func serveResponseCreateOverWebSocket(
+	ctx context.Context,
 	parent fiber.Ctx,
 	conn *websocket.Conn,
 	httpHandler http.Handler,
 	requestBody []byte,
 ) (*responsesWebSocketTurn, error) {
-	req, err := http.NewRequestWithContext(httpbridge.Request(parent).Context(), http.MethodPost, httpbridge.Request(parent).URL.RequestURI(), bytes.NewReader(requestBody))
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, httpbridge.Request(parent).URL.RequestURI(), bytes.NewReader(requestBody))
 	if err != nil {
 		return nil, err
 	}
@@ -216,6 +253,8 @@ func serveResponseCreateOverWebSocket(
 	req.ContentLength = int64(len(requestBody))
 
 	writer := newResponsesWebSocketWriter(conn)
+	writer.context = ctx
+	writer.cancel = cancel
 	httpHandler.ServeHTTP(writer, req)
 	err = writer.finish()
 	return &writer.continuation, err
@@ -235,6 +274,8 @@ func copyWebSocketRequestHeaders(src http.Header, dst http.Header) {
 
 type responsesWebSocketWriter struct {
 	conn         *websocket.Conn
+	context      context.Context
+	cancel       context.CancelFunc
 	header       http.Header
 	status       int
 	size         int
@@ -268,7 +309,7 @@ func (w *responsesWebSocketWriter) WriteHeader(statusCode int) {
 	}
 	w.status = statusCode
 	if statusCode >= http.StatusBadRequest {
-		w.writeErr = writeWebSocketError(w.conn, statusCode, "upstream_error", http.StatusText(statusCode))
+		w.setWriteError(writeWebSocketError(w.conn, statusCode, "upstream_error", http.StatusText(statusCode)))
 	}
 }
 
@@ -394,10 +435,19 @@ func (w *responsesWebSocketWriter) sendCurrentData() {
 	}
 
 	_ = w.conn.SetWriteDeadline(time.Now().Add(responsesWebSocketWriteTimeout))
-	w.writeErr = w.conn.WriteMessage(websocket.TextMessage, []byte(data))
+	w.setWriteError(w.conn.WriteMessage(websocket.TextMessage, []byte(data)))
 	if w.writeErr == nil {
 		w.continuation.observe(data)
 	}
+}
+
+// Delivery failure is a client cancellation, not an upstream/key failure.
+func (w *responsesWebSocketWriter) setWriteError(err error) {
+	if err != nil && w.cancel != nil {
+		w.cancel()
+		err = w.context.Err()
+	}
+	w.writeErr = err
 }
 
 func takeSSELine(buf *bytes.Buffer) (string, bool) {
