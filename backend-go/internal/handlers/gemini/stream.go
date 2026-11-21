@@ -375,9 +375,20 @@ func hasGeminiSemanticContent(jsonData string) bool {
 	if err := json.Unmarshal([]byte(jsonData), &event); err != nil {
 		return false
 	}
+	// Explicit native refusals are terminal, visible outcomes, not empty streams.
+	if feedback, ok := event["promptFeedback"].(map[string]interface{}); ok {
+		if reason, ok := feedback["blockReason"].(string); ok && strings.TrimSpace(reason) != "" {
+			return true
+		}
+	}
 	// 检测 text content
 	if candidates, ok := event["candidates"].([]interface{}); ok && len(candidates) > 0 {
 		if candidate, ok := candidates[0].(map[string]interface{}); ok {
+			reason, _ := candidate["finishReason"].(string)
+			switch reason {
+			case "SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "IMAGE_SAFETY", "IMAGE_PROHIBITED_CONTENT":
+				return true
+			}
 			if content, ok := candidate["content"].(map[string]interface{}); ok {
 				if parts, ok := content["parts"].([]interface{}); ok && len(parts) > 0 {
 					for _, part := range parts {
@@ -385,8 +396,18 @@ func hasGeminiSemanticContent(jsonData string) bool {
 							if thought, _ := p["thought"].(bool); thought {
 								continue
 							}
-							if text, ok := p["text"].(string); ok && text != "" {
+							if text, ok := p["text"].(string); ok && strings.TrimSpace(text) != "" && !common.IsEffectivelyEmptyStreamText(text) {
 								return true
+							}
+							if data, ok := p["inlineData"].(map[string]interface{}); ok {
+								if value, _ := data["data"].(string); strings.TrimSpace(value) != "" {
+									return true
+								}
+							}
+							if data, ok := p["fileData"].(map[string]interface{}); ok {
+								if value, _ := data["fileUri"].(string); strings.TrimSpace(value) != "" {
+									return true
+								}
 							}
 							if call, ok := p["functionCall"].(map[string]interface{}); ok {
 								name, _ := call["name"].(string)

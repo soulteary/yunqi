@@ -250,7 +250,7 @@ func GeminiResponseToResponses(geminiResp map[string]interface{}, sessionID stri
 			continue
 		}
 
-		if text, ok := part["text"].(string); ok && text != "" {
+		if text, ok := part["text"].(string); ok && strings.TrimSpace(text) != "" {
 			if thought, _ := part["thought"].(bool); thought {
 				output = append(output, types.ResponsesItem{
 					Type:   "reasoning",

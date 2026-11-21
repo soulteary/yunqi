@@ -21,3 +21,13 @@ func TestGeminiThoughtOnlyDoesNotCompleteResponses(t *testing.T) {
 		t.Fatalf("thought-only status %s", response.Status)
 	}
 }
+
+func TestGeminiWhitespaceIsNotNonStreamSuccess(t *testing.T) {
+	response, err := GeminiResponseToResponses(map[string]interface{}{"candidates": []interface{}{map[string]interface{}{"finishReason": "STOP", "content": map[string]interface{}{"parts": []interface{}{map[string]interface{}{"text": "  \n\t"}}}}}}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Status != "failed" {
+		t.Fatalf("whitespace status %s", response.Status)
+	}
+}

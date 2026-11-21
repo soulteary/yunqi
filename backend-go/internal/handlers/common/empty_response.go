@@ -245,7 +245,7 @@ func IsGeminiResponseEmpty(resp *types.GeminiResponse) bool {
 	for _, cand := range resp.Candidates {
 		// 安全拦截 / 版权拦截也应原样透传，不触发 failover
 		switch cand.FinishReason {
-		case "SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII":
+		case "SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "IMAGE_SAFETY", "IMAGE_PROHIBITED_CONTENT":
 			return false
 		}
 		if cand.Content == nil {
@@ -255,7 +255,7 @@ func IsGeminiResponseEmpty(resp *types.GeminiResponse) bool {
 			if part.Thought {
 				continue
 			}
-			if !IsEffectivelyEmptyStreamText(part.Text) {
+			if strings.TrimSpace(part.Text) != "" && !IsEffectivelyEmptyStreamText(part.Text) {
 				return false
 			}
 			if part.FunctionCall != nil {
