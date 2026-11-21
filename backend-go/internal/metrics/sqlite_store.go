@@ -1463,6 +1463,7 @@ func (s *SQLiteStore) QueryCostReport(apiType string, since time.Time, groupBy s
 
 // ModelCostBreakdownRow 按模型分组的 token 聚合行（用于成本计算）
 type ModelCostBreakdownRow struct {
+	HasSnapshot         bool   `json:"-"`
 	Model               string `json:"model"`
 	InputTokens         int64  `json:"inputTokens"`
 	OutputTokens        int64  `json:"outputTokens"`
@@ -1470,7 +1471,7 @@ type ModelCostBreakdownRow struct {
 	CacheReadTokens     int64  `json:"cacheReadTokens"`
 }
 
-// QueryModelCostBreakdown 按指定维度筛选后，再按 model 分组返回 token 明细。
+// QueryModelCostBreakdown 按模型与是否已有成本快照分组，保留用量与定价完整性查询。
 // 用于 handler 层计算 ListCostUSD / EffectiveCostUSD（需要逐模型定价）。
 // filterGroupKey 按 groupBy 对应列精确匹配；空字符串表示不过滤。
 func (s *SQLiteStore) QueryModelCostBreakdown(apiType string, since time.Time, groupBy string, filterGroupKey string) ([]ModelCostBreakdownRow, error) {
@@ -1500,14 +1501,14 @@ func (s *SQLiteStore) QueryModelCostBreakdown(apiType string, since time.Time, g
 
 	query := fmt.Sprintf(`
 		SELECT
-			model,
+			model, list_cost_usd IS NOT NULL,
 			SUM(input_tokens) AS input_tokens,
 			SUM(output_tokens) AS output_tokens,
 			SUM(cache_creation_tokens) AS cache_creation_tokens,
 			SUM(cache_read_tokens) AS cache_read_tokens
 		FROM request_records
 		WHERE api_type = ? AND timestamp >= ?%s
-		GROUP BY model
+		GROUP BY model, list_cost_usd IS NOT NULL
 		HAVING model <> ''
 	`, whereExtra)
 
@@ -1520,7 +1521,7 @@ func (s *SQLiteStore) QueryModelCostBreakdown(apiType string, since time.Time, g
 	var results []ModelCostBreakdownRow
 	for rows.Next() {
 		var row ModelCostBreakdownRow
-		if err := rows.Scan(&row.Model, &row.InputTokens, &row.OutputTokens, &row.CacheCreationTokens, &row.CacheReadTokens); err != nil {
+		if err := rows.Scan(&row.Model, &row.HasSnapshot, &row.InputTokens, &row.OutputTokens, &row.CacheCreationTokens, &row.CacheReadTokens); err != nil {
 			return nil, fmt.Errorf("扫描模型成本明细失败: %w", err)
 		}
 		results = append(results, row)

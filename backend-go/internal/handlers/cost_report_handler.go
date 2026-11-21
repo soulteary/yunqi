@@ -107,7 +107,9 @@ func GetCostReport(deps *CostReportDeps) fiber.Handler {
 				calculatedListCost := 0.0
 				for _, breakdown := range modelBreakdowns {
 					listCost, complete := metrics.CalculateTokenCostUSDWithStatus(breakdown.Model, breakdown.InputTokens, breakdown.OutputTokens, breakdown.CacheCreationTokens, breakdown.CacheReadTokens)
-					calculatedListCost += listCost
+					if !breakdown.HasSnapshot {
+						calculatedListCost += listCost
+					}
 					if !complete {
 						cr.PricingComplete = false
 						unpriced[breakdown.Model] = struct{}{}
@@ -115,9 +117,7 @@ func GetCostReport(deps *CostReportDeps) fiber.Handler {
 				}
 				// 旧记录没有固化 list_cost_usd；仅从当时的 token/model 明细补官方标价，
 				// 不使用当前订阅或汇率重算历史 effective cost。
-				if cr.ListCostUSD == 0 {
-					cr.ListCostUSD = calculatedListCost
-				}
+				cr.ListCostUSD += calculatedListCost
 				for model := range unpriced {
 					cr.UnpricedModels = append(cr.UnpricedModels, model)
 				}

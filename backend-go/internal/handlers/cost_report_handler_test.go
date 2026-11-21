@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"database/sql"
 	"encoding/json"
 	"math"
 	"net/http"
@@ -341,5 +342,69 @@ func TestParseCostReportDuration(t *testing.T) {
 				t.Errorf("parseCostReportDuration(%q) = %v, want %v", tc.input, got, tc.expected)
 			}
 		})
+	}
+}
+
+func TestGetCostReportPreservesExplicitFreeSnapshot(t *testing.T) {
+	store, err := metrics.NewSQLiteStore(&metrics.SQLiteStoreConfig{DBPath: t.TempDir() + "/metrics.db", RetentionDays: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	store.AddRecord(metrics.PersistentRecord{Timestamp: time.Now(), APIType: "messages", Model: "claude-opus-4-8", ProxyKeyMask: "free-client", InputTokens: 1000000, OutputTokens: 1000000, ListCostUSD: 0})
+	manager := newTestMetricsManager(store)
+	defer manager.Stop()
+	deps := &CostReportDeps{MetricsManagers: map[string]*metrics.MetricsManager{"messages": manager}}
+	w := httptest.NewRecorder()
+	_, r := httpbridge.TestContext(w)
+	r.Get("/api/reports/cost", GetCostReport(deps))
+	httpbridge.Handler(r).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/reports/cost?type=messages", nil))
+	var response struct {
+		Rows []costReportRow `json:"rows"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != 200 || len(response.Rows) != 1 || response.Rows[0].ListCostUSD != 0 {
+		t.Fatalf("free snapshot repriced: %s", w.Body.String())
+	}
+}
+
+func TestGetCostReportMixedLegacyAndSnapshot(t *testing.T) {
+	path := t.TempDir() + "/mixed.db"
+	store, err := metrics.NewSQLiteStore(&metrics.SQLiteStoreConfig{DBPath: path, RetentionDays: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	for _, cost := range []float64{5, 0} {
+		store.AddRecord(metrics.PersistentRecord{Timestamp: time.Now(), APIType: "messages", Model: "claude-opus-4-8", ProxyKeyMask: "mixed-client", InputTokens: 1000000, OutputTokens: 1000000, ListCostUSD: cost, EffectiveCostUSD: cost * .25, EffectiveCostAvailable: true})
+	}
+	if _, err := store.QueryCostReport("messages", time.Now().Add(-time.Minute), "user"); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec("UPDATE request_records SET list_cost_usd=NULL, effective_cost_available=0 WHERE list_cost_usd=0"); err != nil {
+		t.Fatal(err)
+	}
+	manager := newTestMetricsManager(store)
+	defer manager.Stop()
+	deps := &CostReportDeps{MetricsManagers: map[string]*metrics.MetricsManager{"messages": manager}}
+	w := httptest.NewRecorder()
+	_, r := httpbridge.TestContext(w)
+	r.Get("/api/reports/cost", GetCostReport(deps))
+	httpbridge.Handler(r).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/reports/cost?type=messages", nil))
+	var response struct {
+		Rows []costReportRow `json:"rows"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Rows) != 1 || math.Abs(response.Rows[0].ListCostUSD-35) > 1e-9 || response.Rows[0].EffectiveCostUSD != 1.25 {
+		t.Fatalf("mixed cost revalued or multiplier reapplied: %s", w.Body.String())
 	}
 }
