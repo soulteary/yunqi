@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/autopilot"
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/httpclient"
-	"github.com/BenedictKing/ccx/internal/utils"
+	"github.com/soulteary/yunqi/internal/autopilot"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpclient"
+	"github.com/soulteary/yunqi/internal/utils"
 )
 
 // maxChannelProbeModels 「渠道模型列表」探测范围上限，防止全量目录探测成本失控

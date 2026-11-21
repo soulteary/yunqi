@@ -7,7 +7,7 @@ import { Loader2, Zap } from 'lucide-vue-next'
 import { useStatus } from '@/composables/useStatus'
 import { useLanguage } from '@/composables/useLanguage'
 import { streamTimeoutPresets } from '@/utils/stream-timeout-presets'
-import { GetAdminAccessKey } from '@bindings/github.com/BenedictKing/ccx/desktop/desktopservice'
+import { GetAdminAccessKey } from '@bindings/github.com/soulteary/yunqi/desktop/desktopservice'
 
 interface Props {
   open: boolean

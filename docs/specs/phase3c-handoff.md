@@ -11,7 +11,7 @@
 
 ## 1. 项目与模块背景
 
-- **仓库根**：`/Users/petaflops/works/api-gateways/llm-routing/ccx`
+- **仓库根**：`/Users/petaflops/works/api-gateways/llm-routing/yunqi`
 - **后端模块**：`backend-go/`，Go 1.25 + Gin
 - **后端模块文档**：`backend-go/CLAUDE.md`、`backend-go/README.md`
 - **项目根文档**：`CLAUDE.md`、`docs/specs/channel-data-model-v2.md`（v2 主线 spec，所有阶段定义在此）
@@ -231,13 +231,13 @@ Config
 
 ### 索引与本会话其他 memory
 - 渠道粒度重构 v2、autopilot Phase 1 done、new-api 集成设计、ManualRoutingIntent API 契约、new-api 后端 API 契约、上下文硬约束用映射后模型、渠道级上下文上限自学习、Fuzzy 模式移除、Kimi K3 参数约束、熔断依据与日志生命周期
-- 关键 memory 路径：`/Users/petaflops/.claude/projects/-Users-petaflops-works-api-gateways-llm-routing-ccx/memory/`
+- 关键 memory 路径：`/Users/petaflops/.claude/projects/-Users-petaflops-works-api-gateways-llm-routing-yunqi/memory/`
 
 ## 11. 验证清单（每步必须做）
 
 ### 波 1 重做后必跑
 ```bash
-cd /Users/petaflops/works/api-gateways/llm-routing/ccx/backend-go
+cd /Users/petaflops/works/api-gateways/llm-routing/yunqi/backend-go
 go build ./...
 go test ./internal/config/ -count=1
 go test -race ./internal/config/ -count=1
@@ -307,12 +307,12 @@ go test -run TestAuthoritativeLoad_MigratedChannelNoFalseRollback ./internal/con
   - `backend-go/internal/healthcheck/manager.go` / check.go / l2.go — 健康检查(L1/L2 未接 ClaimProbe)
 
 - CLAUDE.md 索引:
-  - 根:/Users/petaflops/works/api-gateways/llm-routing/ccx/CLAUDE.md
-  - 后端:/Users/petaflops/works/api-gateways/llm-routing/ccx/backend-go/CLAUDE.md
-  - 前端:/Users/petaflops/works/api-gateways/llm-routing/ccx/frontend/CLAUDE.md
+  - 根:/Users/petaflops/works/api-gateways/llm-routing/yunqi/CLAUDE.md
+  - 后端:/Users/petaflops/works/api-gateways/llm-routing/yunqi/backend-go/CLAUDE.md
+  - 前端:/Users/petaflops/works/api-gateways/llm-routing/yunqi/frontend/CLAUDE.md
 
 - memory:
-  - /Users/petaflops/.claude/projects/-Users-petaflops-works-api-gateways-llm-routing-ccx/memory/MEMORY.md — 索引
+  - /Users/petaflops/.claude/projects/-Users-petaflops-works-api-gateways-llm-routing-yunqi/memory/MEMORY.md — 索引
   - feedback_parallel_agent_self_redo_vs_external_revert — 必读
   - project_autopilot_phase1_done — 已完成清单
   - project-channel-data-model-v2 — v2 主线项目状态

@@ -567,10 +567,10 @@ LogicalChannel 持久化派生标签（`HealthTag`/`QualityTag`/`CostTag`/`Capab
 
 ### 17.1 问题本质
 
-`LogicalChannel` 是**管理面聚合视图**，运行时的 health / circuit / blacklist / 并发配额仍按**物理渠道**隔离。当同一物理端点被重复注册到多个 CCX 入口协议时，会出现：
+`LogicalChannel` 是**管理面聚合视图**，运行时的 health / circuit / blacklist / 并发配额仍按**物理渠道**隔离。当同一物理端点被重复注册到多个 Yunqi 入口协议时，会出现：
 
 - L1 探针、熔断、拉黑、并发统计各跑各的；
-- 一个上游慢了/限流了，多个 CCX 渠道各自独立超时、各自独立熔断；
+- 一个上游慢了/限流了，多个 Yunqi 渠道各自独立超时、各自独立熔断；
 - 用户配置一张逻辑卡，但后端行为仍是“多个独立渠道”。
 
 ### 17.2 典型案例：火山 coding-plan
@@ -581,7 +581,7 @@ LogicalChannel 持久化派生标签（`HealthTag`/`QualityTag`/`CostTag`/`Capab
 - `volcengine-chat`（`kind=chat`, `serviceType=openai`）
 - `volcengine-codex`（`kind=responses`, `serviceType=openai`）
 
-这三个物理渠道**共享同一组 key 和同一 endpoint**，但 CCX 会：
+这三个物理渠道**共享同一组 key 和同一 endpoint**，但 Yunqi 会：
 
 1. 对三个 `UpstreamConfig` 分别跑 L1 健康检查；
 2. 分别记 `key_health`、`circuit`、`blacklist`；

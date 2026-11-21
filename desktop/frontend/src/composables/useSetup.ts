@@ -5,7 +5,7 @@ import {
   GetEnvFile,
   SaveEnvFile,
   StartService,
-} from '@bindings/github.com/BenedictKing/ccx/desktop/desktopservice'
+} from '@bindings/github.com/soulteary/yunqi/desktop/desktopservice'
 import { detectEnvNewline, parseEnvFile, serializeEnvFile } from '@/lib/env-file'
 import { useLanguage } from '@/composables/useLanguage'
 import type { TabValue } from '@/types'

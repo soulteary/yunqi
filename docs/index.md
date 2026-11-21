@@ -1,7 +1,7 @@
 ---
 layout: home
 hero:
-  name: CCX
+  name: Yunqi
   text: '- AI API 代理网关'
   tagline: 支持 Claude、OpenAI、Gemini、DeepSeek、Kimi、GLM、MiniMax、通义千问 等多上游的统一代理与协议转换
   actions:
@@ -22,7 +22,7 @@ hero:
       link: /guide/benchmark
     - theme: alt
       text: GitHub
-      link: https://github.com/BenedictKing/ccx
+      link: https://github.com/soulteary/yunqi
 features:
   - title: 多协议支持
     details: 统一代理 Claude Messages、OpenAI Chat/Images、Codex Responses、Gemini 等多种 API 协议

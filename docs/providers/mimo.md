@@ -18,7 +18,7 @@ MiMo 提供两种访问方式，凭证获取路径不同：
 2. 在 [余额页面](https://platform.xiaomimimo.com/console/balance) 充值
 3. 在 [API Keys](https://platform.xiaomimimo.com/console/api-keys) 页面创建 API Key
 
-## 在 CCX 中添加渠道
+## 在 Yunqi 中添加渠道
 
 根据你的访问方式选择对应的 Base URL。
 
@@ -56,7 +56,7 @@ Base URL 按集群和协议分类，以 [订阅管理](https://platform.xiaomimi
 
 ### 配置步骤（以订阅套餐 OpenAI 协议中国集群为例）
 
-1. 进入 CCX 管理界面，选择 **Chat** 入口
+1. 进入 Yunqi 管理界面，选择 **Chat** 入口
 2. 点击「添加渠道」
 3. 填写以下信息：
    - **名称**：`MiMo`
@@ -106,7 +106,7 @@ MiMo 各模型的视觉支持情况：
 `MiMo-V2.5-Pro` 不支持图片输入。如果需要处理包含图片的请求，必须配置**视觉回退模型**。
 :::
 
-**配置方式：** 编辑渠道，在「视觉回退模型」字段填入 `MiMo-V2.5`。当请求包含图片且目标模型（如 `MiMo-V2.5-Pro`）不支持视觉时，CCX 会自动使用 `MiMo-V2.5` 替代模型处理该请求。
+**配置方式：** 编辑渠道，在「视觉回退模型」字段填入 `MiMo-V2.5`。当请求包含图片且目标模型（如 `MiMo-V2.5-Pro`）不支持视觉时，Yunqi 会自动使用 `MiMo-V2.5` 替代模型处理该请求。
 
 ![MiMo 渠道配置：模型重定向将 haiku/opus/sonnet 统一映射到 mimo-v2.5-pro；下方「视觉回退模型」字段填入 mimo-v2.5，当请求包含图片且目标模型不支持视觉时自动切换到该模型](/screenshots/channel-mimo-config.png)
 
@@ -120,7 +120,7 @@ MiMo 作为推理模型，思考过程中产生的 `reasoning_content` 需要回
 
 **必须启用：** 编辑渠道时打开「回传思考内容」开关（`PassbackReasoningContent`）。
 
-启用后 CCX 会自动处理：
+启用后 Yunqi 会自动处理：
 - **请求方向：** 为缺少 `thinking` 块的 assistant 消息注入占位符，满足 MiMo 的回传要求
 - **响应方向：** 将上游返回的 `reasoning_content` 转换为 Claude 原生的 `thinking` 内容块，下游客户端可正常解析
 

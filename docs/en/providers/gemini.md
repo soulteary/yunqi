@@ -7,7 +7,7 @@
 3. Click "Get API Key"
 4. Create a new API Key
 
-## Add Channel in CCX
+## Add Channel in Yunqi
 
 ### Gemini Endpoint (Native Protocol)
 
@@ -20,7 +20,7 @@
 
 ### Steps
 
-1. Go to CCX admin console, select **Gemini** endpoint
+1. Go to Yunqi admin console, select **Gemini** endpoint
 2. Click "Add Channel"
 3. Set service type to `Gemini`
 4. Set Base URL to `https://generativelanguage.googleapis.com`

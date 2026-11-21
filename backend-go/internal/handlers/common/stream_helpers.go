@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/BenedictKing/ccx/internal/utils"
+	"github.com/soulteary/yunqi/internal/utils"
 	"github.com/google/uuid"
 )
 

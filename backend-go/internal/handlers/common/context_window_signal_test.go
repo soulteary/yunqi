@@ -3,7 +3,7 @@ package common
 import (
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/types"
+	"github.com/soulteary/yunqi/internal/types"
 )
 
 func TestUsageTotalContextTokens(t *testing.T) {

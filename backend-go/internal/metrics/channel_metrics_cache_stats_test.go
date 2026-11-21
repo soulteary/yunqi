@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/types"
-	"github.com/BenedictKing/ccx/internal/utils"
+	"github.com/soulteary/yunqi/internal/types"
+	"github.com/soulteary/yunqi/internal/utils"
 )
 
 func TestToResponse_TimeWindowsIncludesCacheStats(t *testing.T) {

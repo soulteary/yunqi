@@ -18,7 +18,7 @@ vi.mock('@/composables/useConsoleChannels', () => ({
   useConsoleChannels: () => ({ activeTab, refreshError }),
 }))
 
-vi.mock('@bindings/github.com/BenedictKing/ccx/desktop/desktopservice', () => ({
+vi.mock('@bindings/github.com/soulteary/yunqi/desktop/desktopservice', () => ({
   OpenWebUIInBrowser: vi.fn().mockResolvedValue(undefined),
 }))
 

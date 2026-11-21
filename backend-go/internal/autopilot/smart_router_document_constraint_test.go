@@ -3,8 +3,8 @@ package autopilot
 import (
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/scheduler"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/scheduler"
 )
 
 // 直测：document 硬约束理由（与 vision 约束同语义）。

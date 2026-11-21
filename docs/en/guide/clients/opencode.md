@@ -1,18 +1,18 @@
-# Connect OpenCode to CCX
+# Connect OpenCode to Yunqi
 
-If you are using **CCX Desktop**, you can apply OpenCode settings from [Agent configuration](/en/guide/desktop/#agent-configuration) first, then return here to confirm the Chat endpoint and Base URL behavior.
+If you are using **Yunqi Desktop**, you can apply OpenCode settings from [Agent configuration](/en/guide/desktop/#agent-configuration) first, then return here to confirm the Chat endpoint and Base URL behavior.
 
-OpenCode can connect to CCX through OpenAI Chat-compatible configuration. Use the CCX **Chat** endpoint.
+OpenCode can connect to Yunqi through OpenAI Chat-compatible configuration. Use the Yunqi **Chat** endpoint.
 
 ## How it works
 
 ```text
-OpenCode  ->  CCX /v1/chat/completions  ->  Chat channel  ->  upstream Chat-compatible endpoint
+OpenCode  ->  Yunqi /v1/chat/completions  ->  Chat channel  ->  upstream Chat-compatible endpoint
 ```
 
-## 1. Configure a CCX channel
+## 1. Configure a Yunqi channel
 
-1. Open the CCX admin console and go to **Chat**
+1. Open the Yunqi admin console and go to **Chat**
 2. Click "Add Channel"
 3. Add an OpenAI Chat-compatible channel
 
@@ -32,20 +32,20 @@ Model names, vision support, and special options differ by upstream. Finish the 
 
 ## 2. Configure OpenCode
 
-### Use CCX Desktop automation
+### Use Yunqi Desktop automation
 
-In **Agent Config → OpenCode**, keep the default **CCX local gateway** provider. Desktop maintains:
+In **Agent Config → OpenCode**, keep the default **Yunqi local gateway** provider. Desktop maintains:
 
-- `~/.config/opencode/opencode.jsonc`: the OpenAI-compatible custom provider, for example `provider.ccx.options.baseURL`
-- `~/.local/share/opencode/auth.json`: the matching provider API key, for example `auth.ccx.key`
+- `~/.config/opencode/opencode.jsonc`: the OpenAI-compatible custom provider, for example `provider.yunqi.options.baseURL`
+- `~/.local/share/opencode/auth.json`: the matching provider API key, for example `auth.yunqi.key`
 
-In default CCX mode, the Base URL is:
+In default Yunqi mode, the Base URL is:
 
 ```text
-http://127.0.0.1:<current CCX port>/v1
+http://127.0.0.1:<current Yunqi port>/v1
 ```
 
-Select `ccx/<model>` in OpenCode. Requests enter CCX through the Chat protocol and are then routed by CCX Chat channels to your configured upstreams.
+Select `yunqi/<model>` in OpenCode. Requests enter Yunqi through the Chat protocol and are then routed by Yunqi Chat channels to your configured upstreams.
 
 Agent Config also offers direct providers, but only for currently supported OpenAI Chat-compatible domestic providers plus OpenCode Zen / OpenCode Go. For any other provider, add it manually using the official OpenCode custom-provider flow.
 
@@ -55,14 +55,14 @@ In OpenCode, choose an OpenAI-compatible / custom provider and fill in:
 
 | Setting | Value |
 |---------|-------|
-| API Key | `your-ccx-proxy-key` |
+| API Key | `your-yunqi-proxy-key` |
 | Base URL | `http://localhost:3000/v1` |
 | Model | requested model name, for example `gpt-5` or `deepseek-v4-pro` |
 
 If your OpenCode version uses a config file, the core values are still the same:
 
 ```text
-API Key: your-ccx-proxy-key
+API Key: your-yunqi-proxy-key
 Base URL: http://localhost:3000/v1
 Model: your-model-name
 ```
@@ -105,9 +105,9 @@ http://localhost:3000/v1/chat/completions
 
 Check:
 
-1. The OpenCode API key matches CCX `PROXY_ACCESS_KEY`
+1. The OpenCode API key matches Yunqi `PROXY_ACCESS_KEY`
 2. You did not enter the upstream provider API key
-3. CCX was started with the same `PROXY_ACCESS_KEY`
+3. Yunqi was started with the same `PROXY_ACCESS_KEY`
 
 ### 404 or Method Not Allowed
 
@@ -115,7 +115,7 @@ This usually means provider type or Base URL does not match. Confirm:
 
 1. OpenCode uses an OpenAI Chat-compatible provider
 2. Base URL is `http://localhost:3000/v1`
-3. CCX has a **Chat** channel, not only Messages or Responses channels
+3. Yunqi has a **Chat** channel, not only Messages or Responses channels
 
 ### model_not_found
 
@@ -135,7 +135,7 @@ OpenCode uses Chat Completions. Different upstreams vary in support for tool cal
 
 ### Requests do not appear in Chat channel logs
 
-Check whether the current OpenCode provider still points to another service. CCX should see this request path:
+Check whether the current OpenCode provider still points to another service. Yunqi should see this request path:
 
 ```text
 /v1/chat/completions

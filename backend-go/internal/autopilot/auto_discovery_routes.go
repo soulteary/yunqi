@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/soulteary/yunqi/internal/config"
 )
 
 // maybeEnableDiscoveredProtocolRoutes 将自定义自动托管账号已探测成功的协议转为真实渠道。

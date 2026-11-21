@@ -7,7 +7,7 @@
 3. 进入「API Keys」页面
 4. 创建新的 API Key 并复制
 
-## 在 CCX 中添加渠道
+## 在 Yunqi 中添加渠道
 
 ### Messages 入口（推荐）
 
@@ -22,7 +22,7 @@ Claude 原生协议使用 Messages 入口：
 
 ### 配置步骤
 
-1. 进入 CCX 管理界面，选择 **Messages** 入口
+1. 进入 Yunqi 管理界面，选择 **Messages** 入口
 2. 点击「添加渠道」
 3. 填写以下信息：
    - **名称**：`Claude`
@@ -33,7 +33,7 @@ Claude 原生协议使用 Messages 入口：
 
 ### Chat 入口（协议转换）
 
-如果你的客户端使用 OpenAI Chat 协议，也可以在 Chat 入口添加 Claude 渠道，CCX 会自动进行协议转换：
+如果你的客户端使用 OpenAI Chat 协议，也可以在 Chat 入口添加 Claude 渠道，Yunqi 会自动进行协议转换：
 
 1. 选择 **Chat** 入口
 2. 服务类型选择 `claude`

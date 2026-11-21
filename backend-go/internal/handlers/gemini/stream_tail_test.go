@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/handlers/common"
+	"github.com/soulteary/yunqi/internal/handlers/common"
 	"github.com/gin-gonic/gin"
 )
 

@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/soulteary/yunqi/internal/config"
 )
 
 // 绑定流程携带代理设置时：profile 与新建渠道都必须持久化 proxyUrl/proxyPreferDirect。

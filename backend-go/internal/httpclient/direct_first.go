@@ -4,7 +4,7 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/BenedictKing/ccx/internal/utils"
+	"github.com/soulteary/yunqi/internal/utils"
 )
 
 // proxyFallbackStatuses 触发代理回退的 HTTP 状态码。

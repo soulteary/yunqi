@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/soulteary/yunqi/internal/config"
 	"github.com/gin-gonic/gin"
 )
 
@@ -163,7 +163,7 @@ func getErrorPage() string {
 	return `<!DOCTYPE html>
 <html>
 <head>
-  <title>CCX - 配置错误</title>
+  <title>云起 Yunqi - 配置错误</title>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>

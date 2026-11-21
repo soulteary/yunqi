@@ -179,7 +179,7 @@
       </div>
     </div>
 
-    <!-- 故障转移位置（与 desktop 一致：API Keys 下方开关） -->
+    <!-- 故障转移位置（API Keys 下方开关） -->
     <div
       class="d-flex align-center ga-3 pa-3 rounded-lg placement-card"
       :class="{ 'placement-card-disabled': submitting }"
@@ -273,32 +273,23 @@ const submitError = ref('')
 
 // ---- Provider 模板状态 ----
 // '' 表示自定义模式（手填 baseURL）；非空表示选中某已知 provider（模板化添加）。
-// 模板加载完成后默认选中首个服务商（赞助商序第一位：火山）。
+// 模板加载完成后默认选中首个服务商。
 const providerId = ref('')
 const providerTemplates = ref<ProviderTemplate[]>([])
 const providerTemplatesLoading = ref(true)
 
 // ---- Provider 模板计算属性 ----
-// 赞助商展示顺序与订阅中心/README 保持一致，排在服务商列表最前（无模板的赞助商自然跳过）
-const SPONSOR_PROVIDER_ORDER = ['volcengine', 'compshare']
+// 不按 channelKind 过滤：所有 provider 都对用户可见（与订阅中心对齐）。
+// 保持后端模板顺序；提交时使用 provider.channelKind 自动创建渠道。
+const availableProviders = computed(() => providerTemplates.value)
 
-// 不按 channelKind 过滤：所有 provider 都对用户可见（与订阅中心对齐）；
-// 选中后由 handleSubmit 用 provider.channelKind 提交，保证多渠道自动建全
-const availableProviders = computed(() => {
-  const sponsorRank = (p: ProviderTemplate) => {
-    const idx = SPONSOR_PROVIDER_ORDER.indexOf(p.providerId)
-    return idx === -1 ? SPONSOR_PROVIDER_ORDER.length : idx
-  }
-  return [...providerTemplates.value].sort((a, b) => sponsorRank(a) - sponsorRank(b))
-})
-
-// 默认选中的服务商：当前渠道类型下排序后的第一个（即火山）；无可用模板时回退自定义模式
+// 默认选中的服务商：当前渠道类型下模板列表中的第一个；无可用模板时回退自定义模式
 const defaultProviderId = computed(() => availableProviders.value[0]?.providerId ?? '')
 
 // new-api 通用接入是独立流程（与订阅中心一致的两步接入表单）：选中后表单体就地切换，不占用 provider 模板状态
 const NEW_API_PROVIDER_VALUE = '__new_api__'
 
-// 选择项：赞助商/已知 provider 在前，其次 new-api 通用接入，「自定义」（value=''，手填地址）固定在最末
+// 选择项：已知 provider 在前，其次 new-api 通用接入，「自定义」（value=''，手填地址）固定在最末
 const providerItems = computed(() => [
   ...availableProviders.value.map(p => ({ title: p.displayName, value: p.providerId })),
   { title: t('autopilot.quickAdd.provider.newApi'), value: NEW_API_PROVIDER_VALUE },
@@ -381,7 +372,7 @@ async function loadProviderTemplates() {
     }
   } finally {
     providerTemplatesLoading.value = false
-    // 模板就绪后应用默认服务商（赞助商序第一位：火山）；用户已手动选择时不覆盖
+    // 模板就绪后应用默认服务商；用户已手动选择时不覆盖
     if (providerId.value === '') {
       providerId.value = defaultProviderId.value
     }

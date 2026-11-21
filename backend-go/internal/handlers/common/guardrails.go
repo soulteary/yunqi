@@ -1,7 +1,7 @@
 package common
 
 import (
-	"github.com/BenedictKing/ccx/internal/guardrails"
+	"github.com/soulteary/yunqi/internal/guardrails"
 )
 
 // MaskForLog 是 key 掩码的统一入口：仅在写日志/落库前对文本做内容级凭据脱敏。

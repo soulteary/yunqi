@@ -1,6 +1,6 @@
 # 发布指南
 
-本文档说明 CCX 的标准发布流程。
+本文档说明 Yunqi 的标准发布流程。
 
 ## 版本来源
 
@@ -127,7 +127,7 @@ git push origin vX.Y.Z
 Releases use two signing layers:
 
 - [Sigstore](https://www.sigstore.dev/) / cosign keyless signing signs the checksums manifests so users can verify Release asset integrity and CI origin.
-- [SignPath Foundation](https://signpath.org/) signs the Windows GitHub installer chain with Authenticode. CI signs `ccx-windows-*.exe`, the desktop `ccx-desktop.exe`, then creates and signs `CCX-Desktop-*-windows-*-setup.exe`.
+- [SignPath Foundation](https://signpath.org/) signs the Windows GitHub installer chain with Authenticode. CI signs `yunqi-windows-*.exe`, the desktop `yunqi-desktop.exe`, then creates and signs `Yunqi-Desktop-*-windows-*-setup.exe`.
 
 After pushing the tag, CI automatically:
 
@@ -153,7 +153,7 @@ The Windows SignPath integration requires these GitHub settings:
 | Secret | `SIGNPATH_API_TOKEN` | SignPath API token with submitter permissions for the target project/policy |
 | Variable | `SIGNPATH_ARTIFACT_CONFIGURATION_SLUG` | Optional; empty uses the project's default artifact configuration |
 
-The workflow currently uses SignPath organization `4ffeb1d3-df31-4323-a3e9-15fecdcbaad2`, project `ccx`, and signing policy `release_certificate_2026` (production certificate).
+The workflow currently uses SignPath organization `4ffeb1d3-df31-4323-a3e9-15fecdcbaad2`, project `yunqi`, and signing policy `release_certificate_2026` (production certificate).
 
 The `release_certificate_2026` policy uses the production certificate chain. CI prints Authenticode certificate details and requires signature verification to return `Valid`; any non-`Valid` status fails the release.
 

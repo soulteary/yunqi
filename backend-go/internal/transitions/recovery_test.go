@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/eventbus"
-	"github.com/BenedictKing/ccx/internal/metrics"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/eventbus"
+	"github.com/soulteary/yunqi/internal/metrics"
 )
 
 // TestRestoreDisabledKeysAndActivate_PublishesStatusEvent 验证恢复并激活渠道时发布 channel_status_changed。

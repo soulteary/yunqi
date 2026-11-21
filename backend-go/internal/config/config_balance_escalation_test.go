@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/errutil"
+	"github.com/soulteary/yunqi/internal/errutil"
 )
 
 // newBalanceEscalationManager 构造带单渠道的 ConfigManager，渠道持有两把 Key。

@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/types"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/types"
 )
 
 // 请求开始时固化的标价快照（ListPricing）应在 finalize 回写 token 后参与

@@ -21,7 +21,7 @@
 1. **分类器 + 结构化 filter 起步**：命令输出先分类（git / test / build / package / docker / shell / error / generic，共 8 类起步），每类 filter 保错误/警告/摘要/变更文件/tail 上下文，剥进度条/重复行/ANSI 噪声。
 2. **保真门是红线**：压缩后校验受保护内容存活——JSON key 完整、数字字面量完整、diff hunk 完整、受保护 token 存活率阈值（≥95%）；任一不达标**回退原文**。压缩后体积反而变大也整体回退（膨胀回退）。
 3. **fail-open**：压缩器 panic/超 CPU 预算时按原文放行，绝不因压缩失败拒绝请求。
-4. **开关层级**：全局默认关 → 渠道级开启 → 请求头 opt-out（`x-ccx-compression: off`）；场景预设联动（`batch_cheap` 等价格敏感预设建议默认开）。
+4. **开关层级**：全局默认关 → 渠道级开启 → 请求头 opt-out（`x-yunqi-compression: off`）；场景预设联动（`batch_cheap` 等价格敏感预设建议默认开）。
 5. **遥测闭环**：每次压缩记录原始/压缩后 token 估算与回退原因，进 metrics（request_records 扩列），成本报表（`CostReportView.vue`）展示节省。
 
 ## 3. 架构
@@ -90,7 +90,7 @@ TryUpstreamWithAllKeys (upstream_failover.go)
 
 | 优先级 | 来源 | 行为 |
 |---|---|---|
-| 1 | 请求头 `x-ccx-compression: off` | 强制关闭 |
+| 1 | 请求头 `x-yunqi-compression: off` | 强制关闭 |
 | 2 | 场景预设 | `batch_cheap` 等价格敏感预设默认开 |
 | 3 | 渠道级 | 预留（本期未暴露配置） |
 | 4 | 全局 | 默认关 |

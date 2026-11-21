@@ -21,7 +21,7 @@
 - **拉黑按 key 跨协议级联（#8）** - `BlacklistKeyWithRecoverAt` 抽出 `applyKeyBlacklistLocked` 单渠道拉黑，随后 `siblingUpstreamsForKeyLocked` 级联拉黑同 `AccountUID`/`LogicalChannelUID` 下持有相同明文 key 的其它协议渠道（单次落盘，各自发 `key_blacklisted` 事件）；不同账号的同名 key 不误伤。修复"拉黑 chat 渠道 key 不影响同账号 claude/codex"的凭证状态隔离缺陷。
 - **火山 L1 探针透传网络配置** - `internal/upstreamprobe` 新增 `ProbeOptions`，`ProbeVolcenginePlan`/`VolcenginePlanL1Probe`/`postJSONProbe` 透传 `proxyURL`/`customHeaders`/`insecureSkipVerify`；`main.go` healthCheckL1Fetcher 与 autopilot verify 接线；`docs/specs/logical-channel.md` 新增 §17 同物理端点多协议引用的运行时一致性。删除错误的 `volcengine-gemini` 渠道（火山 coding-plan 是 OpenAI/Anthropic 协议，不应注册为 Gemini 入口）。
 
-- **订阅中心与密钥管理体验** - 订阅中心改为渠道中心式 Provider 快捷接入，支持一键添加 GitHub Copilot、new-api 与手动订阅；三家赞助商展示真实 Logo/徽标并移除 Unity2.ai；API Key 支持手动暂停/恢复，模型覆盖按 Key 集合归组，火山折叠摘要及 Kimi/Compshare/MiniMax 余量改为统一五档阈值着色，Kimi 同时展示订阅总用量、赠送额度和加油包余额
+- **订阅中心与密钥管理体验** - 订阅中心改为渠道中心式 Provider 快捷接入，支持一键添加 GitHub Copilot、new-api 与手动订阅；API Key 支持手动暂停/恢复，模型覆盖按 Key 集合归组，火山折叠摘要及 Kimi/Compshare/MiniMax 余量改为统一五档阈值着色，Kimi 同时展示订阅总用量、赠送额度和加油包余额
 - **Autopilot Trace v2 契约与脱敏边界** - 新增 TraceDetailV2/TraceSummary/SchedulerDecisionSummary/EndpointAttemptSummary DTO，ComparisonStatus 三态枚举（matched/mismatched/uncompared）替代裸 bool，SanitizeForPersistence/SanitizeForResponse 双边界脱敏，crypto/rand 碰撞安全 TraceUIDv2，策略指纹（排除比例/seed），稳定哈希分桶，v1→v2 读适配器；新增 40+ L1 表驱动测试
 - **SQLite v6 迁移、持久化与清理** - autopilot schema v5→v6 幂等迁移；trace 表新增 schema_version/trace_revision/request_correlation_id/release_id/policy_fingerprint/persistence_class/details_json 列；窗口表重建主键增加 release/policy/cohort 维度和 compared/matched/mismatch/uncompared 计数；safety event 增加 release/policy 字段；in-flight 索引和异常提升落盘；有界异步 writer（512 队列/128 终态预留/64KiB 上限/250ms deadline/1s drain）；7 天 trace + 30 天窗口清理策略
 - **Trace 关联接入请求生命周期** - 入口生成 requestCorrelationId 写入 gin context；选择渠道后写入 AutopilotTraceUID；ChannelLog 新增 RequestCorrelationID/AutopilotTraceUID 字段和 ChannelLogOption；BuildPlan 写入 dry-run trace（必落盘）；NormalizeSelectionTrace 将 SelectionTrace 规范化为安全摘要并 AttachSchedulerDecision；AppendEndpointAttempt 有序/容量受限/乱序合并的 attempt 摘要
@@ -92,7 +92,6 @@
 - **new-api 安全分组倍率路由**
 - **远程预置更新运行时** - 预置数据集中管理 + 运行时可更新架构（Phase 1）、完成远程预置更新运行时
 - **订阅来源等级只读展示** - 来源等级由来源类型系统推导，改为只读展示
-- **火山引擎与 BytePlus 赞助**
 - **套餐类渠道 Key 行余量摘要补齐多时间窗**
 - **桌面端 autopilot 对齐** - 管理面板+健康中心+骨架（第一波）、cockpit概览+new-api订阅+试用意图（第二波）
 - **桌面端渠道自动探测与复用同步** - 同步渠道自动探测与复用、托管渠道识别模板与徽章、Codex 生图工具权限探测、TTFB 首字节 P95 列、auto 上线闸门与自动降级到桌面端健康中心
@@ -187,7 +186,7 @@
 ### 重构
 
 - **移除 Fuzzy 模式开关，统一为单一 failover 策略（BREAKING）** - Fuzzy 模式早已是唯一实际使用的默认值，Normal 模式的精确状态码分类分支已无存在意义，保留两套逻辑徒增维护成本。删除 `FuzzyModeEnabled` 配置字段、`GetFuzzyModeEnabled`/`SetFuzzyModeEnabled`、`GET/PUT /api/settings/fuzzy-mode` 接口及其配置迁移逻辑；`shouldRetryWithNextKeyNormal` 与 `classifyByStatusCode` 整体删除，`shouldRetryWithNextKeyFuzzy` 重命名为 `shouldRetryWithNextKey` 成为唯一实现；`HandleAllChannelsFailed`/`HandleAllKeysFailed` 不再接收 `fuzzyMode` 参数，统一返回通用 503；各协议 `handleSuccess` 的空响应拦截（`IsClaudeResponseEmpty` 等）不再受 `fuzzyMode` 门控而无条件生效；Web 与桌面前端一并移除工具栏开关、stores 状态、API 封装与 i18n key。**行为变化**：404/405/409-417/422/423/424/426/428/431/451 与 3xx 不再走「不 failover 直接透传上游原始状态码与错误体」路径，这类错误会消耗全部 Key/渠道后以通用 503 收尾；全部渠道失败时不再透传最后一个上游错误详情（`model_not_found` 等可归一化的模型路由错误仍保留精确状态码透传）
-- **订阅中心精简** - 移除分区标题、能力标签与手动添加入口，补齐快捷接入文案；赞助商置顶、new-api 置底，GitHub Copilot 卡移到倒数第二位
+- **订阅中心精简** - 移除分区标题、能力标签与手动添加入口，补齐快捷接入文案；new-api 置底，GitHub Copilot 卡移到倒数第二位
 - **移除渠道菜单的试用意图入口**
 - **清理火山套餐历史分支** - 移除 `volcenginePlanModelsHost` 常量与 `endpointFor` 的 `ark_stg` 分支
 
@@ -222,7 +221,6 @@
 - **Codex 上游协议变更评估** - 追加 Codex rust-v0.145.0 上游协议变更评估、新增 gpt-5.6 适配与 codex imagegen 上游文生图待办
 - **SignPath 代码签名致谢** - 文档站首页与 README 添加 SignPath 代码签名致谢，logo 放大并链接到官网
 - **Star History 图表更新** - 调整为 Markdown 图片并更新 token
-- **火山引擎推广链接** - README 为火山引擎注册即领 2500 万 Tokens 添加推广链接
 
 
 ### 其他
@@ -840,9 +838,8 @@
   - Web 端和桌面端所有图表组件同步更新
   - 统一两端时间选项文案：桌面端 `7d`/`30d` → `1周`/`1月`
   - 新增中文、英文、印尼文三语言国际化文案
-- **Unity2.ai 赞助商集成** - 新增 Unity2.ai 赞助商渠道预设与国际化文案支持
+- **Unity2.ai 渠道集成** - 新增 Unity2.ai 渠道预设与国际化文案支持
 - **Unity2.ai 国际化文案** - 添加 Unity2.ai 渠道预设翻译
-- **自动赞助商集成技能** - 新增 add-sponsor skill，支持自动化赞助商集成流程
 - **对齐 Web 与桌面端渠道菜单行为** - 统一两端渠道操作菜单交互逻辑
 
 ### 修复
@@ -869,13 +866,8 @@
 
 - **Codex chat 子代理工具调用测试覆盖** - 为 chat sub-agent tool calls 添加测试覆盖
 
-### 文档
-
-- **更新 add-sponsor skill 文档** - 更新 add-sponsor skill 最新使用模式
-
 ### 其他
 
-- **移除 add-sponsor.sh 脚本** - 删除旧的 add-sponsor shell 脚本
 
 ## [v2.9.13] - 2026-06-21
 
@@ -1248,7 +1240,7 @@
 - **历史图片轮次限制与占位符替换** - 新增渠道级历史图片轮次限制配置（`historicalImageTurnLimit`），超过指定轮次的历史对话图片自动替换为 `[Image]` 占位符，避免不必要的 vision 回退模型切换。覆盖 Claude Messages、OpenAI Chat、Responses API、Gemini 四种协议格式，Web/桌面渠道编辑 UI 支持按渠道配置
 - **渠道体验增强与 Messages 渠道级 CCH 开关** - Web/桌面渠道列表新增 15 分钟窗口”缓存写偏高”提醒 badge；桌面端 RunAPI messages 预设默认关闭 `normalizeMetadataUserId`；`stripBillingHeader` 从全局设置下沉为 messages 渠道级开关，默认关闭，并同步补齐 Web/桌面渠道编辑表单与老配置迁移逻辑
 - **桌面端 OpenRouter 与 ModelScope 渠道预设** - 新增 OpenRouter、ModelScope 渠道中心预设，并将 Kimi Code Plan 合并入 Kimi 预设作为编码计划条目，添加到 Claude/Codex/OpenCode 直连配置列表
-- **桌面端渠道预设扩充** - 新增 RunAPI 赞助商预设、Tencent TokenHub 预设与国内 coding-plan 网关预设，统一 RunAPI 与 Token Plan 文案，优化 RunAPI 渠道预设排序
+- **桌面端渠道预设扩充** - 新增 RunAPI 渠道预设、Tencent TokenHub 预设与国内 coding-plan 网关预设，统一 RunAPI 与 Token Plan 文案，优化 RunAPI 渠道预设排序
 - **桌面端管理面板 Fuzzy 开关与熔断器配置** - 管理面板工具栏新增 Fuzzy 模式开关和熔断器配置按钮，熔断器配置预设值、slider 范围与 WebUI 同步对齐
 - **桌面端 Codex/Responses 分层排障诊断** - 在桌面 Agent 页 Codex 卡片新增分层排障，按顺序检查”Codex 配置一致性 → Responses 渠道可用性 → 最近失败请求”，帮助定位 #156 类”本地网关可达但请求失败”的问题。后端扩展 `AgentConfigStatus`（新增 `authMode`/`configConsistent`/`diagnosticCode`/`diagnosticMessage`），在 `getCodexStatus` 中识别 CCS 等工具导致的 `config.toml` 与 `auth.json` 不一致（缺 key、auth_mode 不匹配、插件模式缺 bearer token、旧式配置残缺、配置污染等）；前端新增 `useResponsesDiagnostics` composable，聚合 Codex 配置层、Responses 渠道层（无渠道/全禁用/无 key/熔断/协议错配）与最近失败日志层（401/403、429、5xx、超时）的诊断结论，并在状态页提供最高优先级问题摘要。第一版仅给出诊断与手动修复建议，不做自动修复。涉及 `desktop/internal/configservice/service.go`、`desktop/frontend/src/composables/useResponsesDiagnostics.ts`、`desktop/frontend/src/components/agent/*`、`desktop/frontend/src/components/status/StatusTab.vue`、`desktop/frontend/src/i18n/messages.ts`、`desktop/frontend/src/types/index.ts`
 - **桌面端 dashboard 显示运行态当前渠道** - 桌面端 dashboard 新增运行态当前渠道信息展示
@@ -1296,7 +1288,7 @@
 
 ### 新增
 
-- **RunAPI 赞助商与桌面端直连预设** - 新增 RunAPI 赞助商展示、渠道中心预设与 Claude/Codex/OpenCode 直连配置，支持 Messages、Chat、Responses 三类目标
+- **RunAPI 渠道与桌面端直连预设** - 新增 RunAPI 渠道中心预设与 Claude/Codex/OpenCode 直连配置，支持 Messages、Chat、Responses 三类目标
 - **流式 post-commit 阶段畸形工具调用截断策略** - 文本已输出后遇到畸形 `tool_use` 时缓冲并截断工具调用，注入 `end_turn` 与 `message_stop` 正常结束，避免客户端进入无效 `tool_result` 重试
 - **Responses 添加 tool_search 工具类型识别与兼容处理** - 新增 tool_search 工具类型的识别与兼容处理逻辑
 - **新增 stripImageGenerationTool 渠道开关** - 渠道配置新增 stripImageGenerationTool 开关，支持过滤图片生成工具
@@ -1746,7 +1738,6 @@
 ### 新增
 
 - **桌面端 Store MSIX 分发支持** - Windows 发布流程新增 Store MSIX 分发配置与打包脚本，为 Microsoft Store 分发补齐 manifest、package 脚本和 release 产物链路。
-- **桌面端 Compshare 推广入口** - 桌面端新增 Compshare 推广入口与外链打开能力，便于用户从侧边栏访问相关服务。
 - **Compshare Agent 直连支持** - 桌面端 Agent 配置新增 Compshare provider 选项，并同步支持直连配置状态识别与应用。
 - **Compshare 渠道预设** - 渠道中心新增 Compshare 预设，补充对应模型映射、服务类型和预设测试覆盖。
 
@@ -1804,9 +1795,6 @@
 ### 文档
 
 - **补充渠道预设模型重定向说明** - 在变更记录中补充渠道预设模型重定向的说明，明确 Codex / Chat 客户端实际请求模型与预设映射关系。
-- **调整赞助商展示样式** - 优化 README 中赞助商展示区域的排版与视觉呈现。
-- **添加赞助商注册链接** - 在 README 赞助商信息中补充可直接访问的注册链接。
-- **添加优云智算赞助商信息** - README 新增优云智算赞助商介绍与展示图片。
 
 ### 其他
 

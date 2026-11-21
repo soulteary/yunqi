@@ -1,7 +1,7 @@
 package common
 
 import (
-	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/soulteary/yunqi/internal/config"
 )
 
 // HandleBalanceClassKeyFailure 处理余额/配额类 Key 失败的组合级降级。

@@ -9,7 +9,7 @@ import {
   PreviewAgentConfigDiff,
   PreviewRestoreConfigDiff,
   MigrateCodexSessions,
-} from '@bindings/github.com/BenedictKing/ccx/desktop/desktopservice'
+} from '@bindings/github.com/soulteary/yunqi/desktop/desktopservice'
 
 const agentLabels: Record<AgentPlatform, string> = {
   claude: 'Claude Code',

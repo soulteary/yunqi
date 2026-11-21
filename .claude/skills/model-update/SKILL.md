@@ -1,12 +1,12 @@
 ---
 name: model-update
-description: 新增或更新 CCX 项目中的模型注册技能。适用于 Claude 与非 Claude 模型，覆盖能力表、路由白名单、基准映射、代码生成与验证。
+description: 新增或更新 Yunqi 项目中的模型注册技能。适用于 Claude 与非 Claude 模型，覆盖能力表、路由白名单、基准映射、代码生成与验证。
 version: 2.1.0
-author: https://github.com/BenedictKing/ccx/
+author: https://github.com/soulteary/yunqi/
 allowed-tools: Bash, Read, Write, Edit, Agent
 ---
 
-# CCX 模型注册更新技能
+# Yunqi 模型注册更新技能
 
 当用户输入包含以下关键词时触发：
 - "新模型"、"添加模型"、"model registry"、"模型注册"、"模型版本更新"、"model update"

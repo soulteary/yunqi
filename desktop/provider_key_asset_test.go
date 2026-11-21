@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/BenedictKing/ccx/desktop/internal/configservice"
+	"github.com/soulteary/yunqi/desktop/internal/configservice"
 )
 
 func newTestConfigService(t *testing.T) *configservice.Service {

@@ -8,7 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/BenedictKing/ccx/internal/presetstore"
+	"github.com/soulteary/yunqi/internal/presetstore"
 )
 
 type compiledBuiltinPattern struct {

@@ -3,8 +3,8 @@ package converters
 import (
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/session"
-	"github.com/BenedictKing/ccx/internal/types"
+	"github.com/soulteary/yunqi/internal/session"
+	"github.com/soulteary/yunqi/internal/types"
 )
 
 // ============== extractTextFromContent 测试 ==============

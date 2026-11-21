@@ -12,7 +12,7 @@ import {
   consoleSelectionChannelType,
   type ConsoleSelection,
 } from '@/composables/useConsoleSelection'
-import { OpenWebUIInBrowser } from '@bindings/github.com/BenedictKing/ccx/desktop/desktopservice'
+import { OpenWebUIInBrowser } from '@bindings/github.com/soulteary/yunqi/desktop/desktopservice'
 import ChannelManager from '@/components/console/ChannelManager.vue'
 import type { ManagedChannelType } from '@/utils/channel-type-api'
 

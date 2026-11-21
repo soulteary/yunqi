@@ -8,7 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/soulteary/yunqi/internal/config"
 )
 
 // TestMessagesHandler_MimoReasoningContentPassback 测试 mimo 场景的 reasoning_content 回传

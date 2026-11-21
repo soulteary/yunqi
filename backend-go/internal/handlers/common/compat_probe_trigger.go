@@ -4,8 +4,8 @@ import (
 	"log"
 	"sync"
 
-	"github.com/BenedictKing/ccx/internal/autopilot"
-	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/soulteary/yunqi/internal/autopilot"
+	"github.com/soulteary/yunqi/internal/config"
 )
 
 // 内容启发式兼容项的探针驱动学习。

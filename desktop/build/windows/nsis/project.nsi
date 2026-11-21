@@ -19,14 +19,14 @@ Unicode true
 ####
 ## The following information is taken from the wails_tools.nsh file, but they can be overwritten here.
 ####
-!define INFO_PROJECTNAME    "ccx-desktop"
-!define INFO_COMPANYNAME    "CCX"
-!define INFO_PRODUCTNAME    "CCX Desktop"
+!define INFO_PROJECTNAME    "yunqi-desktop"
+!define INFO_COMPANYNAME    "Yunqi"
+!define INFO_PRODUCTNAME    "Yunqi Desktop"
 !define INFO_PRODUCTVERSION "0.1.0"
-!define INFO_COPYRIGHT      "© 2026, CCX"
+!define INFO_COPYRIGHT      "© 2026, Yunqi"
 ###
-!define PRODUCT_EXECUTABLE  "ccx-desktop.exe"
-!define UNINST_KEY_NAME     "CCXDesktop"
+!define PRODUCT_EXECUTABLE  "yunqi-desktop.exe"
+!define UNINST_KEY_NAME     "YunqiDesktop"
 ####
 ## !define REQUEST_EXECUTION_LEVEL "admin"            # Default "admin"  see also https://nsis.sourceforge.io/Docs/Chapter4.html
 ####
@@ -120,8 +120,8 @@ Section
     
     !insertmacro wails.files
 
-    ; 捆绑 ccx-go 后端二进制（必需，缺失则安装失败）
-    File "ccx-go.exe"
+    ; 捆绑 yunqi 后端二进制（必需，缺失则安装失败）
+    File "yunqi.exe"
 
     CreateShortcut "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
     CreateShortCut "$DESKTOP\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"

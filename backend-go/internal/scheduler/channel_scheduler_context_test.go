@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/conversation"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/conversation"
 )
 
 func TestSelectChannelFiltersByContextWindowStableOrder(t *testing.T) {

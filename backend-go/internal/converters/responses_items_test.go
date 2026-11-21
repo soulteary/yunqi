@@ -3,7 +3,7 @@ package converters
 import (
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/types"
+	"github.com/soulteary/yunqi/internal/types"
 )
 
 // TestResolveFunctionCallItem_EncryptedArgsPlaceholder 验证 Codex namespace 工具的

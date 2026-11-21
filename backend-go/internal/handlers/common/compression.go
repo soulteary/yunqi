@@ -3,8 +3,8 @@ package common
 import (
 	"log"
 
-	"github.com/BenedictKing/ccx/internal/compression"
-	"github.com/BenedictKing/ccx/internal/scheduler"
+	"github.com/soulteary/yunqi/internal/compression"
+	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/gin-gonic/gin"
 )
 

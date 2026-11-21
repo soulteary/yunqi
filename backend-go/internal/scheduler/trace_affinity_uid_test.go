@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/session"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/session"
 )
 
 func newTestSchedulerWithMessagesChannels(t *testing.T, upstreams []config.UpstreamConfig) (*ChannelScheduler, *session.TraceAffinityManager) {

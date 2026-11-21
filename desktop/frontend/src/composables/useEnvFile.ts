@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import { GetEnvFile, SaveEnvFile, DetectEditors, OpenEnvFileInEditor } from '@bindings/github.com/BenedictKing/ccx/desktop/desktopservice'
+import { GetEnvFile, SaveEnvFile, DetectEditors, OpenEnvFileInEditor } from '@bindings/github.com/soulteary/yunqi/desktop/desktopservice'
 import { useLanguage } from '@/composables/useLanguage'
 
 type EnvFileState = {

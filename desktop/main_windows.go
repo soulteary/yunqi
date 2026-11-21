@@ -36,7 +36,7 @@ func showErrorDialog(title, message string) {
 // recoverWithMessageBox 捕获未处理的 panic 并弹窗提示后退出。
 func recoverWithMessageBox() {
 	if r := recover(); r != nil {
-		showErrorDialog("CCX Desktop - 启动失败", fmt.Sprintf("发生未处理的异常: %v\n\n请检查日志或联系开发者。", r))
+		showErrorDialog("Yunqi Desktop - 启动失败", fmt.Sprintf("发生未处理的异常: %v\n\n请检查日志或联系开发者。", r))
 		os.Exit(1)
 	}
 }

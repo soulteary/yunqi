@@ -7,7 +7,7 @@
 3. Go to "API Keys" page
 4. Create a new API Key
 
-## Add Channel in CCX
+## Add Channel in Yunqi
 
 ### Option 1: Chat Endpoint (OpenAI Compatible)
 

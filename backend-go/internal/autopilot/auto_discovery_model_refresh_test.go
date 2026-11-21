@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/utils"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/utils"
 )
 
 // setupRefreshConfigManager 构造指向指定 baseURL 的自动托管渠道配置管理器。

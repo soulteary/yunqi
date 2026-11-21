@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/eventbus"
+	"github.com/soulteary/yunqi/internal/eventbus"
 )
 
 // TestCircuitStateTransitions_PublishEvents 验证 B.1：

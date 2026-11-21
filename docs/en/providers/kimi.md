@@ -17,7 +17,7 @@ Kimi supports both OpenAI and Anthropic protocols. Kimi Code uses the same key f
 | Anthropic (Kimi Code) | `https://api.kimi.com/coding/` | `https://api.kimi.com/coding/v1/messages` |
 | OpenAI (Kimi Code) | `https://api.kimi.com/coding/v1` | `https://api.kimi.com/coding/v1/chat/completions` |
 
-When Kimi is added from CCX's automatic provider flow (also available as `Kimi Code`), CCX validates and binds an endpoint per key. Kimi Code models are discovered with `GET /coding/v1/models`.
+When Kimi is added from Yunqi's automatic provider flow (also available as `Kimi Code`), Yunqi validates and binds an endpoint per key. Kimi Code models are discovered with `GET /coding/v1/models`.
 
 ## Kimi Code model entitlements
 
@@ -29,13 +29,13 @@ When Kimi is added from CCX's automatic provider flow (also available as `Kimi C
 
 Both `k3` and `kimi-for-coding` support `low`, `high`, and `max` reasoning effort (default `high` for `k3`, default `max` for `kimi-for-coding`). Disabling thinking routes K3-series and `kimi-for-coding` requests to K2.8 Preview (non-thinking); thinking stays enabled server-side for `kimi-for-coding-highspeed`.
 
-The `k3[1m]` form is only a Claude Code environment-variable hint. API requests and CCX model fields use `k3`.
+The `k3[1m]` form is only a Claude Code environment-variable hint. API requests and Yunqi model fields use `k3`.
 
-## Add Channel in CCX
+## Add Channel in Yunqi
 
 ### Automatic Kimi Code setup (recommended)
 
-Select **Kimi** / **Kimi Code** and enter one or more Kimi Code API keys. CCX probes `https://api.kimi.com/coding/v1/models` per key instead of sending a fake inference request, so models outside the membership tier are not listed.
+Select **Kimi** / **Kimi Code** and enter one or more Kimi Code API keys. Yunqi probes `https://api.kimi.com/coding/v1/models` per key instead of sending a fake inference request, so models outside the membership tier are not listed.
 
 ### Option 2: Chat Endpoint (OpenAI Compatible)
 
@@ -57,7 +57,7 @@ For Claude Code CLI and other tools using Claude Messages protocol.
 | Base URL | `https://api.kimi.com/coding/` |
 | API Keys | Your Kimi Code API Key |
 
-Kimi Code does not require mapping `opus`, `sonnet`, or `haiku` to a Claude model name. Prefer the model IDs returned by `/coding/v1/models`; configure an explicit CCX mapping when a client sends a generic alias.
+Kimi Code does not require mapping `opus`, `sonnet`, or `haiku` to a Claude model name. Prefer the model IDs returned by `/coding/v1/models`; configure an explicit Yunqi mapping when a client sends a generic alias.
 
 ## Available Models
 
@@ -78,7 +78,7 @@ Kimi Code does not require mapping `opus`, `sonnet`, or `haiku` to a Claude mode
 
 ## Notes
 
-- The China pay-as-you-go OpenAI-compatible Base URL is `https://api.moonshot.cn/v1`; CCX also retains compatibility with the global `https://api.moonshot.ai/v1` endpoint
+- The China pay-as-you-go OpenAI-compatible Base URL is `https://api.moonshot.cn/v1`; Yunqi also retains compatibility with the global `https://api.moonshot.ai/v1` endpoint
 - Kimi Code Anthropic Base URL is `https://api.kimi.com/coding/`; its OpenAI Base URL is `https://api.kimi.com/coding/v1`
 - Kimi Code `/coding/v1/models` returns the model range for the current key. A 401/403 from that endpoint usually means the key is invalid or unusable; an inference request can also return 401 when its model or context entitlement is unavailable
 - `kimi-k2.7` is the latest pay-as-you-go model with long-context coding support

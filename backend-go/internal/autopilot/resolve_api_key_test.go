@@ -3,7 +3,7 @@ package autopilot
 import (
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/soulteary/yunqi/internal/config"
 )
 
 // newTestManagerForResolveAPIKey 构造一个只挂了 cfgManager 的最小 Manager，

@@ -4,15 +4,15 @@
         <key>CFBundlePackageType</key>
             <string>APPL</string>
         <key>CFBundleName</key>
-            <string>CCX Desktop</string>
+            <string>Yunqi Desktop</string>
         <key>CFBundleExecutable</key>
-            <string>ccx-desktop</string>
+            <string>yunqi-desktop</string>
         <key>CFBundleIdentifier</key>
-            <string>com.benedictking.ccx.dev</string>
+            <string>com.soulteary.yunqi.dev</string>
         <key>CFBundleVersion</key>
             <string>1.0.0</string>
         <key>CFBundleGetInfoString</key>
-            <string>Desktop shell for the CCX core gateway service.</string>
+            <string>Desktop shell for the Yunqi core gateway service.</string>
         <key>CFBundleShortVersionString</key>
             <string>1.0.0</string>
         <key>CFBundleIconFile</key>
@@ -22,7 +22,7 @@
         <key>NSHighResolutionCapable</key>
             <string>true</string>
         <key>NSHumanReadableCopyright</key>
-            <string>Copyright (c) 2026 CCX. All rights reserved.</string>
+            <string>Copyright (c) 2026 Yunqi. All rights reserved.</string>
         <key>NSAppTransportSecurity</key>
         <dict>
             <key>NSAllowsLocalNetworking</key>

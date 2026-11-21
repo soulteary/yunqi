@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/conversation"
+	"github.com/soulteary/yunqi/internal/conversation"
 	"github.com/gin-gonic/gin"
 )
 

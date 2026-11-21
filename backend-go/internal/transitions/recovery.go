@@ -3,8 +3,8 @@ package transitions
 import (
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/eventbus"
-	"github.com/BenedictKing/ccx/internal/metrics"
+	"github.com/soulteary/yunqi/internal/eventbus"
+	"github.com/soulteary/yunqi/internal/metrics"
 )
 
 // RestoreAndHalfOpenResult 描述一次恢复编排结果。

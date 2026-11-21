@@ -1,10 +1,10 @@
 # Provider Setup
 
-This section guides you through configuring various LLM providers in CCX.
+This section guides you through configuring various LLM providers in Yunqi.
 
 ## General Workflow
 
-1. Log in to the CCX admin console (default `http://localhost:3000`)
+1. Log in to the Yunqi admin console (default `http://localhost:3000`)
 2. Select the appropriate proxy endpoint (Chat, Messages, etc.)
 3. Click "Add Channel"
 4. Fill in the channel configuration

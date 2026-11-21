@@ -60,7 +60,7 @@ type Guardrail interface {
 
 - 并发安全，运行时可 Register/替换
 - 按 priority 升序排序执行
-- 支持 `x-ccx-disabled-guardrails` 请求头逗号分隔豁免
+- 支持 `x-yunqi-disabled-guardrails` 请求头逗号分隔豁免
 - **fail-open**：任一 guardrail panic / error 记日志后继续，不阻断请求
 - 提供全局 `DefaultRegistry()` 单例
 
@@ -116,7 +116,7 @@ type Guardrail interface {
   - 超限跳过：>maxScanBytes 时仅扫头部 + trimmed 标记
   - fail-open：panic guardrail 不阻断，后续 guardrail 继续执行
   - 优先级排序：priority 升序执行验证
-  - 请求头豁免：`x-ccx-disabled-guardrails` 跳过验证
+  - 请求头豁免：`x-yunqi-disabled-guardrails` 跳过验证
   - PostCall 对称：响应侧掩码与 meta stage 标记
   - 空输入：nil / 空字节返回 nil result
 - **集成验证**：`make test` 全量内部包通过（37 packages all ok）

@@ -5,8 +5,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/handlers/common"
-	"github.com/BenedictKing/ccx/internal/providers"
+	"github.com/soulteary/yunqi/internal/handlers/common"
+	"github.com/soulteary/yunqi/internal/providers"
 )
 
 func TestGetCapabilityStreamProvider(t *testing.T) {

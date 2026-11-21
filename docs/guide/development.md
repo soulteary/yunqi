@@ -1,6 +1,6 @@
 # 开发指南
 
-本文档说明 CCX 的本地开发方式、常用命令和验证流程。
+本文档说明 Yunqi 的本地开发方式、常用命令和验证流程。
 
 > 相关文档：
 > - 架构设计：[architecture.md](architecture.md)
@@ -184,7 +184,7 @@ make benchmark-update                          # 显式跳过用 --skip-artifici
 
 ### Windows / WSL / Docker 访问建议
 
-Windows 下 cmd、PowerShell、WSL 与 Docker 可能处在不同网络环境中，`localhost` / `127.0.0.1` 不一定指向运行 CCX 的进程。跨环境调用时建议使用 Windows 主机的局域网 IPv4 地址，例如：
+Windows 下 cmd、PowerShell、WSL 与 Docker 可能处在不同网络环境中，`localhost` / `127.0.0.1` 不一定指向运行 Yunqi 的进程。跨环境调用时建议使用 Windows 主机的局域网 IPv4 地址，例如：
 
 ```text
 http://192.168.1.23:3688/v1
@@ -202,7 +202,7 @@ ipconfig
 curl.exe -i http://192.168.1.23:3688/health
 ```
 
-CCX 后端在 `BIND_HOST` 留空时默认监听 `:PORT`，等价于监听所有网卡地址；通常不需要额外修改为 `0.0.0.0`。如需仅本机访问，设置 `BIND_HOST=127.0.0.1`。如果局域网 IP 无法访问，优先检查 Windows 防火墙是否允许对应端口入站。
+Yunqi 后端在 `BIND_HOST` 留空时默认监听 `:PORT`，等价于监听所有网卡地址；通常不需要额外修改为 `0.0.0.0`。如需仅本机访问，设置 `BIND_HOST=127.0.0.1`。如果局域网 IP 无法访问，优先检查 Windows 防火墙是否允许对应端口入站。
 
 ## 常见开发任务
 

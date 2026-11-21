@@ -3,8 +3,8 @@ package providers
 import (
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/types"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/types"
 	"github.com/stretchr/testify/assert"
 )
 

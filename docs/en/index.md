@@ -1,7 +1,7 @@
 ---
 layout: home
 hero:
-  name: CCX
+  name: Yunqi
   text: '- AI API Proxy Gateway'
   tagline: Unified proxy and protocol translation for Claude, OpenAI, Gemini, DeepSeek, Kimi, GLM, MiniMax, Qwen and more
   actions:
@@ -22,7 +22,7 @@ hero:
       link: /en/guide/benchmark
     - theme: alt
       text: GitHub
-      link: https://github.com/BenedictKing/ccx
+      link: https://github.com/soulteary/yunqi
 features:
   - title: Multi-Protocol Support
     details: Unified proxy for Claude Messages, OpenAI Chat/Images, Codex Responses, Gemini and more

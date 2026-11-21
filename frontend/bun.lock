@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "ccx-frontend",
+      "name": "yunqi-frontend",
       "dependencies": {
         "@mdi/js": "^7.4.47",
         "apexcharts": "^5.15.2",

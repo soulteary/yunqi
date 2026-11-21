@@ -2,7 +2,7 @@ import { defineConfig, type HeadConfig } from 'vitepress'
 import { zhConfig } from './zh'
 import { enConfig } from './en'
 
-const SITE_URL = 'https://benedictking.github.io/ccx'
+const SITE_URL = 'https://soulteary.github.io/yunqi'
 
 const localeMap = [
   { lang: 'zh-CN', prefix: '/' },
@@ -10,14 +10,14 @@ const localeMap = [
 ]
 
 export default defineConfig({
-  title: 'CCX',
+  title: 'Yunqi',
   description: 'AI API Proxy & Protocol Translation Gateway',
-  base: '/ccx/',
+  base: '/yunqi/',
   head: [
-    ['link', { rel: 'icon', type: 'image/svg+xml', href: '/ccx/logo.svg' }],
+    ['link', { rel: 'icon', type: 'image/svg+xml', href: '/yunqi/logo.svg' }],
     ['meta', { name: 'author', content: 'BenedictKing' }],
     ['meta', { property: 'og:type', content: 'website' }],
-    ['meta', { property: 'og:site_name', content: 'CCX Docs' }],
+    ['meta', { property: 'og:site_name', content: 'Yunqi Docs' }],
   ],
   locales: {
     root: {
@@ -25,7 +25,7 @@ export default defineConfig({
       lang: 'zh-CN',
       description: '多上游 AI API 代理与协议转换网关',
       head: [
-        ['meta', { name: 'keywords', content: 'CCX, AI API 代理, Claude, OpenAI, Gemini, 协议转换网关, API 调度, 渠道编排' }],
+        ['meta', { name: 'keywords', content: 'Yunqi, AI API 代理, Claude, OpenAI, Gemini, 协议转换网关, API 调度, 渠道编排' }],
         ['meta', { property: 'og:locale', content: 'zh_CN' }],
       ],
       ...zhConfig,
@@ -35,7 +35,7 @@ export default defineConfig({
       lang: 'en',
       description: 'Multi-upstream AI API Proxy & Protocol Translation Gateway',
       head: [
-        ['meta', { name: 'keywords', content: 'CCX, AI API proxy, Claude, OpenAI, Gemini, protocol translation, API gateway, channel orchestration' }],
+        ['meta', { name: 'keywords', content: 'Yunqi, AI API proxy, Claude, OpenAI, Gemini, protocol translation, API gateway, channel orchestration' }],
         ['meta', { property: 'og:locale', content: 'en_US' }],
       ],
       ...enConfig,
@@ -43,7 +43,7 @@ export default defineConfig({
   },
   themeConfig: {
     socialLinks: [
-      { icon: 'github', link: 'https://github.com/BenedictKing/ccx' },
+      { icon: 'github', link: 'https://github.com/soulteary/yunqi' },
     ],
     search: {
       provider: 'local',

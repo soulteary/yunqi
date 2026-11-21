@@ -9,15 +9,15 @@
 
 ## 工作原理
 
-CCX 支持通过多种协议入口接入 DeepSeek：
+Yunqi 支持通过多种协议入口接入 DeepSeek：
 
 ```text
-Claude Code CLI       ──→  /v1/messages          ──→  CCX  ──→  DeepSeek Anthropic 端点
-Codex CLI/App         ──→  /v1/responses         ──→  CCX  ──→  DeepSeek Chat 端点
-OpenAI 兼容工具       ──→  /v1/chat/completions  ──→  CCX  ──→  DeepSeek Chat 端点
+Claude Code CLI       ──→  /v1/messages          ──→  Yunqi  ──→  DeepSeek Anthropic 端点
+Codex CLI/App         ──→  /v1/responses         ──→  Yunqi  ──→  DeepSeek Chat 端点
+OpenAI 兼容工具       ──→  /v1/chat/completions  ──→  Yunqi  ──→  DeepSeek Chat 端点
 ```
 
-一个 CCX 实例可以同时服务所有路径，按需配置对应协议的渠道即可。
+一个 Yunqi 实例可以同时服务所有路径，按需配置对应协议的渠道即可。
 
 ## 场景一：OpenAI Chat 协议（通用）
 
@@ -25,7 +25,7 @@ OpenAI 兼容工具       ──→  /v1/chat/completions  ──→  CCX  ─�
 
 ### 配置步骤
 
-1. 进入 CCX 管理界面，选择 **Chat** 入口
+1. 进入 Yunqi 管理界面，选择 **Chat** 入口
 
 ![Chat 渠道列表](/images/guide/channel-list.png)
 
@@ -47,7 +47,7 @@ OpenAI 兼容工具       ──→  /v1/chat/completions  ──→  CCX  ─�
 ### 客户端配置
 
 ```bash
-export OPENAI_API_KEY="your-ccx-proxy-key"
+export OPENAI_API_KEY="your-yunqi-proxy-key"
 export OPENAI_BASE_URL="http://localhost:3000/v1"
 ```
 
@@ -59,7 +59,7 @@ Claude Code CLI 使用 Messages API。需要在 Messages 入口配置 Claude 服
 
 ### 配置步骤
 
-1. 进入 CCX 管理界面，选择 **Messages** 入口
+1. 进入 Yunqi 管理界面，选择 **Messages** 入口
 
 ![Messages 渠道列表](/images/guide/messages-channel-list.png)
 
@@ -78,7 +78,7 @@ Claude Code CLI 使用 Messages API。需要在 Messages 入口配置 Claude 服
 
 ### 模型映射（推荐）
 
-Claude Code CLI 默认使用 Claude 模型名（如 `claude-opus-4-7`）发起请求。配置模型映射让 CCX 自动重定向到 DeepSeek 模型：
+Claude Code CLI 默认使用 Claude 模型名（如 `claude-opus-4-7`）发起请求。配置模型映射让 Yunqi 自动重定向到 DeepSeek 模型：
 
 | 请求模型 | 重定向到 |
 |----------|----------|
@@ -91,7 +91,7 @@ Claude Code CLI 默认使用 Claude 模型名（如 `claude-opus-4-7`）发起�
 ### 客户端配置
 
 ```bash
-export ANTHROPIC_API_KEY="your-ccx-proxy-key"
+export ANTHROPIC_API_KEY="your-yunqi-proxy-key"
 export ANTHROPIC_BASE_URL="http://localhost:3000"
 ```
 
@@ -102,7 +102,7 @@ claude "你好"
 ```
 
 ::: warning 注意
-`ANTHROPIC_BASE_URL` 指向 CCX 网关根地址，不要加 `/v1` 或 `/v1/messages`。
+`ANTHROPIC_BASE_URL` 指向 Yunqi 网关根地址，不要加 `/v1` 或 `/v1/messages`。
 :::
 
 ---
@@ -113,7 +113,7 @@ Codex CLI 使用 OpenAI Responses API。需要在 Responses 入口配置 Chat �
 
 ### 配置步骤
 
-1. 进入 CCX 管理界面，选择 **Responses** 入口
+1. 进入 Yunqi 管理界面，选择 **Responses** 入口
 
 ![Responses 渠道列表](/images/guide/responses-channel-list.png)
 
@@ -133,12 +133,12 @@ Codex CLI 使用 OpenAI Responses API。需要在 Responses 入口配置 Chat �
 ![高级选项开关](/images/guide/advanced-options.png)
 
 ::: tip 为什么需要启用？
-Codex 的 Responses 请求转换为 Chat Completions 后，可能包含 `developer` 等 DeepSeek 不支持的 role。启用此选项后，CCX 会在发往上游前将其规范化为 `user`。
+Codex 的 Responses 请求转换为 Chat Completions 后，可能包含 `developer` 等 DeepSeek 不支持的 role。启用此选项后，Yunqi 会在发往上游前将其规范化为 `user`。
 :::
 
 ### 模型映射（推荐）
 
-Codex CLI/App 默认使用 GPT 模型名。配置映射让 CCX 自动重定向：
+Codex CLI/App 默认使用 GPT 模型名。配置映射让 Yunqi 自动重定向：
 
 | 请求模型 | 重定向到 |
 |----------|----------|
@@ -148,7 +148,7 @@ Codex CLI/App 默认使用 GPT 模型名。配置映射让 CCX 自动重定向�
 ![Responses 渠道模型映射](/images/guide/model-mapping-deepseek.png)
 
 ::: tip 映射规则
-CCX 优先使用更长的匹配键。`gpt` 匹配 `gpt-5` 等常规模型，`mini` 匹配 `gpt-5-mini` 等轻量模型。不要把 pro 路由键写成 `gpt-5`，否则 `gpt-5-mini` 会先命中 `gpt-5`。
+Yunqi 优先使用更长的匹配键。`gpt` 匹配 `gpt-5` 等常规模型，`mini` 匹配 `gpt-5-mini` 等轻量模型。不要把 pro 路由键写成 `gpt-5`，否则 `gpt-5-mini` 会先命中 `gpt-5`。
 :::
 
 ### 客户端配置
@@ -156,7 +156,7 @@ CCX 优先使用更长的匹配键。`gpt` 匹配 `gpt-5` 等常规模型，`min
 **Codex CLI：**
 
 ```bash
-export OPENAI_API_KEY="your-ccx-proxy-key"
+export OPENAI_API_KEY="your-yunqi-proxy-key"
 export OPENAI_BASE_URL="http://localhost:3000/v1"
 codex "你好"
 ```
@@ -165,9 +165,9 @@ codex "你好"
 
 | 设置项 | 值 |
 |--------|-----|
-| API Key | `your-ccx-proxy-key` |
+| API Key | `your-yunqi-proxy-key` |
 | Base URL | `http://localhost:3000/v1` |
-| Model | `gpt-5`（CCX 自动重定向到 `deepseek-v4-pro`） |
+| Model | `gpt-5`（Yunqi 自动重定向到 `deepseek-v4-pro`） |
 
 ---
 
@@ -182,7 +182,7 @@ codex "你好"
 
 ## 图片/视觉支持
 
-DeepSeek 不支持图片输入。在 CCX 中配置 DeepSeek 渠道时，建议**关闭**视觉支持（编辑渠道时点击右上角的眼睛图标，使其变为关闭状态）。
+DeepSeek 不支持图片输入。在 Yunqi 中配置 DeepSeek 渠道时，建议**关闭**视觉支持（编辑渠道时点击右上角的眼睛图标，使其变为关闭状态）。
 
 ![编辑渠道界面：DeepSeek 渠道的视觉支持已关闭（右上角眼睛图标为灰色），鼠标悬停时显示提示「此渠道不支持图片输入」。关闭后，包含图片的请求将自动跳过此渠道，failover 到下一个支持视觉的渠道](/screenshots/channel-deepseek-vision.png)
 
@@ -191,10 +191,10 @@ DeepSeek 不支持图片输入。在 CCX 中配置 DeepSeek 渠道时，建议**
 关闭后的行为：
 - 纯文本请求正常路由到 DeepSeek 渠道
 - 包含图片的请求会自动跳过该渠道，**failover 到调度队列中下一个支持视觉的渠道**
-- 无需手动干预，CCX 会自动完成路由切换
+- 无需手动干预，Yunqi 会自动完成路由切换
 
 ::: tip
-如果你同时配置了 DeepSeek（纯文本）和另一个支持视觉的渠道，CCX 会智能区分请求类型，将图片请求路由到支持视觉的渠道，文本请求仍走 DeepSeek。
+如果你同时配置了 DeepSeek（纯文本）和另一个支持视觉的渠道，Yunqi 会智能区分请求类型，将图片请求路由到支持视觉的渠道，文本请求仍走 DeepSeek。
 :::
 
 ---
@@ -203,7 +203,7 @@ DeepSeek 不支持图片输入。在 CCX 中配置 DeepSeek 渠道时，建议**
 
 ```bash
 curl http://localhost:3000/v1/models \
-  -H "Authorization: Bearer your-ccx-proxy-key"
+  -H "Authorization: Bearer your-yunqi-proxy-key"
 ```
 
 返回的模型列表中应包含你配置的 DeepSeek 模型。
@@ -212,8 +212,8 @@ curl http://localhost:3000/v1/models \
 
 | 问题 | 解决方案 |
 |------|----------|
-| `401 Unauthorized` | 确认工具中的 Key 与 CCX 的 `PROXY_ACCESS_KEY` 一致 |
+| `401 Unauthorized` | 确认工具中的 Key 与 Yunqi 的 `PROXY_ACCESS_KEY` 一致 |
 | `Model not found` | 确认渠道中的模型名称正确 |
-| `Connection refused` | 确认 CCX 正在运行，Base URL 指向正确地址 |
+| `Connection refused` | 确认 Yunqi 正在运行，Base URL 指向正确地址 |
 | 渠道 unhealthy | 检查 DeepSeek API Key 是否正确，网络是否能访问 `api.deepseek.com` |
 | Claude Code 响应格式异常 | 确认 `ANTHROPIC_BASE_URL` 指向根地址，不含 `/v1` |

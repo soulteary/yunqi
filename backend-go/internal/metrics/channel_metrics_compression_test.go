@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/types"
+	"github.com/soulteary/yunqi/internal/types"
 )
 
 // P2 压缩遥测持久化：RecordRequestCompression 附加到 pending 记录后，

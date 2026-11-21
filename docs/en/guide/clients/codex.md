@@ -1,26 +1,26 @@
-# Connect Codex CLI / Codex App to CCX
+# Connect Codex CLI / Codex App to Yunqi
 
-If you are using **CCX Desktop**, you can apply Codex settings from [Agent configuration](/en/guide/desktop/#agent-configuration) first, then return here to confirm the Responses endpoint and Base URL behavior.
+If you are using **Yunqi Desktop**, you can apply Codex settings from [Agent configuration](/en/guide/desktop/#agent-configuration) first, then return here to confirm the Responses endpoint and Base URL behavior.
 
 Codex CLI and Codex App use the same OpenAI-compatible configuration: Base URL, API key, and model name are the same. Only the configuration entry point differs.
 
 ## How it works
 
 ```text
-Codex CLI / App  ->  CCX /v1/responses  ->  Responses channel  ->  upstream Responses or Chat endpoint
+Codex CLI / App  ->  Yunqi /v1/responses  ->  Responses channel  ->  upstream Responses or Chat endpoint
 ```
 
-## 1. Configure a CCX channel
+## 1. Configure a Yunqi channel
 
-1. Open the CCX admin console and go to **Responses**
+1. Open the Yunqi admin console and go to **Responses**
 2. Click "Add Channel"
 3. Choose the service type based on upstream capability
 
 | Upstream capability | Service type | Notes |
 |---------------------|--------------|-------|
 | Native OpenAI Responses | `Responses` | Direct Responses forwarding |
-| OpenAI Chat-compatible | `OpenAI Chat` | CCX converts Responses to Chat Completions |
-| Claude | `Claude` | CCX converts Responses to Claude Messages |
+| OpenAI Chat-compatible | `OpenAI Chat` | Yunqi converts Responses to Chat Completions |
+| Claude | `Claude` | Yunqi converts Responses to Claude Messages |
 
 If the upstream is Chat-compatible and does not support non-standard Chat roles such as `developer`, edit the channel and enable **Normalize Non-standard Chat Roles**.
 
@@ -30,12 +30,12 @@ Codex CLI and Codex App both use these values:
 
 | Setting | Value |
 |---------|-------|
-| API Key | `your-ccx-proxy-key` |
+| API Key | `your-yunqi-proxy-key` |
 | Base URL | `http://localhost:3000/v1` |
 | Model | requested model name, for example `gpt-5` |
 
 ::: tip
-The API key here is CCX `PROXY_ACCESS_KEY`, not the upstream provider API key. Upstream keys are configured only in CCX channels.
+The API key here is Yunqi `PROXY_ACCESS_KEY`, not the upstream provider API key. Upstream keys are configured only in Yunqi channels.
 :::
 
 ## 3. Codex CLI configuration
@@ -43,7 +43,7 @@ The API key here is CCX `PROXY_ACCESS_KEY`, not the upstream provider API key. U
 Set these environment variables:
 
 ```bash
-export OPENAI_API_KEY="your-ccx-proxy-key"
+export OPENAI_API_KEY="your-yunqi-proxy-key"
 export OPENAI_BASE_URL="http://localhost:3000/v1"
 ```
 
@@ -56,7 +56,7 @@ codex "hello"
 If your Codex CLI version uses a config file instead of environment variables, fill in the same values:
 
 ```text
-API Key: your-ccx-proxy-key
+API Key: your-yunqi-proxy-key
 Base URL: http://localhost:3000/v1
 Model: gpt-5
 ```
@@ -67,7 +67,7 @@ In the Codex App model or provider settings, choose an OpenAI-compatible / custo
 
 | Setting | Value |
 |---------|-------|
-| API Key | `your-ccx-proxy-key` |
+| API Key | `your-yunqi-proxy-key` |
 | Base URL | `http://localhost:3000/v1` |
 | Model | `gpt-5` or your mapped model name |
 
@@ -81,14 +81,14 @@ Codex may request GPT-style model names. If your upstream uses different model n
 | `mini` | upstream lightweight model |
 
 ::: tip
-Do not only map `gpt-5` and forget `gpt-5-mini`. CCX prefers longer matching keys first; `gpt` and `mini` usually cover common Codex model names.
+Do not only map `gpt-5` and forget `gpt-5-mini`. Yunqi prefers longer matching keys first; `gpt` and `mini` usually cover common Codex model names.
 :::
 
 ## Troubleshooting
 
 ### Do Codex CLI and Codex App need separate configurations?
 
-No. They use the same CCX OpenAI-compatible configuration:
+No. They use the same Yunqi OpenAI-compatible configuration:
 
 ```text
 API Key  = PROXY_ACCESS_KEY
@@ -108,9 +108,9 @@ Check:
    printenv OPENAI_API_KEY
    ```
 
-2. `OPENAI_API_KEY` or the App API key matches CCX `PROXY_ACCESS_KEY`
+2. `OPENAI_API_KEY` or the App API key matches Yunqi `PROXY_ACCESS_KEY`
 3. You did not accidentally enter the upstream provider API key
-4. CCX was started with the same `PROXY_ACCESS_KEY`
+4. Yunqi was started with the same `PROXY_ACCESS_KEY`
 
 ### 404 or missing endpoint
 
@@ -152,7 +152,7 @@ Check:
 
 ### Confirm whether the request uses Responses
 
-Check CCX backend logs or channel logs. The request path should be:
+Check Yunqi backend logs or channel logs. The request path should be:
 
 ```text
 /v1/responses

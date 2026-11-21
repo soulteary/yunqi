@@ -1,0 +1,16 @@
+Yunqi（云起）
+
+本项目基于 BenedictKing/ccx，起始快照为
+3a08db977187a37ed4236d6a755fb8ab3aebc214。
+Upstream: https://github.com/BenedictKing/ccx
+
+Copyright (c) 2025-2026 BenedictKing
+Copyright (c) 2026 Yunqi contributors
+
+Yunqi 作为整体以 GNU Affero General Public License version 3 only
+（SPDX: AGPL-3.0-only）提供，完整条款见 LICENSE。
+来自上游的代码仍保留其 MIT 许可及版权声明，见 LICENSES/MIT-upstream.txt。
+本次许可调整不撤销上游已授予的 MIT 权利，也不改变第三方依赖各自的许可。
+
+向用户提供经修改的软件网络服务时，应按 AGPL 第 13 条提供对应源代码
+获取方式。部署者应指向实际运行版本的对应源码，而非仅链接到最新主分支。

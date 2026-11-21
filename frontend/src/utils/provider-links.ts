@@ -1,5 +1,5 @@
-// 服务商官方控制台与推广链接映射。
-// 与桌面端 desktop/frontend/src/lib/external-link.ts 保持一致，用于订阅中心展示卡片的外链入口。
+// 服务商官方控制台链接映射。
+// 订阅中心展示卡片的外链入口。
 
 /** 官方控制台链接（查看用量 / 余额 / 密钥） */
 export const providerConsoleLinks: Record<string, string> = {
@@ -11,8 +11,7 @@ export const providerConsoleLinks: Record<string, string> = {
   tokenrhythm: 'https://tokenrhythm.studio/',
   'tencent-lkeap': 'https://console.cloud.tencent.com/lkeap/token-plan',
   kimi: 'https://platform.moonshot.cn/console/account',
-  volcengine:
-    'https://console.volcengine.com/ark/region:cn-beijing/subscription/coding-plan?projectName=default',
+  volcengine: 'https://console.volcengine.com/ark/region:cn-beijing/subscription/coding-plan?projectName=default',
   qianfan: 'https://console.bce.baidu.com/qianfan/resource/subscribe',
   originrouter: 'https://easytransnote.com/ai/console/#key',
   glm: 'https://open.bigmodel.cn/coding-plan/personal/overview',
@@ -28,24 +27,11 @@ export const providerConsoleLinks: Record<string, string> = {
   atomgit: 'https://ai.atomgit.com/dashboard/coding-plan'
 }
 
-/** 推广 / 注册链接（带 aff 溯源，标记赞助商渠道） */
-export const providerPromotionLinks: Record<string, string> = {
-  'github-copilot': 'https://github.com/features/copilot',
-  compshare: 'https://www.compshare.cn/?ytag=GPU_YY_git_ccx',
-  volcengine:
-    'https://www.volcengine.com/activity/ai618?utm_campaign=hw&utm_content=hw&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=ccx',
-}
-
 export function openExternal(url: string) {
   if (typeof window !== 'undefined') window.open(url, '_blank', 'noopener,noreferrer')
 }
 
 export function openProviderConsole(providerId: string) {
   const url = providerConsoleLinks[providerId]
-  if (url) openExternal(url)
-}
-
-export function openProviderPromotion(providerId: string) {
-  const url = providerPromotionLinks[providerId]
   if (url) openExternal(url)
 }

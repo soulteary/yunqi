@@ -6,7 +6,7 @@ import (
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 
-	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/soulteary/yunqi/internal/config"
 )
 
 // 已知上游模型的请求参数硬约束由 model-registry 承载（config.ModelParamConstraints），不再是

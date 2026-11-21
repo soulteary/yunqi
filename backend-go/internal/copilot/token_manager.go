@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/errutil"
-	"github.com/BenedictKing/ccx/internal/httpclient"
+	"github.com/soulteary/yunqi/internal/errutil"
+	"github.com/soulteary/yunqi/internal/httpclient"
 )
 
 const copilotTokenURL = "https://api.github.com/copilot_internal/v2/token"

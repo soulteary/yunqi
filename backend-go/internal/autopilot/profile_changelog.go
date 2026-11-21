@@ -2,7 +2,7 @@ package autopilot
 
 import (
 	"database/sql"
-	"github.com/BenedictKing/ccx/internal/errutil"
+	"github.com/soulteary/yunqi/internal/errutil"
 	"log"
 	"sync"
 	"sync/atomic"

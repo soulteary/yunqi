@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/errutil"
+	"github.com/soulteary/yunqi/internal/errutil"
 )
 
 // ── DiscoveryTaskStore: 后台 discovery 任务落盘与断点续传 ──

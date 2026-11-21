@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/BenedictKing/ccx/internal/utils"
+	"github.com/soulteary/yunqi/internal/utils"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )

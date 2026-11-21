@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/eventbus"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/eventbus"
 )
 
 // manifest_drift 事件 payload 应携带回填上下文（baseURL/source/discoveredAt），

@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/handlers/responses"
+	"github.com/soulteary/yunqi/internal/handlers/responses"
 	"github.com/gin-gonic/gin"
 )
 

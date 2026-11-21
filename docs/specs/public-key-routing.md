@@ -374,7 +374,7 @@ ccx_opportunistic_saved_cost_usd_total
 
 - ~~成本报表中区分「已确认零成本」与「成本证据缺失」~~ ✅ 已实现（`47d6c205`）：后端输出 `zeroCostCount/configuredMultiplierCount/subscriptionCostCount/unpricedCostCount`，前端成本报表 chip 列 + CSV 字段；
 - `ccx_opportunistic_*` 系列指标与事件（可选，尚未实现）；
-- ~~shadow 对比报告~~ ✅ 已实现（`692d3235`）：auto 模式同时计算实际排序与忽略 opportunistic 的基线排序（`SortKeyBindingsBaseline`），首选不同时写 gin context `ccx.public_key_routing_shadow_diff` 并打 `[<apiType>-PublicKeyRouting-ShadowDiff]` 日志。
+- ~~shadow 对比报告~~ ✅ 已实现（`692d3235`）：auto 模式同时计算实际排序与忽略 opportunistic 的基线排序（`SortKeyBindingsBaseline`），首选不同时写 gin context `yunqi.public_key_routing_shadow_diff` 并打 `[<apiType>-PublicKeyRouting-ShadowDiff]` 日志。
 
 
 ## 10. 实施分期
@@ -447,7 +447,7 @@ private: multiplier=1, policy=normal
 
 - 不提供公开 Key 的抓取、发布、交换或远端生命周期管理；
 - 不绕过上游鉴权、配额、速率限制或服务条款；
-- 不把公开 Key 自动共享给其他 CCX 实例；
+- 不把公开 Key 自动共享给其他 Yunqi 实例；
 - 不用该策略替代熔断、限速、模型兼容性和安全上限；
 - 本期不设计余额感知的最优控制算法，只处理显式用户策略。
 

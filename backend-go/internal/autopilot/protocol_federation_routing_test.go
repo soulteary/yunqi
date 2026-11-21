@@ -3,8 +3,8 @@ package autopilot
 import (
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/scheduler"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/scheduler"
 )
 
 // federationProfileStore 为 messages 原生渠道与 chat sibling 分别登记画像，

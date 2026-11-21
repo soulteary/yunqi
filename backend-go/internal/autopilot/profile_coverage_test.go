@@ -3,7 +3,7 @@ package autopilot
 import (
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/soulteary/yunqi/internal/config"
 )
 
 // newTestManagerForCoverage 构造一个具备 ProfileStore + ModelProfileStore + cfgManager 的最小 Manager，

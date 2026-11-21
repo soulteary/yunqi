@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/BenedictKing/ccx/desktop/internal/uipreferences"
+	"github.com/soulteary/yunqi/desktop/internal/uipreferences"
 )
 
 func TestLoadReturnsDefaultsWhenMissing(t *testing.T) {

@@ -1,7 +1,7 @@
 package metrics
 
 import (
-	"github.com/BenedictKing/ccx/internal/errutil"
+	"github.com/soulteary/yunqi/internal/errutil"
 	"time"
 )
 

@@ -3,7 +3,7 @@ package autopilot
 import (
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/soulteary/yunqi/internal/config"
 )
 
 // TestCalibrateOfficialReleaseEffort 验证官方公告 DeepSWE 等价证据的校准链：

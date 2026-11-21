@@ -1,16 +1,16 @@
-# Claude Code 接入 CCX
+# Claude Code 接入 Yunqi
 
-如果你正在使用 **CCX Desktop**，可先在 [Agent Config](/guide/desktop/#agent-配置) 中写入本地 CCX 配置，再回到本页确认 Claude Code 的协议细节。
+如果你正在使用 **Yunqi Desktop**，可先在 [Agent Config](/guide/desktop/#agent-配置) 中写入本地 Yunqi 配置，再回到本页确认 Claude Code 的协议细节。
 
 ## 工作方式
 
 ```text
-Claude Code  ->  CCX /v1/messages  ->  Messages 渠道  ->  上游 Anthropic 兼容端点
+Claude Code  ->  Yunqi /v1/messages  ->  Messages 渠道  ->  上游 Anthropic 兼容端点
 ```
 
-## 一、配置 CCX 渠道
+## 一、配置 Yunqi 渠道
 
-1. 打开 CCX 管理界面，进入 **Messages** 入口
+1. 打开 Yunqi 管理界面，进入 **Messages** 入口
 2. 点击「添加渠道」
 3. 按上游提供商填写渠道配置
 
@@ -32,7 +32,7 @@ Claude Code  ->  CCX /v1/messages  ->  Messages 渠道  ->  上游 Anthropic 兼
 在终端中设置：
 
 ```bash
-export ANTHROPIC_API_KEY="your-ccx-proxy-key"
+export ANTHROPIC_API_KEY="your-yunqi-proxy-key"
 export ANTHROPIC_BASE_URL="http://localhost:3000"
 ```
 
@@ -43,7 +43,7 @@ claude "你好"
 ```
 
 ::: warning
-`ANTHROPIC_BASE_URL` 填 CCX 网关根地址，不要加 `/v1` 或 `/v1/messages`。
+`ANTHROPIC_BASE_URL` 填 Yunqi 网关根地址，不要加 `/v1` 或 `/v1/messages`。
 :::
 
 ## 三、模型映射建议
@@ -62,7 +62,7 @@ Claude Code 可能会使用 Claude 模型名发起请求，例如：
 | `sonnet` | 上游主力模型 |
 | `haiku` | 上游轻量模型 |
 
-CCX 会按更长的匹配键优先匹配。模型名和映射值以你实际配置的上游为准。
+Yunqi 会按更长的匹配键优先匹配。模型名和映射值以你实际配置的上游为准。
 
 ## 常见问题
 
@@ -70,10 +70,10 @@ CCX 会按更长的匹配键优先匹配。模型名和映射值以你实际配�
 
 检查：
 
-1. `ANTHROPIC_API_KEY` 是否等于 CCX 的 `PROXY_ACCESS_KEY`。
-2. CCX 启动时是否设置了正确的 `PROXY_ACCESS_KEY`。
+1. `ANTHROPIC_API_KEY` 是否等于 Yunqi 的 `PROXY_ACCESS_KEY`。
+2. Yunqi 启动时是否设置了正确的 `PROXY_ACCESS_KEY`。
 3. Shell 中是否存在旧的环境变量覆盖当前值。
-4. 若使用 CCX Desktop，可在托盘菜单或 **Gateway Monitor** 复制当前 `PROXY_ACCESS_KEY`。
+4. 若使用 Yunqi Desktop，可在托盘菜单或 **Gateway Monitor** 复制当前 `PROXY_ACCESS_KEY`。
 
 ### 配置后仍然请求官方 Claude
 
@@ -119,9 +119,9 @@ export ANTHROPIC_BASE_URL="http://localhost:3000/v1/messages"
 
 ### Claude Code 的 `/model` 看不到预期模型
 
-确认 CCX 至少有一个可用的 Messages 渠道，并且模型白名单或模型列表已包含对应模型。也可以用下面命令验证 CCX 模型接口：
+确认 Yunqi 至少有一个可用的 Messages 渠道，并且模型白名单或模型列表已包含对应模型。也可以用下面命令验证 Yunqi 模型接口：
 
 ```bash
 curl http://localhost:3000/v1/models \
-  -H "Authorization: Bearer your-ccx-proxy-key"
+  -H "Authorization: Bearer your-yunqi-proxy-key"
 ```

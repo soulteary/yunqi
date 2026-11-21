@@ -12,7 +12,7 @@ func supportsInAppUpdate(distribution string) bool {
 	if strings.EqualFold(distribution, "store") {
 		return false
 	}
-	// Windows Store 由 Store 自动更新；NSIS/GitHub 包含 ccx-go.exe sidecar，
+	// Windows Store 由 Store 自动更新；NSIS/GitHub 包含 yunqi.exe sidecar，
 	// 不适合使用 Wails 当前的单目标替换流程。
 	return runtime.GOOS == "darwin"
 }

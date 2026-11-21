@@ -3,7 +3,7 @@ package autopilot
 import (
 	"database/sql"
 	"fmt"
-	"github.com/BenedictKing/ccx/internal/errutil"
+	"github.com/soulteary/yunqi/internal/errutil"
 	"log"
 )
 

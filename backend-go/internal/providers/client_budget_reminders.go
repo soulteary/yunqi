@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/BenedictKing/ccx/internal/utils"
+	"github.com/soulteary/yunqi/internal/utils"
 )
 
 // ============== 客户端上下文预算提醒剔除（CC + Codex 统一机制） ==============

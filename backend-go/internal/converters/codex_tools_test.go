@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/types"
+	"github.com/soulteary/yunqi/internal/types"
 )
 
 func TestBuildApplyPatchInput_AddFileDoesNotAddExtraBlankLine(t *testing.T) {

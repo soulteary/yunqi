@@ -7,7 +7,7 @@
 ## 配置文件结构
 
 ```
-ccx/
+yunqi/
 ├── frontend/
 │   ├── .env                    # 前端默认配置
 │   ├── .env.development        # 开发环境配置
@@ -84,14 +84,14 @@ CORS_ORIGIN=*                          # Allowed CORS origin
 
 #### Local HTTPS
 
-`ENABLE_HTTPS=true` enables HTTPS on the current `PORT` for clients such as Claude Desktop that only accept an HTTPS Gateway Base URL. The recommended local URL is `https://localhost:3688`; CCX still accepts `http://localhost:3688` on the same port for compatibility with existing clients.
+`ENABLE_HTTPS=true` enables HTTPS on the current `PORT` for clients such as Claude Desktop that only accept an HTTPS Gateway Base URL. The recommended local URL is `https://localhost:3688`; Yunqi still accepts `http://localhost:3688` on the same port for compatibility with existing clients.
 
-- By default, `TLS_AUTO_CERT=true`: when no certificate files are configured, CCX generates an in-process temporary self-signed certificate for `localhost`, `127.0.0.1`, and `::1`. This is useful for local forwarding and desktop self-checks.
+- By default, `TLS_AUTO_CERT=true`: when no certificate files are configured, Yunqi generates an in-process temporary self-signed certificate for `localhost`, `127.0.0.1`, and `::1`. This is useful for local forwarding and desktop self-checks.
 - If the client requires a certificate trusted by the operating system, use `mkcert`, an enterprise certificate, or a manually issued certificate, and set both `TLS_CERT_FILE` and `TLS_KEY_FILE`.
 - `TLS_CERT_FILE` and `TLS_KEY_FILE` must be set together. Setting only one of them fails startup.
-- Use expanded absolute paths for `TLS_CERT_FILE` and `TLS_KEY_FILE`. Relative paths are resolved from the CCX process working directory; paths such as `./backend-go/...` commonly fail when CCX is started from an installer, systemd, launchd, NSSM, or another directory.
+- Use expanded absolute paths for `TLS_CERT_FILE` and `TLS_KEY_FILE`. Relative paths are resolved from the Yunqi process working directory; paths such as `./backend-go/...` commonly fail when Yunqi is started from an installer, systemd, launchd, NSSM, or another directory.
 
-When Claude Desktop connects to local HTTPS and the CCX logs show `remote error: tls: unknown certificate`, the client usually does not trust the temporary self-signed certificate. The recommended fix is to generate a locally trusted certificate with `mkcert`.
+When Claude Desktop connects to local HTTPS and the Yunqi logs show `remote error: tls: unknown certificate`, the client usually does not trust the temporary self-signed certificate. The recommended fix is to generate a locally trusted certificate with `mkcert`.
 
 Install `mkcert`:
 
@@ -115,18 +115,18 @@ Install the local CA:
 mkcert -install
 ```
 
-Choose the certificate directory based on how CCX is deployed. For CCX Desktop installers, prefer the actual **Data dir** shown in **Gateway Monitor**; the table lists common defaults:
+Choose the certificate directory based on how Yunqi is deployed. For Yunqi Desktop installers, prefer the actual **Data dir** shown in **Gateway Monitor**; the table lists common defaults:
 
 | Scenario | Suggested certificate directory |
 | --- | --- |
 | Source development | `backend-go/.config/certs` |
-| CCX Desktop macOS installer | `~/Library/Application Support/ccx-desktop/certs` |
-| CCX Desktop Linux installer | `~/.local/state/ccx/certs` |
-| CCX Desktop Windows GitHub installer | `%APPDATA%\ccx-desktop\certs` |
-| CCX Desktop Windows Store/MSIX | `%LOCALAPPDATA%\Packages\<package-family>\LocalCache\Roaming\ccx-desktop\certs` |
-| Linux systemd service | `/etc/ccx/certs` |
-| macOS launchd manual service | `~/ccx/certs` |
-| Windows NSSM service | `C:\ccx\certs` |
+| Yunqi Desktop macOS installer | `~/Library/Application Support/yunqi-desktop/certs` |
+| Yunqi Desktop Linux installer | `~/.local/state/yunqi/certs` |
+| Yunqi Desktop Windows GitHub installer | `%APPDATA%\yunqi-desktop\certs` |
+| Yunqi Desktop Windows Store/MSIX | `%LOCALAPPDATA%\Packages\<package-family>\LocalCache\Roaming\yunqi-desktop\certs` |
+| Linux systemd service | `/etc/yunqi/certs` |
+| macOS launchd manual service | `~/yunqi/certs` |
+| Windows NSSM service | `C:\yunqi\certs` |
 
 For source development or macOS/Linux installers, replace `CERT_DIR` with the actual directory from the table. The example expands it to an absolute path; copy the expanded absolute path into `.env`:
 
@@ -143,7 +143,7 @@ mkcert \
 Windows PowerShell example. For the Store/MSIX build, check **Data dir** in **Gateway Monitor** first, then set `$certDir` to the `certs` subdirectory under that path:
 
 ```powershell
-$certDir = "$env:APPDATA\ccx-desktop\certs"
+$certDir = "$env:APPDATA\yunqi-desktop\certs"
 New-Item -ItemType Directory -Force $certDir
 
 mkcert `
@@ -161,21 +161,21 @@ TLS_CERT_FILE=/absolute/path/to/localhost.pem
 TLS_KEY_FILE=/absolute/path/to/localhost-key.pem
 ```
 
-The `.env` location depends on how CCX is started:
+The `.env` location depends on how Yunqi is started:
 
 - Source development: usually `backend-go/.env`.
-- CCX Desktop installer: edit it in **Environment Params**; the backend process working directory is the desktop data directory.
-- Linux systemd: usually `/opt/ccx/.env` from `EnvironmentFile`, unless the service file points elsewhere.
+- Yunqi Desktop installer: edit it in **Environment Params**; the backend process working directory is the desktop data directory.
+- Linux systemd: usually `/opt/yunqi/.env` from `EnvironmentFile`, unless the service file points elsewhere.
 - macOS launchd / Windows NSSM: if you pass settings through service environment variables, configure `ENABLE_HTTPS`, `TLS_AUTO_CERT`, `TLS_CERT_FILE`, and `TLS_KEY_FILE` in that service configuration.
 
-For installers and system services, prefer expanded absolute paths in `.env`; do not rely on relative paths or automatic expansion of variables such as `%APPDATA%`. Restart CCX, then use `https://localhost:3688` as the Gateway Base URL in Claude Desktop.
+For installers and system services, prefer expanded absolute paths in `.env`; do not rely on relative paths or automatic expansion of variables such as `%APPDATA%`. Restart Yunqi, then use `https://localhost:3688` as the Gateway Base URL in Claude Desktop.
 
 If Claude Desktop connects through a LAN IP or custom hostname, for example `https://192.168.1.20:3688`, include that IP or hostname when generating the certificate:
 
 ```bash
 mkcert \
-  -cert-file "$CERT_DIR/ccx-local.pem" \
-  -key-file "$CERT_DIR/ccx-local-key.pem" \
+  -cert-file "$CERT_DIR/yunqi-local.pem" \
+  -key-file "$CERT_DIR/yunqi-local-key.pem" \
   "localhost" "127.0.0.1" "::1" "192.168.1.20"
 ```
 
@@ -260,14 +260,14 @@ The top-level `scheduler` section in `config.json` controls scheduling soft enha
 
 #### Command-line runtime paths
 
-The CLI binary supports runtime path overrides. Without these flags, CCX keeps the existing defaults:
+The CLI binary supports runtime path overrides. Without these flags, Yunqi keeps the existing defaults:
 
 ```bash
-ccx --config ~/.config/ccx/config.json --statedir ~/.local/state/ccx --logdir ~/.local/state/ccx/logs
+yunqi --config ~/.config/yunqi/config.json --statedir ~/.local/state/yunqi --logdir ~/.local/state/yunqi/logs
 ```
 
 - `--config PATH`: sets the runtime config file path.
-- `--statedir DIR`: sets the runtime state directory. `metrics.db`, `conversation_state.json`, and `scheduled_recovery_state.json` are written there; without this flag, CCX keeps the default `.config` directory.
+- `--statedir DIR`: sets the runtime state directory. `metrics.db`, `conversation_state.json`, and `scheduled_recovery_state.json` are written there; without this flag, Yunqi keeps the default `.config` directory.
 - `--logdir DIR`: sets the log directory. It has higher priority than the `LOG_DIR` environment variable. Use `none` or `null` to disable log file writing (console output only), suitable for systemd/journald environments.
 - `--help`: prints the complete CLI usage.
 - `~` / `~/...` paths are expanded to the current user's home directory.
@@ -722,7 +722,7 @@ ENABLE_RESPONSE_LOGS=true
 1. **日志轮转**：定期清理旧日志，避免磁盘空间耗尽
 2. **访问控制**：限制日志文件的访问权限
    ```bash
-   chmod 600 /var/log/ccx/*.log
+   chmod 600 /var/log/yunqi/*.log
    ```
 3. **敏感数据**：即使有脱敏，也应定期审查日志内容
 4. **合规要求**：根据数据保护法规（GDPR、CCPA等）管理日志
@@ -795,8 +795,8 @@ curl -H "x-api-key: ${ADMIN_ACCESS_KEY:-$PROXY_ACCESS_KEY}" http://localhost:300
    journalctl --vacuum-time=7d
 
    # 或使用 logrotate
-   # /etc/logrotate.d/ccx
-   /var/log/ccx/*.log {
+   # /etc/logrotate.d/yunqi
+   /var/log/yunqi/*.log {
        daily
        rotate 7
        compress

@@ -1,8 +1,8 @@
 # 常见问题
 
-本页汇总 CCX Desktop 的常见问题与排障思路。
+本页汇总 Yunqi Desktop 的常见问题与排障思路。
 
-首次上手或需要完整操作说明时，请先参考 [CCX Desktop](./index)。
+首次上手或需要完整操作说明时，请先参考 [Yunqi Desktop](./index)。
 
 ## 遇到问题先检查
 
@@ -10,7 +10,7 @@
 
 **这是最常见的排障第一步。**
 
-全局代理、TUN 模式（如 Clash TUN、Surge 增强模式、v2rayN TUN 等）会劫持本机所有网络流量，导致 CCX 与上游之间的请求被错误转发或拦截。
+全局代理、TUN 模式（如 Clash TUN、Surge 增强模式、v2rayN TUN 等）会劫持本机所有网络流量，导致 Yunqi 与上游之间的请求被错误转发或拦截。
 
 **症状**：
 
@@ -21,14 +21,14 @@
 **解决**：
 
 1. 关闭系统代理或切换为规则模式（PAC / Rule），避免全局劫持。
-2. 关闭 TUN 模式，或将 CCX 相关地址加入绕过列表。
+2. 关闭 TUN 模式，或将 Yunqi 相关地址加入绕过列表。
 3. 重新测试。
 
 ## 启动失败
 
 ### 二进制文件未找到
 
-**症状**：点击“启动服务”后提示“未找到 CCX 二进制”。
+**症状**：点击“启动服务”后提示“未找到 Yunqi 二进制”。
 
 **解决**：
 
@@ -38,8 +38,8 @@
    cd backend-go && make build
    ```
 
-2. 确认 Desktop 能找到 `ccx-go`。
-3. 若修改了构建产物路径，重新打开 CCX Desktop 再试。
+2. 确认 Desktop 能找到 `yunqi`。
+3. 若修改了构建产物路径，重新打开 Yunqi Desktop 再试。
 
 ### 端口冲突
 
@@ -79,7 +79,7 @@
 
 ```bash
 # macOS / Linux
-chmod +x backend-go/ccx-go
+chmod +x backend-go/yunqi
 
 # Windows
 以管理员身份运行 Desktop
@@ -99,7 +99,7 @@ chmod +x backend-go/ccx-go
 
 请按顺序检查：
 
-1. 客户端中的 API Key 是否等于 CCX 的 `PROXY_ACCESS_KEY`。
+1. 客户端中的 API Key 是否等于 Yunqi 的 `PROXY_ACCESS_KEY`。
 2. Desktop 当前启动所用 `PROXY_ACCESS_KEY` 是否正确。
 3. 是否存在旧的环境变量覆盖当前配置。
 4. 是否误填了上游 API Key。
@@ -126,7 +126,7 @@ printenv OPENAI_BASE_URL
 
 ### Windows 下 localhost 无法访问
 
-若客户端运行在 cmd、PowerShell、WSL 或 Docker 中，`localhost` 可能无法正确到达 CCX。
+若客户端运行在 cmd、PowerShell、WSL 或 Docker 中，`localhost` 可能无法正确到达 Yunqi。
 
 可改用 Windows 主机的局域网 IPv4 地址，例如：
 
@@ -160,11 +160,11 @@ http://192.168.1.23:3688
 - Codex CLI / Codex App：`/v1/responses`
 - OpenCode：`/v1/chat/completions`
 
-如果日志显示路径不符合预期，说明客户端未按目标方式接入 CCX，应重新检查 Agent 配置和客户端 Provider 设置。
+如果日志显示路径不符合预期，说明客户端未按目标方式接入 Yunqi，应重新检查 Agent 配置和客户端 Provider 设置。
 
 ### 快速验证各入口是否正常
 
-当请求报错或不确定 CCX 通路是否正常时，用 curl 直接测试对应入口。
+当请求报错或不确定 Yunqi 通路是否正常时，用 curl 直接测试对应入口。
 
 将下面的 `localhost:3688` 替换为你的实际地址和端口，`your-proxy-key` 替换为你的 `PROXY_ACCESS_KEY`。
 
@@ -208,7 +208,7 @@ curl -sS -i "http://localhost:3688/v1/chat/completions" \
 
 **判定标准**：
 
-- 返回 `HTTP/1.1 200 OK` 且响应体有正常内容 → CCX 通路正常，问题在客户端配置。
+- 返回 `HTTP/1.1 200 OK` 且响应体有正常内容 → Yunqi 通路正常，问题在客户端配置。
 - 返回 `401` → 检查 `PROXY_ACCESS_KEY` 是否匹配。
 - 返回 `400` 且响应体提示 model not found → 检查渠道模型映射。
 - 返回 `502` 或连接超时 → 上游不可达，检查渠道配置和网络。
@@ -241,7 +241,7 @@ GitHub 安装包版会访问 GitHub Releases 检查并下载更新。
 
 1. 检查网络连接。
 2. 如使用代理，确认 GitHub Releases 可访问。
-3. 必要时手动从 [Releases 页面](https://github.com/BenedictKing/ccx/releases) 下载安装。
+3. 必要时手动从 [Releases 页面](https://github.com/soulteary/yunqi/releases) 下载安装。
 
 Microsoft Store 版由 Store 负责更新。若 Store 更新失败，可在库页面重试或重新安装。
 
@@ -249,7 +249,7 @@ Microsoft Store 版由 Store 负责更新。若 Store 更新失败，可在库�
 
 ### 窗口位置或大小不恢复
 
-CCX Desktop 会保存窗口状态到数据目录。
+Yunqi Desktop 会保存窗口状态到数据目录。
 
 如状态异常，可尝试：
 

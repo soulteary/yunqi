@@ -3,7 +3,7 @@ package providers
 import (
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/soulteary/yunqi/internal/config"
 )
 
 func TestBuildTargetURL_CopilotSkipsVersionPrefix(t *testing.T) {

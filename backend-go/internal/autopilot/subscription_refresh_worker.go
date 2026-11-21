@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/quota"
+	"github.com/soulteary/yunqi/internal/quota"
 )
 
 // ── 默认配置 ──

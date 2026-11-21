@@ -1,11 +1,19 @@
-# Claude / OpenAI Chat / OpenAI Images / OpenAI Embeddings / Codex Responses / Gemini API Proxy - CCX
+# 云起 Yunqi — 连接客户端与模型。
+
+**多模型 API 网关与协议转换服务**
 
 English | [简体中文](README.zh-CN.md)
 
-[![GitHub release](https://img.shields.io/github/v/release/BenedictKing/ccx)](https://github.com/BenedictKing/ccx/releases/latest)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![GitHub release](https://img.shields.io/github/v/release/BenedictKing/yunqi)](https://github.com/soulteary/yunqi/releases/latest)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 
-CCX is a high-performance AI API proxy and protocol translation gateway for Claude, OpenAI Chat, OpenAI Images, OpenAI Embeddings, Codex Responses, and Gemini. It provides a unified entrypoint, built-in web administration, channel orchestration, failover, multi-key management, and model routing.
+Yunqi is a high-performance AI API proxy and protocol translation gateway for Claude, OpenAI Chat, OpenAI Images, OpenAI Embeddings, Codex Responses, and Gemini. It provides a unified entrypoint, built-in web administration, channel orchestration, failover, multi-key management, and model routing.
+
+> 本仓库发布资源尚未就绪时，请使用 `make build` 或 `docker compose up --build -d` 从源码构建。
+
+## 名称与项目沿革
+
+“云起”出自王维《终南别业》：“行到水穷处，坐看云起时。”项目源自 BenedictKing/ccx，名称不依附单一模型品牌。详见[项目沿革、更名与许可说明](docs/guide/project-origin.md)。
 
 ## Features
 
@@ -19,18 +27,6 @@ CCX is a high-performance AI API proxy and protocol translation gateway for Clau
 - Responses session tracking for multi-turn workflows
 - Embedded frontend assets for simple binary deployment
 
-## Sponsor
-
-<table>
-<tr>
-<td width="180"><a href="https://www.byteplus.com/en/product/modelark?utm_campaign=hw&utm_content=hw&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=ccx"><img src="docs/sponsors/byteplus.png" alt="BytePlus" width="150"></a></td>
-<td>Thanks to <a href="https://www.byteplus.com/en/product/modelark?utm_campaign=hw&utm_content=hw&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=ccx">Dola Seed</a> for sponsoring this project! Dola Seed 2.0 is a <strong>full‑modal general large model</strong> independently developed by ByteDance for the global market. Built on a unified multimodal architecture, it supports joint understanding and generation of text, images, audio, and video. It natively enables agent collaboration, with strong reasoning, long‑task execution, tool integration, and coding capabilities. It is widely applicable to smart cockpits, personal assistants, education, customer support, marketing, retail, and other scenarios. It excels in multimodal perception, end‑to‑end complex task delivery, stable interaction, and data security, and is readily accessible and deployable via the ModelArk platform. Register via <a href="https://www.byteplus.com/en/product/modelark?utm_campaign=hw&utm_content=hw&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=ccx">this link</a> to get 500,000 tokens of free inference quota per model.</td>
-</tr>
-<tr>
-<td width="180"><a href="https://www.compshare.cn/?ytag=GPU_YY_git_ccx"><img src="docs/sponsors/youyun-zhisuan.png" alt="Youyun Zhisuan" width="150"></a></td>
-<td>Thanks to <a href="https://www.compshare.cn/?ytag=GPU_YY_git_ccx">Youyun Zhisuan</a> for sponsoring this project! Youyun Zhisuan is UCloud's AI cloud platform, offering cost-effective domestic AI model Agent Plan packages by monthly subscription or pay-as-you-go, starting from 49 CNY/month. It also provides stable access to official overseas models, supports Claude Code, Codex, and API integrations, and offers enterprise-grade high concurrency, 24/7 technical support, and self-service invoicing. Users who register through <a href="https://www.compshare.cn/?ytag=GPU_YY_git_ccx">this link</a> can receive a free 5 CNY platform trial credit.</td>
-</tr>
-</table>
 
 ## Screenshots
 
@@ -54,7 +50,7 @@ Real-time monitoring of per-channel request traffic, success rate, and latency.
 
 ## Architecture
 
-CCX exposes one backend entrypoint:
+Yunqi exposes one backend entrypoint:
 
 ```text
 Client -> backend :3000 ->
@@ -78,21 +74,21 @@ See [ARCHITECTURE.md](docs/guide/architecture.md) for the detailed design.
 
 ## Quick Start
 
-### Option 0: CCX Desktop
+### Option 0: Yunqi Desktop
 
-CCX Desktop provides a native desktop experience with GUI for managing channels, keys, and agent configuration.
+Yunqi Desktop provides a native desktop experience with GUI for managing channels, keys, and agent configuration.
 
 | Platform | Install Method | Notes |
 |----------|---------------|-------|
-| **Windows** | Search **CCX Desktop** in [Microsoft Store](https://apps.microsoft.com/detail/ccx-desktop) | Recommended. Auto-update, no manual signing. Also available as `setup.exe` from [GitHub Releases](https://github.com/BenedictKing/ccx/releases/latest). |
-| **macOS** | `brew tap BenedictKing/ccx && brew install --cask ccx-desktop` | Or download `.dmg` (arm64/amd64) from [GitHub Releases](https://github.com/BenedictKing/ccx/releases/latest). |
-| **Linux** | Download `.AppImage` from [GitHub Releases](https://github.com/BenedictKing/ccx/releases/latest) | Mark as executable and run. |
+| **Windows** | Search **Yunqi Desktop** in [Microsoft Store](https://apps.microsoft.com/detail/yunqi-desktop) | Recommended. Auto-update, no manual signing. Also available as `setup.exe` from [GitHub Releases](https://github.com/soulteary/yunqi/releases/latest). |
+| **macOS** | `brew tap BenedictKing/yunqi && brew install --cask yunqi-desktop` | Or download `.dmg` (arm64/amd64) from [GitHub Releases](https://github.com/soulteary/yunqi/releases/latest). |
+| **Linux** | Download `.AppImage` from [GitHub Releases](https://github.com/soulteary/yunqi/releases/latest) | Mark as executable and run. |
 
-See [CCX Desktop Guide](docs/en/guide/desktop/) for detailed setup instructions.
+See [Yunqi Desktop Guide](docs/en/guide/desktop/) for detailed setup instructions.
 
 ### Option 1: Binary
 
-1. Download the latest binary from [Releases](https://github.com/BenedictKing/ccx/releases/latest).
+1. Download the latest binary from [Releases](https://github.com/soulteary/yunqi/releases/latest).
 2. Create a `.env` file next to the binary:
 
 ```bash
@@ -104,7 +100,7 @@ APP_UI_LANGUAGE=en
 
 3. Run the binary and open `http://localhost:3000`
 
-On Windows, if the client runs from cmd, PowerShell, WSL, or Docker and `localhost` does not reach CCX, use the Windows host IPv4 address instead, for example `http://192.168.1.23:3000`. When `BIND_HOST` is empty, CCX listens on all interfaces by default through `:PORT`; set `BIND_HOST=127.0.0.1` for local-only access.
+On Windows, if the client runs from cmd, PowerShell, WSL, or Docker and `localhost` does not reach Yunqi, use the Windows host IPv4 address instead, for example `http://192.168.1.23:3000`. When `BIND_HOST` is empty, Yunqi listens on all interfaces by default through `:PORT`; set `BIND_HOST=127.0.0.1` for local-only access.
 
 For background startup without Docker, see [Service Startup](docs/service/README.md).
 
@@ -112,12 +108,12 @@ For background startup without Docker, see [Service Startup](docs/service/README
 
 ```bash
 docker run -d \
-  --name ccx \
+  --name yunqi \
   -p 3000:3000 \
   -e PROXY_ACCESS_KEY=your-proxy-access-key \
   -e APP_UI_LANGUAGE=en \
   -v $(pwd)/.config:/app/.config \
-  crpi-i19l8zl0ugidq97v.cn-hangzhou.personal.cr.aliyuncs.com/bene/ccx:latest
+  ghcr.io/soulteary/yunqi:latest
 ```
 
 Run in the background with Docker Compose:
@@ -135,8 +131,8 @@ docker compose -f docker-compose.yml -f docker-compose.watchtower.yml up -d
 Pull the latest image immediately after setup if needed:
 
 ```bash
-docker compose pull ccx
-docker compose up -d ccx
+docker compose pull yunqi
+docker compose up -d yunqi
 ```
 
 ### Option 3: Build From Source
@@ -144,8 +140,8 @@ docker compose up -d ccx
 Prerequisites: [Go 1.25+](https://go.dev/dl/), [Bun](https://bun.sh), and Make (macOS: `xcode-select --install`).
 
 ```bash
-git clone https://github.com/BenedictKing/ccx
-cd ccx
+git clone https://github.com/soulteary/yunqi
+cd yunqi
 cp backend-go/.env.example backend-go/.env
 make install   # install all dependencies (frontend + Go modules + dev tools)
 make run
@@ -210,9 +206,9 @@ make dev
 
 ## Additional Docs
 
-- [CCX Desktop](docs/en/guide/desktop/)
+- [Yunqi Desktop](docs/en/guide/desktop/)
 - [Client Setup](docs/en/guide/clients/)
-- [CCX Desktop (中文)](docs/guide/desktop/)
+- [Yunqi Desktop (中文)](docs/guide/desktop/)
 - [Client Setup (中文)](docs/guide/clients/)
 - [README.zh-CN.md](README.zh-CN.md)
 - [backend-go/README.md](backend-go/README.md)
@@ -222,22 +218,14 @@ make dev
 - [docs/service/README.md](docs/service/README.md) - non-Docker service startup
 - [RELEASE.md](docs/guide/release.md)
 
-## Community
 
-Join the QQ group for discussion: **642217364**
-
-<img src="docs/qrcode_1769645166806.png" width="300" alt="QQ Group QR Code">
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/chart?repos=BenedictKing/ccx&type=date&legend=top-left&sealed_token=fSL3s-l1Dxr6NrYaxkzzCfeauAKUtRuCg2Npgs_c21isq1szm991sEuNF05_2DoNV0dYEw)](https://www.star-history.com/?repos=BenedictKing%2Fccx&type=date&legend=top-left)
 
 ## Acknowledgments
 
 <table>
   <tr>
     <td align="center" width="60">
-      <a target="_blank" rel="noopener noreferrer nofollow" href="https://artificialanalysis.ai/"><img src="docs/sponsors/artificial-analysis.png" alt="Artificial Analysis Logo" style="max-width: 100%;padding-top: 6px;" width="50"></a>
+      <strong>AA</strong>
     </td>
     <td>
       Benchmark data in this repository includes Artificial Analysis free API data. Attribution to <a href="https://artificialanalysis.ai/">artificialanalysis.ai</a> is required when using that data. Intelligence Index scores are currently interpreted against <strong>v4.1.1</strong>; Coding Index and Agentic Index are derived subsets of the same evaluation set and are not separately versioned.
@@ -248,19 +236,11 @@ Join the QQ group for discussion: **642217364**
       <strong>Data</strong>
     </td>
     <td>
-      CCX benchmark visualizations and registry updates also use publicly available data from <a href="https://benchlm.ai/">BenchLM.ai</a>, <a href="https://deepswe.datacurve.ai/">DeepSWE</a>, and <a href="https://deng.codexradar.com/">CodexRadar</a>. Pricing and context metadata are additionally refreshed from <a href="https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json">LiteLLM model_prices_and_context_window.json</a>.
-    </td>
-  </tr>
-  <tr>
-    <td align="center" width="60">
-      <a target="_blank" rel="noopener noreferrer nofollow" href="https://signpath.org/"><img src="https://signpath.org/assets/favicon-50x50.png" alt="SignPath Logo" style="max-width: 100%;padding-top: 6px;" width="50"></a>
-    </td>
-    <td>
-      Free code signing on Windows provided by <a href="https://signpath.io/">SignPath.io</a>, certificate by <a href="https://signpath.org/">SignPath Foundation</a>
+      Yunqi benchmark visualizations and registry updates also use publicly available data from <a href="https://benchlm.ai/">BenchLM.ai</a>, <a href="https://deepswe.datacurve.ai/">DeepSWE</a>, and <a href="https://deng.codexradar.com/">CodexRadar</a>. Pricing and context metadata are additionally refreshed from <a href="https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json">LiteLLM model_prices_and_context_window.json</a>.
     </td>
   </tr>
 </table>
 
 ## License
 
-MIT
+AGPL-3.0-only。上游 MIT 许可与版权声明保留于 [LICENSES/MIT-upstream.txt](LICENSES/MIT-upstream.txt)，详见 [NOTICE](NOTICE)。

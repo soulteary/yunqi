@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/metrics"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/metrics"
 )
 
 // probeEstInputTokens 与 probeEstOutputTokens 用于模型间相对比较，不代表真实请求大小。

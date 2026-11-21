@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 import { useStatus } from '@/composables/useStatus'
-import { GetAdminAccessKey } from '@bindings/github.com/BenedictKing/ccx/desktop/desktopservice'
+import { GetAdminAccessKey } from '@bindings/github.com/soulteary/yunqi/desktop/desktopservice'
 import {
   EXCHANGE_RATES_PATH,
   groupModelDisablePath,

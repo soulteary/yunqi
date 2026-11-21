@@ -6,7 +6,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/utils"
+	"github.com/soulteary/yunqi/internal/utils"
 )
 
 // IsKeyHealthy 判断单个 Key 是否健康

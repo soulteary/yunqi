@@ -3,7 +3,7 @@ package autopilot
 import (
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/scheduler"
+	"github.com/soulteary/yunqi/internal/scheduler"
 )
 
 func nearTieTestEntry(uid string, score float64, fidelity, model, mapped string, health HealthState) scoredChannelEntry {

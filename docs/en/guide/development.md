@@ -1,6 +1,6 @@
 # Development Guide
 
-This document explains how to set up CCX for local development, common commands, and the verification workflow.
+This document explains how to set up Yunqi for local development, common commands, and the verification workflow.
 
 > Related docs:
 > - Architecture: [architecture.md](architecture.md)
@@ -166,7 +166,7 @@ cd "backend-go" && make lint
 
 ### Windows / WSL / Docker Access Tips
 
-On Windows, cmd, PowerShell, WSL, and Docker may be in different network environments. `localhost` / `127.0.0.1` may not reach the CCX process. For cross-environment access, use the Windows host LAN IPv4 address, for example:
+On Windows, cmd, PowerShell, WSL, and Docker may be in different network environments. `localhost` / `127.0.0.1` may not reach the Yunqi process. For cross-environment access, use the Windows host LAN IPv4 address, for example:
 
 ```text
 http://192.168.1.23:3688/v1
@@ -184,7 +184,7 @@ Verify connectivity:
 curl.exe -i http://192.168.1.23:3688/health
 ```
 
-When `BIND_HOST` is empty, the CCX backend listens on `:PORT` by default, which means all network interfaces. You generally do not need to change it to `0.0.0.0`. Set `BIND_HOST=127.0.0.1` for local-only access. If the LAN IP is not accessible, first check whether the Windows firewall allows inbound traffic on the corresponding port.
+When `BIND_HOST` is empty, the Yunqi backend listens on `:PORT` by default, which means all network interfaces. You generally do not need to change it to `0.0.0.0`. Set `BIND_HOST=127.0.0.1` for local-only access. If the LAN IP is not accessible, first check whether the Windows firewall allows inbound traffic on the corresponding port.
 
 ## Common Development Tasks
 

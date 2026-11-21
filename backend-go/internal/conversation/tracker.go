@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/types"
+	"github.com/soulteary/yunqi/internal/types"
 )
 
 type Conversation struct {

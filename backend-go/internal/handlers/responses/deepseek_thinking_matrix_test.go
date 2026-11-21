@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/session"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/session"
 )
 
 func TestResponsesHandler_DeepSeekChatAndMessagesThinkingMatrix(t *testing.T) {

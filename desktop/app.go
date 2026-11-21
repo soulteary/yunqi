@@ -16,11 +16,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/BenedictKing/ccx/desktop/internal/backend"
-	"github.com/BenedictKing/ccx/desktop/internal/channelpreset"
-	"github.com/BenedictKing/ccx/desktop/internal/configservice"
-	"github.com/BenedictKing/ccx/desktop/internal/editor"
-	"github.com/BenedictKing/ccx/desktop/internal/uipreferences"
+	"github.com/soulteary/yunqi/desktop/internal/backend"
+	"github.com/soulteary/yunqi/desktop/internal/channelpreset"
+	"github.com/soulteary/yunqi/desktop/internal/configservice"
+	"github.com/soulteary/yunqi/desktop/internal/editor"
+	"github.com/soulteary/yunqi/desktop/internal/uipreferences"
 	"github.com/pkg/browser"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )

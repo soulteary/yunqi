@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/BenedictKing/ccx/internal/types"
+	"github.com/soulteary/yunqi/internal/types"
 	"github.com/gin-gonic/gin"
 )
 

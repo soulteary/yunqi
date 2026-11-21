@@ -1,7 +1,7 @@
-# Makefile for CCX Go Backend
+# Makefile for Yunqi Go Backend
 
 # 变量定义
-BINARY_NAME=ccx-go
+BINARY_NAME=yunqi
 MAIN_PATH=.
 BUILD_DIR=../dist
 AIR_VERSION=v1.52.0
@@ -20,7 +20,7 @@ NC=\033[0m # No Color
 
 # 默认目标 - 显示帮助
 help:
-	@echo "$(GREEN)CCX Go Backend - 可用命令:$(NC)"
+	@echo "$(GREEN)Yunqi Go Backend - 可用命令:$(NC)"
 	@echo ""
 	@echo "$(YELLOW)开发命令:$(NC)"
 	@echo "  make dev          - 启动开发模式 (热重载)"

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/metrics"
+	"github.com/soulteary/yunqi/internal/metrics"
 )
 
 func TestRecordChannelLog_TruncatesAndMasks(t *testing.T) {

@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/eventbus"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/eventbus"
 )
 
 // newTestSchedulerWithBus 创建带事件总线注入的最小 ChannelScheduler。

@@ -7,7 +7,7 @@
 3. Go to "API Keys" page
 4. Click "Create new secret key"
 
-## Add Channel in CCX
+## Add Channel in Yunqi
 
 | Field | Value |
 |-------|-------|
@@ -18,7 +18,7 @@
 
 ### Steps
 
-1. Go to CCX admin console, select **Chat** endpoint
+1. Go to Yunqi admin console, select **Chat** endpoint
 2. Click "Add Channel"
 3. Set service type to `OpenAI Chat`
 4. Set Base URL to `https://api.openai.com/v1`
@@ -58,4 +58,4 @@ For Codex/Responses protocol:
 
 - OpenAI API Keys start with `sk-`
 - If using a proxy, fill in the "Proxy URL" field
-- Reasoning models (o1/o3 series) don't support system messages — CCX handles compatibility automatically
+- Reasoning models (o1/o3 series) don't support system messages — Yunqi handles compatibility automatically

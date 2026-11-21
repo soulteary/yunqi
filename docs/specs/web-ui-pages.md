@@ -100,10 +100,10 @@
 9 个 `<router-link>` 平铺，`/` 分隔，顺序与移动端一致：
 
 ```
-渠道 / Images / Vectors / 驾驶舱 / 健康中心 / 订阅中心 / 总览 / Autopilot / 成本报表   API Proxy - CCX
+渠道 / Images / Vectors / 驾驶舱 / 健康中心 / 订阅中心 / 总览 / Autopilot / 成本报表   API Proxy - Yunqi
 ```
 
-i18n key 依次为 `app.tabs.{channels,images,vectors,conversations,healthCenter,subscriptions,cockpitOverview,autopilot,costReport}`。品牌文案 `API Proxy - CCX`（`d-none d-md-inline`）。
+i18n key 依次为 `app.tabs.{channels,images,vectors,conversations,healthCenter,subscriptions,cockpitOverview,autopilot,costReport}`。品牌文案 `API Proxy - Yunqi`（`d-none d-md-inline`）。
 
 > 已在 2026-08-09 修复（commit `d876784d`）：桌面导航末项"成本报表"改为 `t('app.tabs.costReport')`，不再硬编码中文。
 
@@ -285,10 +285,10 @@ i18n key 依次为 `app.tabs.{channels,images,vectors,conversations,healthCenter
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
-│ ┌赞助卡(双倍宽)────────┐┌赞助卡────┐┌赞助卡────┐┌普通卡×N────┐  │
-│ │logo 名称〔赞助商 chip〕││  …      ││  …      ││[domain] 名称 │  │
+│ ┌服务商卡─────────────┐┌服务商卡──┐┌服务商卡──┐┌服务商卡────┐  │
+│ │[domain] 服务商名称     ││  …      ││  …      ││[domain] 名称 │  │
 │ │描述(截断)             ││         ││         ││描述          │  │
-│ │[添加][官网↗][控制台]   ││         ││         ││[添加]…       │  │
+│ │[添加][控制台↗]         ││         ││         ││[添加]…       │  │
 │ ┌Copilot 选择卡────────┐┌new-api 选择卡────────────────┐        │
 │ │[github] GitHub Copilot││[server-network] 接入 new-api  │        │
 │ │ (点击选中,高亮边框)    ││ (选中→展开内嵌两步表单)        │        │

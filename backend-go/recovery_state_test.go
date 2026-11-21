@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/scheduler"
+	"github.com/soulteary/yunqi/internal/scheduler"
 )
 
 func TestLoadScheduledRecoveryLastCheck_MissingFile(t *testing.T) {

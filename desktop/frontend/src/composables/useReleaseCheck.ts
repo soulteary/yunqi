@@ -1,6 +1,6 @@
 import { ref, onMounted, onBeforeUnmount } from 'vue'
-import { CheckLatestRelease, StartInAppUpdate } from '@bindings/github.com/BenedictKing/ccx/desktop/desktopservice'
-import type { ReleaseCheckResult } from '@bindings/github.com/BenedictKing/ccx/desktop/models'
+import { CheckLatestRelease, StartInAppUpdate } from '@bindings/github.com/soulteary/yunqi/desktop/desktopservice'
+import type { ReleaseCheckResult } from '@bindings/github.com/soulteary/yunqi/desktop/models'
 
 // 4 小时与 Go 端 releasesCacheTTL 对齐：组件层面也只需 4h 触发一次。
 // 进程内即便多个组件订阅，调用 CheckLatestRelease(false) 时后端缓存会立刻返回，

@@ -4,7 +4,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/BenedictKing/ccx/internal/presetstore"
+	"github.com/soulteary/yunqi/internal/presetstore"
 )
 
 // BuiltinModelsManifest 内置模型清单条目。

@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/eventbus"
+	"github.com/soulteary/yunqi/internal/eventbus"
 )
 
 func floatPtr(v float64) *float64 { return &v }

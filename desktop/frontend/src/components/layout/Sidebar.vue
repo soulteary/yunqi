@@ -6,8 +6,8 @@ import { useReleaseCheck } from '@/composables/useReleaseCheck'
 import { useTheme } from '@/composables/useTheme'
 import { openExternalLink } from '@/lib/external-link'
 import { useUserGuide } from '@/composables/useUserGuide'
-import { GetVersion } from '@bindings/github.com/BenedictKing/ccx/desktop/desktopservice'
-import type { VersionInfo } from '@bindings/github.com/BenedictKing/ccx/desktop/models'
+import { GetVersion } from '@bindings/github.com/soulteary/yunqi/desktop/desktopservice'
+import type { VersionInfo } from '@bindings/github.com/soulteary/yunqi/desktop/models'
 import Logo from '@/components/layout/Logo.vue'
 import {
   Activity,
@@ -144,7 +144,7 @@ const handleDaemonAction = async () => {
         <!-- 引入全新设计的高能自旋转 AI 路由发光核心 Logo，上调尺寸到 32px 凸显精美细节 -->
         <Logo :size="32" />
         <span class="text-sm font-bold tracking-wider bg-clip-text text-transparent bg-gradient-to-r from-foreground to-muted-foreground">
-          CCX CONTROL
+          Yunqi CONTROL
         </span>
       </div>
     </div>

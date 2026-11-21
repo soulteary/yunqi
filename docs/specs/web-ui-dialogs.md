@@ -1,6 +1,6 @@
 # Web UI 对话框设计文档
 
-> 本文档覆盖 CCX Web 管理界面中所有对话框、弹窗、面板类组件的布局、交互、状态流转与后端调用关系。
+> 本文档覆盖 Yunqi Web 管理界面中所有对话框、弹窗、面板类组件的布局、交互、状态流转与后端调用关系。
 
 ## 0. 组件清单
 
@@ -135,7 +135,7 @@
 - 用途：模板化添加（选 provider + 输 key，系统判 plan/baseURL）；也支持自定义（手填 baseURL）。
 - 触发入口：由 `AddChannelModal` 在 `quickAddMode=true` 时渲染。
 - props / emits：props `channelType`、`existingChannels?`、`placement?`；emits `added(channelId)`、`close`、`update:placement`。`defineExpose({ handleSubmit, resetForm, isFormValid, submitting })` 供父组件调用。
-- 主要字段：provider `v-select`（赞助商 volcengine/compshare 置顶，末尾「new-api 通用接入」与「自定义」；**不按当前协议 tab 过滤**——任意 tab 下拉均显示全部 provider，fc7cc04f）、多 baseURL 输入（`recognizedBaseUrls` 识别提示）、多 apiKey 输入（显隐切换）、自定义模式**代理 URL 输入（可选，`mdi-vpn` 前置图标，随 `discoverFast`/`autoAddChannel` 透传，provider 模式不传）**、故障转移开关、自动生成渠道名预览、重复渠道 alert、提交错误 alert、创建中进度卡。
+- 主要字段：provider `v-select`（保持后端模板顺序，末尾「new-api 通用接入」与「自定义」；**不按当前协议 tab 过滤**——任意 tab 下拉均显示全部 provider，fc7cc04f）、多 baseURL 输入（`recognizedBaseUrls` 识别提示）、多 apiKey 输入（显隐切换）、自定义模式**代理 URL 输入（可选，`mdi-vpn` 前置图标，随 `discoverFast`/`autoAddChannel` 透传，provider 模式不传）**、故障转移开关、自动生成渠道名预览、重复渠道 alert、提交错误 alert、创建中进度卡。
 - 校验/状态：`isQuickFormValid`（provider 模式仅需 key；自定义需 baseUrls+key）；`submitting`、`submitError`、`providerTemplatesLoading`。
 - 后端调用：`getProviderTemplates`、自定义模式 `discoverFast` → `autoAddChannel`；provider 模式直接 `autoAddChannel({providerId, apiKeys, kind: provider.channelKind})`（按 provider 自身声明的 channelKind 提交，自动创建该 provider 支持的全部渠道，避免 tab 与 provider 能力不匹配导致 400）。
 - 联动：选中 `__new_api__` → 打开 `NewApiQuickAddDialog`，其 `@created` → `emit('added', channelIndex)`。
@@ -432,7 +432,7 @@
 │ [help-circle] 新用户指引     第 n / 4 步        [×] │ ← max-width 760 scrollable
 ├─────────────────────────────────────────────────────┤
 │ ● ○ ○ ○   ← 步骤进度点（可点击跳步）                 │
-│ Step1 欢迎使用 CCX: 正文 + 有序列表 3 项             │
+│ Step1 欢迎使用 Yunqi: 正文 + 有序列表 3 项             │
 │       （选协议标签→添加渠道填密钥→客户端指向网关）    │
 │ Step2 顶部切换协议: 自绘协议标签示意条                │
 │       （Claude 高亮/OpenAI Chat/Images/Codex/Gemini/Cockpit）│
@@ -501,7 +501,7 @@ AutopilotDiagnosePanel:
 ```
 认证登录（persistent 500）:            自动认证 overlay（persistent,black scrim）:
 ┌────────────────────────────┐        ┌──────────────────┐
-│    🔐 API Proxy - CCX      │        │      ◌ 64px       │
+│    🔐 API Proxy - Yunqi      │        │      ◌ 64px       │
 │ (error alert authError)    │        │  正在验证访问权限  │
 │ 管理访问密钥 [password]     │        │ 使用保存的访问密钥… │
 │ [访问管理界面 ⏎ block]      │        └──────────────────┘

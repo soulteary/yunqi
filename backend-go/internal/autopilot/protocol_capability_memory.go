@@ -1,6 +1,6 @@
 package autopilot
 
-import "github.com/BenedictKing/ccx/internal/config"
+import "github.com/soulteary/yunqi/internal/config"
 
 // 协议端点不支持结论在模型映射侧的读取。
 //

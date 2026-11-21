@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	corecopilot "github.com/BenedictKing/ccx/internal/copilot"
-	"github.com/BenedictKing/ccx/internal/httpclient"
+	corecopilot "github.com/soulteary/yunqi/internal/copilot"
+	"github.com/soulteary/yunqi/internal/httpclient"
 	"github.com/gin-gonic/gin"
 )
 

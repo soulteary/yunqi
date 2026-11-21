@@ -1,21 +1,21 @@
 ---
 title: Benchmark Dashboard
-description: Interactive model capability and cost comparison built from CCX benchmark data
+description: Interactive model capability and cost comparison built from Yunqi benchmark data
 ---
 
 # Benchmark Dashboard
 
-CCX aggregates model capability, cost, and multi-source comparison data from several public benchmark sources and publishes this interactive chart.
+Yunqi aggregates model capability, cost, and multi-source comparison data from several public benchmark sources and publishes this interactive chart.
 
 - The upper section shows the capability-cost frontier, with switches for mean / median cost and source scope.
 - The lower section compares raw scores for the same model across multiple benchmark sources.
 - Because benchmark task sets, scoring rules, and scales differ, **cross-source scores should not be treated as a strictly normalized ranking**.
 
-<BenchmarkUpdatedAt src="/ccx/benchmark/benchmark-viz-data.json" locale="en" />
+<BenchmarkUpdatedAt src="/yunqi/benchmark/benchmark-viz-data.json" locale="en" />
 
 <iframe
-  src="/ccx/benchmark/benchmark-chart.html"
-  title="CCX Benchmark Chart"
+  src="/yunqi/benchmark/benchmark-chart.html"
+  title="Yunqi Benchmark Chart"
   style="width: 100%; min-height: 1800px; border: 1px solid var(--vp-c-divider); border-radius: 12px; background: var(--vp-c-bg-alt);"
 />
 
@@ -23,7 +23,7 @@ CCX aggregates model capability, cost, and multi-source comparison data from sev
 
 - `pass@1` and raw scores come from the corresponding upstream benchmark results or public APIs.
 - The cost frontier currently uses the single-task cost data that can be mapped from DeepSWE and CodexRadar.
-- CodexRadar was rebuilt in Oct 2026 as "Radar Bench": a unified 64-task pool (DeepSWE 15 + Pompeii adjacency 16 + TB 14 + Science 19) scored on a 150-point authoritative scale (equal-weight mean reward over the last 3 valid graded runs per task), covering only six GPT-family models. CCX ingests it as `mean_reward` (0-1 mean reward ratio); non-GPT models no longer carry evidence from this source.
+- CodexRadar was rebuilt in Oct 2026 as "Radar Bench": a unified 64-task pool (DeepSWE 15 + Pompeii adjacency 16 + TB 14 + Science 19) scored on a 150-point authoritative scale (equal-weight mean reward over the last 3 valid graded runs per task), covering only six GPT-family models. Yunqi ingests it as `mean_reward` (0-1 mean reward ratio); non-GPT models no longer carry evidence from this source.
 - The multi-source comparison chart juxtaposes raw scores from DeepSWE, BenchLM.ai, CodexRadar, Artificial Analysis, and related public sources.
 - **Small-sample policy**: effort levels with fewer than 3 graded tasks (e.g. a newly added model that ran a single task and happened to pass, yielding a noisy pass@1 of 100%) are treated as under-measured — they are excluded from the regular-effort quality calibration and quality tiers, drawn as dimmed dashed points with the task count shown on hover, and excluded from model ordering in the comparison chart. Sources that do not report a `taskCount` are unaffected.
 - For the generation timestamp, see the `generatedAt` field in `benchmark-viz-data.json`; that file is generated alongside the chart HTML in the docs static asset directory.
@@ -33,7 +33,7 @@ CCX aggregates model capability, cost, and multi-source comparison data from sev
 <table>
   <tr>
     <td align="center" width="60">
-      <a target="_blank" rel="noopener noreferrer nofollow" href="https://artificialanalysis.ai/"><img src="/sponsors/artificial-analysis.png" alt="Artificial Analysis Logo" style="max-width: 100%;padding-top: 6px;" width="50"></a>
+      <strong>AA</strong>
     </td>
     <td>
       Benchmark data on this page includes Artificial Analysis free API data. Attribution to <a href="https://artificialanalysis.ai/">artificialanalysis.ai</a> is required when using that data. Intelligence Index scores are currently interpreted against <strong>v4.1.1</strong>; Coding Index and Agentic Index are derived subsets of the same evaluation set and are not separately versioned.
@@ -44,7 +44,7 @@ CCX aggregates model capability, cost, and multi-source comparison data from sev
       <strong>Data</strong>
     </td>
     <td>
-      CCX benchmark visualizations and registry updates also use publicly available data from <a href="https://benchlm.ai/">BenchLM.ai</a>, <a href="https://deepswe.datacurve.ai/">DeepSWE</a>, and <a href="https://deng.codexradar.com/">CodexRadar</a>. Pricing and context metadata are additionally refreshed from <a href="https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json">LiteLLM model_prices_and_context_window.json</a>.
+      Yunqi benchmark visualizations and registry updates also use publicly available data from <a href="https://benchlm.ai/">BenchLM.ai</a>, <a href="https://deepswe.datacurve.ai/">DeepSWE</a>, and <a href="https://deng.codexradar.com/">CodexRadar</a>. Pricing and context metadata are additionally refreshed from <a href="https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json">LiteLLM model_prices_and_context_window.json</a>.
     </td>
   </tr>
 </table>

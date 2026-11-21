@@ -1,6 +1,6 @@
 package autopilot
 
-import "github.com/BenedictKing/ccx/internal/config"
+import "github.com/soulteary/yunqi/internal/config"
 
 // document 不支持结论在路由侧的读取。
 //

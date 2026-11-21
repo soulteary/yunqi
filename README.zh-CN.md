@@ -1,11 +1,19 @@
-# Claude / OpenAI Chat / OpenAI Images / OpenAI Embeddings / Codex Responses / Gemini API Proxy - CCX
+# 云起 Yunqi — 连接客户端与模型。
+
+**多模型 API 网关与协议转换服务**
 
 [English](README.md) | 简体中文
 
-[![GitHub release](https://img.shields.io/github/v/release/BenedictKing/ccx)](https://github.com/BenedictKing/ccx/releases/latest)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![GitHub release](https://img.shields.io/github/v/release/BenedictKing/yunqi)](https://github.com/soulteary/yunqi/releases/latest)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 
-CCX 是一个高性能的 AI API 代理与协议转换网关，支持 Claude、OpenAI Chat、OpenAI Images、OpenAI Embeddings、Codex Responses 与 Gemini。它提供统一入口、内置 Web 管理界面、渠道编排、故障转移、多密钥管理和模型路由能力。
+Yunqi 是一个高性能的 AI API 代理与协议转换网关，支持 Claude、OpenAI Chat、OpenAI Images、OpenAI Embeddings、Codex Responses 与 Gemini。它提供统一入口、内置 Web 管理界面、渠道编排、故障转移、多密钥管理和模型路由能力。
+
+> 本仓库发布资源尚未就绪时，请使用 `make build` 或 `docker compose up --build -d` 从源码构建。
+
+## 名称与项目沿革
+
+“云起”出自王维《终南别业》：“行到水穷处，坐看云起时。”项目源自 BenedictKing/ccx，名称不依附单一模型品牌。详见[项目沿革、更名与许可说明](docs/guide/project-origin.md)。
 
 ## 功能特性
 
@@ -19,18 +27,6 @@ CCX 是一个高性能的 AI API 代理与协议转换网关，支持 Claude、O
 - Responses API 支持多轮会话跟踪
 - 前端构建产物嵌入后端，便于单二进制部署
 
-## 赞助商
-
-<table>
-<tr>
-<td width="180"><a href="https://www.volcengine.com/activity/ai618?utm_campaign=hw&utm_content=hw&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=ccx"><img src="docs/sponsors/volcengine.png" alt="火山引擎" width="150"></a></td>
-<td>感谢 <a href="https://www.volcengine.com/activity/ai618?utm_campaign=hw&utm_content=hw&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=ccx">字节火山引擎</a> 赞助本项目！【专属活动优惠】19元Tokens包！享字节自研豆包模型+满血版开源 SOTA模型，覆盖文本、VLM、图像生成，全模态一站配齐：Seed-2.1、Seedream-5.0、GLM-5.2、DeepSeek等。不止编程、更能解决 Agent 复杂长程任务 --><a href="https://www.volcengine.com/activity/ai618?utm_campaign=hw&utm_content=hw&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=ccx">注册即领2500万Tokens</a>，<a href="https://www.volcengine.com/activity/ai618?utm_campaign=hw&utm_content=hw&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=ccx">立即前往</a></td>
-</tr>
-<tr>
-<td width="180"><a href="https://www.compshare.cn/?ytag=GPU_YY_git_ccx"><img src="docs/sponsors/youyun-zhisuan.png" alt="优云智算" width="150"></a></td>
-<td>感谢 <a href="https://www.compshare.cn/?ytag=GPU_YY_git_ccx">优云智算</a> 赞助了本项目！优云智算是 UCloud 旗下 AI 云平台，主打包月、按次的高性价比国模 Agent Plan 套餐，低至 49 元/月起。同时提供官转稳定海外模型，支持接入 Claude Code、Codex 及 API 调用，支持企业高并发、7*24 技术支持、自助开票。通过<a href="https://www.compshare.cn/?ytag=GPU_YY_git_ccx">此链接</a>注册的用户，可得免费 5 元平台体验金！</td>
-</tr>
-</table>
 
 ## 界面预览
 
@@ -54,7 +50,7 @@ CCX 是一个高性能的 AI API 代理与协议转换网关，支持 Claude、O
 
 ## 架构概览
 
-CCX 对外提供一个统一后端入口：
+Yunqi 对外提供一个统一后端入口：
 
 ```text
 客户端 -> backend :3000 ->
@@ -78,21 +74,21 @@ CCX 对外提供一个统一后端入口：
 
 ## 快速开始
 
-### 方式零：CCX Desktop
+### 方式零：Yunqi Desktop
 
-CCX Desktop 提供原生桌面体验，通过 GUI 管理渠道、密钥和客户端配置。
+Yunqi Desktop 提供原生桌面体验，通过 GUI 管理渠道、密钥和客户端配置。
 
 | 平台 | 安装方式 | 说明 |
 |------|---------|------|
-| **Windows** | 在 [Microsoft Store](https://apps.microsoft.com/detail/ccx-desktop) 搜索 **CCX Desktop** | 推荐方式。自动更新，无需手动签名。也可从 [GitHub Releases](https://github.com/BenedictKing/ccx/releases/latest) 下载 `setup.exe`。 |
-| **macOS** | `brew tap BenedictKing/ccx && brew install --cask ccx-desktop` | 或从 [GitHub Releases](https://github.com/BenedictKing/ccx/releases/latest) 下载 `.dmg`（支持 arm64/amd64）。 |
-| **Linux** | 从 [GitHub Releases](https://github.com/BenedictKing/ccx/releases/latest) 下载 `.AppImage` | 设置可执行权限后运行。 |
+| **Windows** | 在 [Microsoft Store](https://apps.microsoft.com/detail/yunqi-desktop) 搜索 **Yunqi Desktop** | 推荐方式。自动更新，无需手动签名。也可从 [GitHub Releases](https://github.com/soulteary/yunqi/releases/latest) 下载 `setup.exe`。 |
+| **macOS** | `brew tap BenedictKing/yunqi && brew install --cask yunqi-desktop` | 或从 [GitHub Releases](https://github.com/soulteary/yunqi/releases/latest) 下载 `.dmg`（支持 arm64/amd64）。 |
+| **Linux** | 从 [GitHub Releases](https://github.com/soulteary/yunqi/releases/latest) 下载 `.AppImage` | 设置可执行权限后运行。 |
 
-详细安装和配置说明请参考 [CCX Desktop 用户教程](docs/guide/desktop)。
+详细安装和配置说明请参考 [Yunqi Desktop 用户教程](docs/guide/desktop)。
 
 ### 方式一：直接运行二进制
 
-1. 从 [Releases](https://github.com/BenedictKing/ccx/releases/latest) 下载最新可执行文件。
+1. 从 [Releases](https://github.com/soulteary/yunqi/releases/latest) 下载最新可执行文件。
 2. 在可执行文件同目录创建 `.env`：
 
 ```bash
@@ -104,7 +100,7 @@ APP_UI_LANGUAGE=zh-CN
 
 3. 启动后访问 `http://localhost:3000`
 
-Windows 下如果客户端运行在 cmd、PowerShell、WSL 或 Docker 中，且 `localhost` 无法访问 CCX，建议改用 Windows 主机的局域网 IPv4 地址，例如 `http://192.168.1.23:3000`。`BIND_HOST` 留空时，CCX 默认通过 `:PORT` 监听所有网卡地址；如需仅本机访问，设置 `BIND_HOST=127.0.0.1`。
+Windows 下如果客户端运行在 cmd、PowerShell、WSL 或 Docker 中，且 `localhost` 无法访问 Yunqi，建议改用 Windows 主机的局域网 IPv4 地址，例如 `http://192.168.1.23:3000`。`BIND_HOST` 留空时，Yunqi 默认通过 `:PORT` 监听所有网卡地址；如需仅本机访问，设置 `BIND_HOST=127.0.0.1`。
 
 需要后台运行或开机自启动时，参考 [非 Docker 自启动](docs/service/README.md)。
 
@@ -112,12 +108,12 @@ Windows 下如果客户端运行在 cmd、PowerShell、WSL 或 Docker 中，且 
 
 ```bash
 docker run -d \
-  --name ccx \
+  --name yunqi \
   -p 3000:3000 \
   -e PROXY_ACCESS_KEY=your-proxy-access-key \
   -e APP_UI_LANGUAGE=zh-CN \
   -v $(pwd)/.config:/app/.config \
-  crpi-i19l8zl0ugidq97v.cn-hangzhou.personal.cr.aliyuncs.com/bene/ccx:latest
+  ghcr.io/soulteary/yunqi:latest
 ```
 
 使用 Docker Compose 后台运行：
@@ -135,8 +131,8 @@ docker compose -f docker-compose.yml -f docker-compose.watchtower.yml up -d
 首次部署后如需立即拉取最新镜像：
 
 ```bash
-docker compose pull ccx
-docker compose up -d ccx
+docker compose pull yunqi
+docker compose up -d yunqi
 ```
 
 ### 方式三：源码构建
@@ -144,8 +140,8 @@ docker compose up -d ccx
 前置依赖：[Go 1.25+](https://go.dev/dl/)、[Bun](https://bun.sh)、Make（macOS 需先执行 `xcode-select --install`）。
 
 ```bash
-git clone https://github.com/BenedictKing/ccx
-cd ccx
+git clone https://github.com/soulteary/yunqi
+cd yunqi
 cp backend-go/.env.example backend-go/.env
 make install   # 安装所有依赖（前端 + Go 模块 + 开发工具）
 make run
@@ -210,7 +206,7 @@ make dev
 
 ## 相关文档
 
-- [CCX Desktop 用户教程](docs/guide/desktop)
+- [Yunqi Desktop 用户教程](docs/guide/desktop)
 - [客户端接入总览](docs/guide/clients)
 - [README.md](README.md)
 - [backend-go/README.md](backend-go/README.md)
@@ -220,22 +216,14 @@ make dev
 - [docs/service/README.md](docs/service/README.md) - 非 Docker 自启动
 - [RELEASE.md](docs/guide/release.md)
 
-## 社区交流
 
-欢迎加入 QQ 群交流讨论：**642217364**
-
-<img src="docs/qrcode_1769645166806.png" width="300" alt="QQ群二维码">
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/chart?repos=BenedictKing/ccx&type=date&legend=top-left&sealed_token=fSL3s-l1Dxr6NrYaxkzzCfeauAKUtRuCg2Npgs_c21isq1szm991sEuNF05_2DoNV0dYEw)](https://www.star-history.com/?repos=BenedictKing%2Fccx&type=date&legend=top-left)
 
 ## 致谢
 
 <table>
   <tr>
     <td align="center" width="60">
-      <a target="_blank" rel="noopener noreferrer nofollow" href="https://artificialanalysis.ai/"><img src="docs/sponsors/artificial-analysis.png" alt="Artificial Analysis Logo" style="max-width: 100%;padding-top: 6px;" width="50"></a>
+      <strong>AA</strong>
     </td>
     <td>
       本仓库中的部分 benchmark 数据使用了 Artificial Analysis 免费 API。凡使用这些数据，需按要求归因到 <a href="https://artificialanalysis.ai/">artificialanalysis.ai</a>。其中 Intelligence Index 当前应按 <strong>v4.1.1</strong> 解读；Coding Index 与 Agentic Index 是同一组评测子集的派生指标，不单独做版本管理。
@@ -246,19 +234,11 @@ make dev
       <strong>数据源</strong>
     </td>
     <td>
-      CCX 的 benchmark 可视化与注册表更新还使用了 <a href="https://benchlm.ai/">BenchLM.ai</a>、<a href="https://deepswe.datacurve.ai/">DeepSWE</a>、<a href="https://deng.codexradar.com/">CodexRadar</a> 的公开数据；价格与上下文窗口元数据另外同步自 <a href="https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json">LiteLLM model_prices_and_context_window.json</a>。
-    </td>
-  </tr>
-  <tr>
-    <td align="center" width="60">
-      <a target="_blank" rel="noopener noreferrer nofollow" href="https://signpath.org/"><img src="https://signpath.org/assets/favicon-50x50.png" alt="SignPath Logo" style="max-width: 100%;padding-top: 6px;" width="50"></a>
-    </td>
-    <td>
-      Windows 代码签名由 <a href="https://signpath.io/">SignPath.io</a> 免费提供，证书由 <a href="https://signpath.org/">SignPath Foundation</a> 签发。
+      Yunqi 的 benchmark 可视化与注册表更新还使用了 <a href="https://benchlm.ai/">BenchLM.ai</a>、<a href="https://deepswe.datacurve.ai/">DeepSWE</a>、<a href="https://deng.codexradar.com/">CodexRadar</a> 的公开数据；价格与上下文窗口元数据另外同步自 <a href="https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json">LiteLLM model_prices_and_context_window.json</a>。
     </td>
   </tr>
 </table>
 
 ## 许可证
 
-MIT
+AGPL-3.0-only。上游 MIT 许可与版权声明保留于 [LICENSES/MIT-upstream.txt](LICENSES/MIT-upstream.txt)，详见 [NOTICE](NOTICE)。

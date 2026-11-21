@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/soulteary/yunqi/internal/config"
 )
 
 func newProxyTestConfigManager(t *testing.T, channels ...config.UpstreamConfig) *config.ConfigManager {

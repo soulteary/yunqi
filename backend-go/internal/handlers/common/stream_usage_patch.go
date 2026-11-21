@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/BenedictKing/ccx/internal/providers"
-	"github.com/BenedictKing/ccx/internal/types"
-	"github.com/BenedictKing/ccx/internal/utils"
+	"github.com/soulteary/yunqi/internal/providers"
+	"github.com/soulteary/yunqi/internal/types"
+	"github.com/soulteary/yunqi/internal/utils"
 )
 
 func annotatePromptTokensTotalForProvider(provider providers.Provider, usage *types.Usage) *types.Usage {

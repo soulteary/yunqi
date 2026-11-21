@@ -1,7 +1,7 @@
 package common
 
 import (
-	"github.com/BenedictKing/ccx/internal/scheduler"
+	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )

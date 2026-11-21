@@ -3,7 +3,7 @@ package common
 import (
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/scheduler"
+	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/tidwall/gjson"
 )
 

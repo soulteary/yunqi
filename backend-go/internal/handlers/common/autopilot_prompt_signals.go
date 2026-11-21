@@ -1,7 +1,7 @@
 package common
 
 import (
-	"github.com/BenedictKing/ccx/internal/autopilot"
+	"github.com/soulteary/yunqi/internal/autopilot"
 )
 
 // analyzeAutopilotPrompt 从已解码的请求体提取复杂度与领域提示。

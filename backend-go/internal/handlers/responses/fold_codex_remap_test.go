@@ -3,7 +3,7 @@ package responses
 import (
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/converters"
+	"github.com/soulteary/yunqi/internal/converters"
 )
 
 func foldCodexTestContext() *converters.CodexToolContext {

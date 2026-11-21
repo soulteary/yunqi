@@ -1,7 +1,7 @@
 package autopilot
 
 import (
-	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/soulteary/yunqi/internal/config"
 )
 
 // learnedLatencyDegradedLookup 供测试替换的查询入口（同 severity_class_memory 模式）。

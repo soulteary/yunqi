@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/eventbus"
+	"github.com/soulteary/yunqi/internal/eventbus"
 )
 
 // newTestCMWithBus 创建带 EventBus 注入的 ConfigManager。

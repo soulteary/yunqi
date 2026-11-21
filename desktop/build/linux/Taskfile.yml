@@ -91,24 +91,24 @@ tasks:
     cmds:
       - cp {{.APP_BINARY}} {{.APP_NAME}}
       - |
-        CCX_GO_SRC=""
+        Yunqi_GO_SRC=""
         SEARCH_DIR="."
         for i in 1 2 3 4 5 6; do
-          if [ -f "$SEARCH_DIR/bin/ccx-go" ]; then
-            CCX_GO_SRC="$SEARCH_DIR/bin/ccx-go"; break
+          if [ -f "$SEARCH_DIR/bin/yunqi" ]; then
+            Yunqi_GO_SRC="$SEARCH_DIR/bin/yunqi"; break
           fi
-          if [ -f "$SEARCH_DIR/dist/ccx-go" ]; then
-            CCX_GO_SRC="$SEARCH_DIR/dist/ccx-go"; break
+          if [ -f "$SEARCH_DIR/dist/yunqi" ]; then
+            Yunqi_GO_SRC="$SEARCH_DIR/dist/yunqi"; break
           fi
           SEARCH_DIR="$SEARCH_DIR/.."
         done
-        if [ -n "$CCX_GO_SRC" ]; then
-          cp "$CCX_GO_SRC" ccx-go
+        if [ -n "$Yunqi_GO_SRC" ]; then
+          cp "$Yunqi_GO_SRC" yunqi
         else
-          echo "WARN: ccx-go not found, skipping bundled backend"
+          echo "WARN: yunqi not found, skipping bundled backend"
         fi
       - cp ../../appicon.png {{.APP_NAME}}.png
-      - APP_BACKEND=ccx-go wails3 generate appimage -binary {{.APP_NAME}} -icon {{.ICON}} -desktopfile {{.DESKTOP_FILE}} -outputdir {{.OUTPUT_DIR}} -builddir {{.ROOT_DIR}}/build/linux/appimage/build
+      - APP_BACKEND=yunqi wails3 generate appimage -binary {{.APP_NAME}} -icon {{.ICON}} -desktopfile {{.DESKTOP_FILE}} -outputdir {{.OUTPUT_DIR}} -builddir {{.ROOT_DIR}}/build/linux/appimage/build
     vars:
       APP_NAME: '{{.APP_NAME}}'
       APP_BINARY: '../../../bin/{{.APP_NAME}}'

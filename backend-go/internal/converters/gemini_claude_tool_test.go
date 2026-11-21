@@ -3,7 +3,7 @@ package converters
 import (
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/types"
+	"github.com/soulteary/yunqi/internal/types"
 	"github.com/stretchr/testify/assert"
 )
 

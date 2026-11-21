@@ -2,7 +2,7 @@
 name: upstream-check
 description: 检查 Claude Code / Codex 上游版本变更，对比本地版本，识别协议/工具/用法相关更新并追加 TODO 提醒
 version: 1.0.0
-author: https://github.com/BenedictKing/ccx/
+author: https://github.com/soulteary/yunqi/
 allowed-tools: Bash, Read, Write, Edit
 ---
 
@@ -46,7 +46,7 @@ cat .claude/skills/upstream-check/scripts/upstream-state.json
 4. 输出最终判断：`真实协议变更` 或 `误报（仅 bug 修复/体验改进）`
 
 **判断标准**：
-- ✅ **真实变更**：影响 CCX 代理层协议转换、请求构造、响应解析的变更
+- ✅ **真实变更**：影响 Yunqi 代理层协议转换、请求构造、响应解析的变更
 - ❌ **误报**：仅影响 Claude Code/Codex 客户端内部行为，不影响 API 协议的变更
 
 ### 4. 升级建议逻辑
@@ -56,7 +56,7 @@ cat .claude/skills/upstream-check/scripts/upstream-state.json
 | `up_to_date: true` 且 `protocol_changes: false` | "✅ 已是最新版本，无需关注。" |
 | `up_to_date: true` 且 `protocol_changes: true` | "✅ 版本已是最新。以下版本发布说明涉及协议/工具/用法变更，值得阅读了解：[关键字列表]" |
 | `up_to_date: false` 且 `protocol_changes: false` | "⬆️ 有新版本 [remote_version] 可用（本地: [local_version]）。非紧急，可在方便时升级。" |
-| `up_to_date: false` 且 `protocol_changes: true` | "⬆️ 有新版本 [remote_version] 可用（本地: [local_version]），涉及协议/工具/用法变更：[关键字列表]。**建议关注并评估对 ccx 的影响。**" |
+| `up_to_date: false` 且 `protocol_changes: true` | "⬆️ 有新版本 [remote_version] 可用（本地: [local_version]），涉及协议/工具/用法变更：[关键字列表]。**建议关注并评估对 yunqi 的影响。**" |
 
 ### 5. 更新 TODO.md
 
@@ -83,11 +83,11 @@ cat .claude/skills/upstream-check/scripts/upstream-state.json
 
 ## [ ] Claude Code vX.Y.Z 上游协议/工具变更评估
 
-发现协议/工具/用法变更：keyword1, keyword2。请评估对 ccx Messages 渠道的影响。
+发现协议/工具/用法变更：keyword1, keyword2。请评估对 yunqi Messages 渠道的影响。
 
 ## [ ] Codex rust-vX.Y.Z 上游协议/工具变更评估
 
-发现协议/工具/用法变更：keyword1, keyword2。请评估对 ccx Responses 渠道的影响。
+发现协议/工具/用法变更：keyword1, keyword2。请评估对 yunqi Responses 渠道的影响。
 ```
 
 ### 6. 更新状态文件
@@ -141,7 +141,7 @@ cat .claude/skills/upstream-check/scripts/upstream-state.json
 1. 通过 `gh release view` 获取本地版本到最新远程版本之间所有中间版本的 Release Notes
 2. 从每个版本的 Release Notes 中筛选**新增功能**（New Features）和**体验改进**（Improvements / 性能优化 / UX 修复等）
 3. 按 Claude Code / Codex 分类，以表格和列表结构化呈现
-4. 末尾附「对 CCX 的潜在影响要点」，关联到 CCX 五类渠道（Messages / Chat / Responses / Gemini / Images）
+4. 末尾附「对 Yunqi 的潜在影响要点」，关联到 Yunqi 五类渠道（Messages / Chat / Responses / Gemini / Images）
 5. 语调：技术导向但易读，面向开发者
 
 仅当存在版本差异（`up_to_date: false`）时才生成此报告；版本一致时跳过。

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/BenedictKing/ccx/internal/types"
+	"github.com/soulteary/yunqi/internal/types"
 )
 
 // 用户请求关联 ID：RecordRequestCorrelationID 附加到 pending 记录后，

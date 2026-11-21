@@ -3,7 +3,7 @@ package autopilot
 import (
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/soulteary/yunqi/internal/config"
 )
 
 // 协议端点学习闭环（路由侧读取）的回归测试。

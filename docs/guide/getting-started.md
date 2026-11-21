@@ -1,6 +1,6 @@
 # 快速开始
 
-如果你希望通过桌面应用快速上手，可先阅读 [CCX Desktop 用户教程](/guide/desktop/)，按“安装 → 配置密钥 → 启动服务 → Agent 配置 → 添加渠道 → 验证请求”的路径完成基础配置。
+如果你希望通过桌面应用快速上手，可先阅读 [Yunqi Desktop 用户教程](/guide/desktop/)，按“安装 → 配置密钥 → 启动服务 → Agent 配置 → 添加渠道 → 验证请求”的路径完成基础配置。
 
 ## 安装
 
@@ -8,20 +8,20 @@
 
 ```bash
 docker run -d \
-  --name ccx \
+  --name yunqi \
   -p 3000:3000 \
   -v ./.config:/app/.config \
   -e PROXY_ACCESS_KEY=your-proxy-key \
-  crpi-i19l8zl0ugidq97v.cn-hangzhou.personal.cr.aliyuncs.com/bene/ccx:latest
+  ghcr.io/soulteary/yunqi:latest
 ```
 
 ### 二进制部署
 
-从 [GitHub Releases](https://github.com/BenedictKing/ccx/releases) 下载对应平台的二进制文件，然后运行：
+从 [GitHub Releases](https://github.com/soulteary/yunqi/releases) 下载对应平台的二进制文件，然后运行：
 
 ```bash
 export PROXY_ACCESS_KEY=your-proxy-key
-./ccx
+./yunqi
 ```
 
 服务默认监听 `http://localhost:3000`。
@@ -30,7 +30,7 @@ export PROXY_ACCESS_KEY=your-proxy-key
 
 ### 渠道 (Channel)
 
-渠道是 CCX 的核心概念，每个渠道对应一个上游 API 的配置，包括：
+渠道是 Yunqi 的核心概念，每个渠道对应一个上游 API 的配置，包括：
 
 - **API Key**：上游服务的认证密钥
 - **Base URL**：上游 API 的地址

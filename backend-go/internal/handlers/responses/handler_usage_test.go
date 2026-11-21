@@ -3,8 +3,8 @@ package responses
 import (
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/types"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/types"
 )
 
 func TestCalculateTotalTokensWithCache(t *testing.T) {

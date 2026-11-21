@@ -1,4 +1,4 @@
-# CCX 渠道自动托管 (Channel Autopilot) 设计方案
+# Yunqi 渠道自动托管 (Channel Autopilot) 设计方案
 
 ## 1. 设计目标
 
@@ -389,7 +389,7 @@ type UsageWindow struct {
 ```text
 1. 官方用量 API：有 provider adapter 的 plan 主动拉取（§Phase 4 订阅 adapter 的可提前子集）
 2. 响应头：anthropic-ratelimit-* / x-ratelimit-* 等（复用 RateLimitDiscoverer 的信号 tap）
-3. 本地计量兜底：CCX 按 key 累计请求数/token（误差来自窗口起点对齐，标注 Source=local_metering）
+3. 本地计量兜底：Yunqi 按 key 累计请求数/token（误差来自窗口起点对齐，标注 Source=local_metering）
 ```
 
 UI 要求：key 行内显示主窗口（5h）用量进度条，悬浮展开全部窗口；用量 >80% 黄色预警、超限红色并显示预计重置时间。调度联动（Phase 2）：窗口余量进入配额负载均衡权重，窗口耗尽的 key 临时降权而非熔断。
@@ -1143,7 +1143,7 @@ HealthState 判定 = L1 被动指标 + 趋势信号 + L2/L3 探测（如需要�
 
 **问题**：部分官方订阅 plan 的入口没有正确的 models 接口——要么不存在（404）、要么需要额外权限、要么返回与订阅实际可用模型不符的列表（典型：Claude 订阅 OAuth 入口、Codex plan 入口、部分官方企业网关）。对这些 baseURL 做模型发现会失败或产出错误画像。
 
-**方案**：CCX 内置「已知官方 baseURL → 模型清单」映射表，命中时直接返回内置内容，完全跳过上游 models 接口：
+**方案**：Yunqi 内置「已知官方 baseURL → 模型清单」映射表，命中时直接返回内置内容，完全跳过上游 models 接口：
 
 ```go
 // backend-go/internal/config/builtin_models_manifest.go（生成式，随模型注册表更新）
@@ -1165,7 +1165,7 @@ type BuiltinModelsManifest struct {
      → ProfileSource = "builtin_manifest"，不再因 models 接口失败而误判 misconfigured
 
 2. /v1/models 代理响应（现有 Models API）：
-   客户端向 CCX 请求 /v1/models 时，聚合结果中该渠道的贡献
+   客户端向 Yunqi 请求 /v1/models 时，聚合结果中该渠道的贡献
    直接取内置清单，不向上游发起 models 请求
    （渠道显式配置了 supportedModels 时仍以用户配置优先）
 ```
@@ -2488,7 +2488,7 @@ long_context: [medium, high]     image_generation/embedding: 不展开
 
 ```text
 1. 客户端显式 thinking 配置永远优先：请求体已带 thinking/reasoning_effort 参数时，
-   CCX 忠实转发，不展开变体、不改档（代理诚实性原则）
+   Yunqi 忠实转发，不展开变体、不改档（代理诚实性原则）
 2. 只对 autoManaged 且渠道允许注入思考参数的 endpoint 展开；
    现有渠道级思考配置（如 PassbackReasoningContent）语义不变
 3. 升档受成本边界约束：estimatedRequestCost 含 think 开销后仍需通过 §5.6 的排序，
@@ -3330,13 +3330,13 @@ SmartRouter：按任务类型、硬约束、实时质量和有效成本排序
 
 ### 8.5.1 new-api 订阅集成（统一账号接入）
 
-**目标**：用户在订阅中心手填一个 new-api（及其 fork）账号的「系统访问令牌」即可，CCX 自动用该令牌创建代理专用 key、拉取分组倍率、查询额度余额，并把「站点 baseURL + 新建 key」自动落成一个上游渠道，交给 Autopilot 探测与调度。
+**目标**：用户在订阅中心手填一个 new-api（及其 fork）账号的「系统访问令牌」即可，Yunqi 自动用该令牌创建代理专用 key、拉取分组倍率、查询额度余额，并把「站点 baseURL + 新建 key」自动落成一个上游渠道，交给 Autopilot 探测与调度。
 
 **范围约束**：
 - 只使用 new-api 用户在「个人设置」生成的 **系统访问令牌（access_token）** 一种凭据；令牌用于 API 调用的身份验证，属敏感数据，须妥善加密存储。
 - **不做** cookie 登录 + 2FA + 导出后台渠道明文 key 的管理员迁移路径（all-api-hub 的 newApiSession 能力），本设计不涉及。
 - new-api 归入 `OriginType=relay`、`OriginTier=second`（中转站），信任等级不因自动化提升；实时质量仍由运行画像决定。
-- 认证令牌像其他订阅凭据一样由用户手动录入，CCX 不代替用户在 new-api 侧注册或登录。
+- 认证令牌像其他订阅凭据一样由用户手动录入，Yunqi 不代替用户在 new-api 侧注册或登录。
 
 **认证与凭据模型**：
 
@@ -3364,7 +3364,7 @@ type SubscriptionIntegration struct {
     UserID      string `json:"userId"`       // New-API-User 头所需
     AuthTokenMode string `json:"authTokenMode,omitempty"` // "bearer"(默认) | "raw"
     // 自动建 key 的模板
-    ProvisionKeyName   string   `json:"provisionKeyName,omitempty"`   // 默认 "ccx-autopilot"
+    ProvisionKeyName   string   `json:"provisionKeyName,omitempty"`   // 默认 "yunqi-autopilot"
     ProvisionGroup     string   `json:"provisionGroup,omitempty"`     // 建 key 时指定分组，空=默认分组
     ProvisionModels    []string `json:"provisionModels,omitempty"`    // model_limits，空=不限制
     // 自动同步产物（回填，只读展示）
@@ -3392,7 +3392,7 @@ type SubscriptionIntegration struct {
 
 ```json
 {
-  "name": "ccx-autopilot",
+  "name": "yunqi-autopilot",
   "remain_quota": 0,
   "expired_time": -1,
   "unlimited_quota": true,
@@ -3416,7 +3416,7 @@ type SubscriptionIntegration struct {
 3. 拉分组：GET /api/user/self/groups → 写入 GroupMultipliers（{group: ratio}）
           GET /api/user/models       → 记录账号可用模型，供渠道 supportedModels 参考
 4. 建 key：POST /api/token/（按 ProvisionKeyName/Group/Models 模板）
-   ├─ 已存在同名 ccx-autopilot key → 复用其 id，不重复创建（列表比对 name）
+   ├─ 已存在同名 yunqi-autopilot key → 复用其 id，不重复创建（列表比对 name）
    └─ 新建成功 → 回填 ProvisionedTokenID，取 data.key（补齐 sk- 前缀）作为渠道 apiKey
 5. 写入渠道：同 baseURL+channelKind 已有渠道时并入该渠道（多 new-api 订阅与纯 key 整合为同一渠道），否则自动新建
    ├─ 合并目标匹配：BaseURL/BaseURLs 规范化（去尾部 /，忽略大小写）相等；跳过带 providerId 的渠道；多个命中优先 active
@@ -3441,7 +3441,7 @@ type SubscriptionIntegration struct {
 
 **安全与边界**：
 - `access_token` 权限等同 new-api 账户，须加密存储、脱敏展示、禁止写入日志；刷新失败连续 N 次自动停用该订阅的自动刷新，只保留手动。
-- 自动建 key 默认 `unlimited_quota=true` 但可由用户改为限额模板；建 key 是有副作用的写操作，须在接入前明确告知用户「将在 new-api 侧创建一个名为 ccx-autopilot 的令牌」。
+- 自动建 key 默认 `unlimited_quota=true` 但可由用户改为限额模板；建 key 是有副作用的写操作，须在接入前明确告知用户「将在 new-api 侧创建一个名为 yunqi-autopilot 的令牌」。
 - new-api 是 `OriginTier=second`，**不得**用作隐私敏感的 routing advisor / classifier（遵守 §3.2.1 约束）。
 - fork 兼容：请求同时带 `New-API-User` 与 `User-id` 头；响应信封字段名（`success/data/message`）在部分 fork 可能不同，adapter 需容错解析，失败时回退手动录入。
 - 一个 new-api 订阅默认只自动建/绑定一个渠道；用户如需该站多协议渠道，可在同订阅下手动增建，共用同一 key。

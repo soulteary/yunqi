@@ -3,8 +3,8 @@ package autopilot
 import (
 	"strings"
 
-	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/scheduler"
+	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/scheduler"
 )
 
 // channelKindToAPIType 把渠道 kind 字符串映射为 limiter key 前缀。

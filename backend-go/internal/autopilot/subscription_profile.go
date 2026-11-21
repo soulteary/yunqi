@@ -14,7 +14,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/BenedictKing/ccx/internal/errutil"
+	"github.com/soulteary/yunqi/internal/errutil"
 	"golang.org/x/crypto/pbkdf2"
 	"log"
 	"sync"

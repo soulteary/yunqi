@@ -2,7 +2,7 @@ package autopilot
 
 import (
 	"encoding/json"
-	"github.com/BenedictKing/ccx/internal/errutil"
+	"github.com/soulteary/yunqi/internal/errutil"
 	"strings"
 	"testing"
 	"time"

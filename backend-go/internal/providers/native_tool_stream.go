@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/soulteary/yunqi/internal/config"
 )
 
 // ApplyNativeToolStreaming 为支持该扩展的官方 OpenAI Chat 上游开启工具参数流式输出。

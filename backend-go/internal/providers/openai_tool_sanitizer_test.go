@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/BenedictKing/ccx/internal/types"
+	"github.com/soulteary/yunqi/internal/types"
 )
 
 func TestOpenAIProvider_ConvertToClaudeResponse_StripsEmptyReadPages(t *testing.T) {

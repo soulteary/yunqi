@@ -9,7 +9,7 @@ MiMo models are available through [SiliconFlow](https://cloud.siliconflow.cn/) (
 3. Go to "API Keys" page
 4. Create a new API Key
 
-## Add Channel in CCX
+## Add Channel in Yunqi
 
 ### Via SiliconFlow
 
@@ -22,7 +22,7 @@ MiMo models are available through [SiliconFlow](https://cloud.siliconflow.cn/) (
 
 ### Steps
 
-1. Go to CCX admin console, select **Chat** endpoint
+1. Go to Yunqi admin console, select **Chat** endpoint
 2. Click "Add Channel"
 3. Set service type to `OpenAI Chat`
 4. Set Base URL to `https://api.siliconflow.cn/v1`

@@ -6,7 +6,7 @@
 
 ## 1. 背景与问题现象
 
-2026-08-29 用户复盘：某中转渠道（seekai）声称提供 `claude-opus-4-8`，真实会话中模型全程不产生 tool_use，纯文本回复（甚至反咬客户端系统提示是注入攻击）。而 CCX 侧该次请求的 trace 是：
+2026-08-29 用户复盘：某中转渠道（seekai）声称提供 `claude-opus-4-8`，真实会话中模型全程不产生 tool_use，纯文本回复（甚至反咬客户端系统提示是注入攻击）。而 Yunqi 侧该次请求的 trace 是：
 
 ```
 statusCode=200, success=true, durationMs=15851, selectionReason=priority_order
@@ -14,7 +14,7 @@ stages=...protocol_federation:41,smart_filter:26,model_circuit_filter:26
   selected=5:seekai-cc/priority_order
 ```
 
-**全程 200、零负信号**：对 CCX 而言这是一次成功请求，不触发熔断、不降权、不收紧画像，渠道画像的成功率反而漂亮。会话级后果是 agent 反复尝试"不用工具作答"，用户侧表现为能力残废。
+**全程 200、零负信号**：对 Yunqi 而言这是一次成功请求，不触发熔断、不降权、不收紧画像，渠道画像的成功率反而漂亮。会话级后果是 agent 反复尝试"不用工具作答"，用户侧表现为能力残废。
 
 问题的本质：**工具调用硬约束存在，但其静态先验只按模型名解析，无法表达协议差异和中转转换结果**——它只能回答"`claude-opus-4-8` 这个模型理论上支持工具吗"，不能回答"该中转的 Chat/Responses/messages 端点把这次工具请求送到最终上游后，是否仍产生真实工具调用"。例如官方描述可能说明某模型的 Chat Completions 不支持工具调用，但中转站也可能把 Chat 转成 Responses；最终应以该协议路由的端到端实测为准。
 
@@ -83,7 +83,7 @@ if learnedToolCallUnsupported(routeIdentity, actualModel) {
 逻辑渠道/物理端点 + 执行协议 + 实际发送模型
 ```
 
-它表示一次工具请求经过 CCX 的协议转换、中转站端点和最终上游模型后，是否产生真实的工具调用事件。模型注册表中的 `capabilities.toolCalls=true` 只是模型级静态先验，不自动推导 Chat、Responses、messages 或 Gemini 任一协议的最终结果；注册表描述中的协议限制也不直接写成跨渠道的全局黑名单。
+它表示一次工具请求经过 Yunqi 的协议转换、中转站端点和最终上游模型后，是否产生真实的工具调用事件。模型注册表中的 `capabilities.toolCalls=true` 只是模型级静态先验，不自动推导 Chat、Responses、messages 或 Gemini 任一协议的最终结果；注册表描述中的协议限制也不直接写成跨渠道的全局黑名单。
 
 因此，同一个模型在同一逻辑渠道下允许出现不同结论：
 

@@ -9,7 +9,7 @@ import {
   OpenWebUIInBrowser,
   GetAutostartStatus,
   SetAutostart as SetAutostartApi,
-} from '@bindings/github.com/BenedictKing/ccx/desktop/desktopservice'
+} from '@bindings/github.com/soulteary/yunqi/desktop/desktopservice'
 
 // Module-level singletons — all composables share the same state
 const status = ref<DesktopStatus>({

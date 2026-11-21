@@ -1,12 +1,12 @@
 # Channel 数据模型 v2 设计文档
 
-> 目标：把 CCX 的渠道粒度从"协议入口 = 渠道"重构为"物理站点/账号 = 渠道"，让一个渠道下自然表达
+> 目标：把 Yunqi 的渠道粒度从"协议入口 = 渠道"重构为"物理站点/账号 = 渠道"，让一个渠道下自然表达
 > 「多个 key，每个 key 多个 (baseURL, 协议) endpoint，每个 endpoint 有具体模型清单」，
 > 并让 new-api 账号、分组共享的协议+模型认知成为一等公民。
 
 ## 1. 背景与问题
 
-CCX 权威配置是六个并列数组：`upstream`（messages）、`chatUpstream`、`responsesUpstream`、`geminiUpstream`、`imagesUpstream`、`vectorsUpstream`。每个元素是一个 `UpstreamConfig`，只承载**一种协议**（单一 `ServiceType`）、一组 `BaseURLs`、一组 `APIKeys`。
+Yunqi 权威配置是六个并列数组：`upstream`（messages）、`chatUpstream`、`responsesUpstream`、`geminiUpstream`、`imagesUpstream`、`vectorsUpstream`。每个元素是一个 `UpstreamConfig`，只承载**一种协议**（单一 `ServiceType`）、一组 `BaseURLs`、一组 `APIKeys`。
 
 后果：同一物理站点/账号（如火山 `ark.cn-beijing.volces.com/api/coding` 同时兼容 Claude/OpenAI/Responses）被拆成多个 `UpstreamConfig`，导致：
 
@@ -22,7 +22,7 @@ CCX 权威配置是六个并列数组：`upstream`（messages）、`chatUpstream
 - **ChannelKey（凭证）**：渠道下的一个 key。凭证状态（auth 有效性、健康、拉黑、配额）按 key/账号隔离。
 - **KeyEndpointBinding**：key 到某个 `(baseURL, 协议)` endpoint 的绑定。**不复制模型清单**，只引用共享能力。
 - **EndpointCapability（能力认知）**：`(SiteIdentity, GroupIdentity, IdentityBaseURL, Protocol)` 唯一确定的协议+模型认知。**跨账号共享**。
-- **ProtocolFacade**：CCX 入口协议（messages/chat/responses/gemini/images/vectors），决定请求从哪个路由进入。
+- **ProtocolFacade**：Yunqi 入口协议（messages/chat/responses/gemini/images/vectors），决定请求从哪个路由进入。
 - **NewApiAccount**：new-api 渠道的账号侧信息（订阅、accessToken、余额、归属 key）。
 
 ### 2.1 RoutePrefix 与路由入口语义

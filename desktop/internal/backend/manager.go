@@ -21,7 +21,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/BenedictKing/ccx/desktop/internal/appdirs"
+	"github.com/soulteary/yunqi/desktop/internal/appdirs"
 )
 
 const (
@@ -90,7 +90,7 @@ func NewManager(options Options) *Manager {
 		client: &http.Client{
 			Timeout: 900 * time.Millisecond,
 			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // 仅用于本机健康检查，支持 CCX 本地自签名 HTTPS。
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // 仅用于本机健康检查，支持 Yunqi 本地自签名 HTTPS。
 			},
 		},
 	}
@@ -113,13 +113,13 @@ func (m *Manager) Start(ctx context.Context) error {
 			return nil
 		}
 		m.attached = false
-		m.addLogLocked("[Desktop-Backend] 外部 CCX 实例不可用，准备重新启动")
+		m.addLogLocked("[Desktop-Backend] 外部 Yunqi 实例不可用，准备重新启动")
 	}
 	if m.starting {
 		wait := m.startDone
 		m.mu.Unlock()
 		if wait == nil {
-			return fmt.Errorf("CCX 正在启动")
+			return fmt.Errorf("Yunqi 正在启动")
 		}
 		select {
 		case <-ctx.Done():
@@ -159,7 +159,7 @@ func (m *Manager) doStart(ctx context.Context) error {
 		m.attached = true
 		m.port = port
 		m.mu.Unlock()
-		m.appendLog(fmt.Sprintf("[Desktop-Backend] 复用已有 CCX 实例（外部进程），port=%d", port))
+		m.appendLog(fmt.Sprintf("[Desktop-Backend] 复用已有 Yunqi 实例（外部进程），port=%d", port))
 		return nil
 	}
 
@@ -211,7 +211,7 @@ func (m *Manager) doStart(ctx context.Context) error {
 	m.attached = false
 	m.port = port
 	m.binaryPath = binaryPath
-	m.addLogLocked(fmt.Sprintf("[Desktop-Backend] 已启动 CCX，pid=%d port=%d", cmd.Process.Pid, port))
+	m.addLogLocked(fmt.Sprintf("[Desktop-Backend] 已启动 Yunqi，pid=%d port=%d", cmd.Process.Pid, port))
 	m.mu.Unlock()
 
 	go m.scanLogs("stdout", stdout)
@@ -246,16 +246,16 @@ func (m *Manager) Stop(ctx context.Context) error {
 	attached := m.attached
 	m.mu.Unlock()
 	if attached {
-		return fmt.Errorf("当前 CCX 实例由外部进程托管，无法通过桌面外壳停止")
+		return fmt.Errorf("当前 Yunqi 实例由外部进程托管，无法通过桌面外壳停止")
 	}
 	if cmd == nil || cmd.Process == nil {
 		if _, err := m.fetchHealth(ctx, m.port); err == nil {
-			return fmt.Errorf("当前端口 %d 上的 CCX 由外部进程托管，无法通过桌面外壳停止", m.port)
+			return fmt.Errorf("当前端口 %d 上的 Yunqi 由外部进程托管，无法通过桌面外壳停止", m.port)
 		}
 		return nil
 	}
 
-	m.appendLog(fmt.Sprintf("[Desktop-Backend] 正在停止 CCX，pid=%d", cmd.Process.Pid))
+	m.appendLog(fmt.Sprintf("[Desktop-Backend] 正在停止 Yunqi，pid=%d", cmd.Process.Pid))
 	if err := terminateProcess(cmd); err != nil && !errors.Is(err, os.ErrProcessDone) {
 		m.setError(err)
 	}
@@ -328,7 +328,7 @@ func (m *Manager) Status(ctx context.Context) Status {
 			m.attached = false
 			status.Attached = false
 			status.Running = false
-			m.addLogLocked("[Desktop-Backend] 外部 CCX 实例已不可达，清除附着状态")
+			m.addLogLocked("[Desktop-Backend] 外部 Yunqi 实例已不可达，清除附着状态")
 		}
 		m.mu.Unlock()
 	}
@@ -430,16 +430,16 @@ func (m *Manager) WaitHealthy(ctx context.Context, timeout time.Duration) error 
 		select {
 		case <-ctx.Done():
 			if lastErr != nil {
-				return fmt.Errorf("等待 CCX /health 超时: %w", lastErr)
+				return fmt.Errorf("等待 Yunqi /health 超时: %w", lastErr)
 			}
 			return ctx.Err()
 		case <-time.After(300 * time.Millisecond):
 		}
 	}
 	if lastErr != nil {
-		return fmt.Errorf("等待 CCX /health 超时: %w", lastErr)
+		return fmt.Errorf("等待 Yunqi /health 超时: %w", lastErr)
 	}
-	return fmt.Errorf("等待 CCX /health 超时")
+	return fmt.Errorf("等待 Yunqi /health 超时")
 }
 
 func (m *Manager) findBinary() (string, error) {
@@ -449,11 +449,11 @@ func (m *Manager) findBinary() (string, error) {
 			return candidate, nil
 		}
 	}
-	return "", fmt.Errorf("未找到 CCX 二进制，请先运行 make build；已检查: %s", strings.Join(candidates, ", "))
+	return "", fmt.Errorf("未找到 Yunqi 二进制，请先运行 make build；已检查: %s", strings.Join(candidates, ", "))
 }
 
 func (m *Manager) binaryCandidates() []string {
-	name := "ccx-go"
+	name := "yunqi"
 	if runtime.GOOS == "windows" {
 		name += ".exe"
 	}
@@ -476,7 +476,7 @@ func (m *Manager) selectPort(ctx context.Context) (int, error) {
 	bindHost := configuredBindHost(m.dataDir)
 	for port := m.port; port < m.port+20; port++ {
 		if _, err := m.fetchHealth(ctx, port); err == nil {
-			conflicts = append(conflicts, fmt.Sprintf("%d(已被另一个 CCX 健康实例占用)", port))
+			conflicts = append(conflicts, fmt.Sprintf("%d(已被另一个 Yunqi 健康实例占用)", port))
 			continue
 		}
 		ln, err := net.Listen("tcp", listenAddress(bindHost, port))
@@ -577,10 +577,10 @@ func (m *Manager) waitProcess(cmd *exec.Cmd, done chan error) {
 	m.done = nil
 	if err != nil && !strings.Contains(err.Error(), "signal") {
 		m.lastError = err.Error()
-		m.addLogLocked("[Desktop-Backend] CCX 进程退出: " + err.Error())
+		m.addLogLocked("[Desktop-Backend] Yunqi 进程退出: " + err.Error())
 		return
 	}
-	m.addLogLocked("[Desktop-Backend] CCX 进程已退出")
+	m.addLogLocked("[Desktop-Backend] Yunqi 进程已退出")
 }
 
 func (m *Manager) scanLogs(stream string, pipe io.Reader) {

@@ -164,11 +164,11 @@ tasks:
     vars:
       ARCH: '{{.ARCH}}'
       BUILD_VERSION: '{{.BUILD_VERSION | default "0.1.0"}}'
-      MSIX_PACKAGE_NAME: '{{.MSIX_PACKAGE_NAME | default "CCX.Desktop"}}'
-      MSIX_PUBLISHER: '{{.MSIX_PUBLISHER | default "CN=CCX"}}'
-      MSIX_PUBLISHER_DISPLAY_NAME: '{{.MSIX_PUBLISHER_DISPLAY_NAME | default "CCX"}}'
-      MSIX_DISPLAY_NAME: '{{.MSIX_DISPLAY_NAME | default "CCX Desktop"}}'
-      MSIX_DESCRIPTION: '{{.MSIX_DESCRIPTION | default "Desktop shell for the CCX core gateway service."}}'
+      MSIX_PACKAGE_NAME: '{{.MSIX_PACKAGE_NAME | default "Yunqi.Desktop"}}'
+      MSIX_PUBLISHER: '{{.MSIX_PUBLISHER | default "CN=Yunqi"}}'
+      MSIX_PUBLISHER_DISPLAY_NAME: '{{.MSIX_PUBLISHER_DISPLAY_NAME | default "Yunqi"}}'
+      MSIX_DISPLAY_NAME: '{{.MSIX_DISPLAY_NAME | default "Yunqi Desktop"}}'
+      MSIX_DESCRIPTION: '{{.MSIX_DESCRIPTION | default "Desktop shell for the Yunqi core gateway service."}}'
 
   install:msix:tools:
     summary: Checks tools required for MSIX packaging

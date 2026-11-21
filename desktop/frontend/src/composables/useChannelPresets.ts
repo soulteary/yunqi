@@ -9,7 +9,7 @@ import {
   GetProviderPresets,
   GetProviderKeyAssets,
   CreateCCXChannelFromPreset,
-} from '@bindings/github.com/BenedictKing/ccx/desktop/desktopservice'
+} from '@bindings/github.com/soulteary/yunqi/desktop/desktopservice'
 
 const presets = ref<ProviderPreset[]>([])
 const keyAssets = ref<ProviderKeyAsset[]>([])

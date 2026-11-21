@@ -7,7 +7,7 @@
 ## 配置文件结构
 
 ```
-ccx/
+yunqi/
 ├── frontend/
 │   ├── .env                    # 前端默认配置
 │   ├── .env.development        # 开发环境配置
@@ -95,14 +95,14 @@ CORS_ORIGIN=*                          # CORS 允许的源
 
 #### 本地 HTTPS
 
-`ENABLE_HTTPS=true` 会让 CCX 在当前 `PORT` 启用 HTTPS，用于 Claude Desktop 等只接受 HTTPS Gateway Base URL 的客户端。开启后推荐本地访问地址为 `https://localhost:3688`，同时同端口仍接受 `http://localhost:3688`，以兼容已有客户端配置。
+`ENABLE_HTTPS=true` 会让 Yunqi 在当前 `PORT` 启用 HTTPS，用于 Claude Desktop 等只接受 HTTPS Gateway Base URL 的客户端。开启后推荐本地访问地址为 `https://localhost:3688`，同时同端口仍接受 `http://localhost:3688`，以兼容已有客户端配置。
 
-- 默认 `TLS_AUTO_CERT=true`：未配置证书文件时，CCX 会在进程内生成仅包含 `localhost`、`127.0.0.1`、`::1` 的临时自签名证书，适合本地转发和桌面端自检。
+- 默认 `TLS_AUTO_CERT=true`：未配置证书文件时，Yunqi 会在进程内生成仅包含 `localhost`、`127.0.0.1`、`::1` 的临时自签名证书，适合本地转发和桌面端自检。
 - 如客户端严格要求系统信任证书，请使用 `mkcert`、企业证书或手动签发证书，并同时设置 `TLS_CERT_FILE` 与 `TLS_KEY_FILE`。
 - `TLS_CERT_FILE` 和 `TLS_KEY_FILE` 必须成对设置；只设置其中一个会导致启动失败。
-- `TLS_CERT_FILE` 和 `TLS_KEY_FILE` 请使用展开后的绝对路径。相对路径会按 CCX 进程工作目录解析；安装包、systemd、launchd、NSSM 或从不同目录启动时，`./backend-go/...` 这类路径很容易找不到文件。
+- `TLS_CERT_FILE` 和 `TLS_KEY_FILE` 请使用展开后的绝对路径。相对路径会按 Yunqi 进程工作目录解析；安装包、systemd、launchd、NSSM 或从不同目录启动时，`./backend-go/...` 这类路径很容易找不到文件。
 
-Claude Desktop 访问本地 HTTPS 时，如果 CCX 日志出现 `remote error: tls: unknown certificate`，通常表示客户端不信任临时自签名证书。推荐用 `mkcert` 生成系统信任的本地证书。
+Claude Desktop 访问本地 HTTPS 时，如果 Yunqi 日志出现 `remote error: tls: unknown certificate`，通常表示客户端不信任临时自签名证书。推荐用 `mkcert` 生成系统信任的本地证书。
 
 安装 `mkcert`：
 
@@ -126,18 +126,18 @@ scoop install mkcert
 mkcert -install
 ```
 
-生成证书时，先按部署方式选择证书目录。CCX Desktop 安装包请优先以 **Gateway Monitor** 显示的 **Data dir** 为准，下面是常见默认位置：
+生成证书时，先按部署方式选择证书目录。Yunqi Desktop 安装包请优先以 **Gateway Monitor** 显示的 **Data dir** 为准，下面是常见默认位置：
 
 | 场景 | 建议证书目录 |
 | --- | --- |
 | 源码开发 | `backend-go/.config/certs` |
-| CCX Desktop macOS 安装包 | `~/Library/Application Support/ccx-desktop/certs` |
-| CCX Desktop Linux 安装包 | `~/.local/state/ccx/certs` |
-| CCX Desktop Windows GitHub 安装包 | `%APPDATA%\ccx-desktop\certs` |
-| CCX Desktop Windows Store/MSIX | `%LOCALAPPDATA%\Packages\<package-family>\LocalCache\Roaming\ccx-desktop\certs` |
-| Linux systemd 服务 | `/etc/ccx/certs` |
-| macOS launchd 手动服务 | `~/ccx/certs` |
-| Windows NSSM 服务 | `C:\ccx\certs` |
+| Yunqi Desktop macOS 安装包 | `~/Library/Application Support/yunqi-desktop/certs` |
+| Yunqi Desktop Linux 安装包 | `~/.local/state/yunqi/certs` |
+| Yunqi Desktop Windows GitHub 安装包 | `%APPDATA%\yunqi-desktop\certs` |
+| Yunqi Desktop Windows Store/MSIX | `%LOCALAPPDATA%\Packages\<package-family>\LocalCache\Roaming\yunqi-desktop\certs` |
+| Linux systemd 服务 | `/etc/yunqi/certs` |
+| macOS launchd 手动服务 | `~/yunqi/certs` |
+| Windows NSSM 服务 | `C:\yunqi\certs` |
 
 源码开发或 macOS/Linux 安装包可用以下命令，把 `CERT_DIR` 替换为上表中的实际目录。示例会先展开为绝对路径，复制到 `.env` 时也应使用输出后的绝对路径：
 
@@ -154,7 +154,7 @@ mkcert \
 Windows PowerShell 示例。若使用 Store/MSIX 版本，请先在 **Gateway Monitor** 查看 **Data dir**，再把 `$certDir` 改成该目录下的 `certs` 子目录：
 
 ```powershell
-$certDir = "$env:APPDATA\ccx-desktop\certs"
+$certDir = "$env:APPDATA\yunqi-desktop\certs"
 New-Item -ItemType Directory -Force $certDir
 
 mkcert `
@@ -175,18 +175,18 @@ TLS_KEY_FILE=/absolute/path/to/localhost-key.pem
 `.env` 的位置取决于启动方式：
 
 - 源码开发：通常是 `backend-go/.env`。
-- CCX Desktop 安装包：在 **Environment Params** 中编辑；后端进程工作目录是桌面端数据目录。
-- Linux systemd：通常是 `EnvironmentFile` 指向的 `/opt/ccx/.env`，也可能由服务文件改成其他路径。
+- Yunqi Desktop 安装包：在 **Environment Params** 中编辑；后端进程工作目录是桌面端数据目录。
+- Linux systemd：通常是 `EnvironmentFile` 指向的 `/opt/yunqi/.env`，也可能由服务文件改成其他路径。
 - macOS launchd / Windows NSSM：若通过服务环境变量传入配置，应在对应服务配置中设置 `ENABLE_HTTPS`、`TLS_AUTO_CERT`、`TLS_CERT_FILE`、`TLS_KEY_FILE`。
 
-安装包和系统服务场景建议在 `.env` 中使用展开后的绝对路径；不要依赖相对路径或 `%APPDATA%` 这类变量自动展开。重启 CCX 后，在 Claude Desktop 中使用 `https://localhost:3688` 作为 Gateway Base URL。
+安装包和系统服务场景建议在 `.env` 中使用展开后的绝对路径；不要依赖相对路径或 `%APPDATA%` 这类变量自动展开。重启 Yunqi 后，在 Claude Desktop 中使用 `https://localhost:3688` 作为 Gateway Base URL。
 
-如果 Claude Desktop 通过局域网 IP 或自定义主机名访问 CCX，例如 `https://192.168.1.20:3688`，生成证书时必须把该 IP 或主机名一并加入：
+如果 Claude Desktop 通过局域网 IP 或自定义主机名访问 Yunqi，例如 `https://192.168.1.20:3688`，生成证书时必须把该 IP 或主机名一并加入：
 
 ```bash
 mkcert \
-  -cert-file "$CERT_DIR/ccx-local.pem" \
-  -key-file "$CERT_DIR/ccx-local-key.pem" \
+  -cert-file "$CERT_DIR/yunqi-local.pem" \
+  -key-file "$CERT_DIR/yunqi-local-key.pem" \
   "localhost" "127.0.0.1" "::1" "192.168.1.20"
 ```
 
@@ -287,7 +287,7 @@ Vectors 仍不支持 capability-test；不要通过能力测试推断 Embedding 
 命令行版支持用参数覆盖运行时路径，不传参数时仍保持默认行为：
 
 ```bash
-ccx --config ~/.config/ccx/config.json --statedir ~/.local/state/ccx --logdir ~/.local/state/ccx/logs
+yunqi --config ~/.config/yunqi/config.json --statedir ~/.local/state/yunqi --logdir ~/.local/state/yunqi/logs
 ```
 
 - `--config PATH`：指定配置文件路径。
@@ -746,7 +746,7 @@ ENABLE_RESPONSE_LOGS=true
 1. **日志轮转**：定期清理旧日志，避免磁盘空间耗尽
 2. **访问控制**：限制日志文件的访问权限
    ```bash
-   chmod 600 /var/log/ccx/*.log
+   chmod 600 /var/log/yunqi/*.log
    ```
 3. **敏感数据**：即使有脱敏，也应定期审查日志内容
 4. **合规要求**：根据数据保护法规（GDPR、CCPA等）管理日志
@@ -767,7 +767,7 @@ LOG_LEVEL=debug  # 可能泄露敏感信息
 
 ### Q1: 系统是否有自带的日志轮转机制？
 
-是的，CCX 后端自带了开箱即用的日志轮转和自动归档功能。
+是的，Yunqi 后端自带了开箱即用的日志轮转和自动归档功能。
 如果未在环境变量中显式配置，系统将采用以下默认规划（定义在 `internal/logger/logger.go:43` 的 `DefaultConfig` 中）：
 
 - **日志目录 (`LogDir`)**: `logs` （项目根目录下的 `logs/` 文件夹）
@@ -859,8 +859,8 @@ curl -H "x-api-key: ${ADMIN_ACCESS_KEY:-$PROXY_ACCESS_KEY}" http://localhost:300
    journalctl --vacuum-time=7d
 
    # 或使用 logrotate
-   # /etc/logrotate.d/ccx
-   /var/log/ccx/*.log {
+   # /etc/logrotate.d/yunqi
+   /var/log/yunqi/*.log {
        daily
        rotate 7
        compress
