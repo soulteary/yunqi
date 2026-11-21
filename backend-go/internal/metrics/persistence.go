@@ -42,7 +42,7 @@ type PersistenceStore interface {
 	// QueryCostReport 按指定维度聚合成本数据（Phase 4 Item 2: 成本报表）
 	QueryCostReport(apiType string, since time.Time, groupBy string) ([]CostReportRow, error)
 
-	// QueryModelCostBreakdown 按维度筛选后再按 model 分组返回 token 明细（用于逐模型定价计算）
+	// QueryModelCostBreakdown 按模型及成本快照是否存在分组，避免重估已固化成本。
 	QueryModelCostBreakdown(apiType string, since time.Time, groupBy string, filterGroupKey string) ([]ModelCostBreakdownRow, error)
 
 	// QueryConsumptionPolicyDistribution 按 channel_uid + consumption_policy 聚合请求数。
