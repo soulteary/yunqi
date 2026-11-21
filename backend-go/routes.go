@@ -14,6 +14,7 @@ func (a *application) newRouter() *fiber.App {
 	if a.cfgManager != nil {
 		a.envCfg.ManagedProxyKeyLookup = a.cfgManager.FindEntryKey
 		a.envCfg.ManagedAdminKeyLookup = a.cfgManager.FindAdminCredential
+		a.envCfg.IdentityProxyConfigLookup = a.cfgManager.IdentityProxySnapshot
 	}
 	// 创建路由器（使用自定义 Logger，根据 QUIET_POLLING_LOGS 配置过滤轮询日志）
 	r := httpbridge.NewApp()

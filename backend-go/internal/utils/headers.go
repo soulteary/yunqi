@@ -208,6 +208,11 @@ func isLikelyClaudeCodeSubagent(req map[string]interface{}) bool {
 
 func PrepareUpstreamHeaders(c fiber.Ctx, targetHost string) http.Header {
 	headers := httpbridge.Request(c).Header.Clone()
+	for name := range headers {
+		if strings.HasPrefix(strings.ToLower(name), "x-yunqi-identity-") || strings.EqualFold(name, "X-Yunqi-Management-Request") {
+			delete(headers, name)
+		}
+	}
 
 	// 设置正确的Host头部
 	headers.Set("Host", targetHost)
@@ -314,6 +319,9 @@ func SetGeminiAuthenticationHeader(headers http.Header, apiKey string) {
 func ApplyCustomHeaders(headers http.Header, customHeaders map[string]string) {
 	for key, value := range customHeaders {
 		key = strings.TrimSpace(key)
+		if strings.HasPrefix(strings.ToLower(key), "x-yunqi-identity-") || strings.EqualFold(key, "X-Yunqi-Management-Request") {
+			continue
+		}
 		value = strings.TrimSpace(value)
 		if key == "" || value == "" {
 			continue
@@ -338,6 +346,9 @@ var CopilotProtectedHeaders = map[string]bool{
 func ApplyCustomHeadersProtected(headers http.Header, customHeaders map[string]string, protected map[string]bool) {
 	for key, value := range customHeaders {
 		key = strings.TrimSpace(key)
+		if strings.HasPrefix(strings.ToLower(key), "x-yunqi-identity-") || strings.EqualFold(key, "X-Yunqi-Management-Request") {
+			continue
+		}
 		value = strings.TrimSpace(value)
 		if key == "" || value == "" {
 			continue
@@ -380,7 +391,7 @@ func ForwardResponseHeaders(upstreamHeaders http.Header, clientWriter http.Respo
 		lowerKey := strings.ToLower(key)
 
 		// 跳过不应转发的头部
-		if skipHeaders[lowerKey] {
+		if skipHeaders[lowerKey] || strings.HasPrefix(lowerKey, "x-yunqi-identity-") || strings.EqualFold(key, "X-Yunqi-Management-Request") {
 			continue
 		}
 
