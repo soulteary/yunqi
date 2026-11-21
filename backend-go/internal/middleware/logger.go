@@ -30,7 +30,9 @@ func FilteredLogger(envCfg *config.EnvConfig, skipPrefixes ...string) fiber.Hand
 		skipPrefixes = defaultSkipPrefixes
 	}
 	return func(c fiber.Ctx) error {
-		path := httpbridge.Request(c).URL.Path
+		// Match the same normalized path used by routing and authentication. Raw
+		// dot segments can disguise a key route and must never reach the log.
+		path := strings.Clone(c.Path())
 		method := httpbridge.Request(c).Method
 		skip := false
 		if envCfg.QuietPollingLogs {
