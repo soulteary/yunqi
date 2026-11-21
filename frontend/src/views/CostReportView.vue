@@ -229,6 +229,7 @@ import { ref, computed, onMounted } from 'vue'
 import { api } from '@/services/api'
 import type { CostReportRow } from '@/services/api-types'
 import { useI18n } from '@/i18n'
+import { serializeCsv } from '@/utils/csv'
 
 const { t } = useI18n()
 
@@ -352,7 +353,7 @@ function exportCSV() {
     r.unpricedCostCount || 0,
   ])
 
-  const csv = [headers.join(','), ...csvRows.map(r => r.join(','))].join('\n')
+  const csv = serializeCsv([headers, ...csvRows])
   const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
