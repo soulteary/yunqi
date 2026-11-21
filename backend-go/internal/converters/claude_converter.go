@@ -12,8 +12,21 @@ type ClaudeConverter struct{}
 
 // ToProviderRequest 将 Responses 请求转换为 Claude Messages 格式
 func (c *ClaudeConverter) ToProviderRequest(sess *session.Session, req *types.ResponsesRequest) (interface{}, error) {
+	var codexTools []map[string]interface{}
+	var codexCtx CodexToolContext
+	codexEnabled, _ := req.TransformerMetadata["codex_tool_compat_enabled"].(bool)
+	input := req.Input
+	if codexEnabled {
+		codexTools, codexCtx = prepareClaudeCodexTools(sess, req)
+		items, err := parseResponsesInput(input)
+		if err != nil {
+			return nil, err
+		}
+		input = claudeCodexHistory(items, codexCtx)
+		sess = &session.Session{Messages: claudeCodexHistory(sess.Messages, codexCtx)}
+	}
 	// 转换 messages 和 system
-	messages, system, err := ResponsesToClaudeMessages(sess, req.Input, req.Instructions)
+	messages, system, err := ResponsesToClaudeMessages(sess, input, req.Instructions)
 	if err != nil {
 		return nil, err
 	}
@@ -48,9 +61,18 @@ func (c *ClaudeConverter) ToProviderRequest(sess *session.Session, req *types.Re
 	if req.User != "" {
 		claudeReq["metadata"] = map[string]interface{}{"user_id": req.User}
 	}
-	if len(req.Tools) > 0 {
+	if codexEnabled {
+		if len(codexTools) > 0 {
+			claudeReq["tools"] = codexTools
+		}
+	} else if len(req.Tools) > 0 {
 		if tools := responsesToolsToClaude(req.Tools); len(tools) > 0 {
 			claudeReq["tools"] = tools
+		}
+	}
+	if _, hasTools := claudeReq["tools"]; codexEnabled && hasTools && req.ToolChoice != nil {
+		if choice := claudeToolChoice(req.ToolChoice, codexCtx); choice != nil {
+			claudeReq["tool_choice"] = choice
 		}
 	}
 
