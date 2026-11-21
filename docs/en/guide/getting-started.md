@@ -57,6 +57,12 @@ From the admin console you can:
 - Test channel connectivity
 - Adjust channel priorities
 
+### Editing model allowlists and remarks
+
+Open the channel editor and enter rules under **Allowed models (allowlist)** in **Basic information**, then click **Save**. Rules apply to each protocol route independently. Separate rules with newlines or commas; exact names, wildcards such as `gpt*`, `*luna`, and `*deepseek*`, and exclusions such as `!*luna` are supported. Save an empty field to clear that route's restriction.
+
+Channel lists display a nonempty remark first and show the original name on hover. Channels without a remark retain their original display name.
+
 ## Next Steps
 
 Head to [Client Setup](/en/guide/clients/) to configure Claude Code, Codex CLI / App, or OpenCode; head to [Provider Setup](/en/providers/) to configure each LLM provider.
