@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"net/url"
 	"strings"
+	"time"
 )
 
 type IdentityGroupMapping struct {
@@ -14,22 +15,27 @@ type IdentityGroupMapping struct {
 	ChannelUIDs []string `json:"channelUids,omitempty"`
 }
 
-// IdentityProxyConfig authorizes identity assertions only from a configured
-// peer network plus an environment-held shared secret. OAuth stays external.
+type IdentitySessionRevocation struct {
+	Hash      string `json:"hash"`
+	ExpiresAt int64  `json:"expiresAt,omitempty"`
+}
+
+// IdentityProxyConfig authorizes assertions only from configured peer networks
+// plus an environment-held shared secret. OAuth stays external.
 type IdentityProxyConfig struct {
-	AllowedOrigins       []string               `json:"allowedOrigins,omitempty"`
-	Enabled              bool                   `json:"enabled"`
-	Issuer               string                 `json:"issuer"`
-	TrustedCIDRs         []string               `json:"trustedCidrs,omitempty"`
-	MaxSessionSeconds    int64                  `json:"maxSessionSeconds,omitempty"`
-	GroupMappings        []IdentityGroupMapping `json:"groupMappings,omitempty"`
-	RevokedSessionHashes []string               `json:"revokedSessionHashes,omitempty"`
+	RevokedSessions   []IdentitySessionRevocation `json:"revokedSessions,omitempty"`
+	AllowedOrigins    []string                    `json:"allowedOrigins,omitempty"`
+	Enabled           bool                        `json:"enabled"`
+	Issuer            string                      `json:"issuer"`
+	TrustedCIDRs      []string                    `json:"trustedCidrs,omitempty"`
+	MaxSessionSeconds int64                       `json:"maxSessionSeconds,omitempty"`
+	GroupMappings     []IdentityGroupMapping      `json:"groupMappings,omitempty"`
 }
 
 func cloneIdentityProxy(cfg IdentityProxyConfig) IdentityProxyConfig {
+	cfg.RevokedSessions = append([]IdentitySessionRevocation(nil), cfg.RevokedSessions...)
 	cfg.AllowedOrigins = append([]string(nil), cfg.AllowedOrigins...)
 	cfg.TrustedCIDRs = append([]string(nil), cfg.TrustedCIDRs...)
-	cfg.RevokedSessionHashes = append([]string(nil), cfg.RevokedSessionHashes...)
 	cfg.GroupMappings = append([]IdentityGroupMapping(nil), cfg.GroupMappings...)
 	for i := range cfg.GroupMappings {
 		cfg.GroupMappings[i].ChannelUIDs = append([]string(nil), cfg.GroupMappings[i].ChannelUIDs...)
@@ -74,9 +80,13 @@ func (cm *ConfigManager) SetIdentityProxyConfig(cfg IdentityProxyConfig) error {
 	cm.mu.Lock()
 	next := cm.config.deepCopy()
 	// Ordinary policy edits never silently revive revoked sessions.
-	cfg.RevokedSessionHashes = nil
+	cfg.RevokedSessions = nil
 	if next.IdentityProxy != nil {
-		cfg.RevokedSessionHashes = append([]string(nil), next.IdentityProxy.RevokedSessionHashes...)
+		for _, record := range next.IdentityProxy.RevokedSessions {
+			if record.ExpiresAt == 0 || record.ExpiresAt > time.Now().Unix() {
+				cfg.RevokedSessions = append(cfg.RevokedSessions, record)
+			}
+		}
 	}
 	copy := cloneIdentityProxy(cfg)
 	next.IdentityProxy = &copy
@@ -88,10 +98,19 @@ func (cm *ConfigManager) SetIdentityProxyConfig(cfg IdentityProxyConfig) error {
 	return nil
 }
 func (cm *ConfigManager) RevokeIdentitySession(hash string) error {
+	return cm.RevokeIdentitySessionUntil(hash, 0)
+}
+func (cm *ConfigManager) RevokeIdentitySessionUntil(hash string, expiresAt int64) error {
+	return cm.revokeIdentitySessionUntilAt(hash, expiresAt, time.Now().Unix())
+}
+func (cm *ConfigManager) revokeIdentitySessionUntilAt(hash string, expiresAt, now int64) error {
 	hash = strings.ToLower(hash)
 	decoded, err := hex.DecodeString(hash)
-	if err != nil || len(decoded) != 32 {
+	if err != nil || len(decoded) != 32 || expiresAt < 0 {
 		return errors.New("invalid session fingerprint")
+	}
+	if expiresAt > 0 && expiresAt <= now {
+		return nil
 	}
 	cm.mu.Lock()
 	next := cm.config.deepCopy()
@@ -99,17 +118,28 @@ func (cm *ConfigManager) RevokeIdentitySession(hash string) error {
 		cm.mu.Unlock()
 		return errors.New("identity proxy not configured")
 	}
-	for _, existing := range next.IdentityProxy.RevokedSessionHashes {
-		if existing == hash {
-			cm.mu.Unlock()
-			return nil
+	active := make([]IdentitySessionRevocation, 0, len(next.IdentityProxy.RevokedSessions)+1)
+	found := false
+	for _, record := range next.IdentityProxy.RevokedSessions {
+		if record.ExpiresAt > 0 && record.ExpiresAt <= now {
+			continue
 		}
+		if record.Hash == hash {
+			found = true
+			if record.ExpiresAt != 0 && (expiresAt == 0 || expiresAt > record.ExpiresAt) {
+				record.ExpiresAt = expiresAt
+			}
+		}
+		active = append(active, record)
 	}
-	if len(next.IdentityProxy.RevokedSessionHashes) >= 4096 {
-		cm.mu.Unlock()
-		return errors.New("session revocation limit reached")
+	if !found {
+		if len(active) >= 4096 {
+			cm.mu.Unlock()
+			return errors.New("session revocation limit reached")
+		}
+		active = append(active, IdentitySessionRevocation{Hash: hash, ExpiresAt: expiresAt})
 	}
-	next.IdentityProxy.RevokedSessionHashes = append(next.IdentityProxy.RevokedSessionHashes, hash)
+	next.IdentityProxy.RevokedSessions = active
 	if err := cm.saveConfigLocked(next); err != nil {
 		cm.mu.Unlock()
 		return err
@@ -117,6 +147,7 @@ func (cm *ConfigManager) RevokeIdentitySession(hash string) error {
 	cm.fireConfigChangeCallbacks()
 	return nil
 }
+
 func IdentitySessionHash(issuer, session string) string {
 	return EntryKeyHash(issuer + "\x00" + session)
 }

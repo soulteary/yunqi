@@ -14,6 +14,7 @@ const ContextKeyAdminPrincipal = "adminPrincipal"
 
 type AdminPrincipal struct {
 	Source             string   `json:"source,omitempty"`
+	SessionExpiresAt   int64    `json:"sessionExpiresAt,omitempty"`
 	SessionFingerprint string   `json:"sessionFingerprint,omitempty"`
 	ID                 string   `json:"id"`
 	Role               string   `json:"role"`

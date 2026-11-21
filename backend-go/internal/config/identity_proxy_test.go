@@ -32,7 +32,7 @@ func TestIdentityProxyRevocationsPersistAndPolicyEditsCannotClearThem(t *testing
 		t.Fatal(err)
 	}
 	snapshot := cm.IdentityProxySnapshot()
-	if len(snapshot.RevokedSessionHashes) != 1 || snapshot.RevokedSessionHashes[0] != hash {
+	if len(snapshot.RevokedSessions) != 1 || snapshot.RevokedSessions[0].Hash != hash {
 		t.Fatal("revocation lost or duplicated")
 	}
 	snapshot.GroupMappings[0].ChannelUIDs[0] = "other"
@@ -51,8 +51,20 @@ func TestIdentityProxyRevocationsPersistAndPolicyEditsCannotClearThem(t *testing
 		t.Fatal(err)
 	}
 	defer reload.Close()
-	if got := reload.IdentityProxySnapshot(); len(got.RevokedSessionHashes) != 1 || got.RevokedSessionHashes[0] != hash {
+	if got := reload.IdentityProxySnapshot(); len(got.RevokedSessions) != 1 || got.RevokedSessions[0].Hash != hash {
 		t.Fatal("revocation lost on restart")
+	}
+	shortHash := IdentitySessionHash(cfg.Issuer, "short-session")
+	if err := cm.revokeIdentitySessionUntilAt(shortHash, 200, 100); err != nil {
+		t.Fatal(err)
+	}
+	if err := cm.revokeIdentitySessionUntilAt(IdentitySessionHash(cfg.Issuer, "next-session"), 300, 201); err != nil {
+		t.Fatal(err)
+	}
+	for _, record := range cm.IdentityProxySnapshot().RevokedSessions {
+		if record.Hash == shortHash {
+			t.Fatal("expired session tombstone was not reclaimed")
+		}
 	}
 	for _, origin := range []string{"*", "https://*.example", "https://example/path", "file:///tmp/x", "https://user:secret@example", "null"} {
 		if _, err := NormalizeIdentityOrigin(origin); err == nil {

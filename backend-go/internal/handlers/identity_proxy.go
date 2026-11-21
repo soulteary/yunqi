@@ -5,6 +5,7 @@ import (
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/middleware"
+	"time"
 )
 
 func RegisterIdentityProxyRoutes(router fiber.Router, env *config.EnvConfig, cm *config.ConfigManager) {
@@ -13,8 +14,8 @@ func RegisterIdentityProxyRoutes(router fiber.Router, env *config.EnvConfig, cm 
 			return nil
 		}
 		cfg := cm.IdentityProxySnapshot()
-		count := len(cfg.RevokedSessionHashes)
-		cfg.RevokedSessionHashes = nil
+		count := len(cfg.RevokedSessions)
+		cfg.RevokedSessions = nil
 		httpbridge.JSON(c, 200, fiber.Map{"config": cfg, "secretConfigured": len(env.IdentityProxySecret) >= 32, "revokedSessionCount": count})
 		return nil
 	})
@@ -40,12 +41,17 @@ func RegisterIdentityProxyRoutes(router fiber.Router, env *config.EnvConfig, cm 
 		}
 		var req struct {
 			SessionFingerprint string `json:"sessionFingerprint"`
+			ExpiresAt          int64  `json:"expiresAt,omitempty"`
 		}
 		if httpbridge.BindJSON(c, &req) != nil {
 			httpbridge.JSON(c, 400, fiber.Map{"error": "invalid_session_fingerprint"})
 			return nil
 		}
-		if err := cm.RevokeIdentitySession(req.SessionFingerprint); err != nil {
+		if req.ExpiresAt > 0 && req.ExpiresAt <= time.Now().Unix() {
+			httpbridge.JSON(c, 400, fiber.Map{"error": "invalid_session_expiry"})
+			return nil
+		}
+		if err := cm.RevokeIdentitySessionUntil(req.SessionFingerprint, req.ExpiresAt); err != nil {
 			httpbridge.JSON(c, 400, fiber.Map{"error": "session_revocation_failed"})
 			return nil
 		}
@@ -56,7 +62,7 @@ func RegisterIdentityProxyRoutes(router fiber.Router, env *config.EnvConfig, cm 
 		if !middleware.AuthorizeAdminAction(c, "access.session.revoke", "") {
 			return nil
 		}
-		if err := cm.RevokeIdentitySession(middleware.GetAdminPrincipal(c).SessionFingerprint); err != nil {
+		if err := cm.RevokeIdentitySessionUntil(middleware.GetAdminPrincipal(c).SessionFingerprint, middleware.GetAdminPrincipal(c).SessionExpiresAt); err != nil {
 			httpbridge.JSON(c, 503, fiber.Map{"error": "session_revocation_failed"})
 			return nil
 		}

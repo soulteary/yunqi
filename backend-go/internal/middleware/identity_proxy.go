@@ -109,11 +109,12 @@ func authenticateTrustedIdentity(c fiber.Ctx, env *config.EnvConfig) bool {
 		return false
 	}
 	fingerprint := config.IdentitySessionHash(cfg.Issuer, session)
-	for _, revoked := range cfg.RevokedSessionHashes {
-		if revoked == fingerprint {
+	for _, record := range cfg.RevokedSessions {
+		if record.Hash == fingerprint && (record.ExpiresAt == 0 || record.ExpiresAt > now) {
 			return false
 		}
 	}
+
 	rawGroups := httpbridge.GetHeader(c, IdentityGroupsHeader)
 	if len(rawGroups) > 4096 {
 		return false
@@ -172,6 +173,6 @@ func authenticateTrustedIdentity(c fiber.Ctx, env *config.EnvConfig) bool {
 		}
 	}
 	sort.Strings(channelUIDs)
-	SetAdminPrincipal(c, AdminPrincipal{ID: "sso:" + config.EntryKeyHash(cfg.Issuer+"\x00"+subject), Role: chosenRole, ChannelUIDs: channelUIDs, Source: "identity_proxy", SessionFingerprint: fingerprint})
+	SetAdminPrincipal(c, AdminPrincipal{ID: "sso:" + config.EntryKeyHash(cfg.Issuer+"\x00"+subject), Role: chosenRole, ChannelUIDs: channelUIDs, Source: "identity_proxy", SessionFingerprint: fingerprint, SessionExpiresAt: expires})
 	return true
 }
