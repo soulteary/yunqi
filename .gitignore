@@ -1,18 +1,6 @@
 # Logs
 
 logs/
-scripts/*
-!scripts/embed-frontend.sh
-!scripts/container-stage-source.sh
-!scripts/container-verify.sh
-!scripts/generate-model-registry.mjs
-!scripts/generate-channel-presets.mjs
-!scripts/generate-preset-manifest.mjs
-!scripts/update-benchmark-data.mjs
-!scripts/prefill-official-scores.mjs
-!scripts/generate-benchmark-chart.mjs
-!scripts/benchmark-sources/
-!scripts/benchmark-sources/**
 *.log
 npm-debug.log*
 yarn-debug.log*
@@ -235,10 +223,8 @@ vite.config.ts.timestamp-*
 *.tsbuildinfo
 **/.config/
 
-# 测试和脚本文件
-test-*.sh
-test-*.js
-test-*.ts
+# 本地临时调查和实验文件统一放在根 scratch 目录；源码和回归测试不按名字忽略。
+/scratch/
 .gocache/
 .gomodcache/
 
@@ -249,9 +235,6 @@ refs/
 .ccb_config/
 
 # 临时调查文档
-backend-go/cmd/
-!backend-go/cmd/stream_verify/
-!backend-go/cmd/benchmark-report/
 # CLI 编译产物
 backend-go/benchmark-report
 docs/claude-code-investigation-*.md
