@@ -76,7 +76,9 @@ func handleStreamSuccess(
 	needConvert := upstreamType != "responses"
 	var toolRemapper *responsesStreamToolRemapper
 	if !needConvert {
-		if hoisted, _ := httpbridge.Value(c, "codex_additional_tools_hoisted"); hoisted == true {
+		hoisted, _ := httpbridge.Value(c, "codex_additional_tools_hoisted")
+		converted, _ := httpbridge.Value(c, "codex_native_tools_converted")
+		if hoisted == true || converted == true {
 			if rawContext, ok := httpbridge.Value(c, "codex_tool_context"); ok {
 				if ctx, ok := rawContext.(converters.CodexToolContext); ok {
 					toolRemapper = newResponsesStreamToolRemapper(&ctx)
