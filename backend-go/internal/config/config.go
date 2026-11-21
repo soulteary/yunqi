@@ -1411,6 +1411,7 @@ type CircuitBreakerConfig struct {
 }
 
 type Config struct {
+	IdentityProxy    *IdentityProxyConfig   `json:"identityProxy,omitempty"`
 	AdminCredentials []AdminCredential      `json:"adminCredentials,omitempty"`
 	EntryKeys        []EntryKey             `json:"entryKeys,omitempty"`
 	CodexAutoReview  CodexAutoReviewMapping `json:"codexAutoReview,omitempty"`
@@ -1538,6 +1539,10 @@ func (cm *ConfigManager) GetConfig() Config {
 
 	// 深拷贝整个 Config 结构体
 	cloned := cm.config
+	if cm.config.IdentityProxy != nil {
+		value := cloneIdentityProxy(*cm.config.IdentityProxy)
+		cloned.IdentityProxy = &value
+	}
 	cloned.AdminCredentials = make([]AdminCredential, len(cm.config.AdminCredentials))
 	for i, key := range cm.config.AdminCredentials {
 		cloned.AdminCredentials[i] = cloneAdminCredential(key)

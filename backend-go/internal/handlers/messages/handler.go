@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/soulteary/yunqi/internal/redaction"
 	"net/http"
 	"strings"
 	"time"
@@ -903,7 +904,7 @@ func writeClaudeCodeModelSwitchProbeStream(c fiber.Ctx, model string) {
 
 func writeClaudeSSEEvent(c fiber.Ctx, event string, data fiber.Map) {
 	payload, _ := json.Marshal(data)
-	_, _ = fmt.Fprintf(httpbridge.Writer(c), "event: %s\ndata: %s\n\n", event, payload)
+	_, _ = fmt.Fprintf(httpbridge.Writer(c), "event: %s\ndata: %s\n\n", event, redaction.ErrorJSON(payload))
 	if flusher, ok := httpbridge.Writer(c).(http.Flusher); ok {
 		flusher.Flush()
 	}

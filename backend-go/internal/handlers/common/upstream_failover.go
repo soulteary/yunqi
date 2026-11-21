@@ -1236,7 +1236,10 @@ func TryUpstreamWithAllKeys(
 			// 创建 pending 状态日志（附带代理上下文与会话标识，用于 subagent 观测）
 			// interfaceType 记录实际执行协议：联邦 sibling 必须归属到 chat/responses，
 			// 否则日志会把 chat 上的尝试错误地展示成 messages 渠道的尝试。
-			logOpts = append(logOpts, func(log *metrics.ChannelLog) { log.TimingSource = telemetry.Timing(httpbridge.Request(c).Context()) })
+			logOpts = append(logOpts, func(log *metrics.ChannelLog) {
+				log.TimingSource = telemetry.Timing(httpbridge.Request(c).Context())
+				log.OTLPTraceID = telemetry.TraceID(httpbridge.Request(c).Context())
+			})
 			logRequestID := CreatePendingLog(channelLogStore, metricsKey, executionIndex, upstream.Name, actualAttemptModel, actualOriginalModel, originalReasoningEffort, actualReasoningEffort, apiKey, currentBaseURL, executionAPIType, operation, metrics.RequestSourceProxy, AgentContextFromFiber(c), SessionIDFromFiber(c), logOpts...)
 
 			// 计算当前 Key 的 ConsumptionPolicy，供 metrics 与 trace 共同使用。
@@ -1251,6 +1254,7 @@ func TryUpstreamWithAllKeys(
 			// 向 Autopilot trace 追加一条 "started" endpoint 尝试摘要（fail-open）
 			attemptTraceUID, _ := httpbridge.Value(c, "ccx.autopilot_trace_uid")
 			if uid, ok := attemptTraceUID.(string); ok && uid != "" {
+				telemetry.LinkInternal(httpbridge.Request(c).Context(), requestCorrelationID, uid)
 				configuredCostMultiplier := -1.0
 				if endpointPolicy != nil {
 					if _, cands := callPolicySortKeyBindings(endpointPolicy, upstream.ChannelUID, currentBaseURL, []string{apiKey}, apiType, c); len(cands) > 0 {
