@@ -20,6 +20,9 @@ func (a *application) configureGuardrails() {
 	credentialMasker := guardrails.NewCredentialMasker()
 	// 注入网关自身密钥
 	gatewayKeys := []string{a.envCfg.ProxyAccessKey, a.envCfg.GetAdminAccessKey()}
+	if a.envCfg.IdentityProxySecret != "" {
+		gatewayKeys = append(gatewayKeys, a.envCfg.IdentityProxySecret)
+	}
 	gatewayKeys = append(gatewayKeys, a.envCfg.ExtraProxyAccessKeys...)
 	credentialMasker.SetStaticKeys(gatewayKeys)
 	// 注入渠道 key 前缀指纹
