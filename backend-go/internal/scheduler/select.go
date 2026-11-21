@@ -155,9 +155,23 @@ func (s *ChannelScheduler) federateDefaultCandidates(ctx context.Context, reques
 	seen := make(map[ChannelRouteKey]struct{}, len(channels))
 	accountUIDs := make(map[string]struct{})
 	for i := range channels {
-		channels[i].ProtocolFidelity = "native"
+		if channels[i].ProtocolFidelity == "" {
+			channels[i].ProtocolFidelity = "native"
+		}
 		seen[channels[i].Route.Key()] = struct{}{}
 		if upstream := s.getUpstreamByRoute(channels[i].Route); upstream != nil && upstream.AutoManaged && upstream.AccountUID != "" {
+			accountUIDs[upstream.AccountUID] = struct{}{}
+		}
+	}
+	// Accounts remain federation anchors even when their native route is disabled,
+	// lacks this model, or cannot fit the context. Prefix-only routes stay isolated.
+	cfg := s.configManager.GetConfig()
+	nativeUpstreams := cfg.Upstream
+	if requestKind == ChannelKindResponses {
+		nativeUpstreams = cfg.ResponsesUpstream
+	}
+	for _, upstream := range nativeUpstreams {
+		if upstream.AutoManaged && upstream.AccountUID != "" && upstream.RoutePrefix == "" {
 			accountUIDs[upstream.AccountUID] = struct{}{}
 		}
 	}
@@ -250,6 +264,16 @@ func (s *ChannelScheduler) SelectChannelWithOptions(ctx context.Context, opts Se
 		opts.SmartFilter, candidateSelectionObserver = s.buildSmartFilterFromProvider(ctx, kind, model)
 	}
 
+	// Explicit pins/prefixes keep their original protocol boundary. Default
+	// routing may recover through eligible siblings before a native-only error.
+	defaultFederation := s.protocolFederationApplicable(kind) && routePrefix == "" && channelName == "" && opts.SmartFilter != nil
+	federate := func(channels []ChannelInfo) []ChannelInfo {
+		if !defaultFederation {
+			return channels
+		}
+		return s.federateDefaultCandidates(ctx, kind, channels, model, opts.ContextRequirement, trace)
+	}
+
 	var activeChannels []ChannelInfo
 	candidateCount := 0
 	finish := func(upstream *config.UpstreamConfig, channelIndex int, reason string) *SelectionResult {
@@ -301,6 +325,9 @@ func (s *ChannelScheduler) SelectChannelWithOptions(ctx context.Context, opts Se
 	// 获取活跃渠道列表（含模型过滤）
 	activeChannels = s.getActiveChannelsWithTrace(ctx, kind, model, trace)
 	trace.setStage("active_model_filter", len(activeChannels))
+	if len(activeChannels) == 0 {
+		activeChannels = federate(nil)
+	}
 	if len(activeChannels) == 0 {
 		// 区分"无活跃渠道"和"无渠道支持该模型"
 		kindName := "Messages"
@@ -360,6 +387,9 @@ func (s *ChannelScheduler) SelectChannelWithOptions(ctx context.Context, opts Se
 			}
 		}
 		if len(filtered) == 0 {
+			filtered = federate(nil)
+		}
+		if len(filtered) == 0 {
 			kindName := "Messages"
 			switch kind {
 			case ChannelKindGemini:
@@ -381,6 +411,13 @@ func (s *ChannelScheduler) SelectChannelWithOptions(ctx context.Context, opts Se
 	}
 
 	activeChannels, err := s.filterChannelsByContext(activeChannels, kind, model, opts.ContextRequirement, trace)
+	if err != nil && defaultFederation {
+		// Prefer the requested model's healthy protocol siblings before asking the
+		// overflow provider to redirect to a different model/account.
+		if siblings := federate(nil); len(siblings) > 0 {
+			activeChannels, err = siblings, nil
+		}
+	}
 	if err != nil {
 		trace.setStage("context_filter", 0)
 		// 溢出跨协议重定向注入：同协议候选（含试探档）全灭时，询问注入器
@@ -416,6 +453,9 @@ func (s *ChannelScheduler) SelectChannelWithOptions(ctx context.Context, opts Se
 	// 这是基础可用性约束，不属于模型重定向或自动路由决策：
 	// 已持久禁用、enabled=false 或空 Key 渠道即使被选中，后续也只会立即 failover。
 	activeChannels = s.filterChannelsByKeyAvailability(activeChannels, kind, trace)
+	if len(activeChannels) == 0 {
+		activeChannels = federate(nil)
+	}
 	trace.setStage("key_availability_filter", len(activeChannels))
 	if len(activeChannels) == 0 {
 		return nil, traceErr(fmt.Errorf("没有具有可用 API Key 的 %s 渠道", kindDisplayName(kind)))
@@ -463,11 +503,23 @@ func (s *ChannelScheduler) SelectChannelWithOptions(ctx context.Context, opts Se
 		return nil, traceErr(fmt.Errorf("指定渠道 %q 不满足当前模型、路由前缀或上下文要求", channelName))
 	}
 
+	// Admission recovery may already contain converted siblings. Keep manual
+	// ordering and promotion scoped to native routes, as on the normal path.
+	explicitChannels := activeChannels
+	if defaultFederation {
+		explicitChannels = make([]ChannelInfo, 0, len(activeChannels))
+		for _, ch := range activeChannels {
+			if ch.ProtocolFidelity != "converted" || ch.OverflowRedirect {
+				explicitChannels = append(explicitChannels, ch)
+			}
+		}
+	}
+
 	// 0. 检查手动序列覆盖
 	if userID != "" && s.overrideManager != nil {
 		if sequence, ok := s.overrideManager.GetOverrideForUserWithRole(string(kind), userID, opts.AgentRole); ok {
 			prefix := kindSchedulerLogPrefix(kind)
-			orderedChannels := applyManualOverrideOrder(activeChannels, sequence)
+			orderedChannels := applyManualOverrideOrder(explicitChannels, sequence)
 			for _, ch := range orderedChannels {
 				if channelInfoFailed(ch, failedChannels, failedRoutes) {
 					trace.skipChannel(ch, "manual_override", "failed_in_request", "")
@@ -497,7 +549,7 @@ func (s *ChannelScheduler) SelectChannelWithOptions(ctx context.Context, opts Se
 	}
 
 	// 1. 检查促销期渠道（手动覆盖之后，绕过健康检查）
-	promotedChannel := s.findPromotedChannel(activeChannels, kind)
+	promotedChannel := s.findPromotedChannel(explicitChannels, kind)
 	if promotedChannel != nil && !channelInfoFailed(*promotedChannel, failedChannels, failedRoutes) {
 		// 促销渠道存在且未失败，直接使用（不检查健康状态，让用户设置的促销渠道有机会尝试）
 		route := normalizedChannelRoute(*promotedChannel, kind)
@@ -524,8 +576,8 @@ func (s *ChannelScheduler) SelectChannelWithOptions(ctx context.Context, opts Se
 	}
 
 	// 仅默认 Autopilot 路径加入同账号托管 sibling；显式 X-Channel、手动覆盖和促销已在此前返回。
-	if (kind == ChannelKindMessages || kind == ChannelKindResponses) && routePrefix == "" && channelName == "" && opts.SmartFilter != nil {
-		activeChannels = s.federateDefaultCandidates(ctx, kind, activeChannels, model, opts.ContextRequirement, trace)
+	if defaultFederation {
+		activeChannels = federate(activeChannels)
 		trace.setStage("protocol_federation", len(activeChannels))
 	}
 
