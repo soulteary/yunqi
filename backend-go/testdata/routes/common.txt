@@ -411,3 +411,5 @@ PUT /api/smart-routing/config
 PUT /api/subscriptions/:uid
 PUT /api/task-templates/:id
 PUT /api/vectors/channels/:id
+POST /v1/quote
+POST /:routePrefix/v1/quote

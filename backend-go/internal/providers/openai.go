@@ -421,6 +421,7 @@ func (p *OpenAIProvider) ConvertToClaudeResponse(providerResp *types.ProviderRes
 		}
 	}
 
+	types.CaptureUsageSource(claudeResp.Usage, "chat", providerResp.Body)
 	return claudeResp, nil
 }
 

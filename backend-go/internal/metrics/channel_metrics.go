@@ -82,6 +82,7 @@ const (
 
 // RequestRecord 带时间戳的请求记录（扩展版，支持 Token、Cache 和失败分类数据）。
 type RequestRecord struct {
+	UsageProvenance          *types.UsageProvenance
 	ChannelUID               string // 渠道稳定标识，breakerscope 三元组之一
 	RouteModel               string // 客户端原始请求模型，breakerscope 三元组之一；空为未知
 	Model                    string // 实际发给上游的模型（可被 autopilot 映射改写）
@@ -397,6 +398,7 @@ func (m *MetricsManager) loadFromStore() error {
 			metrics := m.getOrCreateKeyLocked(r.BaseURL, r.MetricsKey, r.KeyMask)
 
 			metrics.requestHistory = append(metrics.requestHistory, RequestRecord{
+				UsageProvenance:          r.UsageProvenance,
 				Model:                    r.Model,
 				Timestamp:                r.Timestamp,
 				Success:                  r.Success,

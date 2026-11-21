@@ -209,13 +209,20 @@ func (cm *ConfigManager) addUpstreamCommon(k ChannelKindConfig, upstream Upstrea
 
 // updateUpstreamCommonLocked 是六类 Update*Upstream 方法的通用实现。
 // 返回值 shouldResetMetrics 与旧方法语义一致。
-func (cm *ConfigManager) updateUpstreamCommonLocked(k ChannelKindConfig, index int, updates UpstreamUpdate) (bool, error) {
+func (cm *ConfigManager) updateUpstreamCommonLocked(k ChannelKindConfig, index int, updates UpstreamUpdate) (reset bool, updateErr error) {
 	slice := k.SliceRef(&cm.config)
 	if index < 0 || index >= len(*slice) {
 		return false, fmt.Errorf("无效的 %s 上游索引: %d", k.Kind.Label(), index)
 	}
 
 	originalConfig := cm.config.deepCopy()
+	// Validation and persistence failures must not publish a partially applied
+	// runtime configuration. This includes mutations to sibling routes.
+	defer func() {
+		if updateErr != nil {
+			cm.config = originalConfig
+		}
+	}()
 	upstream := &(*slice)[index]
 
 	upstream.ServiceType = normalizeUpstreamServiceType(upstream.ServiceType, k.DefaultServiceType)
@@ -412,10 +419,10 @@ func applyUpstreamUpdateFields(upstream *UpstreamConfig, updates UpstreamUpdate)
 		upstream.HistoricalAPIKeys = newHistoricalKeys
 
 		wasSuspended := upstream.Status == "suspended"
-		if applySingleKeyReplacementTransition(upstream, updates.APIKeys) {
+		if applyKeyReplacementTransition(upstream, updates.APIKeys) {
 			shouldResetMetrics = true
 			if wasSuspended {
-				log.Printf("[Config-Upstream] 渠道 %s 已从暂停状态自动激活（单 key 更换）", upstream.Name)
+				log.Printf("[Config-Upstream] 渠道 %s 已从暂停状态自动激活（可用 Key 已恢复）", upstream.Name)
 			}
 		}
 		upstream.APIKeys = deduplicateStrings(updates.APIKeys)

@@ -30,10 +30,14 @@ func (m *MetricsManager) recordSuccessWithUsageLocked(baseURL, apiKey, serviceTy
 	inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens := extractUsageTokens(usage)
 
 	m.appendToHistoryKeyWithUsage(metrics, now, true, FailureClassNone, model, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens)
+	if len(metrics.requestHistory) > 0 {
+		metrics.requestHistory[len(metrics.requestHistory)-1].UsageProvenance = usage.AccountingProvenance()
+	}
 	m.handleBreakerSuccessLocked(metrics, now)
 
 	if m.store != nil {
 		m.store.AddRecord(PersistentRecord{
+			UsageProvenance:     usage.AccountingProvenance(),
 			ChannelUID:          "",
 			RouteModel:          "",
 			MetricsKey:          metrics.MetricsKey,
@@ -365,6 +369,7 @@ func (m *MetricsManager) RecordRequestFinalizeOutcome(baseURL, apiKey, serviceTy
 	now := time.Now()
 	metrics.RequestCount++
 	record := &metrics.requestHistory[idx]
+	record.UsageProvenance = usage.AccountingProvenance()
 	record.Success = success
 	record.FailureClass = normalizeFailureClass(success, failureClass)
 
@@ -394,6 +399,7 @@ func (m *MetricsManager) RecordRequestFinalizeOutcome(baseURL, apiKey, serviceTy
 
 		if m.store != nil {
 			m.store.AddRecord(PersistentRecord{
+				UsageProvenance:           record.UsageProvenance,
 				ChannelUID:                record.ChannelUID,
 				RouteModel:                record.RouteModel,
 				MetricsKey:                metrics.MetricsKey,
