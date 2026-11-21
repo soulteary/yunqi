@@ -67,3 +67,17 @@ func TestSQLiteAddDuringCloseDoesNotRace(t *testing.T) {
 	s.Close()
 	wg.Wait()
 }
+
+func TestSQLiteShutdownReportsUnpersistedRecords(t *testing.T) {
+	s, err := NewSQLiteStore(&SQLiteStoreConfig{DBPath: filepath.Join(t.TempDir(), "bad.db")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec("DROP TABLE request_records"); err != nil {
+		t.Fatal(err)
+	}
+	s.AddRecord(PersistentRecord{Timestamp: time.Now(), APIType: "messages"})
+	if err := s.Close(); err == nil {
+		t.Fatal("unpersisted acknowledged usage reported as successful shutdown")
+	}
+}

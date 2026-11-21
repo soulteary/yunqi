@@ -166,10 +166,13 @@ func (m *Manager) probeOneModel(
 		return false
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), policy.Timeout)
+	ctx, cancel := context.WithTimeout(m.lifetimeContext(), policy.Timeout)
 	success, _, statusCode, respBody, upstreamModel, sendErr := handlers.SendHealthCheckL2Stream(ctx, &probeChannel, req.WithContext(ctx), channelType)
 	cancel()
 
+	if m.lifetimeContext().Err() != nil {
+		return false
+	}
 	if httpclient.IsEgressError(sendErr) {
 		return false
 	}
