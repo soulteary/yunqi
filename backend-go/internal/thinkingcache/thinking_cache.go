@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/types"
 	"github.com/soulteary/yunqi/internal/utils"
 
 	"github.com/soulteary/yunqi/internal/errutil"
@@ -206,6 +207,9 @@ func InjectCachedClaudeThinking(bodyBytes []byte, sessionID string, upstream *co
 		if !ok {
 			continue
 		}
+		if assistantContentHasThinkingText(content, thinking) {
+			continue
+		}
 
 		switch typed := content.(type) {
 		case []interface{}:
@@ -289,7 +293,39 @@ func decodeObject(bodyBytes []byte) (map[string]interface{}, bool) {
 
 // StoreClaudeThinkingForContent stores thinking by session and assistant content fingerprint.
 func StoreClaudeThinkingForContent(sessionID string, content interface{}, thinking string) bool {
-	if strings.TrimSpace(sessionID) == "" || !isRealThinking(thinking) {
+	return storeClaudeThinkingForContent(sessionID, content, thinking, isRealThinking(thinking))
+}
+
+// StoreClaudeResponseThinking records the presence of upstream thinking blocks,
+// including an explicitly empty string. A missing block must not create a cache entry.
+func StoreClaudeResponseThinking(sessionID string, content []types.ClaudeContent) bool {
+	var thinking strings.Builder
+	present := false
+	for _, block := range content {
+		if block.Type == "thinking" || (block.Type == "redacted_thinking" && isRealThinking(block.Thinking)) {
+			present = true
+			thinking.WriteString(block.Thinking)
+		}
+	}
+	if !present {
+		return false
+	}
+	// Fingerprint the client-visible normalized tool IDs and arguments.
+	raw, err := json.Marshal(content)
+	if err != nil {
+		return false
+	}
+	var fingerprintContent interface{}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(&fingerprintContent); err != nil {
+		return false
+	}
+	return storeClaudeThinkingForContent(sessionID, fingerprintContent, thinking.String(), true)
+}
+
+func storeClaudeThinkingForContent(sessionID string, content interface{}, thinking string, present bool) bool {
+	if strings.TrimSpace(sessionID) == "" || !present {
 		return false
 	}
 
@@ -997,6 +1033,24 @@ func assistantContentHasToolUse(content interface{}) bool {
 		}
 		blockType, _ := block["type"].(string)
 		if blockType == "tool_use" || blockType == "server_tool_use" {
+			return true
+		}
+	}
+	return false
+}
+
+// Match only explicit string fields, including empty upstream thinking.
+func assistantContentHasThinkingText(content interface{}, thinking string) bool {
+	blocks, ok := content.([]interface{})
+	if !ok {
+		return false
+	}
+	for _, raw := range blocks {
+		block, ok := raw.(map[string]interface{})
+		if !ok || block["type"] != "thinking" {
+			continue
+		}
+		if text, ok := block["thinking"].(string); ok && text == thinking {
 			return true
 		}
 	}

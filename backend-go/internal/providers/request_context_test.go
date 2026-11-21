@@ -13,6 +13,7 @@ import (
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/thinkingcache"
+	"github.com/soulteary/yunqi/internal/types"
 )
 
 type testContextKey string
@@ -97,6 +98,38 @@ func TestClaudeProvider_ConvertToProviderRequest_InjectsCachedThinkingForDeepSee
 	}
 	if !bytes.Contains(reqBody, []byte(`"type":"thinking"`)) || !bytes.Contains(reqBody, []byte(`"thinking":"cached reasoning"`)) {
 		t.Fatalf("request body missing cached thinking block: %s", string(reqBody))
+	}
+}
+
+func TestClaudeProviderRestoresObservedEmptyThinkingAfterCompatibilityCleanup(t *testing.T) {
+	thinkingcache.ResetForTest()
+	t.Cleanup(thinkingcache.ResetForTest)
+	content := []types.ClaudeContent{
+		{Type: "thinking", Thinking: ""},
+		{Type: "tool_use", ID: "toolu_empty", Name: "Bash", Input: map[string]interface{}{"command": "pwd"}},
+	}
+	if !thinkingcache.StoreClaudeResponseThinking("session-empty", content) {
+		t.Fatal("store observed empty thinking")
+	}
+	body := []byte(`{"model":"deepseek-v4-pro","thinking":{"type":"enabled"},"messages":[{"role":"assistant","content":[{"type":"thinking","thinking":""},{"type":"tool_use","id":"toolu_empty","name":"Bash","input":{"command":"pwd"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_empty","content":"/tmp"}]}]}`)
+	c := newFiberContext(http.MethodPost, "/v1/messages", body, context.Background())
+	httpbridge.Request(c).Header.Set("X-Claude-Code-Session-Id", "session-empty")
+	upstream := &config.UpstreamConfig{ServiceType: "claude", BaseURL: "https://api.deepseek.com"}
+	upstream.SetLearnedCompatTrait(config.TraitPassbackReasoningContent, true)
+	upstream.SetLearnedCompatTrait(config.TraitPassbackThinkingBlocks, true)
+	_, requestBody, err := (&ClaudeProvider{}).ConvertToProviderRequest(c, upstream, "test-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result struct {
+		Messages []struct{ Content []map[string]interface{} }
+	}
+	if err := json.Unmarshal(requestBody, &result); err != nil {
+		t.Fatal(err)
+	}
+	blocks := result.Messages[0].Content
+	if len(blocks) != 2 || blocks[0]["type"] != "thinking" || blocks[0]["thinking"] != "" || blocks[1]["id"] != "toolu_empty" {
+		t.Fatalf("observed empty thinking not restored in original order: %s", requestBody)
 	}
 }
 

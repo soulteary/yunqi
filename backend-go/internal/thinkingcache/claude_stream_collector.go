@@ -9,8 +9,9 @@ import (
 
 // ClaudeStreamCollector reconstructs assistant content fingerprints from Claude SSE.
 type ClaudeStreamCollector struct {
-	thinking strings.Builder
-	blocks   map[int]*streamBlock
+	thinking     strings.Builder
+	thinkingSeen bool
+	blocks       map[int]*streamBlock
 }
 
 type streamBlock struct {
@@ -62,7 +63,7 @@ func (c *ClaudeStreamCollector) Store(sessionID string) bool {
 	if c == nil {
 		return false
 	}
-	return StoreClaudeThinkingForContent(sessionID, c.Content(), c.Thinking())
+	return storeClaudeThinkingForContent(sessionID, c.Content(), c.Thinking(), c.thinkingSeen)
 }
 
 func (c *ClaudeStreamCollector) Thinking() string {
@@ -119,9 +120,11 @@ func (c *ClaudeStreamCollector) processContentBlockStart(data map[string]interfa
 	if text, _ := contentBlock["text"].(string); text != "" {
 		block.Text.WriteString(text)
 	}
-	if (blockType == "thinking" || blockType == "redacted_thinking") && isRealString(contentBlock["thinking"]) {
-		thinking, _ := contentBlock["thinking"].(string)
-		c.thinking.WriteString(thinking)
+	if blockType == "thinking" || blockType == "redacted_thinking" {
+		if thinking, ok := contentBlock["thinking"].(string); ok {
+			c.thinkingSeen = true
+			c.thinking.WriteString(thinking)
+		}
 	}
 
 	c.blocks[index] = block
@@ -153,10 +156,12 @@ func (c *ClaudeStreamCollector) processContentBlockDelta(data map[string]interfa
 			block.InputJSON.WriteString(partial)
 		}
 	case "thinking_delta", "redacted_thinking_delta":
-		if thinking, _ := delta["thinking"].(string); thinking != "" {
+		if thinking, ok := delta["thinking"].(string); ok {
+			c.thinkingSeen = true
 			c.thinking.WriteString(thinking)
 		}
-		if text, _ := delta["text"].(string); text != "" {
+		if text, ok := delta["text"].(string); ok {
+			c.thinkingSeen = true
 			c.thinking.WriteString(text)
 		}
 	}
@@ -277,9 +282,4 @@ func cloneMap(input map[string]interface{}) map[string]interface{} {
 		cloned[key] = normalizeJSONValue(value)
 	}
 	return cloned
-}
-
-func isRealString(value interface{}) bool {
-	text, ok := value.(string)
-	return ok && strings.TrimSpace(text) != ""
 }
