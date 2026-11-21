@@ -1,6 +1,8 @@
 package middleware
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"log"
 	"net/http"
 	"strings"
@@ -221,6 +223,12 @@ func AuthenticateProxy(c fiber.Ctx, envCfg *config.EnvConfig) error {
 		httpbridge.Abort(c)
 		return nil
 	}
+	sum := sha256.Sum256([]byte(providedKey))
+	principalID := "key:" + hex.EncodeToString(sum[:])
+	if id := envCfg.ProxyPrincipalIDs[providedKey]; id != "" {
+		principalID = "principal:" + id
+	}
+	httpbridge.SetValue(c, ContextKeyPrincipalID, principalID)
 	if mask := envCfg.ProxyKeyMaskForRequest(providedKey); mask != "" {
 		httpbridge.SetValue(c, ContextKeyProxyKeyMask, mask)
 	}

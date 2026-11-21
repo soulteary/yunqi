@@ -24,6 +24,8 @@ func (a *application) newRouter() *fiber.App {
 	// Web UI 访问控制中间件
 	r.Use(middleware.WebAuthMiddleware(a.envCfg, a.cfgManager))
 
+	r.Use(middleware.ProxyAdmissionMiddleware(a.envCfg))
+
 	a.registerSystemRoutes(r)
 	apiGroup := r.Group("/api")
 	a.registerManagementRoutes(apiGroup)
