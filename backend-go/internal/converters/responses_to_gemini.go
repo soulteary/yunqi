@@ -236,6 +236,10 @@ func GeminiResponseToResponses(geminiResp map[string]interface{}, sessionID stri
 	}
 
 	candidate, _ := candidates[0].(map[string]interface{})
+	finishReason, finishErr := types.ParseGeminiFinishReason(candidate["finishReason"])
+	if finishErr != nil {
+		return nil, finishErr
+	}
 	content, _ := candidate["content"].(map[string]interface{})
 	parts, _ := content["parts"].([]interface{})
 
@@ -304,7 +308,6 @@ func GeminiResponseToResponses(geminiResp map[string]interface{}, sessionID stri
 	}
 
 	// 转换 finishReason → status
-	finishReason, _ := candidate["finishReason"].(string)
 	status := geminiFinishReasonToResponsesStatus(finishReason)
 	deliverable := len(textParts) > 0
 	for _, item := range output {
@@ -388,6 +391,14 @@ func ConvertGeminiStreamToResponses(ctx context.Context, modelName string, origi
 	jsonStr := strings.TrimPrefix(line, "data: ")
 	jsonStr = strings.TrimSpace(jsonStr)
 
+	if err := types.ValidateGeminiFinishReasons([]byte(jsonStr)); err != nil {
+		if st.ResponseID == "" {
+			st.ResponseID = generateResponseID()
+			st.CreatedAt = time.Now().Unix()
+		}
+		st.FirstChunk = false
+		return st.generateCompletedEvent(originalRequestRawJSON, "INVALID_FINISH_REASON")
+	}
 	root := gjson.Parse(jsonStr)
 	var out []string
 

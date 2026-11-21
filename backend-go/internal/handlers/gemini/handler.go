@@ -622,6 +622,9 @@ func handleSuccess(
 
 	switch upstreamType {
 	case "gemini":
+		if err := types.ValidateGeminiFinishReasons(bodyBytes); err != nil {
+			return nil, fmt.Errorf("%w: %v", common.ErrInvalidResponseBody, err)
+		}
 		// 直接解析 Gemini 响应
 		if err := json.Unmarshal(bodyBytes, &geminiResp); err != nil {
 			preview := bodyBytes

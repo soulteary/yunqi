@@ -244,6 +244,9 @@ func preflightGeminiStream(resp *http.Response, upstreamType string, timeouts co
 			}
 			jsonData := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 			if upstreamType == "gemini" {
+				if err := types.ValidateGeminiFinishReasons([]byte(jsonData)); err != nil {
+					return nil, chunkChan, bodyErrChan, fmt.Errorf("%w: %v", common.ErrEmptyStreamResponse, err)
+				}
 				var chunk types.GeminiStreamChunk
 				if json.Unmarshal([]byte(jsonData), &chunk) == nil {
 					for _, candidate := range chunk.Candidates {
@@ -667,6 +670,15 @@ func streamGeminiToGemini(
 		if strings.HasPrefix(line, "data: ") {
 			jsonData := strings.TrimPrefix(line, "data: ")
 
+			if err := types.ValidateGeminiFinishReasons([]byte(jsonData)); err != nil {
+				payload, _ := json.Marshal(types.GeminiError{Error: types.GeminiErrorDetail{Code: 502, Status: "INTERNAL", Message: err.Error()}})
+				_, _ = fmt.Fprintf(httpbridge.Writer(c), "data: %s\n\n", payload)
+				if flusher != nil {
+					flusher.Flush()
+				}
+				progress.Finish("error")
+				return nil, err
+			}
 			// 尝试解析 usage
 			var chunk types.GeminiStreamChunk
 			if err := json.Unmarshal([]byte(jsonData), &chunk); err == nil {

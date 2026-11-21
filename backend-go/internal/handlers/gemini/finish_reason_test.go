@@ -94,3 +94,34 @@ func TestGeminiNativeRefusalsAndMediaAreDeliverable(t *testing.T) {
 		}
 	}
 }
+
+func TestGeminiInvalidFinishReasonTypesFailAtEveryStage(t *testing.T) {
+	for _, value := range []string{`42`, `false`, `{}`} {
+		t.Run(value, func(t *testing.T) {
+			raw := `{"candidates":[{"content":{"parts":[{"text":"hello"}]},"finishReason":` + value + `}]}`
+			resp := &http.Response{Body: io.NopCloser(strings.NewReader("data: " + raw + "\n\n"))}
+			if _, _, _, err := preflightGeminiStream(resp, "gemini", common.StreamPreflightTimeouts{}); !errors.Is(err, common.ErrEmptyStreamResponse) {
+				t.Fatalf("preflight accepted %s: %v", value, err)
+			}
+			w := httptest.NewRecorder()
+			c, _ := httpbridge.TestContext(w)
+			httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1beta/models/m:generateContent", nil))
+			response := &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(raw))}
+			if _, err := handleSuccess(c, response, "gemini", &config.EnvConfig{}, time.Now(), nil, "m", false, common.StreamPreflightTimeouts{}); !errors.Is(err, common.ErrInvalidResponseBody) {
+				t.Fatalf("nonstream accepted %s: %v", value, err)
+			}
+			if w.Body.Len() != 0 {
+				t.Fatalf("nonstream committed invalid response %s", w.Body.String())
+			}
+			prefix := "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"first\"}]}}]}\n\n"
+			reader := &streamLineReader{remainder: prefix + "data: " + raw + "\n\n", eof: true}
+			progress := common.NewStreamProgressLogger("Gemini", time.Now(), false)
+			if _, err := streamGeminiToGemini(c, reader, w, nil, false, common.StreamPreflightTimeouts{InactivityTimeoutMs: 100}, progress); err == nil {
+				t.Fatalf("postcommit accepted %s", value)
+			}
+			if !strings.Contains(w.Body.String(), "finishReason must be a string") || strings.Contains(w.Body.String(), `"finishReason":`+value) {
+				t.Fatalf("postcommit error not normalized %s", w.Body.String())
+			}
+		})
+	}
+}

@@ -2,6 +2,7 @@ package converters
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -29,5 +30,22 @@ func TestGeminiWhitespaceIsNotNonStreamSuccess(t *testing.T) {
 	}
 	if response.Status != "failed" {
 		t.Fatalf("whitespace status %s", response.Status)
+	}
+}
+
+func TestGeminiInvalidFinishReasonTypesCannotCompleteResponses(t *testing.T) {
+	for _, value := range []interface{}{42, false, map[string]interface{}{"bad": true}} {
+		candidate := map[string]interface{}{"finishReason": value, "content": map[string]interface{}{"parts": []interface{}{map[string]interface{}{"text": "hello"}}}}
+		raw := map[string]interface{}{"candidates": []interface{}{candidate}}
+		if _, err := GeminiResponseToResponses(raw, ""); err == nil {
+			t.Fatalf("nonstream accepted %#v", value)
+		}
+		data, _ := json.Marshal(raw)
+		var state any
+		events := ConvertGeminiStreamToResponses(context.Background(), "m", nil, nil, append([]byte("data: "), data...), &state)
+		joined := strings.Join(events, "")
+		if strings.Contains(joined, "response.completed") || !strings.Contains(joined, "INVALID_FINISH_REASON") {
+			t.Fatalf("stream accepted %#v: %s", value, joined)
+		}
 	}
 }
