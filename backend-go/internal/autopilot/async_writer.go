@@ -50,10 +50,12 @@ const (
 
 // asyncWriter 是 TraceStore 的有界异步写入后端。
 type asyncWriter struct {
-	queue    chan writeItem
-	db       traceDB // 抽象 DB 接口，便于测试
-	stopOnce sync.Once
-	done     chan struct{}
+	queue     chan writeItem
+	db        traceDB // 抽象 DB 接口，便于测试
+	stopOnce  sync.Once
+	enqueueMu sync.RWMutex
+	closed    bool
+	done      chan struct{}
 
 	// 内部指标：请求 goroutine（enqueue）、后台 writer goroutine（flushBatch）
 	// 与指标读取方并发访问，全部使用原子操作。
@@ -85,6 +87,11 @@ func newAsyncWriter(db traceDB) *asyncWriter {
 // 终态/窗口项有预留容量，普通抽样在队列满时被丢弃。
 func (w *asyncWriter) enqueue(uid string, data []byte, priority writePriority) {
 	if w == nil {
+		return
+	}
+	w.enqueueMu.RLock()
+	defer w.enqueueMu.RUnlock()
+	if w.closed {
 		return
 	}
 	// 截断到最大字节数
@@ -154,7 +161,7 @@ func (w *asyncWriter) loop() {
 		case item, ok := <-w.queue:
 			if !ok {
 				// 队列关闭，drain 剩余项
-				w.drainAndFlush()
+				w.flushBatch(batch)
 				return
 			}
 			batch = append(batch, item)
@@ -168,38 +175,6 @@ func (w *asyncWriter) loop() {
 				w.flushBatch(batch)
 				batch = batch[:0]
 			}
-		}
-	}
-}
-
-// drainAndFlush 在服务关闭时 drain 队列并写入。
-func (w *asyncWriter) drainAndFlush() {
-	deadline := time.After(drainTimeout)
-	batch := make([]writeItem, 0, 64)
-	for {
-		select {
-		case item := <-w.queue:
-			batch = append(batch, item)
-			if len(batch) >= 64 {
-				w.flushBatch(batch)
-				batch = batch[:0]
-			}
-		case <-deadline:
-			// 超时：安全丢弃剩余项
-			remaining := len(w.queue)
-			if remaining > 0 {
-				log.Printf("[TraceStore-Writer] drain 超时，丢弃 %d 条待写入项", remaining)
-			}
-			if len(batch) > 0 {
-				w.flushBatch(batch)
-			}
-			return
-		default:
-			// 队列空
-			if len(batch) > 0 {
-				w.flushBatch(batch)
-			}
-			return
 		}
 	}
 }
@@ -232,14 +207,19 @@ func (w *asyncWriter) flushBatch(batch []writeItem) {
 // dataToSQL 将 writeItem 转换为 SQL 语句。
 func (item *writeItem) dataToSQL() string {
 	// data 是 JSON 编码的 trace，直接使用 UPSERT
-	return `INSERT INTO autopilot_routing_traces (trace_uid, details_json, schema_version, trace_revision, created_at)
-VALUES (?, ?, 2, 0, ?)
+	return `INSERT INTO autopilot_routing_traces (trace_uid, details_json, schema_version, trace_revision, created_at, request_kind, task_class)
+VALUES (?, ?, 2, 0, ?, ?, ?)
 ON CONFLICT(trace_uid) DO UPDATE SET details_json = excluded.details_json`
 }
 
 // sqlArgs 返回 writeItem 的 SQL 参数。
 func (item *writeItem) sqlArgs() []any {
-	return []any{item.traceUID, string(item.data), item.createdAt.UTC().Format(time.RFC3339)}
+	var metadata struct {
+		RequestKind string `json:"requestKind"`
+		TaskClass   string `json:"taskClass"`
+	}
+	_ = json.Unmarshal(item.data, &metadata)
+	return []any{item.traceUID, string(item.data), item.createdAt.UTC().Format(time.RFC3339), metadata.RequestKind, metadata.TaskClass}
 }
 
 // close 优雅关闭 writer，最多等待 drainTimeout。
@@ -248,7 +228,10 @@ func (w *asyncWriter) close() {
 		return
 	}
 	w.stopOnce.Do(func() {
+		w.enqueueMu.Lock()
+		w.closed = true
 		close(w.queue)
+		w.enqueueMu.Unlock()
 		select {
 		case <-w.done:
 		case <-time.After(drainTimeout + time.Second):

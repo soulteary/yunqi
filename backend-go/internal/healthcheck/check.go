@@ -177,7 +177,7 @@ func (m *Manager) checkKeyL1(
 
 	for _, baseURL := range baseURLs {
 		lastBaseURL = baseURL
-		ctx, cancel := context.WithTimeout(context.Background(), policy.Timeout)
+		ctx, cancel := context.WithTimeout(m.lifetimeContext(), policy.Timeout)
 		resp, err := fetcher(ctx, L1Request{
 			BaseURL:                  baseURL,
 			APIKey:                   apiKey,
@@ -193,6 +193,9 @@ func (m *Manager) checkKeyL1(
 		cancel()
 		if resp.RealCallVerified {
 			outcome.realCallVerified = true
+		}
+		if m.lifetimeContext().Err() != nil {
+			return outcome
 		}
 		if httpclient.IsEgressError(err) {
 			return outcome

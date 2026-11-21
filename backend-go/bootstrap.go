@@ -15,6 +15,7 @@ import (
 	"github.com/soulteary/yunqi/internal/eventbus"
 	"github.com/soulteary/yunqi/internal/handlers"
 	"github.com/soulteary/yunqi/internal/healthcheck"
+	"github.com/soulteary/yunqi/internal/httpclient"
 	"github.com/soulteary/yunqi/internal/logger"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/presetstore"
@@ -68,6 +69,9 @@ func runService(cliOpts cliOptions) {
 	if err := godotenv.Load(); err != nil {
 		log.Println("没有找到 .env 文件，使用环境变量或默认值")
 	}
+
+	// Cover default HTTP clients before any configuration sync or probe starts.
+	httpclient.InstallDefaultOutboundPolicy()
 
 	// 设置版本信息到 handlers 包
 	handlers.SetVersionInfo(Version, BuildTime, GitCommit)

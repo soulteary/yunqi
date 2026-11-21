@@ -131,6 +131,7 @@ func TestRouterAuthenticationAndFrontendCompatibility(t *testing.T) {
 		{"GET", "/api/metrics/prometheus", "", 401},
 		{"GET", "/api/metrics/prometheus", "route-proxy", 401},
 		{"GET", "/api/metrics/prometheus", "route-admin", 200},
+		{"GET", "/api/reports/requests?since=0&until=1", "", 401},
 		{"GET", "/api/network/interfaces", "route-proxy", 401},
 		{"GET", "/api/network/interfaces", "route-admin", 200},
 		{"POST", "/api/network/diagnose", "route-proxy", 401},
