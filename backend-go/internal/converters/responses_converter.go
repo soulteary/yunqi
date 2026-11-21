@@ -198,6 +198,10 @@ func responsesItemToClaudeMessage(item types.ResponsesItem) (*types.ClaudeMessag
 		}, nil
 
 	case "message":
+		if blocks := responsesClaudeTextBlocks(item.Content); len(blocks) > 0 {
+			role, _ := resolveResponsesTextItem(item)
+			return &types.ClaudeMessage{Role: role, Content: blocks}, nil
+		}
 		// 新格式：嵌套结构（type=message, role=user/assistant, content=[]ContentBlock）
 		role, contentText := resolveResponsesTextItem(item)
 		if contentText == "" {
@@ -1380,4 +1384,38 @@ func ExtractUsageMetrics(usageRaw interface{}) types.ResponsesUsage {
 
 	// 3. 默认 OpenAI 格式
 	return parseResponsesUsage(usageRaw)
+}
+
+func responsesClaudeTextBlocks(content interface{}) []types.ClaudeContent {
+	raw, err := json.Marshal(content)
+	if err != nil {
+		return nil
+	}
+	var parts []map[string]interface{}
+	if json.Unmarshal(raw, &parts) != nil {
+		return nil
+	}
+	var blocks []types.ClaudeContent
+	for _, part := range parts {
+		kind, _ := part["type"].(string)
+		if kind != "text" && kind != "input_text" && kind != "output_text" {
+			continue
+		}
+		text, _ := part["text"].(string)
+		if text == "" {
+			continue
+		}
+		block := types.ClaudeContent{Type: "text", Text: text}
+		if value, ok := part["cache_control"]; ok {
+			raw, err := json.Marshal(value)
+			if err == nil {
+				var control types.CacheControl
+				if json.Unmarshal(raw, &control) == nil {
+					block.CacheControl = &control
+				}
+			}
+		}
+		blocks = append(blocks, block)
+	}
+	return blocks
 }

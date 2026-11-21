@@ -30,9 +30,9 @@ it('does not claim complete success when managed fields were dropped', async () 
  setActivePinia(createPinia())
  mocks.updateManagedAccount.mockResolvedValue({})
  const original = { ...base, providerId: undefined }
- const result = await useChannelStore().saveChannel({ ...original, fastMode: true }, 0, {
+ const result = await useChannelStore().saveChannel({ ...original, serviceType: 'openai' }, 0, {
   channelType: 'responses', autoManaged: true, accountUid: 'account', originalChannel: original,
  })
  expect(result.success).toBe(false)
- expect(result.message).toContain('fastMode')
+ expect(result.message).toContain('serviceType')
 })

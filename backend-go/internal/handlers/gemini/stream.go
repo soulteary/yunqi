@@ -499,7 +499,8 @@ func handleStreamSuccess(
 	}
 	reader := newStreamLineReader(chunkChan, bodyErrChan, common.GetStreamTimeoutObserver(c))
 	reader.remainder = bufferedBody
-	progress := common.NewStreamProgressLogger("Gemini", startTime, envCfg.ShouldLog("info"), common.RequestLogTag(c))
+	progress := common.NewStreamProgressLogger("Gemini", startTime, envCfg.ShouldLog("info"), common.RequestLogTag(c)).WithMetricsContext(httpbridge.Request(c).Context())
+	defer progress.FinishMetricsFallback()
 
 	switch upstreamType {
 	case "gemini":

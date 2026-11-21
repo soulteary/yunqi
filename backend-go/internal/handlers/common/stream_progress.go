@@ -1,6 +1,9 @@
 package common
 
 import (
+	"context"
+	"github.com/soulteary/yunqi/internal/telemetry"
+	"sync"
 	"time"
 
 	"github.com/soulteary/yunqi/internal/utils"
@@ -9,11 +12,13 @@ import (
 // StreamProgressLogger 记录流式响应的进度，便于定位首字后吞吐下降或断流。
 // TPS 为估算值：文本路径使用 token 估算，纯透传路径按字节做保守估算。
 type StreamProgressLogger struct {
-	component   string
-	enabled     bool
-	logTag      string
-	startTime   time.Time
-	lastLogTime time.Time
+	metricContext context.Context
+	metricOnce    sync.Once
+	component     string
+	enabled       bool
+	logTag        string
+	startTime     time.Time
+	lastLogTime   time.Time
 
 	totalTokens int
 	totalChars  int
@@ -75,7 +80,24 @@ func (l *StreamProgressLogger) Tick() {
 	l.log(now, "progress")
 }
 
+func (l *StreamProgressLogger) WithMetricsContext(ctx context.Context) *StreamProgressLogger {
+	l.metricContext = ctx
+	return l
+}
+func (l *StreamProgressLogger) FinishMetricsFallback() {
+	status := "unknown"
+	if l.metricContext != nil && l.metricContext.Err() != nil {
+		status = "canceled"
+	}
+	l.recordTerminal(status)
+}
+func (l *StreamProgressLogger) recordTerminal(status string) {
+	if l != nil {
+		l.metricOnce.Do(func() { telemetry.Event(l.metricContext, "sse_terminal", status) })
+	}
+}
 func (l *StreamProgressLogger) Finish(status string) {
+	l.recordTerminal(status)
 	if l == nil || !l.enabled {
 		return
 	}

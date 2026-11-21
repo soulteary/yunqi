@@ -34,6 +34,7 @@ type ClaudeMessage struct {
 // CacheControl Anthropic 缓存控制
 // 用于 Claude API 请求，会序列化到 JSON（仅在发送给 Anthropic 时有效）
 type CacheControl struct {
+	TTL  string `json:"ttl,omitempty"`
 	Type string `json:"type,omitempty"` // "ephemeral"
 }
 

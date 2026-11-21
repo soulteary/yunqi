@@ -28,6 +28,7 @@ import (
 	"github.com/soulteary/yunqi/internal/racing"
 	"github.com/soulteary/yunqi/internal/ratelimit"
 	"github.com/soulteary/yunqi/internal/scheduler"
+	"github.com/soulteary/yunqi/internal/telemetry"
 	"github.com/soulteary/yunqi/internal/types"
 	"github.com/soulteary/yunqi/internal/utils"
 	"github.com/soulteary/yunqi/internal/warmup"
@@ -1094,6 +1095,7 @@ func TryUpstreamWithAllKeys(
 				if limiter := rateLimitMgr.Get(executionAPIType, executionIndex); limiter != nil {
 					release, rlErr := limiter.Acquire(httpbridge.Request(c).Context(), maxRateLimitWait, time.Now())
 					if rlErr != nil {
+						telemetry.Event(httpbridge.Request(c).Context(), "limiter", "scope")
 						lastError = rlErr
 						RequestLogf(c, "[%s-RateLimit] 渠道限速器拦截: %v，尝试下一个 Key/渠道", apiType, rlErr)
 						failedKeys[apiKey] = true
@@ -1105,6 +1107,7 @@ func TryUpstreamWithAllKeys(
 					keyLimiter := rateLimitMgr.GetOrCreateScoped(executionAPIType, executionIndex, selection.LimiterScope, keypool.ConfigForCandidate(*upstream, selection.Config))
 					release, rlErr := keyLimiter.Acquire(httpbridge.Request(c).Context(), maxRateLimitWait, time.Now())
 					if rlErr != nil {
+						telemetry.Event(httpbridge.Request(c).Context(), "limiter", "scope")
 						lastError = rlErr
 						RequestLogf(c, "[%s-RateLimit] Key/Quota 限速器拦截: scope=%s, err=%v，尝试下一个 Key/渠道", apiType, selection.LimiterScope, rlErr)
 						failedKeys[apiKey] = true
@@ -1349,6 +1352,7 @@ func TryUpstreamWithAllKeys(
 					CompleteLog(channelLogStore, metricsKey, logRequestID, 0, false, err.Error(), isRetryAttempt)
 					return false, "", 0, nil, nil, err
 				}
+				telemetry.Event(httpbridge.Request(c).Context(), "failover", "transport_error")
 				// 真实渠道故障：计入失败，继续 failover
 				failedKeys[apiKey] = true
 				cfgManager.MarkKeyAsFailed(apiKey, executionAPIType)
@@ -1699,6 +1703,7 @@ func TryUpstreamWithAllKeys(
 				}
 
 				if shouldFailover {
+					telemetry.Event(httpbridge.Request(c).Context(), "failover", "http_error")
 					lastError = fmt.Errorf("上游错误: %d", resp.StatusCode)
 					failedKeys[apiKey] = true
 					cfgManager.MarkKeyAsFailed(apiKey, executionAPIType)
@@ -1971,6 +1976,7 @@ func TryUpstreamWithAllKeys(
 					}
 					// 记录渠道日志
 					CompleteLog(channelLogStore, metricsKey, logRequestID, http.StatusOK, false, err.Error(), isRetryAttempt)
+					telemetry.Event(httpbridge.Request(c).Context(), "failover", "invalid_response")
 					RequestLogf(c, "[%s-InvalidResponse] 上游返回无效响应 (Key: %s): %v，尝试下一个密钥", apiType, utils.MaskAPIKey(apiKey), err)
 					continue
 				} else if blErr, ok := err.(*ErrBlacklistKey); ok {
