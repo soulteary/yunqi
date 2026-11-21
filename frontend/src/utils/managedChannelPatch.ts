@@ -29,6 +29,8 @@ const CHANNEL_PATCH_NORMALIZERS: Readonly<Record<string, (value: unknown) => unk
   channelCreditCurrency: normalizeTrimmed,
   channelCreditAmount: normalizePositiveOrZero,
   proxyUrl: normalizeTrimmed,
+  proxyPreferDirect: Boolean,
+  outboundNetwork: value => value ?? null,
   customHeaders: normalizeHeaders,
 }
 
@@ -47,6 +49,8 @@ export function buildManagedChannelPatch(
   const originalRecord = original as unknown as Record<string, unknown>
   const patch: Record<string, unknown> = {}
   for (const [field, normalize] of Object.entries(CHANNEL_PATCH_NORMALIZERS)) {
+    // 出口策略允许显式 null 清除；未携带字段的旧调用方保留现有策略。
+    if ((field === 'outboundNetwork' || field === 'proxyPreferDirect') && !(field in next)) continue
     const before = normalize(originalRecord[field])
     const after = normalize(next[field])
     if (!isStructurallyEqual(before, after)) {
