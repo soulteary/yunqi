@@ -239,6 +239,12 @@ func (s *ChannelScheduler) SelectChannel(
 func (s *ChannelScheduler) SelectChannelWithOptions(ctx context.Context, opts SelectionOptions) (*SelectionResult, error) {
 	endTiming := telemetry.Phase(ctx, "selection")
 	defer endTiming()
+	if opts.StrictSession != nil {
+		return s.selectStrictSession(ctx, opts)
+	}
+	return s.selectChannelWithOptions(ctx, opts)
+}
+func (s *ChannelScheduler) selectChannelWithOptions(ctx context.Context, opts SelectionOptions) (*SelectionResult, error) {
 	// Hold the provider lock only while copying references. Callbacks may update
 	// providers themselves, and nested readers can deadlock behind a queued writer.
 	s.mu.RLock()
