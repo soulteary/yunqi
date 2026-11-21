@@ -10,11 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/soulteary/yunqi/internal/httpbridge"
-
 	"github.com/soulteary/yunqi/internal/autopilot"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/eventbus"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/scheduler"
 )
@@ -128,6 +127,11 @@ func TestRouterAuthenticationAndFrontendCompatibility(t *testing.T) {
 		{"GET", "/health", "", 200},
 		{"GET", "/team/health", "", 200},
 		{"GET", "/console", "", 200},
+		{"GET", "/api/network/interfaces", "", 401},
+		{"GET", "/api/network/interfaces", "route-proxy", 401},
+		{"GET", "/api/network/interfaces", "route-admin", 200},
+		{"POST", "/api/network/diagnose", "route-proxy", 401},
+		{"POST", "/api/network/diagnose", "route-admin", 400},
 		{"GET", "/api/console/status", "", 401},
 		{"GET", "/api/console/status", "route-proxy", 401},
 		{"GET", "/api/console/status", "route-admin", 200},

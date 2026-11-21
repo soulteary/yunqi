@@ -237,12 +237,16 @@ type ClientOptions struct {
 	ResponseHeaderTimeout time.Duration // 等待响应头超时（0=继承全局配置）
 	Insecure              bool          // 跳过 TLS 证书验证
 	ProxyURL              string        // HTTP/HTTPS/SOCKS5 代理地址，空=直连
-	ProxyPreferDirect     bool          // 配置了代理时先直连，失败（网络错误/451/403）自动回退代理
+	OutboundNetwork       *config.OutboundNetworkConfig
+	ProxyPreferDirect     bool // 配置了代理时先直连，失败（网络错误/451/403）自动回退代理
 }
 
 // GetClient 按 ClientOptions 获取客户端。
-// ProxyPreferDirect=false 或 ProxyURL 为空时与 Get 系列方法行为完全一致（含缓存）。
+// 未配置 OutboundNetwork 时，ProxyPreferDirect=false 或 ProxyURL 为空与旧 Get 方法一致（含缓存）。
 func (cm *ClientManager) GetClient(opts ClientOptions) *http.Client {
+	if opts.OutboundNetwork != nil {
+		return cm.outboundClient(opts, true)
+	}
 	if !opts.ProxyPreferDirect || opts.ProxyURL == "" {
 		if opts.Stream {
 			return cm.GetStreamClientWithResponseHeaderTimeout(opts.ResponseHeaderTimeout, opts.Insecure, opts.ProxyURL)
@@ -254,6 +258,9 @@ func (cm *ClientManager) GetClient(opts ClientOptions) *http.Client {
 
 // NewClient 与 GetClient 相同但不进入缓存（适用于表单临时代理等高变参数）。
 func (cm *ClientManager) NewClient(opts ClientOptions) *http.Client {
+	if opts.OutboundNetwork != nil {
+		return cm.outboundClient(opts, false)
+	}
 	if !opts.ProxyPreferDirect || opts.ProxyURL == "" {
 		if opts.Stream {
 			return cm.GetStreamClientWithResponseHeaderTimeout(opts.ResponseHeaderTimeout, opts.Insecure, opts.ProxyURL)

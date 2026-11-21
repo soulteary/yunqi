@@ -660,6 +660,7 @@ func IsChannelInPromotion(upstream *UpstreamConfig) bool {
 // 使用深拷贝可避免并发请求之间的竞态条件
 func (u *UpstreamConfig) Clone() *UpstreamConfig {
 	cloned := *u // 浅拷贝
+	cloned.OutboundNetwork = CloneOutboundNetwork(u.OutboundNetwork)
 
 	// 深拷贝切片字段
 	if u.BaseURLs != nil {

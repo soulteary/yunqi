@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpclient"
 	"github.com/soulteary/yunqi/internal/metrics"
 )
 
@@ -46,6 +47,7 @@ type L1Request struct {
 	CustomHeaders      map[string]string
 	ProxyURL           string
 	ProxyPreferDirect  bool
+	OutboundNetwork    *config.OutboundNetworkConfig
 	InsecureSkipVerify bool
 	// LearnedClientFingerprint 渠道学习到的客户端伪装标记：
 	// 上游 models 端点存在客户端指纹校验时，L1 请求需带 Claude Code 伪装头。
@@ -386,6 +388,11 @@ func (m *Manager) checkChannel(channelType string, channelIndex int) {
 		return
 	}
 	u := &upstreams[channelIndex]
+	if u.OutboundNetwork != nil {
+		if _, err := httpclient.ResolveOutboundPlan(httpclient.ClientOptions{OutboundNetwork: u.OutboundNetwork, ProxyURL: u.ProxyURL, ProxyPreferDirect: u.ProxyPreferDirect}); err != nil {
+			return
+		}
+	}
 	if channelStatus(u) != "active" {
 		return
 	}

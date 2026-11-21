@@ -702,6 +702,7 @@ func (r *AutoDiscoveryRunner) discoverEndpoints(ctx context.Context, channel *co
 			Insecure:          channel.InsecureSkipVerify,
 			ProxyURL:          channel.ProxyURL,
 			ProxyPreferDirect: channel.ProxyPreferDirect,
+			OutboundNetwork:   channel.OutboundNetwork,
 		})
 	}
 
@@ -762,6 +763,7 @@ func (r *AutoDiscoveryRunner) discoverEndpointsWithCheckpoint(ctx context.Contex
 			Insecure:          channel.InsecureSkipVerify,
 			ProxyURL:          channel.ProxyURL,
 			ProxyPreferDirect: channel.ProxyPreferDirect,
+			OutboundNetwork:   channel.OutboundNetwork,
 		})
 	}
 
@@ -1099,7 +1101,7 @@ func (r *AutoDiscoveryRunner) probeEndpoint(ctx context.Context, client *http.Cl
 		if resolver == nil {
 			resolver = copilot.DefaultEndpointResolver()
 		}
-		_, _, details, err := resolver.Models(ctx, apiKey, channel.ProxyURL)
+		_, _, details, err := resolver.Models(httpclient.WithOutboundContext(ctx, channel), apiKey, channel.ProxyURL)
 		if err != nil {
 			result.ErrorMessage = err.Error()
 			return result

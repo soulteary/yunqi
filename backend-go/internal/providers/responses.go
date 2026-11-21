@@ -18,6 +18,7 @@ import (
 	"github.com/soulteary/yunqi/internal/copilot"
 	"github.com/soulteary/yunqi/internal/errutil"
 	"github.com/soulteary/yunqi/internal/httpbridge"
+	"github.com/soulteary/yunqi/internal/httpclient"
 	"github.com/soulteary/yunqi/internal/session"
 	"github.com/soulteary/yunqi/internal/types"
 	"github.com/soulteary/yunqi/internal/utils"
@@ -83,7 +84,7 @@ func (p *ResponsesProvider) ConvertBodyToProviderRequest(
 		if resolver == nil {
 			resolver = copilot.DefaultEndpointResolver()
 		}
-		token, baseURL, protocol, endpoint, err := resolver.Resolve(httpbridge.Request(c).Context(), apiKey, upstream.ProxyURL, model.Model, upstream.CopilotProtocol)
+		token, baseURL, protocol, endpoint, err := resolver.Resolve(httpclient.WithOutboundContext(httpbridge.Request(c).Context(), upstream), apiKey, upstream.ProxyURL, model.Model, upstream.CopilotProtocol)
 		if err != nil {
 			return nil, bodyBytes, err
 		}

@@ -1,3 +1,4 @@
+import type { OutboundNetworkConfig } from './types/network'
 import { useAuthStore } from '@/stores/auth'
 import {
   normalizeDiscoveredChannelKind,
@@ -22,6 +23,7 @@ export interface AutoAddChannelRequest {
   /** 渠道级代理（HTTP/HTTPS/SOCKS5）：发现/探活与后续上游请求经代理访问 */
   proxyUrl?: string
   /** 直连优先：配置代理后先直连，失败自动回退代理（仅 proxyUrl 非空时生效） */
+  outboundNetwork?: OutboundNetworkConfig | null
   proxyPreferDirect?: boolean
   /** 故障转移位置：front（首位）| back（末尾，默认） */
   placement?: ChannelPlacement
@@ -351,7 +353,7 @@ export async function discoverFast(
   kind: ChannelKind,
   baseUrls: string[],
   apiKeys: string[],
-  opts?: { proxyUrl?: string; proxyPreferDirect?: boolean }
+  opts?: { proxyUrl?: string; proxyPreferDirect?: boolean; outboundNetwork?: OutboundNetworkConfig | null }
 ): Promise<AutoAddRouteDiscovery | null> {
   if (!supportsQuickAddProtocolDiscovery(kind)) {
     return { primaryKind: kind, routes: [{ channelKind: kind }] }
@@ -362,7 +364,7 @@ export async function discoverFast(
   // 不传 channelKind，让后端根据真实探测结果决定协议；透传全部 key，后端按 (baseURL,key) 组合择优。
   const proxyUrl = opts?.proxyUrl?.trim() || undefined
   const proxyPreferDirect = proxyUrl ? opts?.proxyPreferDirect || undefined : undefined
-  const fast = await api.discoverChannelConfigFast({ baseUrls, apiKeys: nonEmptyKeys, proxyUrl, proxyPreferDirect })
+  const fast = await api.discoverChannelConfigFast({ baseUrls, apiKeys: nonEmptyKeys, proxyUrl, proxyPreferDirect, outboundNetwork: opts?.outboundNetwork })
   const primaryKind = normalizeDiscoveredChannelKind(fast.primaryKind)
   if (!primaryKind) return null
   return { primaryKind, routes: [{ channelKind: primaryKind }], rateLimitHint: fast.rateLimit }

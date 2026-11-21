@@ -147,7 +147,8 @@
                 <v-icon size="20" color="primary">mdi-tune</v-icon>
                 <h3 class="section-header-title">{{ t('channelEditor.nav.custom') }}</h3>
               </header>
-              <!-- 代理服务器 -->
+              <OutboundNetworkSettings :model-value="form.outboundNetwork" :base-url="form.baseUrl" :proxy-url="form.proxyUrl" :proxy-prefer-direct="form.proxyPreferDirect" :insecure-skip-verify="form.insecureSkipVerify" @update:model-value="updateForm({ outboundNetwork: $event })" />
+<!-- 代理服务器 -->
               <v-text-field
                 :model-value="form.proxyUrl"
                 :label="t('channelEditor.transport.proxyUrl.label')"
@@ -179,7 +180,7 @@
                   density="compact"
                   hide-details
                   class="proxy-direct-row-switch"
-                  :disabled="!form.proxyUrl?.trim()"
+                  :disabled="!form.proxyUrl?.trim() || (!!form.outboundNetwork?.proxyMode && form.outboundNetwork.proxyMode !== 'legacy')"
                   @update:model-value="updateForm({ proxyPreferDirect: $event })"
                 />
               </div>
@@ -471,6 +472,8 @@
 </template>
 
 <script setup lang="ts">
+import OutboundNetworkSettings from './OutboundNetworkSettings.vue'
+
 import { computed, ref, watch } from 'vue'
 
 // 子组件导入

@@ -653,7 +653,7 @@ func (r *AutoDiscoveryRunner) probeProtocolModel(
 		if resolver == nil {
 			resolver = copilot.DefaultEndpointResolver()
 		}
-		token, origin, _, endpoint, err := resolver.Resolve(ctx, apiKey, channel.ProxyURL, model, protocol)
+		token, origin, _, endpoint, err := resolver.Resolve(httpclient.WithOutboundContext(ctx, channel), apiKey, channel.ProxyURL, model, protocol)
 		if err != nil {
 			return protocolProbeAttempt{outcome: protocolProbeFailed, err: err}
 		}
@@ -691,6 +691,7 @@ func (r *AutoDiscoveryRunner) probeProtocolModel(
 			Insecure:          channel.InsecureSkipVerify,
 			ProxyURL:          channel.ProxyURL,
 			ProxyPreferDirect: channel.ProxyPreferDirect,
+			OutboundNetwork:   channel.OutboundNetwork,
 		})
 	}
 	resp, err := client.Do(req)

@@ -141,6 +141,7 @@ func cloneLogicalChannelSettings(input *LogicalChannelSettings) *LogicalChannelS
 		return nil
 	}
 	out := *input
+	out.OutboundNetwork = CloneOutboundNetwork(input.OutboundNetwork)
 	out.CustomHeaders = cloneStringMap(input.CustomHeaders)
 	out.AutoBlacklistBalance = cloneBoolPtr(input.AutoBlacklistBalance)
 	out.NormalizeMetadataUserID = cloneBoolPtr(input.NormalizeMetadataUserID)

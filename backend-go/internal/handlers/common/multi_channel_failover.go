@@ -9,6 +9,7 @@ import (
 	"github.com/soulteary/yunqi/internal/autopilot"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/httpbridge"
+	"github.com/soulteary/yunqi/internal/httpclient"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/types"
 )
@@ -26,7 +27,8 @@ type MultiChannelAttemptResult struct {
 	ResponseText      string
 	// AlsoFailedRoutes 竞速场景下与主尝试同时失败的真实影子路由：
 	// 外壳需一并写入 failedRoutes，避免后续轮次重选到已失败的影子渠道。
-	AlsoFailedRoutes []scheduler.ChannelRouteKey
+	AlsoFailedRoutes    []scheduler.ChannelRouteKey
+	HasNonEgressFailure bool // A racing sibling failed for a reason other than local egress.
 }
 
 // TrySelectedChannelFunc 尝试一次选中的渠道，返回该渠道的尝试结果。
@@ -135,6 +137,8 @@ func HandleMultiChannelFailoverWithSelectionFilter(
 	// 的相同 index 相互污染。旧 SelectChannel/SelectionOptions 调用方仍可显式传 FailedChannels。
 	failedRoutes := make(map[scheduler.ChannelRouteKey]bool)
 	var lastError error
+	var lastEgressError, lastNonEgressError error
+	failedAttempts, localEgressFailures := 0, 0
 	var lastFailoverError *FailoverError
 	hasImageContent := false
 	requestBody := GetEffectiveRequestBody(c, nil)
@@ -187,7 +191,11 @@ func HandleMultiChannelFailoverWithSelectionFilter(
 		if err != nil {
 			// 上下文溢出的跨协议重定向已前移到调度器内部（容量错误分支注入
 			// OverflowRedirect 候选），外壳不再二次改写模型。
-			lastError = err
+			if failedAttempts > 0 && localEgressFailures == failedAttempts {
+				lastError = lastEgressError
+			} else {
+				lastError = err
+			}
 			break
 		}
 		if channelAttempt == 0 && selection.CandidateCount > 0 {
@@ -295,6 +303,17 @@ func HandleMultiChannelFailoverWithSelectionFilter(
 			return
 		}
 
+		failedAttempts++
+		if httpclient.IsEgressError(result.LastError) && result.FailoverError == nil && !result.HasNonEgressFailure {
+			localEgressFailures++
+			lastEgressError = result.LastError
+		} else {
+			if httpclient.IsEgressError(result.LastError) {
+				lastNonEgressError = fmt.Errorf("another racing branch failed")
+			} else {
+				lastNonEgressError = result.LastError
+			}
+		}
 		failedRoutes[selection.Route.Key()] = true
 		for _, routeKey := range result.AlsoFailedRoutes {
 			failedRoutes[routeKey] = true
@@ -324,6 +343,12 @@ func HandleMultiChannelFailoverWithSelectionFilter(
 	}
 
 	RequestLogf(c, "[%s-Error] 所有渠道都失败了", apiType)
+	if failedAttempts > 0 && localEgressFailures == failedAttempts {
+		lastError = lastEgressError
+	}
+	if localEgressFailures < failedAttempts && httpclient.IsEgressError(lastError) {
+		lastError = lastNonEgressError
+	}
 	handleAllFailed(c, lastFailoverError, lastError)
 	if pendingOutcome != nil {
 		notifyRoutingOutcome(pendingOutcome.selection, buildRoutingOutcome(

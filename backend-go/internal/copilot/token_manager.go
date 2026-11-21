@@ -106,6 +106,9 @@ func ResolveToken(ctx context.Context, githubToken string) (string, string, erro
 
 // ResolveTokenWithProxy 使用可选代理解析 Copilot API token。
 func ResolveTokenWithProxy(ctx context.Context, githubToken string, proxyURL string) (string, string, error) {
+	if opts, ok := httpclient.OutboundOptionsFromContext(ctx); ok && opts.OutboundNetwork != nil {
+		return defaultTokenManager.resolveToken(ctx, githubToken, httpclient.GetManager().GetClient(opts))
+	}
 	proxyURL = strings.TrimSpace(proxyURL)
 	if proxyURL == "" {
 		return defaultTokenManager.ResolveToken(ctx, githubToken)

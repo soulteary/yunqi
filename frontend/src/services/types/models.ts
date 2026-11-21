@@ -1,3 +1,4 @@
+import type { OutboundNetworkConfig } from './network'
 import type { Channel } from './channels'
 import type { ChannelAuthHeader } from './common'
 
@@ -101,6 +102,7 @@ export interface ChannelModelsRequest {
   // 否则编辑器 per-key 校验会被指纹拦截误报「上游 API Key 无效」。
   learnedClientFingerprint?: boolean
   proxyUrl?: string
+  outboundNetwork?: OutboundNetworkConfig | null
   proxyPreferDirect?: boolean
   insecureSkipVerify?: boolean
   customHeaders?: Record<string, string>

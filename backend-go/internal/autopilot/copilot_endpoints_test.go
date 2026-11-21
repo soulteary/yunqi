@@ -11,6 +11,7 @@ import (
 
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/copilot"
+	"github.com/soulteary/yunqi/internal/httpclient"
 )
 
 func TestCopilotDiscoveryUsesModelEndpointsAndPreservesIdentity(t *testing.T) {
@@ -52,7 +53,11 @@ func TestCopilotDiscoveryUsesModelEndpointsAndPreservesIdentity(t *testing.T) {
 		w.Write([]byte(`{"ok":true}`))
 	}))
 	defer server.Close()
-	resolver := copilot.NewEndpointResolver(func(_ context.Context, key, proxy string) (string, string, error) {
+	resolver := copilot.NewEndpointResolver(func(ctx context.Context, key, proxy string) (string, string, error) {
+		opts, ok := httpclient.OutboundOptionsFromContext(ctx)
+		if !ok || opts.OutboundNetwork == nil || opts.OutboundNetwork.ProxyMode != "direct" || opts.ProxyURL != "http://127.0.0.1:1" {
+			t.Errorf("Copilot channel request lost outbound policy: %+v present=%t", opts, ok)
+		}
 		if key != "github-fake" {
 			t.Errorf("wrong credential %q", key)
 		}
@@ -61,7 +66,7 @@ func TestCopilotDiscoveryUsesModelEndpointsAndPreservesIdentity(t *testing.T) {
 	runner := NewAutoDiscoveryRunner(nil, nil)
 	runner.client = server.Client()
 	runner.copilotResolver = resolver
-	channel := &config.UpstreamConfig{ServiceType: "copilot", APIKeys: []string{"github-fake"}, BaseURL: "https://unused.invalid", CustomHeaders: map[string]string{"Authorization": "bad", "X-Api-Key": "bad"}, AccountUID: "acct-fake"}
+	channel := &config.UpstreamConfig{OutboundNetwork: &config.OutboundNetworkConfig{ProxyMode: "direct"}, ProxyURL: "http://127.0.0.1:1", ProxyPreferDirect: true, ServiceType: "copilot", APIKeys: []string{"github-fake"}, BaseURL: "https://unused.invalid", CustomHeaders: map[string]string{"Authorization": "bad", "X-Api-Key": "bad"}, AccountUID: "acct-fake"}
 	result := runner.probeEndpoint(context.Background(), server.Client(), channel, channel.BaseURL, "github-fake")
 	if !result.ProtocolOk || len(result.ModelDetails) != 7 {
 		t.Fatalf("catalog evidence lost: %+v", result)

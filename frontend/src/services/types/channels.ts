@@ -1,3 +1,4 @@
+import type { OutboundNetworkConfig } from './network'
 import type { ChannelAuthHeader, ChannelDisplayStatus, ChannelKind } from './common'
 import type { ChannelBalanceCheckConfig } from './health'
 import type { ChannelMetrics, ChannelRecentActivity, SchedulerStatsResponse } from './metrics'
@@ -104,6 +105,7 @@ export interface Channel {
   fastMode?: boolean
   customHeaders?: Record<string, string> // 自定义请求头
   proxyUrl?: string // HTTP/HTTPS/SOCKS5 代理 URL
+  outboundNetwork?: OutboundNetworkConfig | null
   proxyPreferDirect?: boolean // 直连优先：配代理时先直连，失败（网络错误/451/403）自动回退代理
   costMultiplier?: number // 渠道级充值倍率（EffectiveCost = ListCost × 倍率，0/空=不参与）
   maxGroupMultiplier?: number // 渠道级最高分组倍率上限（Key 分组倍率超过则自动退出调度，0/空=不启用闸门）
@@ -294,6 +296,7 @@ export interface CreateLogicalChannelProtocol {
   supportedModels?: string[]
   customHeaders?: Record<string, string>
   proxyUrl?: string
+  outboundNetwork?: OutboundNetworkConfig | null
   proxyPreferDirect?: boolean
 }
 

@@ -1,3 +1,4 @@
+import type { OutboundNetworkConfig } from '../services/types/network'
 import { ref, reactive, computed, watch, onUnmounted, nextTick } from 'vue'
 import { useTheme } from 'vuetify'
 import type { Channel, ChannelProtocolRoute } from '../services/api'
@@ -125,6 +126,7 @@ export function useEditChannelModal(props: ResolvedEditChannelModalProps, emit: 
     fastMode: false,
     customHeaders: {} as Record<string, string>,
     proxyUrl: '',
+    outboundNetwork: null as OutboundNetworkConfig | null,
     proxyPreferDirect: false,
     racing: undefined as { enabled?: boolean } | undefined,
     balanceCheck: undefined as Channel['balanceCheck'] | undefined,
@@ -338,6 +340,7 @@ export function useEditChannelModal(props: ResolvedEditChannelModalProps, emit: 
       customHeaders: { ...form.customHeaders },
       proxyUrl: form.proxyUrl.trim(),
       proxyPreferDirect: form.proxyPreferDirect,
+      outboundNetwork: form.outboundNetwork,
       racing: form.racing,
       balanceCheck: form.balanceCheck,
       remark: form.remark.trim(),
@@ -452,6 +455,7 @@ export function useEditChannelModal(props: ResolvedEditChannelModalProps, emit: 
     form.textVerbosity = ''
     form.fastMode = false
     form.customHeaders = {}
+    form.outboundNetwork = null
     form.proxyUrl = ''
     form.proxyPreferDirect = false
     form.racing = undefined
@@ -550,6 +554,7 @@ export function useEditChannelModal(props: ResolvedEditChannelModalProps, emit: 
     form.textVerbosity = channel.textVerbosity || ''
     form.fastMode = !!channel.fastMode
     form.customHeaders = { ...(channel.customHeaders || {}) }
+    form.outboundNetwork = channel.outboundNetwork ? { ...channel.outboundNetwork, dns: channel.outboundNetwork.dns ? { ...channel.outboundNetwork.dns, servers: [...(channel.outboundNetwork.dns.servers || [])] } : undefined } : null
     form.proxyUrl = channel.proxyUrl || ''
     form.proxyPreferDirect = !!channel.proxyPreferDirect
     form.racing = channel.racing ? { ...channel.racing } : undefined
@@ -802,6 +807,7 @@ export function useEditChannelModal(props: ResolvedEditChannelModalProps, emit: 
       baseUrls: form.baseUrls,
       apiKeys: form.apiKeys,
       proxyUrl: form.proxyUrl,
+      outboundNetwork: form.outboundNetwork,
       insecureSkipVerify: form.insecureSkipVerify,
       customHeaders: form.customHeaders,
       authHeader: form.authHeader,

@@ -1,3 +1,4 @@
+import type { OutboundNetworkConfig } from './network'
 import type { Channel } from './channels'
 import type { ChannelAuthHeader } from './common'
 
@@ -227,6 +228,7 @@ export interface ChannelDiscoveryRequest {
   authHeader?: ChannelAuthHeader | ''
   customHeaders?: Record<string, string>
   proxyUrl?: string
+  outboundNetwork?: OutboundNetworkConfig | null
   proxyPreferDirect?: boolean
   insecureSkipVerify?: boolean
   targetClients?: ChannelDiscoveryTargetClient[]
@@ -321,6 +323,7 @@ export interface ChannelDiscoveryFastRequest {
   authHeader?: ChannelAuthHeader | ''
   customHeaders?: Record<string, string>
   proxyUrl?: string
+  outboundNetwork?: OutboundNetworkConfig | null
   proxyPreferDirect?: boolean
   insecureSkipVerify?: boolean
 }

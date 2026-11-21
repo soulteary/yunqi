@@ -13,6 +13,7 @@ import (
 
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/handlers/common"
+	"github.com/soulteary/yunqi/internal/httpclient"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/utils"
 )
@@ -185,12 +186,16 @@ func (m *Manager) checkKeyL1(
 			CustomHeaders:            u.CustomHeaders,
 			ProxyURL:                 u.ProxyURL,
 			ProxyPreferDirect:        u.ProxyPreferDirect,
+			OutboundNetwork:          u.OutboundNetwork,
 			InsecureSkipVerify:       u.InsecureSkipVerify,
 			LearnedClientFingerprint: u.LearnedClientFingerprint,
 		})
 		cancel()
 		if resp.RealCallVerified {
 			outcome.realCallVerified = true
+		}
+		if httpclient.IsEgressError(err) {
+			return outcome
 		}
 		lastModel = resp.Model
 		if err != nil {

@@ -127,6 +127,7 @@ GET /api/messages/global/stats/history
 GET /api/messages/models/stats/history
 GET /api/messages/ping
 GET /api/messages/ping/:id
+GET /api/network/interfaces
 GET /api/presets
 GET /api/presets/status
 GET /api/quota/channels
@@ -317,6 +318,7 @@ POST /api/messages/channels/:id/resume
 POST /api/messages/channels/auto-add
 POST /api/messages/channels/reorder
 POST /api/messages/channels/scheduler/diagnose
+POST /api/network/diagnose
 POST /api/responses/channels
 POST /api/responses/channels/:id/auto-discover
 POST /api/responses/channels/:id/balance/check

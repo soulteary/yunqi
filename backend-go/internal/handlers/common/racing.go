@@ -11,6 +11,7 @@ import (
 	"github.com/soulteary/yunqi/internal/autopilot"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/httpbridge"
+	"github.com/soulteary/yunqi/internal/httpclient"
 	"github.com/soulteary/yunqi/internal/racing"
 	"github.com/soulteary/yunqi/internal/scheduler"
 )
@@ -512,6 +513,7 @@ func RunRacingAttempt(
 			return win.selection, winResult
 		}
 		result.AlsoFailedRoutes = runs.failedRouteList()
+		result.HasNonEgressFailure = runs.hasNonEgressFailure()
 		return in.Selection, result
 	}
 
@@ -526,6 +528,7 @@ func RunRacingAttempt(
 			return win.selection, winResult
 		}
 		result.AlsoFailedRoutes = runs.failedRouteList()
+		result.HasNonEgressFailure = runs.hasNonEgressFailure()
 		return in.Selection, result
 	}
 	if !in.IsStream {
@@ -894,4 +897,15 @@ func writeEchoMappingHeaders(c fiber.Ctx, cfgManager *config.ConfigManager, appl
 		httpbridge.Writer(c).Header().Del("X-CCX-Original-Model")
 		httpbridge.Writer(c).Header().Del("X-CCX-Mapping-Source")
 	}
+}
+
+func (r *racingRuns) hasNonEgressFailure() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, res := range r.results {
+		if !res.Handled && (res.FailoverError != nil || isRealBranchFailure(res.LastError)) && (res.FailoverError != nil || !httpclient.IsEgressError(res.LastError)) {
+			return true
+		}
+	}
+	return false
 }

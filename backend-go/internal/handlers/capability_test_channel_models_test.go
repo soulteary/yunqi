@@ -6,9 +6,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/httpclient"
 )
 
 func TestParseChannelModelsBody(t *testing.T) {
@@ -200,5 +202,28 @@ func TestResolveChannelProbeModels_TruncateToMax(t *testing.T) {
 	}
 	if len(got) != maxChannelProbeModels {
 		t.Fatalf("models len = %d, want %d", len(got), maxChannelProbeModels)
+	}
+}
+
+func TestCapabilityModelCatalogHonorsOutboundNetwork(t *testing.T) {
+	var upstreamCalls, proxyCalls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalls.Add(1)
+		w.Write([]byte(`{"data":[{"id":"test-model"}]}`))
+	}))
+	defer upstream.Close()
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { proxyCalls.Add(1); w.WriteHeader(502) }))
+	defer proxy.Close()
+	channel := &config.UpstreamConfig{ServiceType: "openai", BaseURL: upstream.URL, APIKeys: []string{"test-only"}, ProxyURL: proxy.URL, OutboundNetwork: &config.OutboundNetworkConfig{ProxyMode: "direct"}}
+	models, err := resolveChannelProbeModels(context.Background(), channel, "chat", nil)
+	if err != nil || strings.Join(models, ",") != "test-model" || proxyCalls.Load() != 0 {
+		t.Fatalf("direct catalog: models=%v err=%v proxyCalls=%d", models, err, proxyCalls.Load())
+	}
+	before := upstreamCalls.Load()
+	channel.OutboundNetwork = &config.OutboundNetworkConfig{InterfaceName: "yunqi-missing", DNS: config.OutboundDNSConfig{Mode: "bound", Servers: []string{"127.0.0.1:53"}}}
+	channel.SupportedModels = []string{"cached-model"}
+	_, err = resolveChannelProbeModels(context.Background(), channel, "chat", nil)
+	if !httpclient.IsEgressError(err) || upstreamCalls.Load() != before || proxyCalls.Load() != 0 {
+		t.Fatalf("binding failure: err=%v upstream=%d proxy=%d", err, upstreamCalls.Load(), proxyCalls.Load())
 	}
 }

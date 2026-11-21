@@ -20,6 +20,11 @@ func handleCustomAutoAdd(c fiber.Ctx, deps *AutoManagedDeps, requestKind string,
 		return
 	}
 	baseURLs := uniqueNonEmptyStrings(req.BaseURLs)
+	if err := config.ValidateOutboundNetwork(req.OutboundNetwork, req.ProxyURL); err != nil {
+		httpbridge.JSON(c, 400, fiber.Map{"error": err.Error()})
+		return
+	}
+
 	if len(baseURLs) == 0 {
 		httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "baseUrls 不能为空"})
 		return
@@ -54,6 +59,7 @@ func handleCustomAutoAdd(c fiber.Ctx, deps *AutoManagedDeps, requestKind string,
 			SupportedModels:   append([]string(nil), route.SupportedModels...),
 			ProxyURL:          strings.TrimSpace(req.ProxyURL),
 			ProxyPreferDirect: req.ProxyPreferDirect,
+			OutboundNetwork:   req.OutboundNetwork,
 		}, accountUID, baseName, route.ChannelKind, multiRoute, now)
 		additions = append(additions, config.AccountChannelAddition{Kind: route.ChannelKind, Upstream: upstream, Placement: req.Placement})
 	}

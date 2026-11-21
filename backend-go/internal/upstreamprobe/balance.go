@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/httpclient"
 	"github.com/soulteary/yunqi/internal/utils"
 )
@@ -35,6 +36,7 @@ type BalanceProbeRequest struct {
 	CustomHeaders      map[string]string
 	ProxyURL           string
 	ProxyPreferDirect  bool
+	OutboundNetwork    *config.OutboundNetworkConfig
 	InsecureSkipVerify bool
 	Timeout            time.Duration // 单次（每端点）请求超时；0=15s
 }
@@ -85,6 +87,12 @@ var autoBalanceProbeOrder = []string{
 // 可选 preferred 变参优先复用上次识别成功的 provider（减少每轮探测请求数），
 // 第一个 Identified 的结果即返回，全部失败时返回最后一个错误。
 func ProbeBalance(ctx context.Context, req BalanceProbeRequest, provider string, preferred ...string) BalanceProbeResult {
+	if req.OutboundNetwork != nil {
+		if _, err := httpclient.ResolveOutboundPlan(httpclient.ClientOptions{OutboundNetwork: req.OutboundNetwork, ProxyURL: req.ProxyURL, ProxyPreferDirect: req.ProxyPreferDirect}); err != nil {
+			return BalanceProbeResult{Err: err}
+		}
+	}
+
 	if req.Timeout <= 0 {
 		req.Timeout = 15 * time.Second
 	}
@@ -107,6 +115,9 @@ func ProbeBalance(ctx context.Context, req BalanceProbeRequest, provider string,
 	var lastResult BalanceProbeResult
 	for i, p := range order {
 		res := probeBalanceWith(req, p)
+		if httpclient.IsEgressError(res.Err) {
+			return res
+		}
 		if res.Identified {
 			return res
 		}
@@ -139,6 +150,12 @@ func containsString(list []string, s string) bool {
 
 // mergeBalanceFailure 聚合 auto 模式下各端点的失败信息（截断防膨胀），保留最后状态码。
 func mergeBalanceFailure(a, b BalanceProbeResult) BalanceProbeResult {
+	if httpclient.IsEgressError(a.Err) {
+		return a
+	}
+	if httpclient.IsEgressError(b.Err) {
+		return b
+	}
 	merged := b
 	if a.Err != nil && b.Err != nil {
 		merged.Err = fmt.Errorf("%v; %v", truncateBalanceErr(a.Err), truncateBalanceErr(b.Err))
@@ -192,6 +209,7 @@ func balanceGetJSON(req BalanceProbeRequest, url string) (int, []byte, error) {
 		Insecure:          req.InsecureSkipVerify,
 		ProxyURL:          req.ProxyURL,
 		ProxyPreferDirect: req.ProxyPreferDirect,
+		OutboundNetwork:   req.OutboundNetwork,
 	})
 
 	doRequest := func(withProbeHeaders bool) (int, []byte, error) {

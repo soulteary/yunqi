@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"net/http"
 	"os"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/soulteary/yunqi/internal/handlers/responses"
 	"github.com/soulteary/yunqi/internal/handlers/vectors"
 	"github.com/soulteary/yunqi/internal/healthcheck"
+	"github.com/soulteary/yunqi/internal/httpclient"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/presetstore"
 	"github.com/soulteary/yunqi/internal/scheduler"
@@ -50,6 +52,17 @@ func (a *application) startAutopilotWorkers() {
 				},
 			)
 			probeWorker.SetAPIKeyResolver(a.autopilotManager.ResolveAPIKey)
+			probeWorker.SetClientResolver(func(uid string, timeout time.Duration) (*http.Client, bool) {
+				up := a.cfgManager.GetUpstreamByUID("", uid)
+				if up == nil {
+					return nil, false
+				}
+				opts := httpclient.ClientOptions{Timeout: timeout, ProxyURL: up.ProxyURL, ProxyPreferDirect: up.ProxyPreferDirect, Insecure: up.InsecureSkipVerify, OutboundNetwork: up.OutboundNetwork}
+				if _, err := httpclient.ResolveOutboundPlan(opts); err != nil {
+					return nil, false
+				}
+				return httpclient.GetManager().GetClient(opts), true
+			})
 			a.autopilotManager.SetProbeWorker(probeWorker)
 			log.Printf("[Autopilot-Init] L2 ProbeWorker 已创建 (将在 StartWorker 时启动)")
 		}

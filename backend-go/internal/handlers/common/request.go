@@ -253,6 +253,7 @@ func SendRequestWithLifecycleTrace(req *http.Request, upstream *config.UpstreamC
 			Insecure:              upstream.InsecureSkipVerify,
 			ProxyURL:              upstream.ProxyURL,
 			ProxyPreferDirect:     upstream.ProxyPreferDirect,
+			OutboundNetwork:       upstream.OutboundNetwork,
 		})
 	} else {
 		timeout := time.Duration(upstream.GetEffectiveRequestTimeoutMs(globalRequestTimeout)) * time.Millisecond
@@ -262,6 +263,7 @@ func SendRequestWithLifecycleTrace(req *http.Request, upstream *config.UpstreamC
 			Insecure:              upstream.InsecureSkipVerify,
 			ProxyURL:              upstream.ProxyURL,
 			ProxyPreferDirect:     upstream.ProxyPreferDirect,
+			OutboundNetwork:       upstream.OutboundNetwork,
 		})
 	}
 
@@ -275,7 +277,7 @@ func SendRequestWithLifecycleTrace(req *http.Request, upstream *config.UpstreamC
 		requestLogToConsoleFromRequest(req, "[%s-Request-Method] 请求方法: %s", apiType, req.Method)
 		requestLogToFileFromRequest(req, "[%s-Request-URL] 实际请求URL: %s", apiType, req.URL.String())
 		requestLogToFileFromRequest(req, "[%s-Request-Method] 请求方法: %s", apiType, req.Method)
-		if upstream.ProxyURL != "" {
+		if upstream.ProxyURL != "" && (upstream.OutboundNetwork == nil || upstream.OutboundNetwork.ProxyMode != "direct") {
 			redactedProxyURL := utils.RedactURLCredentials(upstream.ProxyURL)
 			requestLogToConsoleFromRequest(req, "[%s-Request-Proxy] 使用代理: %s", apiType, redactedProxyURL)
 			requestLogToFileFromRequest(req, "[%s-Request-Proxy] 使用代理: %s", apiType, redactedProxyURL)
@@ -285,6 +287,16 @@ func SendRequestWithLifecycleTrace(req *http.Request, upstream *config.UpstreamC
 		}
 	}
 
+	if upstream.OutboundNetwork != nil && envCfg.EnableRequestLogs {
+		plan, err := httpclient.ResolveOutboundPlan(httpclient.ClientOptions{OutboundNetwork: upstream.OutboundNetwork, ProxyURL: upstream.ProxyURL, ProxyPreferDirect: upstream.ProxyPreferDirect})
+		if err == nil {
+			requestLogToConsoleFromRequest(req, "[%s-Egress] source=logical_channel interface=%s family=%s policy=%s", apiType, plan.Config.InterfaceName, plan.Config.AddressFamily, plan.Fingerprint)
+			trace := &httptrace.ClientTrace{GotConn: func(info httptrace.GotConnInfo) {
+				requestLogToConsoleFromRequest(req, "[%s-Egress] local=%s remote=%s reused=%t", apiType, info.Conn.LocalAddr(), info.Conn.RemoteAddr(), info.Reused)
+			}}
+			req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
+		}
+	}
 	req = withLifecycleTrace(req, lifecycleTrace)
 	return client.Do(req)
 }

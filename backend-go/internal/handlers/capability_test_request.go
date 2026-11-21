@@ -20,6 +20,7 @@ import (
 	"github.com/soulteary/yunqi/internal/copilot"
 	"github.com/soulteary/yunqi/internal/errutil"
 	"github.com/soulteary/yunqi/internal/handlers/common"
+	"github.com/soulteary/yunqi/internal/httpclient"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/providers"
 	"github.com/soulteary/yunqi/internal/utils"
@@ -313,7 +314,7 @@ func buildTestRequestWithModelContext(ctx context.Context, protocol string, chan
 
 	copilotToken := ""
 	if channel.ServiceType == "copilot" {
-		token, origin, _, endpoint, err := capabilityCopilotResolver.Resolve(ctx, apiKey, channel.ProxyURL, model, headerProtocol)
+		token, origin, _, endpoint, err := capabilityCopilotResolver.Resolve(httpclient.WithOutboundContext(ctx, channel), apiKey, channel.ProxyURL, model, headerProtocol)
 		if err != nil {
 			return nil, err
 		}

@@ -16,6 +16,7 @@ import (
 	"github.com/soulteary/yunqi/internal/errutil"
 	"github.com/soulteary/yunqi/internal/handlers/common"
 	"github.com/soulteary/yunqi/internal/httpbridge"
+	"github.com/soulteary/yunqi/internal/httpclient"
 	"github.com/soulteary/yunqi/internal/middleware"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/types"
@@ -498,7 +499,7 @@ func buildProviderRequest(
 		}
 		// copilot 使用 token exchange 返回的动态端点，而非渠道静态 baseURL
 		if upstream.ServiceType == "copilot" {
-			copilotToken, copilotBaseURL, err := copilot.ResolveTokenWithProxy(httpbridge.Request(c).Context(), apiKey, upstream.ProxyURL)
+			copilotToken, copilotBaseURL, err := copilot.ResolveTokenWithProxy(httpclient.WithOutboundContext(httpbridge.Request(c).Context(), upstream), apiKey, upstream.ProxyURL)
 			if err != nil {
 				return nil, fmt.Errorf("copilot token 交换失败: %w", err)
 			}

@@ -1,3 +1,4 @@
+import type { OutboundNetworkConfig } from '../services/types/network'
 import { ref, type ComputedRef } from 'vue'
 import { ApiError, ApiService, type Channel } from '../services/api'
 import { sortModelNamesDesc } from '../utils/modelPriority'
@@ -13,6 +14,7 @@ type FormLike = {
   baseUrl: string
   customHeaders: Record<string, string>
   insecureSkipVerify: boolean
+  outboundNetwork?: OutboundNetworkConfig | null
   proxyUrl: string
   serviceType: ServiceType
 }
@@ -113,6 +115,7 @@ export function useTargetModelFetch(options: TargetModelFetchOptions) {
       baseUrl: options.form.baseUrl || undefined,
       serviceType: options.form.serviceType || undefined,
       learnedClientFingerprint: options.channel.value?.learnedClientFingerprint || undefined,
+      outboundNetwork: options.form.outboundNetwork,
       proxyUrl: options.form.proxyUrl || undefined,
       insecureSkipVerify: options.form.insecureSkipVerify || undefined,
       customHeaders: Object.keys(options.form.customHeaders).length > 0 ? { ...options.form.customHeaders } : undefined,

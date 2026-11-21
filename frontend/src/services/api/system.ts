@@ -1,3 +1,4 @@
+import type { NetworkInterface, NetworkDiagnosis, OutboundNetworkConfig } from '../types/network'
 import type { ApiClient } from './client'
 import type { PresetBundle, ProviderTemplatesResponse } from '../types/presets'
 import type {
@@ -10,6 +11,12 @@ import type {
 
 export function createSystemApi(client: ApiClient) {
   return {
+    async getNetworkInterfaces(): Promise<{ interfaces: NetworkInterface[] }> {
+      return client.request('/network/interfaces')
+    },
+    async diagnoseNetwork(settings: { baseUrl?: string; channelUid?: string; proxyUrl?: string; proxyPreferDirect?: boolean; insecureSkipVerify?: boolean; outboundNetwork?: OutboundNetworkConfig | null }): Promise<{ results: NetworkDiagnosis[] }> {
+      return client.request('/network/diagnose', { method: 'POST', body: JSON.stringify(settings) })
+    },
     async getConsoleStatus(): Promise<ConsoleStatus> {
       return client.request('/console/status')
     },

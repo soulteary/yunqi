@@ -11,6 +11,7 @@ import (
 
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/copilot"
+	"github.com/soulteary/yunqi/internal/httpclient"
 )
 
 func TestCopilotDiscoveryAndCapabilityShareEndpointEvidence(t *testing.T) {
@@ -38,14 +39,18 @@ func TestCopilotDiscoveryAndCapabilityShareEndpointEvidence(t *testing.T) {
 	}))
 	defer server.Close()
 	old := capabilityCopilotResolver
-	capabilityCopilotResolver = copilot.NewEndpointResolver(func(_ context.Context, key, proxy string) (string, string, error) {
+	capabilityCopilotResolver = copilot.NewEndpointResolver(func(ctx context.Context, key, proxy string) (string, string, error) {
+		opts, ok := httpclient.OutboundOptionsFromContext(ctx)
+		if !ok || opts.OutboundNetwork == nil || opts.OutboundNetwork.ProxyMode != "direct" || opts.ProxyURL != "http://127.0.0.1:1" {
+			t.Errorf("Copilot channel request lost outbound policy: %+v present=%t", opts, ok)
+		}
 		if key != "github-fake" {
 			t.Errorf("credential=%q", key)
 		}
 		return "runtime-fake", server.URL, nil
 	}, server.Client())
 	defer func() { capabilityCopilotResolver = old }()
-	channel := &config.UpstreamConfig{ServiceType: "copilot", BaseURL: "https://unused.invalid", APIKeys: []string{"github-fake"}, CustomHeaders: map[string]string{"Authorization": "bad", "X-Api-Key": "bad"}}
+	channel := &config.UpstreamConfig{OutboundNetwork: &config.OutboundNetworkConfig{ProxyMode: "direct"}, ProxyURL: "http://127.0.0.1:1", ProxyPreferDirect: true, ServiceType: "copilot", BaseURL: "https://unused.invalid", APIKeys: []string{"github-fake"}, CustomHeaders: map[string]string{"Authorization": "bad", "X-Api-Key": "bad"}}
 	discovered := discoverTransientModels(context.Background(), channel, "responses", "github-fake")
 	if len(discovered.ModelDetails) != 1 || len(discovered.Items) != 1 {
 		t.Fatalf("metadata not retained: %+v", discovered)
@@ -85,4 +90,5 @@ func TestCopilotDiscoveryAndCapabilityShareEndpointEvidence(t *testing.T) {
 	if posts.Load() != 4 {
 		t.Fatalf("unexpected inference attempts %d", posts.Load())
 	}
+	runCompatDiagnoseWithProbeModel(channel, "responses", "github-fake", channel.BaseURL, "opaque")
 }

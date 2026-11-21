@@ -120,6 +120,7 @@ func pingBaseURL(upstream config.UpstreamConfig, baseURL string, timeout time.Du
 		Insecure:          upstream.InsecureSkipVerify,
 		ProxyURL:          upstream.ProxyURL,
 		ProxyPreferDirect: upstream.ProxyPreferDirect,
+		OutboundNetwork:   upstream.OutboundNetwork,
 	})
 	req, err := builder(upstream, strings.TrimSuffix(baseURL, "/"))
 	if err != nil {

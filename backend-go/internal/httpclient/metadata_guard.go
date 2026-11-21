@@ -65,6 +65,9 @@ func (t *metadataGuardTransport) RoundTrip(req *http.Request) (*http.Response, e
 		if req.Context().Err() != nil {
 			return nil, req.Context().Err()
 		}
+		if IsEgressError(err) {
+			return nil, err
+		}
 		if err == nil {
 			for _, ip := range ips {
 				if utils.IsMetadataIP(ip.IP) {

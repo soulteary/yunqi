@@ -29,6 +29,8 @@ func (a *application) registerSystemRoutes(r *fiber.App) {
 }
 
 func (a *application) registerManagementRoutes(apiGroup fiber.Router) {
+	apiGroup.Get("/network/interfaces", handlers.NetworkInterfaces())
+	apiGroup.Post("/network/diagnose", handlers.DiagnoseNetwork(a.cfgManager))
 	discoveryModelFetchers := buildChannelDiscoveryModelFetchers(a.cfgManager)
 	apiGroup.Get("/console/status", handlers.ConsoleStatus(a.envCfg, a.cfgManager))
 	apiGroup.Get("/console/codex-auto-review", handlers.GetCodexAutoReviewMapping(a.cfgManager))

@@ -20,6 +20,7 @@ import (
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/handlers/common"
 	"github.com/soulteary/yunqi/internal/httpbridge"
+	"github.com/soulteary/yunqi/internal/httpclient"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/session"
@@ -397,5 +398,35 @@ func TestHandleMultiChannelFailover_KeepsExistingTextAffinityOnVisionFallback(t 
 	}
 	if idx != 0 {
 		t.Fatalf("已有文本 affinity 不应被含图请求覆盖，期望 0，实际 %d", idx)
+	}
+}
+
+func TestMultiChannelLocalEgressErrorAggregation(t *testing.T) {
+	for _, scenario := range []int{0, 1, 2} {
+		mixed := scenario != 0
+		t.Run(fmt.Sprint(scenario), func(t *testing.T) {
+			cfg := config.Config{Upstream: []config.UpstreamConfig{
+				{Name: "first", ChannelUID: "ch-net-1", BaseURL: "https://net1.example.com", APIKeys: []string{"key1"}, Status: "active"},
+				{Name: "second", ChannelUID: "ch-net-2", BaseURL: "https://net2.example.com", APIKeys: []string{"key2"}, Status: "active"},
+			}}
+			env := newAffinityTestEnv(t, cfg)
+			defer env.cleanup()
+			c := newTestFiberContext(httptest.NewRecorder())
+			attempts := 0
+			var final error
+			common.HandleMultiChannelFailover(c, &config.EnvConfig{}, env.scheduler, scheduler.ChannelKindMessages, "Messages", "user", "model", false, "",
+				func(fiber.Ctx, *scheduler.SelectionResult) common.MultiChannelAttemptResult {
+					attempts++
+					err := error(&httpclient.EgressError{Stage: "interface", Err: errors.New("missing")})
+					if scenario == 1 && attempts == 1 {
+						err = errors.New("upstream failure")
+					}
+					return common.MultiChannelAttemptResult{Attempted: true, LastError: err, HasNonEgressFailure: scenario == 2 && attempts == 1}
+				}, nil,
+				func(_ fiber.Ctx, _ *common.FailoverError, err error) { final = err })
+			if attempts != 2 || httpclient.IsEgressError(final) == mixed {
+				t.Fatalf("attempts=%d mixed=%t final=%v", attempts, mixed, final)
+			}
+		})
 	}
 }
