@@ -373,6 +373,9 @@ func (st *claudeToResponsesState) startToolUse(callID, name string, nextSeq func
 	st.ToolArgsBuf.Reset()
 
 	// Codex remap：custom 代理以 custom_tool_call 形态开局；namespace function 还原名
+	if st.CodexCtx.IsToolSearchProxy(name) {
+		return st.toolSearchEvent("response.output_item.added", "in_progress", "{}", nextSeq)
+	}
 	if st.isCodexCustomProxy(name) {
 		item := `{"type":"response.output_item.added","sequence_number":0,"output_index":0,"item":{"id":"","type":"custom_tool_call","status":"in_progress","call_id":"","name":"","input":""}}`
 		item, _ = sjson.Set(item, "sequence_number", nextSeq())
@@ -431,6 +434,14 @@ func (st *claudeToResponsesState) closeToolUse(nextSeq func() int) []string {
 	}
 
 	// Codex custom 代理 → custom_tool_call 序列（input delta/done + item done）
+	if st.CodexCtx.IsToolSearchProxy(st.CurrentToolName) {
+		events := st.toolSearchEvent("response.output_item.done", "completed", args, nextSeq)
+		st.CompletedOutput = append(st.CompletedOutput, map[string]interface{}{
+			"id": st.CurrentToolItemID, "type": "tool_search_call", "status": "completed", "execution": "client", "call_id": st.CurrentToolCallID, "arguments": toolSearchArgumentsValue(args),
+		})
+		st.ActiveItemType = ""
+		return events
+	}
 	if st.isCodexCustomProxy(st.CurrentToolName) {
 		customInput := ReconstructCustomToolCallInput(st.CodexCtx, st.CurrentToolName, args)
 		originalName := st.CodexCtx.OriginalCustomToolName(st.CurrentToolName)
@@ -510,6 +521,15 @@ func (st *claudeToResponsesState) closeToolUse(nextSeq func() int) []string {
 		emitResponsesEvent("response.function_call_arguments.done", argsDone),
 		emitResponsesEvent("response.output_item.done", itemDone),
 	}
+}
+
+func (st *claudeToResponsesState) toolSearchEvent(eventType, status, args string, nextSeq func() int) []string {
+	event := `{"type":"","sequence_number":0,"output_index":0,"item":{}}`
+	event, _ = sjson.Set(event, "type", eventType)
+	event, _ = sjson.Set(event, "sequence_number", nextSeq())
+	event, _ = sjson.Set(event, "output_index", st.ToolIndex)
+	event, _ = sjson.Set(event, "item", map[string]interface{}{"id": st.CurrentToolItemID, "type": "tool_search_call", "status": status, "execution": "client", "call_id": st.CurrentToolCallID, "arguments": toolSearchArgumentsValue(args)})
+	return []string{emitResponsesEvent(eventType, event)}
 }
 
 func (st *claudeToResponsesState) completedEvent(modelName string, originalRequestRawJSON []byte, nextSeq func() int) string {
