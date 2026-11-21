@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/soulteary/yunqi/internal/httpclient"
 	"io"
 	"math"
 	"net/http"
@@ -172,7 +173,7 @@ func verifyStream(name, baseURL, apiKey, model, prompt string, verbose bool) *Ve
 	req.Header.Set("X-Stainless-Retry-Count", "0")
 	req.Header.Set("X-Stainless-Timeout", "200")
 
-	client := &http.Client{Timeout: 60 * time.Second}
+	client := httpclient.GetManager().GetStandardClient(60*time.Second, false)
 	resp, err := client.Do(req)
 	if err != nil {
 		result.Errors = append(result.Errors, fmt.Sprintf("请求失败: %v", err))

@@ -470,9 +470,6 @@ func (m *Manager) Stop() {
 func (m *Manager) Close() error {
 	m.Stop()
 	var errs []error
-	if err := m.store.Close(); err != nil {
-		errs = append(errs, err)
-	}
 	if m.subscriptionStore != nil {
 		if err := m.subscriptionStore.Close(); err != nil {
 			errs = append(errs, err)
@@ -497,6 +494,10 @@ func (m *Manager) Close() error {
 		if err := m.traceStore.Close(); err != nil {
 			errs = append(errs, err)
 		}
+	}
+	// ProfileStore owns the shared DB; close it after all dependent queues flush.
+	if err := m.store.Close(); err != nil {
+		errs = append(errs, err)
 	}
 	if len(errs) > 0 {
 		return fmt.Errorf("[Autopilot-Close] 关闭 store 出错: %v", errs)

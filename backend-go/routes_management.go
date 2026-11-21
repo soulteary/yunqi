@@ -96,6 +96,7 @@ func (a *application) registerManagementRoutes(apiGroup fiber.Router) {
 	apiGroup.Get("/conversations/settings", handlers.GetConversationSettings(convDeps))
 	apiGroup.Put("/conversations/settings", handlers.UpdateConversationSettings(convDeps))
 
+	apiGroup.Get("/reports/requests", handlers.GetRequestHistory(a.metricsStore))
 	// Phase 4 Item 2: 成本报表 API（按 user/model/key 分组聚合）
 	apiGroup.Get("/reports/cost", handlers.GetCostReport(&handlers.CostReportDeps{
 		MetricsManagers: map[string]*metrics.MetricsManager{
