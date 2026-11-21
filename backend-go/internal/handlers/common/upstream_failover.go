@@ -686,6 +686,9 @@ func TryUpstreamWithAllKeys(
 		var retryAPIKey string
 
 		for keyAttempts, attemptOrdinal := 0, 0; keyAttempts < maxRetries || retryAPIKey != ""; attemptOrdinal++ {
+			if requestErr := httpbridge.Request(c).Context().Err(); requestErr != nil {
+				return true, "", 0, nil, nil, requestErr
+			}
 			isRetryAttempt := attemptOrdinal > 0 || urlIdx > 0
 			// 每次 attempt 开始时清除上一轮的 effort 可观测性标记，
 			// 防止 failover 到未产生 resolved target 的 endpoint 时残留旧值。
@@ -1311,7 +1314,7 @@ func TryUpstreamWithAllKeys(
 					return false, "", 0, nil, nil, err
 				}
 				// 区分客户端取消和真实渠道故障（统一口径）
-				if isClientSideError(err) {
+				if isClientSideError(err) || httpbridge.Request(c).Context().Err() != nil {
 					// 客户端取消：不计入失败，不触发 failover
 					metricsManager.RecordRequestFinalizeClientCancel(currentBaseURL, apiKey, metricsServiceType, requestID)
 					channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, metricsServiceType, executionKind)
@@ -1889,7 +1892,7 @@ func TryUpstreamWithAllKeys(
 				// 区分客户端错误和渠道故障；errors.As 匹配 rejected，防止未来
 				// provider 闭包包装后静默落入「真实渠道故障」分支被逐 Key 重放。
 				var rejected *UpstreamRequestRejectedError
-				if isClientSideError(err) || isClientWriteDisconnect(err) {
+				if isClientSideError(err) || httpbridge.Request(c).Context().Err() != nil || isClientWriteDisconnect(err) {
 					// 客户端取消/断开：计入总请求数但不计入失败
 					metricsManager.RecordRequestFinalizeClientCancel(currentBaseURL, apiKey, metricsServiceType, requestID)
 					channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, metricsServiceType, executionKind)
