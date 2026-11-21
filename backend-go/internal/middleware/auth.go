@@ -1,6 +1,8 @@
 package middleware
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"log"
 	"net/http"
 	"strings"
@@ -111,7 +113,7 @@ func isDataPlaneEndpoint(method, path string) bool {
 		}
 	case http.MethodPost:
 		switch path {
-		case "/v1/messages", "/v1/messages/count_tokens", "/v1/responses", "/v1/responses/compact",
+		case "/v1/quote", "/v1/messages", "/v1/messages/count_tokens", "/v1/responses", "/v1/responses/compact",
 			"/v1/chat/completions", "/v1/images/generations", "/v1/images/edits",
 			"/v1/images/variations", "/v1/embeddings":
 			return true
@@ -221,6 +223,12 @@ func AuthenticateProxy(c fiber.Ctx, envCfg *config.EnvConfig) error {
 		httpbridge.Abort(c)
 		return nil
 	}
+	sum := sha256.Sum256([]byte(providedKey))
+	principalID := "key:" + hex.EncodeToString(sum[:])
+	if id := envCfg.ProxyPrincipalIDs[providedKey]; id != "" {
+		principalID = "principal:" + id
+	}
+	httpbridge.SetValue(c, ContextKeyPrincipalID, principalID)
 	if mask := envCfg.ProxyKeyMaskForRequest(providedKey); mask != "" {
 		httpbridge.SetValue(c, ContextKeyProxyKeyMask, mask)
 	}

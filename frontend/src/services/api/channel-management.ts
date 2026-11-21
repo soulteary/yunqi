@@ -20,7 +20,7 @@ export function createChannelManagementApi(client: ApiClient) {
     /** 获取单个渠道视图 */
     async getChannelV2(
       uid: string
-    ): Promise<{ channel: Record<string, unknown>; capabilities: Record<string, unknown>[] }> {
+    ): Promise<{ channel: Record<string, unknown>; capabilities: Record<string, unknown>[]; revision?: string }> {
       return client.request(`/channels/${uid}`)
     },
 
@@ -42,11 +42,14 @@ export function createChannelManagementApi(client: ApiClient) {
     },
 
     /** 更新渠道（按 ChannelUID 寻址） */
-    async updateChannelV2(uid: string, updates: Record<string, unknown>): Promise<void> {
-      await client.request(`/channels/${uid}`, {
+    async updateChannelV2(uid: string, updates: Record<string, unknown>, expectedRevision?: string): Promise<{ revision: string; persisted: boolean; changed: boolean; changedFields?: string[] }> {
+      const result: { revision: string; persisted: boolean; changed: boolean; changedFields?: string[] } = await client.request(`/channels/${uid}`, {
         method: 'PUT',
+        ...(expectedRevision ? { headers: { 'If-Match': expectedRevision } } : {}),
         body: JSON.stringify(updates)
       })
+      if (!result?.persisted || !result.revision) throw new Error('服务端未确认配置已持久化')
+      return result
     },
 
     /** 删除渠道（按 ChannelUID 寻址） */

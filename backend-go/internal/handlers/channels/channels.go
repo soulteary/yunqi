@@ -7,6 +7,7 @@ package channels
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"strings"
@@ -56,13 +57,14 @@ func (h *Handler) List(c fiber.Ctx) error {
 // GetResponse 单渠道响应，仅附带该渠道 key 引用到的能力子集。
 type GetResponse struct {
 	Channel      config.ChannelView          `json:"channel"`
+	Revision     string                      `json:"revision,omitempty"`
 	Capabilities []config.EndpointCapability `json:"capabilities"`
 }
 
 // Get 按聚合 ChannelUID 返回单个渠道视图及其引用的能力子集。
 func (h *Handler) Get(c fiber.Ctx) error {
 	uid := httpbridge.Param(c, "uid")
-	views, caps := h.cm.GetChannelViews()
+	views, caps, revisions := h.cm.ChannelSaveViews()
 	capByUID := make(map[string]config.EndpointCapability, len(caps))
 	for _, cap := range caps {
 		capByUID[cap.CapabilityUID] = cap
@@ -71,7 +73,7 @@ func (h *Handler) Get(c fiber.Ctx) error {
 		if v.ChannelUID != uid {
 			continue
 		}
-		httpbridge.JSON(c, http.StatusOK, GetResponse{Channel: v, Capabilities: referencedCapabilities(v, capByUID)})
+		httpbridge.JSON(c, http.StatusOK, GetResponse{Channel: v, Revision: revisions[uid], Capabilities: referencedCapabilities(v, capByUID)})
 		return nil
 	}
 	httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "channel not found", "uid": uid})
@@ -238,7 +240,7 @@ type UpdateRequest struct {
 // Update 更新渠道（按 ChannelUID 寻址，内部按 kind 路由）。
 func (h *Handler) Update(c fiber.Ctx) error {
 	uid := httpbridge.Param(c, "uid")
-	loc, _, found := h.cm.FindUpstreamByUID(uid)
+	_, _, found := h.cm.FindUpstreamByUID(uid)
 	if !found {
 		httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "channel not found", "uid": uid})
 		return nil
@@ -313,8 +315,12 @@ func (h *Handler) Update(c fiber.Ctx) error {
 		BalanceCheck:                  req.BalanceCheck,
 	}
 
-	shouldResetMetrics, err := config.UpdateUpstreamByKind(h.cm, loc, updates)
+	receipt, loc, shouldResetMetrics, err := h.cm.UpdateChannelWithReceipt(uid, httpbridge.Request(c).Header.Get("If-Match"), updates)
 	if err != nil {
+		if errors.Is(err, config.ErrChannelRevisionConflict) {
+			httpbridge.JSON(c, http.StatusConflict, fiber.Map{"error": err.Error(), "persisted": false})
+			return nil
+		}
 		log.Printf("[Channels-Update] 更新渠道失败: %v", err)
 		httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": "Failed to update channel: " + err.Error()})
 		return nil
@@ -324,7 +330,7 @@ func (h *Handler) Update(c fiber.Ctx) error {
 		kind := schedulerChannelKind(loc.Kind)
 		h.scheduler.ResetChannelMetrics(loc.Index, kind)
 	}
-	httpbridge.JSON(c, http.StatusOK, fiber.Map{"message": "渠道已更新"})
+	httpbridge.JSON(c, http.StatusOK, fiber.Map{"message": "渠道已更新", "revision": receipt.Revision, "persisted": receipt.Persisted, "changed": receipt.Changed, "changedFields": receipt.ChangedFields})
 	return nil
 }
 

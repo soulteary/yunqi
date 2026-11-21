@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/soulteary/yunqi/internal/config"
+	"github.com/soulteary/yunqi/internal/types"
 	"github.com/soulteary/yunqi/internal/utils"
 
 	"github.com/soulteary/yunqi/internal/errutil"
@@ -35,6 +37,8 @@ type SQLiteStore struct {
 	// 控制
 	stopCh       chan struct{}
 	wg           sync.WaitGroup
+	closeOnce    sync.Once
+	closeErr     error
 	closed       bool           // 是否已关闭
 	flushMu      sync.Mutex     // 串行化 flush 与 delete 操作，避免并发竞态
 	asyncFlushWg sync.WaitGroup // 追踪 AddRecord 触发的异步 flush goroutine
@@ -350,6 +354,25 @@ func initSchema(db *sql.DB) error {
 			}
 		}
 		log.Printf("[SQLite-Migration] schema 升级: v8 -> v9 (添加 correlation_id 列)")
+	}
+
+	var provenanceVersion int
+	if err := db.QueryRow("PRAGMA user_version").Scan(&provenanceVersion); err != nil {
+		return err
+	}
+	if provenanceVersion < 10 {
+		for _, q := range []string{"ALTER TABLE request_records ADD COLUMN usage_provenance TEXT NOT NULL DEFAULT '{}'", "PRAGMA user_version = 10"} {
+			if _, err := db.Exec(q); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+				return fmt.Errorf("migration v9->v10 failed: %w", err)
+			}
+		}
+	}
+	// Filter-specific keyset indexes do not reserve a schema version.
+	for _, column := range []string{"model,", "channel_uid,", "correlation_id,"} {
+		name := strings.ReplaceAll(column, ",", "")
+		if _, err := db.Exec("CREATE INDEX IF NOT EXISTS idx_history_" + name + " ON request_records(api_type," + column + "timestamp DESC,id DESC)"); err != nil {
+			return fmt.Errorf("history index: %w", err)
+		}
 	}
 
 	return nil
@@ -724,12 +747,16 @@ func (s *SQLiteStore) AddRecord(record PersistentRecord) {
 	}
 	s.writeBuffer = append(s.writeBuffer, record)
 	shouldFlush := len(s.writeBuffer) >= s.batchSize
+	// Register flush work under bufferMu: Close must not Wait before Add.
+	startFlush := shouldFlush && s.flushing.CompareAndSwap(false, true)
+	if startFlush {
+		s.asyncFlushWg.Add(1)
+	}
 	s.bufferMu.Unlock()
 
 	// 使用原子标记确保同一时间只有一个 flush goroutine 被调度
 	// 避免高并发下产生大量 goroutine 排队等待 flushMu
-	if shouldFlush && s.flushing.CompareAndSwap(false, true) {
-		s.asyncFlushWg.Add(1)
+	if startFlush {
 		go func() {
 			defer s.asyncFlushWg.Done()
 			defer s.flushing.Store(false)
@@ -778,8 +805,8 @@ func (s *SQLiteStore) batchInsertRecords(records []PersistentRecord) error {
 		 channel_uid, route_model, key_uid, subscription_uid, exchange_snapshot_version,
 		 list_cost_usd, effective_cost_usd, effective_cost_available, effective_cost_reason, consumption_policy,
 			 compressed, original_tokens, compressed_tokens, compression_savings_percent, compression_technique, compression_fallback_reason,
-			 correlation_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 correlation_id, usage_provenance)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return err
@@ -799,7 +826,7 @@ func (s *SQLiteStore) batchInsertRecords(records []PersistentRecord) error {
 			r.ChannelUID, r.RouteModel, r.KeyUID, r.SubscriptionUID, r.ExchangeSnapshotVersion,
 			r.ListCostUSD, r.EffectiveCostUSD, effectiveAvailable, r.EffectiveCostReason, r.ConsumptionPolicy,
 			r.Compressed, r.OriginalTokens, r.CompressedTokens, r.CompressionSavingsPct, r.CompressionTechnique, r.CompressionFallbackReason,
-			r.CorrelationID,
+			r.CorrelationID, marshalUsageProvenance(r.UsageProvenance),
 		)
 		if err != nil {
 			return err
@@ -816,7 +843,7 @@ func (s *SQLiteStore) LoadRecords(since time.Time, apiType string) ([]Persistent
 		       key_uid, subscription_uid, exchange_snapshot_version, list_cost_usd, effective_cost_usd,
 		       effective_cost_available, effective_cost_reason, consumption_policy,
 		       compressed, original_tokens, compressed_tokens, compression_savings_percent, compression_technique, compression_fallback_reason,
-		       correlation_id
+		       correlation_id, usage_provenance
 		FROM request_records
 		WHERE timestamp >= ? AND api_type = ?
 		ORDER BY timestamp ASC
@@ -828,6 +855,7 @@ func (s *SQLiteStore) LoadRecords(since time.Time, apiType string) ([]Persistent
 	var records []PersistentRecord
 	for rows.Next() {
 		var r PersistentRecord
+		var provenance string
 		var ts int64
 		var success int
 		var failureClass string
@@ -841,11 +869,12 @@ func (s *SQLiteStore) LoadRecords(since time.Time, apiType string) ([]Persistent
 			&r.ChannelUID, &r.RouteModel, &keyUID, &subscriptionUID, &version, &listCost, &effectiveCost,
 			&effectiveAvailable, &effectiveReason, &consumptionPolicy,
 			&r.Compressed, &r.OriginalTokens, &r.CompressedTokens, &r.CompressionSavingsPct, &r.CompressionTechnique, &r.CompressionFallbackReason,
-			&r.CorrelationID,
+			&r.CorrelationID, &provenance,
 		)
 		if err != nil {
 			return nil, err
 		}
+		r.UsageProvenance = unmarshalUsageProvenance(provenance)
 		r.Timestamp = time.Unix(ts, 0)
 		r.Success = success == 1
 		r.FailureClass = FailureClass(failureClass)
@@ -1157,19 +1186,29 @@ func (s *SQLiteStore) doCleanup() {
 
 // Close 关闭存储
 func (s *SQLiteStore) Close() error {
-	// 标记为已关闭，阻止新记录
-	s.bufferMu.Lock()
-	s.closed = true
-	s.bufferMu.Unlock()
-
-	// 停止后台循环（flushLoop 会在退出前执行最后一次 flush）
-	close(s.stopCh)
-	s.wg.Wait()
-
-	// 等待所有 AddRecord 触发的异步 flush goroutine 完成
-	s.asyncFlushWg.Wait()
-
-	return s.db.Close()
+	s.closeOnce.Do(func() {
+		s.bufferMu.Lock()
+		s.closed = true
+		s.bufferMu.Unlock()
+		close(s.stopCh)
+		s.wg.Wait()
+		s.asyncFlushWg.Wait()
+		// A failed background flush may have requeued records. Retry once and report
+		// failure instead of claiming shutdown persisted all acknowledged usage.
+		s.flushMu.Lock()
+		s.bufferMu.Lock()
+		pending := s.writeBuffer
+		s.writeBuffer = nil
+		s.bufferMu.Unlock()
+		if len(pending) > 0 {
+			s.closeErr = s.batchInsertRecords(pending)
+		}
+		s.flushMu.Unlock()
+		if err := s.db.Close(); err != nil && s.closeErr == nil {
+			s.closeErr = err
+		}
+	})
+	return s.closeErr
 }
 
 // GetRecordCount 获取记录总数（用于调试）
@@ -1527,4 +1566,22 @@ func (s *SQLiteStore) QueryModelCostBreakdown(apiType string, since time.Time, g
 		results = append(results, row)
 	}
 	return results, rows.Err()
+}
+
+func marshalUsageProvenance(p *types.UsageProvenance) string {
+	if p == nil {
+		return "{}"
+	}
+	b, err := json.Marshal((&types.Usage{Provenance: p}).AccountingProvenance())
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
+}
+func unmarshalUsageProvenance(raw string) *types.UsageProvenance {
+	var p types.UsageProvenance
+	if json.Unmarshal([]byte(raw), &p) != nil || p.UsageSource == "" {
+		return &types.UsageProvenance{UsageSource: "unknown", Reason: "source_not_captured"}
+	}
+	return &p
 }

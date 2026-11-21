@@ -110,12 +110,14 @@ type Manager struct {
 	stopTimeout  time.Duration
 	now          func() time.Time
 
-	mu       sync.Mutex
-	running  bool
-	stopCh   chan struct{}
-	tasks    chan checkTask
-	wg       sync.WaitGroup
-	inFlight map[string]struct{}
+	mu             sync.Mutex
+	running        bool
+	lifetime       context.Context
+	cancelLifetime context.CancelFunc
+	stopCh         chan struct{}
+	tasks          chan checkTask
+	wg             sync.WaitGroup
+	inFlight       map[string]struct{}
 
 	// capabilityProbeLedger 记录本扫描周期内已探测的能力（按 CapabilityUID），
 	// 同一扫描周期内跨账号 key 对同站点同分组协议/模型探测只执行一次，其余复用结论。
@@ -196,6 +198,7 @@ func (m *Manager) Start() {
 		return
 	}
 	m.running = true
+	m.lifetime, m.cancelLifetime = context.WithCancel(context.Background())
 	m.stopCh = make(chan struct{})
 	m.mu.Unlock()
 
@@ -220,6 +223,9 @@ func (m *Manager) Stop() {
 		return
 	}
 	m.running = false
+	if m.cancelLifetime != nil {
+		m.cancelLifetime()
+	}
 	close(m.stopCh)
 	m.mu.Unlock()
 
@@ -442,4 +448,14 @@ func (m *Manager) checkChannel(channelType string, channelIndex int) {
 		// 火山套餐 L1 已完成一次最便宜模型的真实调用；其余模型按预算做稀疏探测。
 		m.checkKeyL2Sparse(channelType, channelIndex, channelID, u, apiKey, keyBaseURLs, outcome.models, policy, prevL2ByModel)
 	}
+}
+
+// lifetimeContext also supports direct unit probes before Start.
+func (m *Manager) lifetimeContext() context.Context {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.lifetime == nil {
+		return context.Background()
+	}
+	return m.lifetime
 }

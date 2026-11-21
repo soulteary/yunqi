@@ -32,6 +32,17 @@ func ConvertResponsesToOpenAIChatRequest(modelName string, inputRawJSON []byte, 
 
 	root := gjson.ParseBytes(inputRawJSON)
 
+	if format := root.Get("text.format"); format.Exists() {
+		if format.Get("type").String() == "json_schema" {
+			out, _ = sjson.SetRaw(out, "response_format.json_schema", format.Raw)
+			out, _ = sjson.Delete(out, "response_format.json_schema.type")
+			out, _ = sjson.Set(out, "response_format.type", "json_schema")
+		} else {
+			out, _ = sjson.SetRaw(out, "response_format", format.Raw)
+		}
+	}
+	out = copyOpenAICacheFields(root, out)
+
 	// 设置 model
 	out, _ = sjson.Set(out, "model", modelName)
 
@@ -447,6 +458,16 @@ func ConvertChatRequestToResponsesRequest(chatBody []byte) []byte {
 
 	out := `{"model":"","input":[],"stream":false}`
 
+	if format := root.Get("response_format"); format.Exists() {
+		if format.Get("type").String() == "json_schema" {
+			out, _ = sjson.SetRaw(out, "text.format", format.Get("json_schema").Raw)
+			out, _ = sjson.Set(out, "text.format.type", "json_schema")
+		} else {
+			out, _ = sjson.SetRaw(out, "text.format", format.Raw)
+		}
+	}
+	out = copyOpenAICacheFields(root, out)
+
 	// model
 	if model := root.Get("model"); model.Exists() {
 		out, _ = sjson.Set(out, "model", model.String())
@@ -847,4 +868,16 @@ func ConvertResponsesResponseToChatResponse(responsesBody []byte, model string) 
 func jsonString(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b)
+}
+
+// copyOpenAICacheFields preserves field presence and exact JSON values between
+// OpenAI protocols. Cache policy is never translated to another vendor's TTL.
+func copyOpenAICacheFields(root gjson.Result, out string) string {
+	for _, key := range []string{"prompt_cache_key", "prompt_cache_options", "prompt_cache_retention"} {
+		value := root.Get(key)
+		if value.Exists() || value.Raw == "null" {
+			out, _ = sjson.SetRaw(out, key, value.Raw)
+		}
+	}
+	return out
 }
