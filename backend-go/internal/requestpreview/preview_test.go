@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"github.com/soulteary/yunqi/internal/config"
 	"net/http"
+	"net/url"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -66,5 +68,54 @@ func TestPreviewNullDraftResetsScalarWithoutSaving(t *testing.T) {
 	draft, err := ApplyDraft(up, map[string]json.RawMessage{"fastMode": json.RawMessage(`null`), "textVerbosity": json.RawMessage(`null`)})
 	if err != nil || draft.FastMode || draft.TextVerbosity != "" || !up.FastMode || up.TextVerbosity != "high" {
 		t.Fatalf("null draft did not reset independent copy: %+v %v", draft, err)
+	}
+}
+
+func TestPreviewDoesNotStartSessionCleanupWorkersOrAccessHistory(t *testing.T) {
+	count := func() int {
+		buffer := make([]byte, 1<<20)
+		n := runtime.Stack(buffer, true)
+		return strings.Count(string(buffer[:n]), "session.(*SessionManager).cleanupLoop")
+	}
+	before := count()
+	for i := 0; i < 100; i++ {
+		for _, protocol := range []string{"responses", "messages"} {
+			body := json.RawMessage(`{"model":"test","input":"sample"}`)
+			if protocol == "messages" {
+				body = json.RawMessage(`{"model":"test","max_tokens":16,"messages":[{"role":"user","content":"sample"}]}`)
+			}
+			if _, err := Build(config.UpstreamConfig{ServiceType: "responses", BaseURL: "https://example.test", TextVerbosity: "high"}, Input{Protocol: protocol, Body: body}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if after := count(); after != before {
+		t.Fatalf("preview leaked cleanup workers: before=%d after=%d", before, after)
+	}
+	if _, err := Build(config.UpstreamConfig{ServiceType: "responses", BaseURL: "https://example.test"}, Input{Protocol: "responses", Body: json.RawMessage(`{"model":"test","input":"sample","previous_response_id":"real-history"}`)}); err == nil || !strings.Contains(err.Error(), "conversation history") {
+		t.Fatalf("history dependency was not rejected: %v", err)
+	}
+}
+func TestPreviewLocallyMasksEncodedDraftCredentials(t *testing.T) {
+	secret := `opaque/+ secret"\token`
+	encoded, _ := json.Marshal(secret)
+	text := url.QueryEscape(secret) + " " + url.PathEscape(secret) + " " + string(encoded[1:len(encoded)-1])
+	body, _ := json.Marshal(map[string]any{"model": "test", "messages": []any{map[string]any{"role": "user", "content": text}}})
+	result, err := Build(config.UpstreamConfig{ServiceType: "openai", BaseURL: "https://example.test", CustomHeaders: map[string]string{"X-Draft-Auth": secret}}, Input{Protocol: "chat", Body: body})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if json.Unmarshal(result.Body, &decoded) != nil {
+		t.Fatal("redaction broke JSON")
+	}
+	raw := string(result.Body)
+	for _, variant := range []string{url.QueryEscape(secret), url.PathEscape(secret)} {
+		if strings.Contains(raw, variant) {
+			t.Fatalf("encoded credential escaped local redaction: %s", raw)
+		}
+	}
+	if !strings.Contains(raw, "REDACTED") {
+		t.Fatal("draft credential was not masked")
 	}
 }

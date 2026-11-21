@@ -20,6 +20,8 @@ import (
 	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/providers"
 	"github.com/soulteary/yunqi/internal/redaction"
+	"github.com/soulteary/yunqi/internal/session"
+	"time"
 )
 
 const MaxSampleBytes = 32768
@@ -77,6 +79,19 @@ func ApplyDraft(up config.UpstreamConfig, draft map[string]json.RawMessage) (con
 		return up, errors.New("invalid draft option type")
 	}
 	up = decoded
+	if len(up.CustomHeaders) > 64 {
+		return up, errors.New("preview supports at most 64 custom headers")
+	}
+	headerBytes := 0
+	for name, value := range up.CustomHeaders {
+		headerBytes += len(name) + len(value)
+		if len(name) > 128 || len(value) > 4096 {
+			return up, errors.New("preview custom header limit exceeded")
+		}
+	}
+	if headerBytes > 32768 {
+		return up, errors.New("preview custom header limit exceeded")
+	}
 	switch up.ServiceType {
 	case "openai", "claude", "responses", "gemini", "copilot":
 	default:
@@ -89,6 +104,13 @@ func Build(up config.UpstreamConfig, input Input) (Result, error) {
 	result := Result{SourceProtocol: input.Protocol, Effects: []Effect{}, Boundaries: []string{"single sample; fields marked no_effect_for_sample may affect other inputs", "no scheduling, automatic model/effort selection, learned compatibility, session history, transport or upstream validation", "first configured endpoint and key; no network or OAuth refresh"}}
 	if len(input.Body) == 0 || len(input.Body) > MaxSampleBytes || !json.Valid(input.Body) {
 		return result, errors.New("sample must be valid JSON within 32768 bytes")
+	}
+	var sample map[string]json.RawMessage
+	if json.Unmarshal(input.Body, &sample) != nil || sample == nil {
+		return result, errors.New("sample must be a JSON object")
+	}
+	if previous, exists := sample["previous_response_id"]; exists && string(previous) != "null" && string(previous) != `""` {
+		return result, errors.New("offline preview cannot read or create conversation history; remove previous_response_id")
 	}
 	var err error
 	up, err = ApplyDraft(up, input.Draft)
@@ -234,9 +256,14 @@ func build(up *config.UpstreamConfig, input Input, key string) (*http.Request, [
 	case "gemini":
 		req, err = gemini.BuildRequestPreview(c, up, key, input.Body, input.Model, input.Stream)
 	case "responses":
-		req, _, err = (&providers.ResponsesProvider{}).ConvertBodyToProviderRequest(c, up, key, input.Body, path)
+		req, _, err = (&providers.ResponsesProvider{SessionManager: session.NewEphemeralSessionManager(time.Hour, 100, 100000)}).ConvertBodyToProviderRequest(c, up, key, input.Body, path)
 	case "messages":
-		provider := providers.GetProvider(up.ServiceType)
+		var provider providers.Provider
+		if up.ServiceType == "responses" {
+			provider = &providers.ResponsesProvider{SessionManager: session.NewEphemeralSessionManager(time.Hour, 100, 100000)}
+		} else {
+			provider = providers.GetProvider(up.ServiceType)
+		}
 		if provider == nil {
 			return nil, nil, errors.New("unsupported provider")
 		}
@@ -266,12 +293,24 @@ func sanitizeBody(body []byte, up config.UpstreamConfig, key string) []byte {
 	if json.Unmarshal(body, &value) != nil {
 		return []byte(`{"preview":"body omitted: invalid JSON"}`)
 	}
-	values := []string{key}
-	for _, v := range up.CustomHeaders {
-		if v != "" {
-			values = append(values, v)
+	values := []string{}
+	add := func(secret string) {
+		if secret == "" {
+			return
+		}
+		values = append(values, secret, url.QueryEscape(secret), url.PathEscape(secret))
+		encoded, _ := json.Marshal(secret)
+		if len(encoded) >= 2 {
+			values = append(values, string(encoded[1:len(encoded)-1]))
 		}
 	}
+	add(key)
+	for _, v := range up.CustomHeaders {
+		if v != "" {
+			add(v)
+		}
+	}
+	sort.SliceStable(values, func(i, j int) bool { return len(values[i]) > len(values[j]) })
 	var scrub func(any) any
 	scrub = func(v any) any {
 		switch x := v.(type) {
