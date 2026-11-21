@@ -857,6 +857,7 @@ func (p *ClaudeProvider) ConvertToClaudeResponse(providerResp *types.ProviderRes
 				convertedBody := convertReasoningContentToThinking(providerResp.Body)
 				if err := json.Unmarshal(convertedBody, &claudeResp); err == nil {
 					normalizeClaudeResponse(&claudeResp)
+					types.CaptureUsageSource(claudeResp.Usage, "messages", providerResp.Body)
 					return &claudeResp, nil
 				}
 			}
@@ -864,6 +865,7 @@ func (p *ClaudeProvider) ConvertToClaudeResponse(providerResp *types.ProviderRes
 	}
 
 	normalizeClaudeResponse(&claudeResp)
+	types.CaptureUsageSource(claudeResp.Usage, "messages", providerResp.Body)
 	return &claudeResp, nil
 }
 
