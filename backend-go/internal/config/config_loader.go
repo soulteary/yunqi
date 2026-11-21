@@ -1517,7 +1517,7 @@ func (cm *ConfigManager) saveConfigLocked(config Config) error {
 		return err
 	}
 
-	if err := os.WriteFile(cm.configFile, data, 0600); err != nil { // 仅所有者可读写，保护敏感配置
+	if err := writeConfigAtomically(cm.configFile, data); err != nil { // 仅所有者可读写，保护敏感配置
 		return err
 	}
 	cm.recordSelfWrite(data)
