@@ -239,3 +239,62 @@ func TestExecutorTerminalGuardEveryOutlet(t *testing.T) {
 		}
 	}
 }
+
+func TestTerminalParserJSONLinesStateRemainsBounded(t *testing.T) {
+	line := "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n"
+	source := &upstreamTerminalBody{ReadCloser: io.NopCloser(strings.NewReader(strings.Repeat(line, 50000) + "data: [DONE]\n")), protocol: "chat"}
+	buffer := make([]byte, 4096)
+	for {
+		_, err := source.Read(buffer)
+		if len(source.data) != 0 || source.dataBytes != 0 || len(source.remainder) > len(line) {
+			t.Fatalf("JSON-lines retained stream: data=%d bytes=%d tail=%d", len(source.data), source.dataBytes, len(source.remainder))
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if terminal, _ := source.state(); !terminal {
+		t.Fatal("terminal missing")
+	}
+	writer := &streamTerminalWriter{ResponseWriter: newBranchRecorder(t), source: source, protocol: "chat"}
+	for i := 0; i < 50000; i++ {
+		if _, err := writer.Write([]byte(line)); err != nil {
+			t.Fatal(err)
+		}
+		if writer.buffer.Len() > len(line) {
+			t.Fatal("writer retained JSON-lines stream")
+		}
+	}
+}
+
+func newBranchRecorder(t *testing.T) httpbridge.ResponseWriter {
+	t.Helper()
+	c, _ := httpbridge.TestContext(httptest.NewRecorder())
+	return httpbridge.Writer(c)
+}
+
+func TestTerminalParserRejectsOversizedUnterminatedFrames(t *testing.T) {
+	for _, raw := range []string{"data: " + strings.Repeat("x", terminalParserBufferLimit+1), strings.Repeat("data: {\n", terminalParserBufferLimit/8+1)} {
+		source := &upstreamTerminalBody{ReadCloser: io.NopCloser(strings.NewReader(raw)), protocol: "chat"}
+		if _, err := io.Copy(io.Discard, source); !errors.Is(err, ErrStreamUnexpectedEOF) {
+			t.Fatalf("oversized source accepted: %v", err)
+		}
+		if len(source.remainder) > terminalParserBufferLimit || source.dataBytes > terminalParserBufferLimit {
+			t.Fatal("source limit exceeded")
+		}
+	}
+	source := &upstreamTerminalBody{protocol: "chat"}
+	w := httptest.NewRecorder()
+	c, _ := httpbridge.TestContext(w)
+	writer := &streamTerminalWriter{ResponseWriter: httpbridge.Writer(c), source: source, protocol: "chat"}
+	_, _ = writer.Write([]byte(terminalGuardPrefixes["chat"]))
+	if _, err := writer.Write([]byte("data: " + strings.Repeat("x", terminalParserBufferLimit+1))); !errors.Is(err, ErrStreamUnexpectedEOF) {
+		t.Fatalf("oversized writer accepted: %v", err)
+	}
+	if writer.buffer.Len() > terminalParserBufferLimit || strings.Contains(w.Body.String(), `"finish_reason":"stop"`) {
+		t.Fatal("oversized frame produced success or retained bytes")
+	}
+}

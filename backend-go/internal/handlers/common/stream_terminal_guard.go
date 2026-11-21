@@ -17,6 +17,7 @@ import (
 )
 
 const unconfirmedTerminalTailLimit = 256 << 10
+const terminalParserBufferLimit = 4 << 20
 
 type upstreamTerminalBody struct {
 	io.ReadCloser
@@ -27,12 +28,18 @@ type upstreamTerminalBody struct {
 	event     string
 	terminal  bool
 	failed    bool
+	dataBytes int
+	parseErr  error
 }
 
 func (r *upstreamTerminalBody) Read(p []byte) (int, error) {
 	n, err := r.ReadCloser.Read(p)
 	r.mu.Lock()
 	r.remainder += string(p[:n])
+	if len(r.remainder) > terminalParserBufferLimit {
+		r.parseErr = fmt.Errorf("%w: upstream_frame_limit", ErrStreamUnexpectedEOF)
+		r.remainder = ""
+	}
 	for {
 		index := strings.IndexByte(r.remainder, '\n')
 		if index < 0 {
@@ -48,10 +55,17 @@ func (r *upstreamTerminalBody) Read(p []byte) (int, error) {
 		}
 		r.line("")
 	}
+	parseErr := r.parseErr
 	r.mu.Unlock()
+	if parseErr != nil {
+		return 0, parseErr
+	}
 	return n, err
 }
 func (r *upstreamTerminalBody) line(line string) {
+	if r.parseErr != nil {
+		return
+	}
 	line = strings.TrimSuffix(line, "\r")
 	if line == "" {
 		payload := strings.Join(r.data, "\n")
@@ -59,6 +73,7 @@ func (r *upstreamTerminalBody) line(line string) {
 		r.terminal = r.terminal || terminal
 		r.failed = r.failed || failed
 		r.data = nil
+		r.dataBytes = 0
 		r.event = ""
 		return
 	}
@@ -67,13 +82,22 @@ func (r *upstreamTerminalBody) line(line string) {
 	}
 	if strings.HasPrefix(line, "data:") {
 		payload := strings.TrimPrefix(strings.TrimPrefix(line, "data:"), " ")
-		r.data = append(r.data, payload)
 		// Some Chat providers use JSON-per-line without blank separators.
-		if json.Valid([]byte(payload)) || strings.TrimSpace(payload) == "[DONE]" {
+		if len(r.data) == 0 && (json.Valid([]byte(payload)) || strings.TrimSpace(payload) == "[DONE]") {
 			terminal, failed := streamFrameTerminal(payload, r.event, r.protocol, true)
 			r.terminal = r.terminal || terminal
 			r.failed = r.failed || failed
+			r.event = ""
+			return
 		}
+		r.dataBytes += len(line) + 1
+		if r.dataBytes > terminalParserBufferLimit {
+			r.parseErr = fmt.Errorf("%w: upstream_frame_limit", ErrStreamUnexpectedEOF)
+			r.data = nil
+			r.dataBytes = 0
+			return
+		}
+		r.data = append(r.data, payload)
 	}
 }
 func (r *upstreamTerminalBody) state() (bool, bool) {
@@ -102,23 +126,47 @@ func (w *streamTerminalWriter) Write(data []byte) (int, error) {
 	if w.rejected != nil {
 		return len(data), nil
 	}
-	w.buffer.Write(data)
-	for {
-		raw := w.buffer.Bytes()
-		end := bytes.Index(raw, []byte("\n\n"))
-		width := 2
-		if crlf := bytes.Index(raw, []byte("\r\n\r\n")); crlf >= 0 && (end < 0 || crlf < end) {
-			end = crlf
-			width = 4
+	for offset := 0; offset < len(data); {
+		endOffset := offset + (32 << 10)
+		if endOffset > len(data) {
+			endOffset = len(data)
 		}
-		if end < 0 {
-			break
+		w.buffer.Write(data[offset:endOffset])
+		offset = endOffset
+		for {
+			raw := w.buffer.Bytes()
+			end := bytes.Index(raw, []byte("\n\n"))
+			width := 2
+			if crlf := bytes.Index(raw, []byte("\r\n\r\n")); crlf >= 0 && (end < 0 || crlf < end) {
+				end = crlf
+				width = 4
+			}
+			if end < 0 {
+				// Flush complete JSON-per-line data without waiting for a blank separator.
+				if newline := bytes.LastIndexByte(raw, '\n'); newline >= 0 {
+					payload, _ := streamFrameData(raw[:newline+1])
+					if streamPayloadValid(payload) {
+						end = newline
+						width = 1
+					}
+				}
+			}
+			if end < 0 {
+				break
+			}
+			if end+width > terminalParserBufferLimit {
+				return 0, w.reject("upstream_frame_limit")
+			}
+			frame := append([]byte(nil), w.buffer.Next(end+width)...)
+			if err := w.frame(frame); err != nil {
+				return 0, err
+			}
 		}
-		frame := append([]byte(nil), w.buffer.Next(end+width)...)
-		if err := w.frame(frame); err != nil {
-			return 0, err
+		if w.buffer.Len() > terminalParserBufferLimit {
+			return 0, w.reject("upstream_frame_limit")
 		}
 	}
+
 	return len(data), nil
 }
 func (w *streamTerminalWriter) Unwrap() http.ResponseWriter          { return w.ResponseWriter }
@@ -198,6 +246,12 @@ func (w *streamTerminalWriter) finish() error {
 		}
 	}
 	terminal, failed := w.source.state()
+	w.source.mu.Lock()
+	parseErr := w.source.parseErr
+	w.source.mu.Unlock()
+	if parseErr != nil {
+		return w.reject("upstream_frame_limit")
+	}
 	if !terminal {
 		return w.reject("upstream_eof")
 	}
