@@ -6,15 +6,15 @@
 
 ## 1. 背景与目标
 
-| 环节 | 现状 | 缺口 |
+| 环节 | 引入 credential-masker 前的处理 | 当时的缺口 |
 |---|---|---|
 | 结构字段脱敏 | `utils.MaskAPIKey`、`channel_log_helper.go` `KeyMask`/`ProxyKeyMask`（日志字段级掩码） | 键名已知的结构性字段，**内容级无扫描** |
 | 错误分类 | `handlers/common/failover.go` moderation 类识别（用于 failover 决策） | 不做内容改写 |
 | 红线 | AGENTS.md「记录或展示日志时注意脱敏」是人工纪律 | 无代码兜底 |
 
-真实缺口：上游错误消息回显的 Authorization / 自家网关密钥、body 中粘贴泄漏的 key，目前会原样进日志与 trace 详情页。
+引入 credential-masker 前，上游错误消息中的 Authorization、网关密钥和正文中粘贴的 key 可能原样进入日志与 trace 详情页。当前日志写入路径通过 `MaskForLog` 扫描这些内容；下面说明其范围和限制。
 
-**目标**：以最低成本补上内容级凭据掩码的安全底线，同时构建可扩展的 guardrail 链架构。
+**目标**：在日志写入前掩码凭据，并为后续检查提供 `Guardrail` 接口。
 
 ## 2. 核心设计决策
 
@@ -132,7 +132,7 @@ type Guardrail interface {
 | 渠道级开关 | 从配置中读取 per-channel guardrail 白/黑名单 | — |
 | 管理端 UI | 暴露注册表列表 + 开关 + 命中统计 | — |
 
-新增 guardrail 的标准姿势：实现 `Guardrail` 接口 → 在 `main.go` 初始化时 `Register` → 补单测。无需修改既有 guardrail 或调度逻辑。
+新增 guardrail 的步骤：实现 `Guardrail` 接口 → 在 `bootstrap_config.go` 初始化时 `Register` → 补单测。无需修改既有 guardrail 或调度逻辑。
 
 ## 8. 文件索引
 
@@ -146,4 +146,4 @@ type Guardrail interface {
 | `internal/handlers/common/guardrails.go` | 日志脱敏统一入口 `MaskForLog`（转发路径无挂载点） |
 | `internal/handlers/common/request.go` | 请求体日志（实际/原始）写入前经 `MaskForLog` 脱敏 |
 | `internal/handlers/common/channel_log_helper.go` | 渠道错误日志落库前经 `MaskForLog` 脱敏 |
-| `main.go` | 初始化注册 + 配置热重载联动 |
+| `bootstrap_config.go` | 初始化注册 + 配置热重载联动 |

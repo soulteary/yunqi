@@ -16,10 +16,10 @@
 相关支撑包/文件（在 healthcheck 之外）：
 - `backend-go/internal/config/health_check.go` — 保活策略配置类型与解析 `ResolveHealthCheckPolicy`
 - `backend-go/internal/upstreamprobe/volcengine.go` — 火山 Plan 数据面共享探针（与 autopilot 共用）
-- `backend-go/internal/upstreamprobe/balance.go` — 上游余额探测器（balanceprobe 姊妹功能，见 §10）
+- `backend-go/internal/upstreamprobe/balance.go` — 上游余额探测器（balanceprobe 余额探测，见 §10）
 - `backend-go/internal/metrics/sqlite_store_key_health.go` — `key_health` 表持久化（`KeyHealthRecord`）
 - `backend-go/internal/metrics/model_circuit.go` — 模型级熔断追踪器 `ModelCircuitTracker`
-- `backend-go/main.go:104-176、1043-1048` — L1Fetcher 接线、火山探针分流、拉黑/喂熔断回调注入
+- `backend-go/background.go` 的 `startHealthChecks` — L1Fetcher 注册、火山探针分流、拉黑与熔断回调注入
 - `backend-go/internal/scheduler/recovery.go` + `internal/config/config.go` — 渠道/Key 恢复
 - `backend-go/internal/autopilot/volcengine_coding_plan.go` — 火山管控面签名客户端（用量/套餐识别，凭证回填）
 
@@ -31,7 +31,7 @@
 - `CheckKindL1 = "l1"`、`CheckKindL2 = "l2"`、`CheckKindL2ModelPrefix = "l2:"`
 - 状态：`StatusOK = "ok"`、`StatusAuthFailed = "auth_failed"`、`StatusError = "error"`
 - 到期判定只看 L1 记录（`groupL1Records` 只保留 `CheckKind==l1`）。
-- `key_health` 表另承载姊妹功能余额探测的 `check_kind="balance"` 记录（写入方是 `internal/balanceprobe`，见 §10；healthcheck 自身的到期判定与管理视图读全表时与其共存互不干扰）。
+- `key_health` 表另承载余额探测的 `check_kind="balance"` 记录（写入方是 `internal/balanceprobe`，见 §10；healthcheck 自身的到期判定与管理视图读全表时与其共存互不干扰）。
 
 ### 2.2 L1 探针（`check.go:checkKeyL1`, line 151）
 - 目的：带单个 key 拉取上游模型列表，验证账号/凭证可达性。六类渠道通用（`messages/chat/responses/gemini/images/vectors`）。
@@ -103,9 +103,9 @@
 - **L1/L2 同周期去重**：`RealCallVerified=true` 时跳过等价 L2（火山 L1 已是真实调用），改走稀疏探测；`RealCallVerified=false`（通用 `/v1/models`）L1 成功后仍执行 L2（非火山不回归）。
 - **同能力探测去重**：L2 经 `CapabilityProbeLedger` 按 `(siteIdentity, groupIdentity, protocol)` 抢占，同能力多 key 每周期只真实探测一次（见 §2.3）。
 
-### 3.6 L1Fetcher 接线与火山分流（`main.go:142 healthCheckL1Fetcher`）
+### 3.6 L1Fetcher 接线与火山分流（`discovery.go` 的 `healthCheckL1Fetcher`）
 - 命中 `IsVolcenginePlanBaseURL` → 走 `VolcenginePlanL1Probe`，用内置 manifest 候选动态选模型，返回 `RealCallVerified=true`。
-- 否则走 `channelModelsHandlerFetcher`（各渠道 `GetChannelModels` handler 的 httptest 包装，`main.go:104`），`RealCallVerified=false`；请求体透传 `learnedClientFingerprint`（`main.go:116`），六类 `GetChannelModels` 在渠道配置值或请求值为真时给 models 请求加 Claude Code 探针头（claude serviceType 默认带）。含义：L1 的 401/403 判定存在「客户端指纹风控」第三态背景，未学习指纹的渠道首次仍可能裸试被拒（由 discovery 学习后自动恢复）。被包装的 `GetChannelModels` handler 本身对火山套餐已改走管控面套餐清单（158d9c12，见 §9.1 与 `autopilot.md` §2.11）。
+- 否则走 `channelModelsHandlerFetcher`（各渠道 `GetChannelModels` handler 的 httptest 包装，`discovery.go`），`RealCallVerified=false`；请求体透传 `learnedClientFingerprint`（`discovery.go`），六类 `GetChannelModels` 在渠道配置值或请求值为真时给 models 请求加 Claude Code 探针头（claude serviceType 默认带）。含义：L1 的 401/403 判定存在「客户端指纹风控」第三态背景，未学习指纹的渠道首次仍可能裸试被拒（由 discovery 学习后自动恢复）。被包装的 `GetChannelModels` handler 本身对火山套餐已改走管控面套餐清单（158d9c12，见 §9.1 与 `autopilot.md` §2.11）。
 
 ## 4. 探针结果如何影响 scheduler 的选择/熔断/恢复
 
@@ -113,7 +113,7 @@
 `KeyHealthRecord`（`metrics/sqlite_store_key_health.go:9`）：`ChannelType/ChannelID/KeyMask/CheckKind/LastCheckAt/LastStatus/ConsecutiveFailures/LatencyMs/ModelCount/Detail`。表 `key_health` 主键 `(channel_type, channel_id, key_mask, check_kind)`，UPSERT 语义。该表**仅供保活自身到期判定和管理 API 展示**，不直接被 scheduler 读取。
 
 ### 4.2 探针失败 → 熔断（间接）
-探针失败通过 `main.go:939` 注入的 `recordFailure` 回调，喂 `channelScheduler.RecordFailure(baseURL, apiKey, serviceType, kind)`（`delegates.go:24`）→ `MetricsManager.RecordFailure` 写入 Key 级熔断滑动窗口；同时写渠道日志（`RecordChannelLogWithSource`，`RequestSource=healthcheck`，`metrics/channel_log.go:65`）。
+探针失败通过 `background.go` 的 `startHealthChecks` 注入的 `recordFailure` 回调，喂 `channelScheduler.RecordFailure(baseURL, apiKey, serviceType, kind)`（`delegates.go:24`）→ `MetricsManager.RecordFailure` 写入 Key 级熔断滑动窗口；同时写渠道日志（`RecordChannelLogWithSource`，`RequestSource=healthcheck`，`metrics/channel_log.go:65`）。
 
 scheduler 选渠道读的是运行时熔断/健康度，探针失败与真实请求失败共同累积到同一 breaker：
 - `channelCircuitState` → `GetChannelCircuitStateMultiURL`（`select.go:806`）
@@ -130,7 +130,7 @@ scheduler 选渠道读的是运行时熔断/健康度，探针失败与真实请
 - 稀疏 L2 探针通过 `modelCircuitLookup` **读取**该 tracker 判断哪些模型需优先探测恢复；真实请求路径通过 `recordModelCircuitFailure/Success`（`upstream_failover.go:1768/1785`）**写入**。保活探针本身通过 `recordFailure` 喂的是 Key 级 breaker，不直接写模型级 tracker。
 
 ### 4.4 恢复（`scheduler/recovery.go` + `config/config.go`）
-- 定时恢复：`RunScheduledRecoveries`（UTC 0/8/16 点，`main.go` goroutine 驱动）与 `RunDueRecoveries`（到 `RecoverAt` 即恢复）。
+- 定时恢复：`RunScheduledRecoveries`（UTC 0/8/16 点，`background_recovery.go` 中的后台任务驱动）与 `RunDueRecoveries`（到 `RecoverAt` 即恢复）。
 - `restoreKeysForKind`（`recovery.go:187`）：只恢复 `IsAutoRecoverableDisabledReason` 原因的 key（余额/额度类），`RestoreDisabledKeys` 移回 APIKeys，`transitions.RestoreDisabledKeysAndActivate` 编排 `MoveKeyToHalfOpen` + 激活渠道；同时 `RestoreExpiredKeyModels` 清理到期的 `(Key,模型)` 限制。
 - 手动恢复：`ResumeChannelWithKind`（`handlers/channel_metrics_handler.go:975`）→ `transitions.RestoreAllAndReset` = `RestoreAllKeys`（恢复全部禁用+手动暂停 key）+ `ResetChannelMetrics`。
 - 认证失败（`authentication_error`）无 `RecoverAt`，必须手动恢复，不参与定时自动恢复。
@@ -160,7 +160,7 @@ scheduler 选渠道读的是运行时熔断/健康度，探针失败与真实请
 
 healthcheck 不直接依赖 provider 适配层，而是通过 `internal/upstreamprobe`（中性共享包）与火山交互：
 
-- **数据面探针**（推理 key 可用性）：`upstreamprobe.VolcenginePlanL1Probe` / `ProbeVolcenginePlan`。healthcheck L1（`main.go:145`）与 autopilot 新渠道验证（`autopilot/verify_endpoint.go:472 verifyVolcenginePlanEndpoint`）共用同一实现，避免请求特征漂移。请求走真实 `/messages` 或 `/chat/completions`，非管控面。
+- **数据面探针**（推理 key 可用性）：`upstreamprobe.VolcenginePlanL1Probe` / `ProbeVolcenginePlan`。healthcheck L1（`discovery.go` 的 `healthCheckL1Fetcher`）与 autopilot 新渠道验证（`autopilot/verify_endpoint.go:472 verifyVolcenginePlanEndpoint`）共用同一实现，避免请求特征漂移。请求走真实 `/messages` 或 `/chat/completions`，非管控面。
 - **管控面**（套餐识别/模型发现/用量，凭证回填）：`autopilot/volcengine_coding_plan.go volcenginePlanClient`（HMAC 签名），供用量刷新→`TryRestoreDisabledKeysByUsage` 恢复。
 - **内置 manifest**（`config/builtin_models_manifest.go`）：火山 Agent/Coding Plan 条目 `DisableProbe=true`（普通 key 无法用 `/v1/models` 探测），保活 L1 探针成功后用 `volcengineAgentPlanModelIDs`/`volcengineCodingPlanModelIDs` 生成模型清单。
 - **AFP 定价**（`config/volcengine_afp_pricing.go`）：`ResolveVolcengineAFPCost` 供稀疏 L2 选模型按成本排序，含输入分段与活动倍率、别名解析。**输入分段系数自 2026-09-01（`afpSegmentCutoff`）取消**：分界前按 ≤32k×0.67 / ≤128k×1 / >128k×2，分界后统一 ×1（官方取消输入长度分段）。目录已同步至 2026-09-20 官方文档：新增 `glm-5.3-flash` / `deepseek-v4.1-flash` / `kimi-k2.8-preview` / `doubao-embedding-vision`，移除已下线的 `glm-5.2`，修正 kimi-k2.7-code 与 deepseek-v4-pro 历史活动边界（6/10 18:00 起、7/15 00:00 止）。
@@ -305,7 +305,7 @@ healthcheck 不直接依赖 provider 适配层，而是通过 `internal/upstream
 
 - **无分时段策略**：高峰/低谷未按时间窗口自动降/升预算。
 
-## 10. 姊妹功能：上游余额探测（balanceprobe）
+## 10. 上游余额探测（balanceprobe）
 
 2026-10-03 起与保活验证并存的渠道级探测功能，**独立包** `backend-go/internal/balanceprobe/`（探测器在 `internal/upstreamprobe/balance.go`，协议无关）。分工：healthcheck 探测「渠道是否活着」，balanceprobe 探测「key 还剩多少钱」。
 

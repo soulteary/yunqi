@@ -1,17 +1,17 @@
 # 验证发布产物
 
-Yunqi 的正式 Release 使用 [Sigstore](https://www.sigstore.dev/) keyless signing 对 checksums 清单签名。通过验证签名，可以确认发布产物确实由 `BenedictKing/yunqi` 仓库的 GitHub Actions 工作流构建，而非被篡改或来自非官方渠道。
+当前自动发布暂停，见[发布状态](release.md)。本页保留发布恢复后的核验步骤；只有对应 Release 提供校验和与签名文件后，才适用以下命令。签名身份和 Windows 签名要求应以该版本的发布说明为准。
 
-Windows 服务二进制同时使用 SignPath Foundation 做 Authenticode 代码签名。Sigstore 用于验证 Release 清单和 CI 来源，Authenticode 用于让 Windows 验证安装包发布者和文件完整性。
+Sigstore 验证用于确认校验和清单由预期的工作流身份签名，再通过 SHA256 检查二进制是否与清单一致。以下示例假设发布工作流恢复为 `soulteary/yunqi` 的 `.github/workflows/release.yml`；实际使用时需核对对应 Release 的身份。
 
 ## 工作原理
 
-1. CI 构建时，GitHub Actions 通过 OIDC 协议向 Sigstore 的 Fulcio CA 申请**短期签名证书**（有效期约 10 分钟），证书中绑定了 GitHub Actions 身份信息。
+1. CI 构建时，GitHub Actions 通过 OIDC 协议向 Sigstore 的 Fulcio CA 申请**短期签名证书**，证书中绑定了 GitHub Actions 身份信息。
 2. `cosign` 使用该证书对 `checksums.txt` 文件签名，生成 Sigstore bundle（`.sigstore.json`）。
 3. 签名记录写入 Rekor 公开透明度日志，任何人都可审计。
 4. 用户验证时，cosign 从 bundle 中恢复证书信息，校验签名是否来自预期的 GitHub Actions 身份。
 
-整个过程**不需要任何密钥管理**，也不需要项目维护者存储或轮换密钥。
+keyless 签名不要求维护者长期保存签名私钥，但仍需维护工作流权限和发布身份。
 
 ## 安装 cosign
 
@@ -49,7 +49,7 @@ choco install cosign
 ### 2. 验证 checksums 清单签名
 
 ```bash
-VERSION=v2.7.12  # 替换为要验证的版本
+VERSION=vX.Y.Z  # 替换为要验证的版本
 
 cosign verify-blob \
   --bundle checksums.txt.sigstore.json \
@@ -60,12 +60,12 @@ cosign verify-blob \
 
 验证成功时 cosign 输出 `Verified checksums.txt` 并返回 exit code 0。
 
-如果不确定版本号，可使用正则匹配：
+优先按实际标签核验。仅检查发布身份时，也可使用以下仓库限定的正则；它不会核对你选择的具体版本：
 
 ```bash
 cosign verify-blob \
   --bundle checksums.txt.sigstore.json \
-  --certificate-identity-regexp "^https://github\.com/BenedictKing/yunqi/\.github/workflows/release\.yml@refs/tags/v.*$" \
+  --certificate-identity-regexp "^https://github\.com/soulteary/yunqi/\.github/workflows/release\.yml@refs/tags/v.*$" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
   checksums.txt
 ```
@@ -89,7 +89,7 @@ shasum -a 256 yunqi-darwin-arm64
 
 ### 4. 验证 Windows Authenticode 签名
 
-Windows 服务二进制可用 PowerShell 验证 SignPath 代码签名：
+若该 Release 声明提供 Authenticode 签名，可用 PowerShell 检查 Windows 二进制：
 
 ```powershell
 $signature = Get-AuthenticodeSignature ".\yunqi-windows-amd64.exe"
@@ -124,4 +124,4 @@ $signature.SignerCertificate.Subject
 - [Rekor 透明度日志](https://docs.sigstore.dev/logging/overview/)
 - [SLSA 供应链安全框架](https://slsa.dev/)
 
-当前产物为 `yunqi-{linux,darwin,windows}-{amd64,arm64}`（Windows 后缀 `.exe`）以及对应校验文件。旧桌面安装包及 MSIX 不再生成。
+归档发布流程规划的产物为 `yunqi-{linux,darwin,windows}-{amd64,arm64}`（Windows 后缀 `.exe`）以及对应校验文件。旧桌面安装包及 MSIX 不再生成。

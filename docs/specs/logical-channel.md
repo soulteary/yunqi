@@ -318,7 +318,7 @@ LogicalChannel 持久化派生标签（`HealthTag`/`QualityTag`/`CostTag`/`Capab
 
 文件：`backend-go/internal/handlers/logicalchannels/logical_channels.go`
 
-路由注册：`backend-go/main.go`（行 1426）
+路由注册：`backend-go/routes_management.go` 的 `logicalchannels.RegisterRoutes`
 
 | 方法 | 路径 | 说明 |
 |---|---|---|

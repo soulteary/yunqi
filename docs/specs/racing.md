@@ -41,11 +41,11 @@
 2. 回退：缓存空 → `SelectChannelWithOptions` 按 FailedRoutes（已用路由）重选（纯跨渠道）。
 3. 执行：候选反查渠道构造 SelectionResult + pin（`WithExecutionPin` 经 `WithSelectionTrace` 透传），reason 记 `racing_shadow`。
 
-## 裁决与分支治理
+## 赢家裁决与分支清理
 
 - **提交闸门** `racing.Gate`（claim-once）：claim 点在 preflight 首字确认后 / 非流式完整响应校验后、写客户端之前；胜者 claim 即取消其余分支（ctx 级），败者 claim 失败以 `ErrRacingSuperseded` 收尾。主分支返回后的编排器止血同样只取消非赢家分支（`CancelExcept(ClaimedBy())`）——影子已 claim 时必须保留赢家透传（固定 `CancelExcept(0)` 会把赢家一并取消、客户端流被切断 context canceled，248deb01 回归修复）；无 claim（主真实失败）时保留在飞影子，由结算路径兜底接管。
 - **分支写出隔离** `racingBranchWriter`：主/影子分支各挂独立分支 writer（pre-commit 头/状态/体写私有缓冲），claim 赢家 Commit 时一次性桥接到真实客户端 writer 并转透传，败者 Discard 后写出静默丢弃——真实 writer 只被赢家触碰（构造保证的单写者，取代早期"影子回填主 Writer + meta 锁串行化 echo 头"的约定式模型）。
-- **败者治理**：不计失败指标、不熔断、不拉黑、不标 URL 失败、不参与自学习（工具调用/严重度/上下文棘轮）；唯一例外是质量闸门让出——伪标记已在败者分支自身首包缓冲实测命中（已完成观察，非部分流推断），让出时单独计一次白名单负反馈（`notePseudoToolCallYield`，见 tool-call-capability.md §4.5）。渠道日志终态 `racing_lost` + `racingStatus=lost`，赢家 `racingStatus=won`。影子真实上游错误（超时/500/拉黑）仍照常记账。主/影子尝试共享请求 correlation ID，渠道日志按用户请求折叠为一行（「N 次尝试」徽章，见 web-ui-dialogs.md §6）。
+- **未获胜分支的处理**：不计失败指标、不熔断、不拉黑、不标 URL 失败、不参与自学习（工具调用/严重度/上下文棘轮）；唯一例外是质量闸门让出——伪标记已在败者分支自身首包缓冲实测命中（已完成观察，非部分流推断），让出时单独计一次白名单负反馈（`notePseudoToolCallYield`，见 tool-call-capability.md §4.5）。渠道日志终态 `racing_lost` + `racingStatus=lost`，赢家 `racingStatus=won`。影子真实上游错误（超时/500/拉黑）仍照常记账。主/影子尝试共享请求 correlation ID，渠道日志按用户请求折叠为一行（「N 次尝试」徽章，见 web-ui-dialogs.md §6）。
 - **防误判赢家**：被取消的影子可能以空流 EOF → 内部轮转 → context.Canceled + Handled=true 收尾，pickWinner 判据为 `Handled && LastError == nil`；cancel 连带的空流响应直接按败出终止。
 - 影子赢时分支 gin keys 回拷主 context（responseText/lastUserMessage 不丢）；primary selection 补记 trace 终态（防悬空）。
 - 防放大：每请求最多 maxShadows 条（策略表）；全局并发信号量 12；影子分支内禁递归竞速；X-Channel pin / 含图请求 / 非四对话协议不竞速；**限流热渠道不派影子**（渠道级冷却中或全部 key scope 被限速延迟时该候选被跳过——排名缓存路径绕过调度器冷却过滤，候选构造处兜底，防止 429 风暴中 shadow 放大真实上游消耗）。
@@ -58,14 +58,14 @@
 | `internal/racing/` | 阈值注册表、Gate、信号量、策略表、ErrRacingSuperseded |
 | `internal/config/racing_config.go` | 全局/渠道级开关 + ResolveRacingPolicy + SetRacingEnabled |
 | `internal/handlers/common/racing.go` | 编排器 RunRacingAttempt（武装检查/定时器/影子派发/裁决归并/样本记录） |
-| `internal/handlers/common/multi_channel_failover.go` | 外壳接线（TrySelectedChannelFunc 增加 gin context 参数；AlsoFailedRoutes 并入 failedRoutes） |
+| `internal/handlers/common/multi_channel_failover.go` | 外壳接线（TrySelectedChannelFunc 接收 Fiber context 参数；AlsoFailedRoutes 并入 failedRoutes） |
 | `internal/handlers/common/upstream_failover.go` | echo 头块写出（分支 writer 隔离）、败者分类豁免（先于 isClientSideError）、成功路径 won 标记、日志角色 |
 | `internal/handlers/common/racing_writer.go` | 分支 writer：pre-commit 私有缓冲、赢家 Commit 桥接真实 writer、败者 Discard |
 | `internal/handlers/common/stream_processor.go` + 4 协议 handler | 流式/非流式 claim 点 |
 | `internal/autopilot/racing_candidates.go` | 五元组候选选取 |
-| `main.go` | RacingHub 注入 + `/api/racing/config` |
+| `bootstrap_scheduler.go`、`routes_management.go` | RacingHub 注入及 `/api/racing/config` 路由 |
 
-## 延迟负反馈学习（竞速姊妹机制）
+## 延迟负反馈学习
 
 竞速样本不只驱动阈值，还回流为组合级学习：
 

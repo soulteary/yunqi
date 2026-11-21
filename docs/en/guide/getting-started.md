@@ -3,27 +3,41 @@
 
 ## Installation
 
-### Docker (Recommended)
+Automated publishing is paused. Build from source or use the repository's local Docker build; check [release status](release.md) before expecting downloadable assets.
+
+First clone the repository:
 
 ```bash
-docker run -d \
-  --name yunqi \
-  -p 3000:3000 \
-  -v ./.config:/app/.config \
-  -e PROXY_ACCESS_KEY=your-proxy-key \
-  ghcr.io/soulteary/yunqi:latest
+git clone https://github.com/soulteary/yunqi
+cd yunqi
 ```
 
-### Binary
+### Local Docker Build
 
-Download the binary for your platform from [GitHub Releases](https://github.com/soulteary/yunqi/releases), then run:
+Replace the sample `PROXY_ACCESS_KEY` in `docker-compose.yml`, then start a new deployment:
 
 ```bash
+docker compose up --build -d
+```
+
+This builds `yunqi:local` from the repository. The default service address is `http://localhost:3000`.
+
+### Go Binary Built From Source
+
+With Go 1.26+, Bun and Make installed, run from the repository root:
+
+```bash
+(cd frontend && bun install)
+make build
 export PROXY_ACCESS_KEY=your-proxy-key
-./yunqi
+./dist/yunqi
 ```
 
-The service listens on `http://localhost:3000` by default.
+Replace the example key before starting. The binary listens on port 3000 unless you set `PORT`; persistent files use paths relative to the working directory unless CLI options override them. See [service startup](../../service/README.md) for background operation.
+
+### Published Artifacts
+
+When the desired version is available in [GitHub Releases](https://github.com/soulteary/yunqi/releases), you can download its binary instead. Use a registry image only after confirming that its tag exists. Published artifacts are alternatives to the source build, not prerequisites for it.
 
 ## Core Concepts
 
@@ -49,7 +63,7 @@ A channel represents a configured upstream API connection, including:
 
 ## Admin Console
 
-Visit `http://localhost:3000` and log in with your `ADMIN_ACCESS_KEY`.
+Visit the configured address (port 3000 by default). If `ADMIN_ACCESS_KEY` is set, use it to sign in; otherwise use `PROXY_ACCESS_KEY`, as in the examples above.
 
 From the admin console you can:
 - Add and manage channels
@@ -67,6 +81,4 @@ Channel lists display a nonempty remark first and show the original name on hove
 
 Head to [Client Setup](/en/guide/clients/) to configure Claude Code, Codex CLI / App, or OpenCode; head to [Provider Setup](/en/providers/) to configure each LLM provider.
 
-## Web console
-
-Open the configured service address and port in a browser. Sign in, add and test upstream channels, then use **Service & setup** to generate client configuration. For existing desktop installations see [migration](./desktop/).
+For existing desktop installations see the [migration guide](./desktop/).

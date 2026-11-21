@@ -1,17 +1,17 @@
 # Verifying Release Artifacts
 
-Yunqi releases are signed using [Sigstore](https://www.sigstore.dev/) keyless signing on the checksums manifest. Verifying the signature proves that the release artifacts were built by the `BenedictKing/yunqi` GitHub Actions workflow and have not been tampered with.
+Publishing is paused; see [release status](release.md). The following steps apply after a release provides a checksums manifest and signature bundle. Confirm the actual signing identity and any Windows signing requirements in that release's notes.
 
-Windows service binaries are also Authenticode-signed through the SignPath Foundation. Sigstore verifies the Release manifest and CI origin; Authenticode lets Windows verify installer publisher and file integrity.
+A valid Sigstore signature authenticates the checksums manifest against the expected workflow identity. Checking the binary's SHA256 then confirms that it matches that manifest. The examples assume the restored workflow is `.github/workflows/release.yml` in `soulteary/yunqi`; use the identity recorded for the actual release.
 
 ## How It Works
 
-1. During CI, GitHub Actions requests a **short-lived signing certificate** (valid ~10 minutes) from Sigstore's Fulcio CA via the OIDC protocol. The certificate binds the signing identity to the GitHub Actions workflow.
+1. During CI, GitHub Actions requests a **short-lived signing certificate** from Sigstore's Fulcio CA via the OIDC protocol. The certificate binds the signing identity to the GitHub Actions workflow.
 2. `cosign` signs the `checksums.txt` file with that certificate, producing a Sigstore bundle (`.sigstore.json`).
 3. The signature is recorded in the Rekor public transparency log, which anyone can audit.
 4. When verifying, cosign extracts the certificate from the bundle and checks that the signature matches the expected GitHub Actions identity.
 
-The entire process requires **no key management** from the project maintainers.
+Keyless signing avoids a long-lived signing private key; maintainers still need to manage workflow permissions and the release identity.
 
 ## Installing cosign
 
@@ -49,7 +49,7 @@ Download from [GitHub Releases](https://github.com/soulteary/yunqi/releases):
 ### 2. Verify the checksums manifest signature
 
 ```bash
-VERSION=v2.7.12  # Replace with the target version
+VERSION=vX.Y.Z  # Replace with the target version
 
 cosign verify-blob \
   --bundle checksums.txt.sigstore.json \
@@ -60,12 +60,12 @@ cosign verify-blob \
 
 A successful verification prints `Verified checksums.txt` and returns exit code 0.
 
-If you don't know the exact version, use a regex pattern:
+Prefer the exact release tag. The following repository-scoped regex checks the publishing identity, but does not pin a specific version:
 
 ```bash
 cosign verify-blob \
   --bundle checksums.txt.sigstore.json \
-  --certificate-identity-regexp "^https://github\.com/BenedictKing/yunqi/\.github/workflows/release\.yml@refs/tags/v.*$" \
+  --certificate-identity-regexp "^https://github\.com/soulteary/yunqi/\.github/workflows/release\.yml@refs/tags/v.*$" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
   checksums.txt
 ```
@@ -89,7 +89,7 @@ shasum -a 256 yunqi-darwin-arm64
 
 ### 4. Verify Windows Authenticode signature
 
-You can verify SignPath code signing for Windows service binaries with PowerShell:
+If a release promises Authenticode signing, verify its Windows binary with PowerShell:
 
 ```powershell
 $signature = Get-AuthenticodeSignature ".\yunqi-windows-amd64.exe"
@@ -124,4 +124,4 @@ $signature.SignerCertificate.Subject
 - [Rekor Transparency Log](https://docs.sigstore.dev/logging/overview/)
 - [SLSA Supply Chain Security](https://slsa.dev/)
 
-Current assets are `yunqi-{linux,darwin,windows}-{amd64,arm64}` (with `.exe` on Windows), their checksum sidecars and the consolidated signed manifest. Desktop installers and MSIX packages are no longer generated.
+The archived workflow targets `yunqi-{linux,darwin,windows}-{amd64,arm64}` (with `.exe` on Windows), their checksum sidecars and the consolidated signed manifest. Desktop installers and MSIX packages are no longer generated.

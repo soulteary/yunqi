@@ -48,9 +48,9 @@ Channels   (Claude/OpenAI/Gemini/...)
 | 模块 | 依赖 | 被依赖 |
 |------|------|--------|
 | LogicalChannel | config, handlers | frontend, scheduler |
-| Autopilot | config, scheduler, metrics, ratelimit, keypool, handlers/common | main.go |
-| New-API Integration | autopilot, config, handlers | main.go, frontend |
-| Healthcheck | config, metrics, scheduler, upstreamprobe, handlers/common | main.go |
+| Autopilot | config, scheduler, metrics, ratelimit, keypool, handlers/common | bootstrap_autopilot.go |
+| New-API Integration | autopilot, config, handlers | routes_autopilot.go, frontend |
+| Healthcheck | config, metrics, scheduler, upstreamprobe, handlers/common | background.go |
 
 ## 3. 关键交互边界
 
@@ -64,12 +64,12 @@ Channels   (Claude/OpenAI/Gemini/...)
 
 | 交互点 | 位置 | 方向 |
 |--------|------|------|
-| `SetCandidateFilterProvider` | `main.go:788` | autopilot → scheduler |
-| `SetModelSupportResolverProvider` | `main.go:935` | autopilot → scheduler |
-| `SetEndpointPolicyProviderHook` | `main.go:829` | autopilot → handlers/common |
-| `SetNotifyEndpointResultHook` | `main.go:854` | handlers/common → autopilot |
-| `SetRoutingOutcomeRecorderHook` | `main.go:813` | handlers/common → autopilot |
-| `SetAttemptRecorderHook` | `main.go:819` | handlers/common → autopilot |
+| `SetCandidateFilterProvider` | `bootstrap_scheduler.go` | autopilot → scheduler |
+| `SetModelSupportResolverProvider` | `bootstrap_scheduler.go` | autopilot → scheduler |
+| `SetEndpointPolicyProviderHook` | `bootstrap_scheduler.go` | autopilot → handlers/common |
+| `SetNotifyEndpointResultHook` | `bootstrap_scheduler.go` | handlers/common → autopilot |
+| `SetRoutingOutcomeRecorderHook` | `bootstrap_scheduler.go` | handlers/common → autopilot |
+| `SetAttemptRecorderHook` | `bootstrap_scheduler.go` | handlers/common → autopilot |
 
 ### 3.3 Autopilot 与 Healthcheck
 
@@ -96,7 +96,7 @@ Channels   (Claude/OpenAI/Gemini/...)
 
 ### 3.5 默认路由与前缀路由隔离
 
-- 代理入口在 `backend-go/main.go` 中成对注册默认路径与 `/:routePrefix/...` 路径，覆盖 `/v1/messages`、`/v1/messages/count_tokens`、`/v1/chat/completions`、`/v1/responses`、`/v1/models`、`/v1/models/:model`、`/v1beta/models/:model/generateContent`、`/v1/images/*`、`/v1/embeddings` 等代理入口。
+- 代理入口在 `backend-go/routes_proxy.go` 中成对注册默认路径与 `/:routePrefix/...` 路径，覆盖 `/v1/messages`、`/v1/messages/count_tokens`、`/v1/chat/completions`、`/v1/responses`、`/v1/models`、`/v1/models/:model`、`/v1beta/models/:model/generateContent`、`/v1/images/*`、`/v1/embeddings` 等代理入口。
 - 请求进入带前缀路径时，路径参数会作为 scheduler 的 `RoutePrefix` 参与选渠；无前缀路径则等价于空前缀。
 - `backend-go/internal/scheduler/select.go` 的 `SelectChannelWithOptions` 会在常规调度前先做前缀隔离：
   - 非空前缀执行 `route_prefix_filter`，只保留 `RoutePrefix` 与请求前缀精确匹配的渠道。

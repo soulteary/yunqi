@@ -209,7 +209,7 @@ Key 徽章 14/20 对火山渠道同样走管控面套餐接口(`GetChannelModels
 | 画像写入(整体覆盖协议 map) | `backend-go/internal/autopilot/auto_discovery.go:1297-1472` |
 | 协议视图聚合(并集/max 时间戳/mixed) | `backend-go/internal/autopilot/handlers_auto_managed.go:684-893` |
 | 协议条目缺失回退 | `backend-go/internal/autopilot/handlers_auto_managed.go:856-888` |
-| 定期刷新接线 | `backend-go/main.go:1509-1518` |
+| 定期刷新接线 | `backend-go/background.go` 的 `startAutopilotWorkers` |
 | 「重新发现」按钮范围 | `frontend/src/components/edit-channel/ProtocolModelAvailability.vue:298-351` |
 | 协议区块渲染/分组/来源标签 | `frontend/src/components/edit-channel/ProtocolModelAvailability.vue:383-517` |
 | Key 徽章(硬编码 200) | `frontend/src/composables/useTargetModelFetch.ts:124-173`、`frontend/src/components/edit-channel/ApiKeyManagementSection.vue:262-298` |

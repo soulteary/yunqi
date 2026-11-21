@@ -2,10 +2,16 @@
 
 ## Docker Compose
 
+在已克隆的仓库中执行部署。自动发布暂停期间使用本地镜像构建，不依赖 GHCR 产物；发布情况见[发布状态](release.md)。
+
 ```yaml
 services:
   yunqi:
-    image: ghcr.io/soulteary/yunqi:latest
+    image: yunqi:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
     ports:
       - '3000:3000'
     volumes:

@@ -54,7 +54,7 @@ Autopilot 是 Yunqi 的智能路由与渠道托管子系统，由 Manager + Smar
 
 | 文件 | 职责 |
 |---|---|
-| `manager.go` | `Manager` 总控；启动 worker、组件持有、与 scheduler/main.go 接线 |
+| `manager.go` | `Manager` 总控；启动 worker、组件持有、与 scheduler 与启动装配接线 |
 | `profile_store.go` | `ProfileStore`：endpoint 画像的内存缓存 + SQLite 异步持久化 |
 | `schema_migration.go` | SQLite 画像库 schema 版本管理 |
 | `async_writer.go` | 有界异步 writer，供 TraceStore 等批量落盘；指标计数（dropped/writeErrors 等）为 `atomic.Int64`，enqueue/flush/读取三方无锁并发安全 |
@@ -429,7 +429,7 @@ Autopilot 是 Yunqi 的智能路由与渠道托管子系统，由 Manager + Smar
 
 ### 4.4 调度器集成：渠道级过滤
 
-入口：`main.go:791` 通过 `channelScheduler.SetCandidateFilterProvider` 注册。
+入口：`bootstrap_scheduler.go` 通过 `channelScheduler.SetCandidateFilterProvider` 注册。
 
 ```
 Scheduler 选渠链路：
@@ -496,7 +496,7 @@ ContextFilter → CandidateFilter(SmartRouter) → X-Channel/ManualOverride/Prom
 
 ### 4.6 Endpoint 级策略
 
-`EndpointPolicy` 由 `main.go:832` 的 hook 注入 `handlers/common`。
+`EndpointPolicy` 由 `bootstrap_scheduler.go` 的 hook 注入 `handlers/common`。
 
 `BuildEndpointPolicy`（`endpoint_policy.go:267`）：
 
@@ -544,7 +544,7 @@ health(40) > fastDecay(25) > successRate(20) > latency(10) > cost(5)
 ### 4.8 失败后学习/熔断/重试
 
 #### FastDecay
-- `FastDecayScorer.RecordResult(endpointUID, success)`（`main.go:857` hook）
+- `FastDecayScorer.RecordResult(endpointUID, success)`（`bootstrap_scheduler.go` hook）
 - 普通失败：`DecayFactor = pow(0.85, consecutiveFail)`
 - 断流：`pow(0.70, consecutiveFail)`
 - 成功：`+0.15` 恢复
@@ -875,8 +875,8 @@ health(40) > fastDecay(25) > successRate(20) > latency(10) > cost(5)
 
 | 交互 | 位置 |
 |---|---|
-| `SetCandidateFilterProvider` 注册 SmartRouter | `main.go:791` |
-| `SetModelSupportResolverProvider` 注册 AutoManaged 模型支持解析 | `main.go:938` |
+| `SetCandidateFilterProvider` 注册 SmartRouter | `bootstrap_scheduler.go` |
+| `SetModelSupportResolverProvider` 注册 AutoManaged 模型支持解析 | `bootstrap_scheduler.go` |
 | `CandidateFilterFunc` 类型契约 | `internal/scheduler/scheduler.go:55` |
 | `ChannelScheduler.channelAvailableForCandidateFilter` | `internal/scheduler/scheduler.go:674` |
 | `buildSmartFilterFromProvider` 包装 SmartFilter | `internal/scheduler/scheduler.go:1535` |
@@ -913,11 +913,11 @@ health(40) > fastDecay(25) > successRate(20) > latency(10) > cost(5)
 
 | Hook | 位置 | 用途 |
 |---|---|---|
-| `SetEndpointPolicyProviderHook` | `main.go:832` | 注入 `EndpointAttemptPolicy` |
-| `SetNotifyEndpointResultHook` | `main.go:857` | 通知 FastDecay |
-| `SetRoutingOutcomeRecorderHook` | `main.go:816` | 记录请求终态到 Trace |
-| `SetAttemptRecorderHook` | `main.go:822` | 记录每次 endpoint 尝试 |
-| `SetUsagePatternRecorderHook` | `main.go:888` | 记录用量画像 |
+| `SetEndpointPolicyProviderHook` | `bootstrap_scheduler.go` | 注入 `EndpointAttemptPolicy` |
+| `SetNotifyEndpointResultHook` | `bootstrap_scheduler.go` | 通知 FastDecay |
+| `SetRoutingOutcomeRecorderHook` | `bootstrap_scheduler.go` | 记录请求终态到 Trace |
+| `SetAttemptRecorderHook` | `bootstrap_scheduler.go` | 记录每次 endpoint 尝试 |
+| `SetUsagePatternRecorderHook` | `bootstrap_scheduler.go` | 记录用量画像 |
 
 ### 6.8 兼容性记忆
 

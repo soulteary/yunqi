@@ -91,7 +91,7 @@ shared/model-registry/ccx_model_registry.json
   -> backend-go/internal/presetstore/embedded/model-registry.json
   -> PresetStore 原子快照
   -> 后端模型解析与 /api/presets
-  -> Web / Desktop runtime registry
+  -> Web runtime registry
 ```
 
 后端启动时使用 embedded JSON，随后可由已校验磁盘缓存或文档站远程 preset 整包替换。`upstreamCapabilities` 与 `benchmarkProfiles` 随同一个 `PresetBundle` 原子发布，前端统一通过 `/api/presets` 获取当前生效版本，不直接请求文档站。
