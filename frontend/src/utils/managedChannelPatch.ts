@@ -52,8 +52,8 @@ export function buildManagedChannelPatch(
     // Missing fields and undefined are always omission, for every field.
     if (!(field in next) || next[field] === undefined) continue
     const normalize = CHANNEL_PATCH_NORMALIZERS[field] ?? ((value: unknown) => value)
-    const before = normalize(originalRecord[field])
-    const after = normalize(next[field])
+    const before = originalRecord[field] === null ? null : normalize(originalRecord[field])
+    const after = next[field] === null ? null : normalize(next[field])
     if (!isStructurallyEqual(before, after)) patch[field] = after
   }
   return patch
