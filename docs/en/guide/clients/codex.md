@@ -85,6 +85,20 @@ Do not only map `gpt-5` and forget `gpt-5-mini`. Yunqi prefers longer matching k
 
 ## Troubleshooting
 
+### Why does a larger channel window not change the Codex limit?
+
+Yunqi channel capabilities validate the actual upstream model. Codex has a separate local context-window setting. Changing a channel or mapping a GPT name to another model does not update Codex configuration or increase upstream capacity.
+
+Select Codex in **Service & client setup** to enter an optional context window. The exported TOML adds `model_context_window` at the root; leaving it blank keeps client defaults. Only after verifying that the actual model and every fallback route support the window, merge a value such as:
+
+```toml
+model_context_window = 1000000
+```
+
+Place it before tables such as `[model_providers.ccx]` in `~/.codex/config.toml`. Export does not edit local files or set an automatic compaction threshold. Recheck capacity when changing models or fallback routes.
+
+See the [official Codex configuration reference](https://developers.openai.com/codex/config-reference/). Support depends on the client version.
+
 ### Do Codex CLI and Codex App need separate configurations?
 
 No. They use the same Yunqi OpenAI-compatible configuration:

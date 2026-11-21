@@ -2,6 +2,32 @@ import { describe, expect, it } from 'vitest'
 import { spawnSync } from 'node:child_process'
 import { clientConfig, gatewayRoot } from './client-setup'
 describe('browser client setup', () => {
+  it('exports an explicit Codex context window as a root TOML integer', () => {
+    const config = clientConfig('codex', 'https://gateway.example/team', 'gpt-5.2', 1_000_000)
+    const parsed = spawnSync(
+      'bun',
+      ['--eval', 'process.stdout.write(JSON.stringify(Bun.TOML.parse(await Bun.stdin.text())))'],
+      { input: config.content, encoding: 'utf8' }
+    )
+    expect(parsed.status, parsed.stderr).toBe(0)
+    const toml = JSON.parse(parsed.stdout)
+    expect(toml.model_context_window).toBe(1_000_000)
+    expect(toml.model).toBe('gpt-5.2')
+    expect(toml.model_providers.ccx.model_context_window).toBeUndefined()
+    expect(toml.model_auto_compact_token_limit).toBeUndefined()
+  })
+  it.each([0, -1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1])(
+    'rejects an invalid explicit Codex context window: %s',
+    value =>
+      expect(() => clientConfig('codex', 'https://gateway.example', 'model', value)).toThrow('positive safe integer')
+  )
+  it('does not carry a Codex context override into other clients', () => {
+    for (const kind of ['claude', 'opencode'] as const) {
+      expect(clientConfig(kind, 'https://gateway.example', 'model', 1_000_000)).toEqual(
+        clientConfig(kind, 'https://gateway.example', 'model')
+      )
+    }
+  })
   it('exports parseable Codex TOML with a Responses provider using the client API key environment', () => {
     const config = clientConfig('codex', 'https://gateway.example/team/v1/', 'model"with\\escapes')
     expect(config.filename).toBe('codex-config.toml')

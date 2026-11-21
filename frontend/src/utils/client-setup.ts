@@ -8,7 +8,12 @@ export function gatewayRoot(value: string): string {
   return url.toString().replace(/\/+$/, '').replace(/\/v1$/, '')
 }
 
-export function clientConfig(kind: ClientKind, address: string, model: string): { filename: string; content: string } {
+export function clientConfig(
+  kind: ClientKind,
+  address: string,
+  model: string,
+  codexContextWindow?: number
+): { filename: string; content: string } {
   const root = gatewayRoot(address)
   const key = 'YOUR_CCX_PROXY_KEY'
   model = model.trim()
@@ -16,8 +21,7 @@ export function clientConfig(kind: ClientKind, address: string, model: string): 
     const code = character.charCodeAt(0)
     return code < 32 || code === 127
   })
-  if (!model || hasControlCharacter)
-    throw new Error('Model is required and must not contain control characters')
+  if (!model || hasControlCharacter) throw new Error('Model is required and must not contain control characters')
   if (kind === 'claude')
     return {
       filename: 'claude-settings.json',
@@ -27,11 +31,15 @@ export function clientConfig(kind: ClientKind, address: string, model: string): 
         2
       )
     }
-  if (kind === 'codex')
+  if (kind === 'codex') {
+    if (codexContextWindow !== undefined && (!Number.isSafeInteger(codexContextWindow) || codexContextWindow <= 0))
+      throw new Error('Codex context window must be a positive safe integer')
+    const context = codexContextWindow === undefined ? '' : `model_context_window = ${codexContextWindow}\n`
     return {
       filename: 'codex-config.toml',
-      content: `model = ${JSON.stringify(model)}\nmodel_provider = "ccx"\n\n[model_providers.ccx]\nname = "CCX"\nbase_url = ${JSON.stringify(root + '/v1')}\nwire_api = "responses"\nenv_key = "CCX_PROXY_KEY"\n`
+      content: `model = ${JSON.stringify(model)}\nmodel_provider = "ccx"\n${context}\n[model_providers.ccx]\nname = "CCX"\nbase_url = ${JSON.stringify(root + '/v1')}\nwire_api = "responses"\nenv_key = "CCX_PROXY_KEY"\n`
     }
+  }
   return {
     filename: 'opencode.json',
     content: JSON.stringify(

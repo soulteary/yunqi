@@ -19,9 +19,19 @@ const address = ref(
 )
 const model = ref('')
 const kind = ref<ClientKind>('claude')
+const codexContextWindow = ref<string | null>('')
 const config = computed(() => {
   try {
-    return { ...clientConfig(kind.value, address.value, model.value), error: '' }
+    const context = String(codexContextWindow.value ?? '').trim()
+    return {
+      ...clientConfig(
+        kind.value,
+        address.value,
+        model.value,
+        kind.value === 'codex' && context ? Number(context) : undefined
+      ),
+      error: ''
+    }
   } catch (e) {
     return { filename: '', content: '', error: String(e) }
   }
@@ -134,7 +144,27 @@ function diagnostics() {
           hint="https://gateway.example/team"
           persistent-hint
         />
-        <v-text-field v-model="model" :label="zh ? '已配置的请求模型名' : 'Configured request model'" />
+        <v-text-field
+          v-model="model"
+          data-test="client-model"
+          :label="zh ? '已配置的请求模型名' : 'Configured request model'"
+        />
+        <v-text-field
+          v-if="kind === 'codex'"
+          v-model="codexContextWindow"
+          data-test="codex-context-window"
+          type="number"
+          min="1"
+          step="1"
+          clearable
+          :label="zh ? 'Codex 上下文窗口（tokens，可选）' : 'Codex context window (tokens, optional)'"
+          :hint="
+            zh
+              ? '留空沿用客户端默认值。仅影响 Codex 本地配置，不能扩展上游模型的实际容量。'
+              : 'Leave blank for client defaults. This only sets local Codex configuration, not upstream capacity.'
+          "
+          persistent-hint
+        />
         <v-alert type="info" variant="tonal">{{
           zh
             ? '远程访问时请填写客户端能连接的网关地址。代理密钥与管理密钥可能不同，配置中只使用 PROXY_ACCESS_KEY。'
@@ -143,7 +173,9 @@ function diagnostics() {
       </v-col>
       <v-col cols="12" md="7">
         <v-alert v-if="config.error" type="warning">{{
-          zh ? '请输入有效的 HTTP(S) 网关地址和模型名。' : 'Enter a valid HTTP(S) gateway URL and model.'
+          zh
+            ? '请输入有效的 HTTP(S) 网关地址和模型名；Codex 上下文窗口如填写，须为正整数。'
+            : 'Enter a valid HTTP(S) gateway URL and model. An optional Codex context window must be a positive integer.'
         }}</v-alert>
         <template v-else>
           <p class="mb-2">{{ config.filename }}</p>
