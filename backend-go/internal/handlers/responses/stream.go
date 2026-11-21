@@ -529,6 +529,10 @@ func handleStreamSuccess(
 		}
 
 		for _, event := range eventsToProcess {
+			if info, ok := detectAnyUpstreamStreamError(event, ""); ok {
+				committedStreamErr = fmt.Errorf("upstream stream failure: %s", formatResponsesErrorDiagnostic(info))
+				event = buildResponsesFailureEvent(info, "upstream", eventsSentCount+1, outputCollector.responseID)
+			}
 			if toolRemapper != nil {
 				// 只聚合需要格式还原的工具项，正文不等待工具或整轮结束。
 				remapped := toolRemapper.processLine(event)

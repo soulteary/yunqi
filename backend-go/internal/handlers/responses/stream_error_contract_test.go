@@ -59,3 +59,16 @@ func TestLocalIncompleteHasGatewaySource(t *testing.T) {
 		t.Fatalf("missing local provenance %s", event)
 	}
 }
+
+func TestResponsesConvertedGeminiFailureCannotBeFollowedBySuccess(t *testing.T) {
+	prefix := "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"hello\"}]}}]}\n\n"
+	raw := prefix + "data: {\"candidates\":[{\"finishReason\":\"SAFETY\"}]}\n\n"
+	w := httptest.NewRecorder()
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/responses", nil))
+	resp := &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(raw))}
+	_, err := handleStreamSuccess(c, resp, "gemini", &config.EnvConfig{}, nil, time.Now(), &types.ResponsesRequest{Model: "m"}, []byte(`{"model":"m","input":"hi"}`), common.StreamPreflightTimeouts{})
+	if err == nil || strings.Contains(w.Body.String(), `"type":"response.completed"`) {
+		t.Fatalf("converted failure became success: %v %s", err, w.Body.String())
+	}
+}
