@@ -84,3 +84,18 @@ func TestClaudeResponse_MarshalWithoutExtraFieldsUnchanged(t *testing.T) {
 		t.Fatalf("Marshal() = %s, want %s", out, want)
 	}
 }
+
+func TestClaudeNativeCitationAndSearchBlocksRoundTrip(t *testing.T) {
+	raw := []byte(`{"content":[{"type":"text","text":"Answer","citations":[{"type":"web_search_result_location","url":"https://example.com","cited_text":"Quote"}]},{"type":"search_result","source":"kb://source-1","title":"Title","content":[{"type":"text","text":"Quote"}]}]}`)
+	var response ClaudeResponse
+	if err := json.Unmarshal(raw, &response); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), "https://example.com") || !strings.Contains(string(encoded), "kb://source-1") {
+		t.Fatalf("native search attribution lost %s", encoded)
+	}
+}

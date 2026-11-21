@@ -18,7 +18,7 @@ func TestAccessPortalUsesNonceAndNoPersistentCredentialStorage(t *testing.T) {
 		t.Fatalf("portal response %d", w.Code)
 	}
 	nonce := regexp.MustCompile(`nonce="([A-Za-z0-9_-]+)"`).FindStringSubmatch(w.Body.String())
-	if len(nonce) != 2 || !strings.Contains(w.Header().Get("Content-Security-Policy"), "'nonce-"+nonce[1]+"'") || strings.Contains(w.Body.String(), "__NONCE__") {
+	if len(nonce) != 2 || !strings.Contains(w.Header().Get("Content-Security-Policy"), "'nonce-"+nonce[1]+"'") || (strings.Contains(w.Body.String(), "__NONCE__") || strings.Contains(w.Body.String(), "__IDENTITY_PROXY_ENABLED__")) {
 		t.Fatal("portal CSP does not bind its scripts")
 	}
 	for _, unsafe := range []string{"innerHTML", "localStorage", "sessionStorage", "?key=", "?api_key="} {
