@@ -21,6 +21,7 @@ import (
 	"github.com/soulteary/yunqi/internal/middleware"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/session"
+	"github.com/soulteary/yunqi/internal/telemetry"
 	"github.com/soulteary/yunqi/internal/utils"
 )
 
@@ -45,6 +46,7 @@ func WebSocketHandler(
 ) fiber.Handler {
 	httpHandler := Handler(envCfg, cfgManager, sessionManager, channelScheduler)
 	bridgeRouter := httpbridge.NewApp()
+	bridgeRouter.Use(telemetry.BridgeMiddleware())
 	bridgeRouter.Use(middleware.ProxyAdmissionMiddleware(envCfg))
 	bridgeRouter.Post("/v1/responses", httpHandler)
 	bridgeRouter.Post("/:routePrefix/v1/responses", httpHandler)

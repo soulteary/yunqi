@@ -3,6 +3,8 @@ package telemetry
 import (
 	"context"
 	"fmt"
+	"github.com/gofiber/fiber/v3"
+	"github.com/soulteary/yunqi/internal/httpbridge"
 	"io"
 	"sort"
 	"strings"
@@ -54,5 +56,18 @@ func writeEvents(w io.Writer, events map[string]uint64) {
 				_, _ = fmt.Fprintf(w, "%s{endpoint=%q,outcome=%q} %d\n", entry.name, parts[0], parts[2], events[key])
 			}
 		}
+	}
+}
+
+// BridgeMiddleware instruments each WebSocket response.create HTTP bridge using
+// the service registry inherited in its trusted parent context. The outer
+// responses_ws handler measures only the connection lifetime.
+func BridgeMiddleware() fiber.Handler {
+	return func(c fiber.Ctx) error {
+		binding, ok := httpbridge.Request(c).Context().Value(metricContextKey{}).(requestMetricContext)
+		if !ok {
+			return c.Next()
+		}
+		return binding.registry.Middleware()(c)
 	}
 }
