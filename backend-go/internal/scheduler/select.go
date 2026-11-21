@@ -555,10 +555,13 @@ func (s *ChannelScheduler) SelectChannelWithOptions(ctx context.Context, opts Se
 	if userID != "" {
 		compositeKey := traceAffinityKey(kind, affinityUserID, opts.ContextRequirement)
 		if preferredRoute, ok := s.traceAffinity.GetPreferredRoute(compositeKey, string(kind)); ok {
-			preferredIdx := preferredRoute.Index
 			bestPriority := s.findBestAvailableChannelPriorityWithRoutes(activeChannels, failedChannels, failedRoutes, kind, model)
 			for _, ch := range activeChannels {
 				if ch.Route.Matches(preferredRoute) && !channelInfoFailed(ch, failedChannels, failedRoutes) {
+					// UID matches survive reordering; execution must use the current candidate index.
+					route := normalizedChannelRoute(ch, kind)
+					preferredIdx := route.Index
+					executionKind := ChannelKind(route.Kind)
 					// 检查渠道状态：只有 active 状态才使用亲和性
 					if ch.Status != "active" {
 						prefix := kindSchedulerLogPrefix(kind)
@@ -574,7 +577,7 @@ func (s *ChannelScheduler) SelectChannelWithOptions(ctx context.Context, opts Se
 						continue
 					}
 					// 检查渠道是否健康且未处于运行态冷却
-					upstream := s.getUpstreamByRoute(ch.Route)
+					upstream := s.getUpstreamByRoute(route)
 					// 模型级熔断的亲和性防线：正常情况下熔断渠道已被
 					// filterChannelsByModelCircuit 从 activeChannels 剔除、走不到这里；
 					// 但该过滤 fail-open，全渠道熔断时会保留原列表。此时长会话的亲和性
@@ -586,7 +589,7 @@ func (s *ChannelScheduler) SelectChannelWithOptions(ctx context.Context, opts Se
 						trace.skipChannel(ch, "trace_affinity", "model_circuit_open", model)
 						continue
 					}
-					if upstream != nil && s.channelIsRuntimeAvailable(upstream, kind, preferredIdx, "") {
+					if upstream != nil && s.channelIsRuntimeAvailable(upstream, executionKind, preferredIdx, "") {
 						prefix := kindSchedulerLogPrefix(kind)
 						log.Printf("[%s-Affinity] Trace亲和选择渠道: [%d] %s (user: %s)", prefix, preferredIdx, upstream.Name, maskUserID(userID))
 						return finish(upstream, preferredIdx, "trace_affinity"), nil
