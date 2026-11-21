@@ -1,5 +1,7 @@
 package types
 
+import "encoding/json"
+
 // ============== Responses API 类型定义 ==============
 
 // ResponsesRequest Responses API 请求
@@ -22,6 +24,11 @@ type ResponsesRequest struct {
 	RawTools           []interface{}            `json:"tools,omitempty"`               // 原始工具定义，支持字符串简写
 	ToolChoice         interface{}              `json:"tool_choice,omitempty"`         // string 或 object
 	ParallelToolCalls  *bool                    `json:"parallel_tool_calls,omitempty"` // 是否允许并行工具调用
+
+	// 保留原始 JSON，区分未传、null、false 和 0；不推断供应商 TTL。
+	PromptCacheKey       json.RawMessage `json:"prompt_cache_key,omitempty"`
+	PromptCacheOptions   json.RawMessage `json:"prompt_cache_options,omitempty"`
+	PromptCacheRetention json.RawMessage `json:"prompt_cache_retention,omitempty"`
 
 	// TransformerMetadata 转换器元数据（仅内存使用，不序列化）
 	// 用于在单次请求的转换流程中保留原始格式信息，如 system 数组格式等
