@@ -1548,7 +1548,7 @@ func marshalUsageProvenance(p *types.UsageProvenance) string {
 	if p == nil {
 		return "{}"
 	}
-	b, err := json.Marshal(p)
+	b, err := json.Marshal((&types.Usage{Provenance: p}).AccountingProvenance())
 	if err != nil {
 		return "{}"
 	}

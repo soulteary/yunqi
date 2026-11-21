@@ -2,6 +2,7 @@ package common
 
 import (
 	"encoding/json"
+	"fmt"
 	"github.com/soulteary/yunqi/internal/types"
 	"io"
 	"strings"
@@ -91,5 +92,28 @@ func TestUsageCaptureAuthoritativeTerminalZeroCorrectsEstimate(t *testing.T) {
 	r.annotate(u, "responses")
 	if u.OutputTokens != 0 || u.Provenance.UsageSource != "provider" || len(u.Provenance.EstimatedFields) != 0 {
 		t.Fatalf("%+v %+v", u, u.Provenance)
+	}
+}
+
+func TestUsageCaptureLimitsAggregateAndRedactsStrings(t *testing.T) {
+	var stream strings.Builder
+	for i := 0; i < 300; i++ {
+		fmt.Fprintf(&stream, "data: {\"usage\":{\"counter%d\":%d}}\n", i, i)
+	}
+	r := &usageCapture{ReadCloser: io.NopCloser(strings.NewReader(stream.String())), stream: true}
+	_, _ = io.ReadAll(r)
+	u := &types.Usage{InputTokens: 1}
+	r.annotate(u, "messages")
+	if len(r.raw) != 0 || u.Provenance.UsageSource != "unknown" || u.Provenance.Reason != "raw_usage_limit_exceeded" {
+		t.Fatalf("%+v", u.Provenance)
+	}
+
+	r = &usageCapture{ReadCloser: io.NopCloser(strings.NewReader(`{"usage":{"input_tokens":2,"api_key":"sk-secret","metadata":{"text":"private response","ok":true},"reasoning_tokens":1}}`))}
+	_, _ = io.ReadAll(r)
+	u = &types.Usage{InputTokens: 2}
+	r.annotate(u, "messages")
+	raw := string(u.Provenance.RawUsage)
+	if strings.Contains(raw, "sk-secret") || strings.Contains(raw, "private response") || !strings.Contains(raw, "[redacted]") || !strings.Contains(raw, `"reasoning_tokens":1`) {
+		t.Fatalf("unsafe summary %s", raw)
 	}
 }

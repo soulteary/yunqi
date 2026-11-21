@@ -20,6 +20,7 @@ type usageCapture struct {
 	overflow    bool
 	validJSON   bool
 	finalOutput *int
+	truncated   bool
 	raw         map[string]json.RawMessage
 }
 
@@ -65,6 +66,9 @@ func (r *usageCapture) captureLine(line []byte) {
 }
 
 func (r *usageCapture) captureJSON(body []byte) {
+	if r.truncated {
+		return
+	}
 	var envelope map[string]json.RawMessage
 	if json.Unmarshal(body, &envelope) != nil {
 		return
@@ -97,8 +101,11 @@ func (r *usageCapture) captureJSON(body []byte) {
 		}
 		return
 	}
+	raw = types.SanitizeRawUsage(raw)
 	var usage map[string]json.RawMessage
-	if len(raw) > 64<<10 || json.Unmarshal(raw, &usage) != nil {
+	if len(raw) == 0 || len(raw) > 64<<10 || json.Unmarshal(raw, &usage) != nil {
+		r.raw = nil
+		r.truncated = true
 		return
 	}
 	if r.raw == nil {
@@ -106,6 +113,11 @@ func (r *usageCapture) captureJSON(body []byte) {
 	}
 	for key, value := range usage {
 		r.raw[key] = value
+	}
+	encoded, _ := json.Marshal(r.raw)
+	if len(r.raw) > 256 || len(encoded) > 64<<10 {
+		r.raw = nil
+		r.truncated = true
 	}
 }
 
@@ -146,6 +158,10 @@ func (r *usageCapture) annotate(u *types.Usage, protocol string) {
 		p.EstimatedFields = fields
 	}
 	p.Protocol = protocol
+	if r.truncated {
+		u.Provenance = &types.UsageProvenance{UsageSource: "unknown", Protocol: protocol, Reason: "raw_usage_limit_exceeded"}
+		return
+	}
 	if len(r.raw) == 0 {
 		if p.UsageSource == "unknown" {
 			p.Reason = "upstream_usage_missing_or_unreadable"
