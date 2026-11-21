@@ -7,31 +7,33 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type EnvConfig struct {
-	Port                 int
-	BindHost             string
-	Env                  string
-	EnableHTTPS          bool
-	TLSCertFile          string
-	TLSKeyFile           string
-	TLSAutoCert          bool
-	EnableWebUI          bool
-	UILanguage           string
-	ProxyPrincipalIDs    map[string]string // 可选 Key -> 稳定主体 ID，仅在认证后使用
-	ProxyMaxConcurrency  int               // 每个入口密钥并发上限，0 表示不限制
-	ProxyAccessKey       string
-	ExtraProxyAccessKeys []string // 额外代理访问密钥（仅用于代理 API，不授予管理权限）
-	AdminAccessKey       string   // 管理 API 独立密钥（可选，未设置时回退到 ProxyAccessKey）
-	LogLevel             string
-	EnableRequestLogs    bool
-	EnableResponseLogs   bool
-	QuietPollingLogs     bool   // 静默轮询端点日志
-	RawLogOutput         bool   // 原始日志输出（不缩进、不截断、不重排序）
-	SSEDebugLevel        string // SSE 调试级别: off, summary, full
-	RewriteResponseModel bool   // 是否改写响应中的 model 字段为请求的 model（默认 false）
-	ServerReadTimeout    int    // HTTP 服务端读取请求超时（毫秒），仅用于入站连接读取
+	ManagedProxyKeyLookup func(string) (EntryKey, bool) `json:"-"` // 只读持久化入口策略，启动时注入
+	Port                  int
+	BindHost              string
+	Env                   string
+	EnableHTTPS           bool
+	TLSCertFile           string
+	TLSKeyFile            string
+	TLSAutoCert           bool
+	EnableWebUI           bool
+	UILanguage            string
+	ProxyPrincipalIDs     map[string]string // 可选 Key -> 稳定主体 ID，仅在认证后使用
+	ProxyMaxConcurrency   int               // 每个入口密钥并发上限，0 表示不限制
+	ProxyAccessKey        string
+	ExtraProxyAccessKeys  []string // 额外代理访问密钥（仅用于代理 API，不授予管理权限）
+	AdminAccessKey        string   // 管理 API 独立密钥（可选，未设置时回退到 ProxyAccessKey）
+	LogLevel              string
+	EnableRequestLogs     bool
+	EnableResponseLogs    bool
+	QuietPollingLogs      bool   // 静默轮询端点日志
+	RawLogOutput          bool   // 原始日志输出（不缩进、不截断、不重排序）
+	SSEDebugLevel         string // SSE 调试级别: off, summary, full
+	RewriteResponseModel  bool   // 是否改写响应中的 model 字段为请求的 model（默认 false）
+	ServerReadTimeout     int    // HTTP 服务端读取请求超时（毫秒），仅用于入站连接读取
 
 	RequestTimeout     int
 	MaxRequestBodySize int64 // 请求体最大大小 (字节)，由 MB 配置转换
@@ -205,6 +207,11 @@ func (c *EnvConfig) ValidateAccessKeys() error {
 func (c *EnvConfig) IsValidProxyAccessKey(providedKey string) bool {
 	if providedKey == "" {
 		return false
+	}
+	if c.ManagedProxyKeyLookup != nil {
+		if key, ok := c.ManagedProxyKeyLookup(providedKey); ok {
+			return key.ValidNow(time.Now())
+		}
 	}
 	if secureCompare(providedKey, c.ProxyAccessKey) {
 		return true
