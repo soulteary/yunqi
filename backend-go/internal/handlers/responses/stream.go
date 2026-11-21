@@ -257,7 +257,7 @@ func handleStreamSuccess(
 					if r, m := detectResponsesErrorBlacklist(upstreamErr); r != "" {
 						return nil, &common.ErrBlacklistKey{Reason: r, Message: m, RecoverAt: utils.ExtractQuotaRecoverAt(m)}
 					}
-					common.RequestLogf(c, "[Responses-UpstreamError] %s，触发重试", preflightDiagnostic)
+					common.RequestLogf(c, "[Responses-UpstreamError] 上游错误事件，触发重试")
 					return nil, fmt.Errorf("%w: %s", common.ErrEmptyStreamResponse, preflightDiagnostic)
 				}
 				hadPendingToolCall := preflightToolTracker.HasPendingToolCall()

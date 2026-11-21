@@ -107,8 +107,8 @@ func TestCompactHandler_SingleChannelFailureRecordsMetricsAndLogs(t *testing.T) 
 	if logs[0].InterfaceType != "Responses" {
 		t.Fatalf("log interfaceType = %q, want Responses", logs[0].InterfaceType)
 	}
-	if !strings.Contains(logs[0].ErrorInfo, "unauthorized") {
-		t.Fatalf("log errorInfo = %q, want contains unauthorized", logs[0].ErrorInfo)
+	if logs[0].ErrorInfo != "status=401 body=omitted" {
+		t.Fatalf("log errorInfo = %q, want minimal failure evidence without reflected upstream body", logs[0].ErrorInfo)
 	}
 
 	metricsResp := sch.GetResponsesMetricsManager().ToResponseMultiURL(0, []string{upstream.URL}, []string{"sk-test"}, "responses", 0)

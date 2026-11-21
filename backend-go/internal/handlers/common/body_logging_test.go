@@ -115,3 +115,18 @@ func TestMinimizedBlacklistEvidenceRetainsOriginalQuotaReset(t *testing.T) {
 		t.Fatalf("privacy changed quota lifecycle or retained body: message=%q recoverAt=%q", message, recoverAt)
 	}
 }
+
+func TestBodyLogPolicyOmitsReflectedClassifierDebug(t *testing.T) {
+	_ = bodyLoggingTestManager(t)
+	old := log.Writer()
+	var output bytes.Buffer
+	log.SetOutput(&output)
+	defer log.SetOutput(old)
+	const private = "private-business-prompt"
+	for _, body := range []string{`{"error":"unauthorized ` + private + `"}`, `{"error":{"code":"rate_limit_exceeded ` + private + `"}}`, `{"` + private + `":true}`} {
+		ShouldRetryWithNextKey(401, []byte(body), "Chat")
+	}
+	if strings.Contains(output.String(), private) {
+		t.Fatal("classifier debug bypassed body logging consent")
+	}
+}
