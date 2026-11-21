@@ -1650,5 +1650,26 @@
   "network.mode.proxy": "Use proxy",
   "network.mode.direct_first": "Direct first",
   "network.applied": "Yes",
-  "network.notApplied": "No"
+  "network.notApplied": "No",
+  "requestPreview": {
+    "title": "Passthrough and request preview",
+    "scope": "Build a redacted request from current compatibility options and sample JSON before saving. No upstream call is made. The first saved endpoint and key are used.",
+    "protocol": "Client protocol",
+    "model": "Model (Gemini path model)",
+    "sample": "Sample request JSON",
+    "build": "Build redacted preview",
+    "sampleBoundary": "No change means no visible effect for this sample. Other inputs may use the option, and protocol defaults may still apply.",
+    "runtimeBoundary": "Scheduling, automatic model/effort selection, learned compatibility, session history and transport are outside this preview and may further change the real request. Copilot OAuth has no offline preview.",
+    "bodyOmitted": "Body omitted because of redaction capacity or body size limits.",
+    "mode": {
+      "conversion": "Protocol conversion",
+      "native_with_compatibility": "Native passthrough with compatibility changes"
+    },
+    "effect": {
+      "applied_to_sample": "Applied: removing this option changes the sample request",
+      "no_effect_for_sample": "No visible effect for this sample",
+      "default_or_unset": "Unset or default value",
+      "overridden_by_managed_policy": "Overridden by managed channel runtime policy"
+    }
+  }
 }
