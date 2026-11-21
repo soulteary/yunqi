@@ -83,6 +83,20 @@ Codex 默认可能请求 GPT 模型名。如果上游使用不同模型名，建
 
 ## 常见问题
 
+### 渠道设置了更大的窗口，为什么 Codex 显示的上限没有变化？
+
+Yunqi 的渠道能力用于判断实际模型能否承载请求；Codex 使用自己的本地模型窗口设置。修改渠道能力或将 GPT 模型名映射到其他模型，不会自动修改 Codex 的本地配置，也不会扩大上游模型的实际容量。
+
+在「服务与客户端接入」中选择 Codex 后，可填写可选的「Codex 上下文窗口」。导出的 `codex-config.toml` 会在顶层加入 `model_context_window`；留空则沿用客户端默认值。例如，只有确认实际模型及所有备用路由都支持该窗口后，才使用：
+
+```toml
+model_context_window = 1000000
+```
+
+将这一行合并到 `~/.codex/config.toml` 的顶层，放在 `[model_providers.ccx]` 等表定义之前。导出不会修改本机文件，也不会设置自动压缩阈值。切换模型或备用路由后，应重新核对窗口，不要按客户端请求模型名推断上游容量。
+
+字段说明见 [Codex 官方配置参考](https://developers.openai.com/codex/config-reference/)；是否支持该配置取决于客户端版本。
+
 ### Codex CLI 和 Codex App 是否要分开配置？
 
 不需要。两者使用同一套 Yunqi OpenAI 兼容配置：

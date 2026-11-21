@@ -18,13 +18,53 @@ const status = {
 function render() {
   const names = ['VCard', 'VAlert', 'VRow', 'VCol', 'VSelect', 'VTextField', 'VDivider']
   const stubs = Object.fromEntries(names.map(name => [name, { template: '<div><slot /></div>' }]))
-  return mount(ConsoleView, { global: { stubs: { ...stubs, VBtn: { template: '<button><slot /></button>' } } } })
+  return mount(ConsoleView, {
+    global: {
+      stubs: {
+        ...stubs,
+        VBtn: { template: '<button><slot /></button>' },
+        VSelect: {
+          props: ['modelValue', 'items'],
+          emits: ['update:modelValue'],
+          template:
+            '<select :value="modelValue" @change="$emit(\'update:modelValue\', $event.target.value)"><option v-for="item in items" :key="item.value" :value="item.value">{{item.title}}</option></select>'
+        },
+        VTextField: {
+          props: ['modelValue', 'label', 'hint'],
+          emits: ['update:modelValue'],
+          template:
+            '<label>{{label}}<input :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)"><small>{{hint}}</small></label>'
+        }
+      }
+    }
+  })
 }
 describe('Web service console', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     useAuthStore().apiKey = 'test-admin'
     vi.mocked(api.getConsoleStatus).mockReset()
+  })
+  it('exports a user-selected Codex context window, clears it, and blocks invalid values', async () => {
+    vi.mocked(api.getConsoleStatus).mockResolvedValue(status)
+    const view = render()
+    await flushPromises()
+    await view.get('[data-test="client-model"] input').setValue('gpt-5.2')
+    await view.get('select').setValue('codex')
+    expect(view.get('pre').text()).not.toContain('model_context_window')
+    expect(view.text()).toContain('不能扩展上游模型的实际容量')
+    const context = view.get('[data-test="codex-context-window"] input')
+    await context.setValue('1000000')
+    expect(view.get('pre').text()).toContain('model_context_window = 1000000')
+    await context.setValue('0')
+    expect(view.find('pre').exists()).toBe(false)
+    expect(view.text()).toContain('须为正整数')
+    await view.get('select').setValue('claude')
+    expect(view.get('pre').text()).not.toContain('model_context_window')
+    await view.get('select').setValue('codex')
+    await view.get('[data-test="codex-context-window"] input').setValue('')
+    expect(view.get('pre').text()).not.toContain('model_context_window')
+    view.unmount()
   })
   it('shows server runtime information and all six channel counts', async () => {
     vi.mocked(api.getConsoleStatus).mockResolvedValue(status)
