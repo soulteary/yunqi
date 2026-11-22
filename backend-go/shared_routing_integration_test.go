@@ -11,8 +11,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/entrylease"
 	"github.com/soulteary/yunqi/internal/httpbridge"
+	"github.com/soulteary/yunqi/internal/keypool"
+	"github.com/soulteary/yunqi/internal/ratelimit"
 	"github.com/soulteary/yunqi/internal/redisconn"
 )
 
@@ -67,6 +70,11 @@ func TestSharedRoutingRealHTTPChannelCapacityAcrossIndependentNodes(t *testing.T
 		if err := node.cfgManager.AddChatUpstream(channel); err != nil {
 			t.Fatal(err)
 		}
+		manager := ratelimit.NewManager()
+		manager.GetOrCreate("Chat", 0, ratelimit.Config{RPM: 2, WindowSeconds: 120, MaxConcurrent: 1})
+		node.rateLimitManager = manager
+		node.channelScheduler.SetRateLimitManager(manager)
+		t.Cleanup(manager.Stop)
 	}
 	handlers := []http.Handler{httpbridge.Handler(nodes[0].newRouter()), httpbridge.Handler(nodes[1].newRouter())}
 	first := make(chan *httptest.ResponseRecorder, 1)
@@ -76,10 +84,23 @@ func TestSharedRoutingRealHTTPChannelCapacityAcrossIndependentNodes(t *testing.T
 	case <-time.After(5 * time.Second):
 		t.Fatal("first request missing")
 	}
-	rejected := callRedisAdmission(handlers[1], "route-proxy", redisAdmissionBody)
-	if rejected.Code != 429 || calls.Load() != 1 || rejected.Header().Get("Retry-After") == "" {
-		t.Fatalf("capacity bypass: %d %d %s", rejected.Code, calls.Load(), rejected.Body.String())
+	for i := 0; i < 5; i++ {
+		rejected := callRedisAdmission(handlers[1], "route-proxy", redisAdmissionBody)
+		if rejected.Code != 429 || calls.Load() != 1 || rejected.Header().Get("Retry-After") == "" {
+			t.Fatalf("capacity rejection %d: status=%d calls=%d %s", i, rejected.Code, calls.Load(), rejected.Body.String())
+		}
 	}
+	// Rejected calls must not spend a second, non-refundable local RPM budget,
+	// including channel defaults inherited by the key/quota scope.
+	manager := nodes[1].rateLimitManager
+	if used := manager.Get("Chat", 0).Status(time.Now()).WindowSize; used != 0 {
+		t.Fatalf("rejections spent local channel RPM: %d", used)
+	}
+	scope := keypool.LimiterScopeFor("fake-provider", config.APIKeyConfig{})
+	if scoped := manager.GetScoped("Chat", 0, scope); scoped != nil && scoped.Status(time.Now()).WindowSize != 0 {
+		t.Fatal("rejections spent inherited local key RPM")
+	}
+
 	unblock()
 	if response := <-first; response.Code != 200 {
 		t.Fatalf("first request: %d %s", response.Code, response.Body.String())
