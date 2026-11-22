@@ -63,6 +63,10 @@ func TestTypedReservationBoundsEveryCacheTTLAndTier(t *testing.T) {
 			t.Fatalf("reservation below actual: cost=%v complete=%v", cost, complete)
 		}
 	}
+	ttlReserve, ttlKnown := CalculateUsageReservationUSDWithPricing(p, &types.Usage{CacheCreation5mInputTokens: 1000000})
+	if !ttlKnown || ttlReserve != 10 {
+		t.Fatalf("TTL-only upper bound reserve=%v known=%v", ttlReserve, ttlKnown)
+	}
 	if _, known := CalculateUsageReservationUSDWithPricing(&config.ModelPricing{InputCacheHitPrice: floatPtr(0)}, &types.Usage{InputTokens: 1}); known {
 		t.Fatal("unknown cache miss price accepted as free")
 	}

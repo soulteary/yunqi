@@ -64,7 +64,7 @@ func Validate(p *Pricing) error {
 		return errors.New("prices must be finite nonnegative numbers")
 	}
 	for _, tier := range p.Tiers {
-		if tier.InputTokensAbove < 0 || tier.InputTokensUpTo < 0 || (tier.InputTokensUpTo > 0 && tier.InputTokensAbove >= tier.InputTokensUpTo) || !validPrices(tier.InputCacheHitPrice, tier.InputCacheMissPrice, tier.OutputPrice, tier.CacheCreation5mPrice, tier.CacheCreation1hPrice, tier.ReasoningOutputPrice) {
+		if tier.InputTokensAbove < 0 || tier.InputTokensUpTo < 0 || int64(tier.InputTokensAbove) > 1<<50 || int64(tier.InputTokensUpTo) > 1<<50 || (tier.InputTokensUpTo > 0 && tier.InputTokensAbove >= tier.InputTokensUpTo) || !validPrices(tier.InputCacheHitPrice, tier.InputCacheMissPrice, tier.OutputPrice, tier.CacheCreation5mPrice, tier.CacheCreation1hPrice, tier.ReasoningOutputPrice) {
 			return errors.New("invalid pricing tier")
 		}
 	}

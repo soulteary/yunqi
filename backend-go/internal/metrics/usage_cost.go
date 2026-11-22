@@ -104,7 +104,14 @@ func CalculateUsageReservationUSDWithPricing(pricing *config.ModelPricing, upper
 	if !known {
 		return 0, false
 	}
-	input := int64(upper.InputTokens) + int64(upper.CacheReadInputTokens) + int64(upper.CacheCreationInputTokens)
+	creation := int64(upper.CacheCreationInputTokens)
+	if ttl := int64(upper.CacheCreation5mInputTokens) + int64(upper.CacheCreation1hInputTokens); ttl > creation {
+		creation = ttl
+	}
+	input := int64(upper.InputTokens) + int64(upper.CacheReadInputTokens) + creation
+	if int64(upper.PromptTokensTotal) > input {
+		input = int64(upper.PromptTokensTotal)
+	}
 	if upper.CacheReadInputTokens < 0 || upper.CacheCreationInputTokens < 0 {
 		return 0, false
 	}
