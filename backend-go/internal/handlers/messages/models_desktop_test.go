@@ -37,6 +37,8 @@ func TestModelEntryReadsDesktopAndLegacyMetadata(t *testing.T) {
 		{"desktop", `{"id":"alias","supports_1m":true,"anthropic_family_tier":"opus","is_family_default":true,"max_input_tokens":1000000}`, "opus", true, true, 1000000},
 		{"legacy", `{"id":"alias","supports1m":true,"anthropicFamilyTier":"sonnet","isFamilyDefault":true,"context_window":1000000}`, "sonnet", true, true, 1000000},
 		{"canonical false wins", `{"supports_1m":false,"supports1m":true,"anthropic_family_tier":"haiku","anthropicFamilyTier":"opus","is_family_default":false,"isFamilyDefault":true}`, "haiku", false, false, 0},
+		{"canonical input limit wins", `{"context_window":1048576,"max_input_tokens":200000}`, "", false, false, 200000},
+		{"canonical zero wins", `{"context_window":1048576,"max_input_tokens":0}`, "", false, false, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var model ModelEntry

@@ -21,7 +21,7 @@ func (model *ModelEntry) UnmarshalJSON(data []byte) error {
 	var wire struct {
 		modelEntryJSON
 		Supports1M          *bool   `json:"supports_1m"`
-		MaxInputTokens      int     `json:"max_input_tokens"`
+		MaxInputTokens      *int    `json:"max_input_tokens"`
 		AnthropicFamilyTier *string `json:"anthropic_family_tier"`
 		IsFamilyDefault     *bool   `json:"is_family_default"`
 	}
@@ -32,8 +32,8 @@ func (model *ModelEntry) UnmarshalJSON(data []byte) error {
 	if wire.Supports1M != nil {
 		model.Supports1M = *wire.Supports1M
 	}
-	if model.ContextWindow == 0 {
-		model.ContextWindow = wire.MaxInputTokens
+	if wire.MaxInputTokens != nil {
+		model.ContextWindow = *wire.MaxInputTokens
 	}
 	if wire.AnthropicFamilyTier != nil {
 		model.AnthropicFamilyTier = *wire.AnthropicFamilyTier
