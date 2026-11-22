@@ -16,6 +16,10 @@ type EnvConfig struct {
 	IdentityProxyRevocationRedisURL       string `json:"-"`
 	IdentityProxyRevocationRedisNamespace string
 	IdentityProxyRevocations              IdentityRevocationBackend `json:"-"`
+	BudgetRedisURL                        string                    `json:"-"`
+	BudgetRedisNamespace                  string                    `json:"-"`
+	BudgetRedisNewDomainAck               string                    `json:"-"`
+	BudgetRedisEpoch                      string                    `json:"-"`
 	ProxyRedisURL                         string                    `json:"-"`
 	ProxyRedisNamespace                   string
 	ProxyRedisLeaseSeconds                int
@@ -105,6 +109,10 @@ func NewEnvConfig() *EnvConfig {
 		UILanguage:                            normalizeUILanguage(getEnv("APP_UI_LANGUAGE", "zh-CN")),
 		ProxyPrincipalIDs:                     parseProxyPrincipalIDs(getEnv("PROXY_PRINCIPAL_IDS", "")),
 		ProxyMaxConcurrency:                   max(0, getEnvAsInt("PROXY_MAX_CONCURRENCY", 0)),
+		BudgetRedisURL:                        getEnv("BUDGET_REDIS_URL", ""),
+		BudgetRedisNamespace:                  getEnv("BUDGET_REDIS_NAMESPACE", "yunqi"),
+		BudgetRedisNewDomainAck:               getEnv("BUDGET_REDIS_NEW_DOMAIN_ACK", ""),
+		BudgetRedisEpoch:                      getEnv("BUDGET_REDIS_EPOCH", ""),
 		ProxyRedisURL:                         getEnv("PROXY_REDIS_URL", ""),
 		ProxyRedisNamespace:                   getEnv("PROXY_REDIS_NAMESPACE", "yunqi"),
 		ProxyRedisLeaseSeconds:                getEnvAsInt("PROXY_REDIS_LEASE_SECONDS", 30),

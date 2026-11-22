@@ -45,3 +45,21 @@ func TestSharedIdentityRedisCredentialIsProtectedBeforeConfigurationLogs(t *test
 		t.Fatal("identity revocation URL leaked through environment JSON")
 	}
 }
+
+func TestSharedBudgetRedisCredentialIsProtectedBeforeConfigurationLogs(t *testing.T) {
+	password := "synthetic-budget-redis-password+decoded"
+	raw := "redis://user:synthetic-budget-redis-password%2Bdecoded@redis.invalid:6379/0"
+	env := &config.EnvConfig{BudgetRedisURL: raw}
+	cleanup := initializeCredentialRedaction(env)
+	defer cleanup()
+	if safe := redaction.String("connection " + raw + " password=" + password); strings.Contains(safe, password) || strings.Contains(safe, raw) {
+		t.Fatal("budget credential not redacted")
+	}
+	encoded, err := json.Marshal(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "synthetic-budget-redis-password") {
+		t.Fatal("budget URL leaked through environment JSON")
+	}
+}
