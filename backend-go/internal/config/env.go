@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
@@ -12,8 +13,11 @@ import (
 )
 
 type EnvConfig struct {
-	BudgetManager             *entrybudget.Manager `json:"-"`
-	StrictSessionAffinity     bool
+	StrictSessionAffinity bool
+	UsageDrainTimeoutMs   int             // opt-in client-cancel accounting drain, hard max 5s
+	ServiceContext        context.Context `json:"-"` // independent shutdown cancellation
+
+	BudgetManager             *entrybudget.Manager                 `json:"-"`
 	IdentityProxySecret       string                               `json:"-"`
 	IdentityProxyConfigLookup func() IdentityProxyConfig           `json:"-"`
 	ManagedAdminKeyLookup     func(string) (AdminCredential, bool) `json:"-"`
@@ -103,10 +107,11 @@ func NewEnvConfig() *EnvConfig {
 		RewriteResponseModel:  getEnv("REWRITE_RESPONSE_MODEL", "false") == "true",
 		ServerReadTimeout:     clampInt(getEnvAsInt("SERVER_READ_TIMEOUT", 60000), 10000, 300000),
 
-		RequestTimeout:     clampInt(getEnvAsInt("REQUEST_TIMEOUT", 300000), MinRequestTimeoutMs, MaxRequestTimeoutMs),
-		MaxRequestBodySize: getEnvAsInt64("MAX_REQUEST_BODY_SIZE_MB", 50) * 1024 * 1024, // MB 转换为字节
-		EnableCORS:         getEnv("ENABLE_CORS", "false") == "true",
-		CORSOrigin:         getEnv("CORS_ORIGIN", "*"),
+		UsageDrainTimeoutMs: clampInt(getEnvAsInt("USAGE_DRAIN_TIMEOUT_MS", 0), 0, 5000),
+		RequestTimeout:      clampInt(getEnvAsInt("REQUEST_TIMEOUT", 300000), MinRequestTimeoutMs, MaxRequestTimeoutMs),
+		MaxRequestBodySize:  getEnvAsInt64("MAX_REQUEST_BODY_SIZE_MB", 50) * 1024 * 1024, // MB 转换为字节
+		EnableCORS:          getEnv("ENABLE_CORS", "false") == "true",
+		CORSOrigin:          getEnv("CORS_ORIGIN", "*"),
 		// 指标配置
 		MetricsWindowSize:       getEnvAsInt("METRICS_WINDOW_SIZE", 20),
 		MetricsFailureThreshold: getEnvAsFloat("METRICS_FAILURE_THRESHOLD", 0.7),
