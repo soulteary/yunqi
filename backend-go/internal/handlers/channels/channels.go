@@ -31,6 +31,7 @@ func RegisterRoutes(apiGroup fiber.Router, cfgManager *config.ConfigManager, cha
 	apiGroup.Get("/channels/:uid", h.Get)
 	apiGroup.Post("/channels/:uid/request-preview", h.RequestPreview)
 	apiGroup.Get("/channels/:uid/model-import", h.GetModelImport)
+	apiGroup.Delete("/channels/:uid/model-import", h.RemoveModelImport)
 	apiGroup.Put("/channels/:uid/model-import/policy", h.SetModelImportPolicy)
 	apiGroup.Post("/channels/:uid/model-import/preview", h.PreviewModelImport)
 	apiGroup.Post("/channels/:uid/model-import/approve", h.ApproveModelImport)

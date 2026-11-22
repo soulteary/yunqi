@@ -6,6 +6,7 @@ DELETE /api/accounts/:accountUid/credentials/:credentialUid/mimo-console-cookie
 DELETE /api/accounts/:accountUid/credentials/:credentialUid/volcengine-access-key
 DELETE /api/channels/:uid
 DELETE /api/channels/:uid/keys/:keyHash
+DELETE /api/channels/:uid/model-import
 DELETE /api/chat/channels/:id
 DELETE /api/chat/channels/:id/capability-test/:jobId
 DELETE /api/chat/channels/:id/keys/:apiKey

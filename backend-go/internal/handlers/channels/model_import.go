@@ -159,3 +159,23 @@ func (h *Handler) ApproveModelImport(c fiber.Ctx) error {
 	httpbridge.JSON(c, 200, view)
 	return nil
 }
+
+func (h *Handler) RemoveModelImport(c fiber.Ctx) error {
+	uid, ok := h.importChannel(c, true)
+	if !ok {
+		return nil
+	}
+	var input struct {
+		AllowUnrestricted bool `json:"allowUnrestricted"`
+	}
+	if !decodeModelImport(c, &input, 4096) {
+		return nil
+	}
+	view, err := h.cm.RemoveModelImport(uid, httpbridge.GetHeader(c, "If-Match"), middleware.GetAdminActorID(c), input.AllowUnrestricted)
+	if err != nil {
+		return modelImportError(c, err)
+	}
+	httpbridge.Header(c, "ETag", `"`+view.Revision+`"`)
+	httpbridge.JSON(c, 200, view)
+	return nil
+}

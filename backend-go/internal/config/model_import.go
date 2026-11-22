@@ -76,9 +76,10 @@ type ModelImportState struct {
 	Audit    []ModelImportAudit `json:"audit,omitempty"`
 }
 type ModelImportView struct {
-	ChannelUID string           `json:"channelUid"`
-	Revision   string           `json:"revision"`
-	State      ModelImportState `json:"state"`
+	ChannelUID           string           `json:"channelUid"`
+	Revision             string           `json:"revision"`
+	State                ModelImportState `json:"state"`
+	UnrestrictedOnRemove bool             `json:"unrestrictedOnRemove"`
 }
 
 var ErrInvalidModelImport = errors.New("invalid model import")
@@ -332,7 +333,7 @@ func modelImportView(channel *UpstreamConfig) ModelImportView {
 	if state == nil {
 		state = &ModelImportState{}
 	}
-	return ModelImportView{ChannelUID: channel.ChannelUID, Revision: modelImportRevision(channel), State: *state}
+	return ModelImportView{ChannelUID: channel.ChannelUID, Revision: modelImportRevision(channel), State: *state, UnrestrictedOnRemove: len(channel.SupportedModels) == 0}
 }
 func (cm *ConfigManager) GetModelImport(uid string) (ModelImportView, error) {
 	cm.mu.RLock()
@@ -548,4 +549,36 @@ func (cm *ConfigManager) ModelImportInventoryRevision() string {
 	raw, _ := json.Marshal(entries)
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])
+}
+
+// RemoveModelImport explicitly restores legacy automatic configuration writes.
+// Keep the current supported-model rules; broadening an empty list to legacy
+// unrestricted admission requires a separate acknowledgement.
+func (cm *ConfigManager) RemoveModelImport(uid, expected, actor string, allowUnrestricted bool) (view ModelImportView, err error) {
+	if actor == "" || len(actor) > 256 {
+		return view, invalidModelImport("model import removal requires an authenticated actor")
+	}
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	channel := cm.modelImportChannelLocked(uid)
+	if channel == nil {
+		return view, ErrModelImportNotFound
+	}
+	if expected == "" || strings.Trim(expected, "\"") != modelImportRevision(channel) {
+		return view, ErrModelImportConflict
+	}
+	if len(channel.SupportedModels) == 0 && !allowUnrestricted {
+		return view, invalidModelImport("restoring unrestricted legacy models requires acknowledgement")
+	}
+	before := cm.config.deepCopy()
+	defer func() {
+		if err != nil {
+			cm.config = before
+		}
+	}()
+	channel.ModelImport = nil
+	if err = cm.saveConfigLocked(cm.config); err != nil {
+		return view, err
+	}
+	return modelImportView(cm.modelImportChannelLocked(uid)), nil
 }

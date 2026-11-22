@@ -112,7 +112,7 @@ func authorizeManagementRoute(c fiber.Ctx) bool {
 		if len(parts) == 4 && method == http.MethodGet {
 			return AuthorizeAdminAction(c, "channels.read", parts[2])
 		}
-		if len(parts) == 5 && ((parts[4] == "policy" && method == http.MethodPut) || ((parts[4] == "preview" || parts[4] == "approve") && method == http.MethodPost)) {
+		if (len(parts) == 4 && method == http.MethodDelete) || len(parts) == 5 && ((parts[4] == "policy" && method == http.MethodPut) || ((parts[4] == "preview" || parts[4] == "approve") && method == http.MethodPost)) {
 			return AuthorizeAdminAction(c, "channels.model-import", parts[2])
 		}
 	}

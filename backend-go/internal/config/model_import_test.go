@@ -218,3 +218,34 @@ func TestModelImportDraftDoesNotInterruptCallsBeforeAtomicActivation(t *testing.
 		t.Fatalf("preview accepted stale revision: %v", err)
 	}
 }
+
+func TestModelImportExplicitRemovalRestoresLegacyWithAcknowledgement(t *testing.T) {
+	cm := newImportManager(t)
+	enableImport(t, cm, ModelImportPolicy{Enabled: false})
+	cm.config.ChatUpstream[0].SupportedModels = nil
+	view, _ := cm.GetModelImport("import-channel")
+	if !view.UnrestrictedOnRemove {
+		t.Fatal("unsafe widening was not exposed")
+	}
+	if _, err := cm.RemoveModelImport("import-channel", view.Revision, "admin", false); !errors.Is(err, ErrInvalidModelImport) {
+		t.Fatalf("unacknowledged unrestricted reset: %v", err)
+	}
+	if _, err := cm.RemoveModelImport("import-channel", "stale", "admin", true); !errors.Is(err, ErrModelImportConflict) {
+		t.Fatalf("stale reset: %v", err)
+	}
+	if _, err := cm.RemoveModelImport("import-channel", view.Revision, "admin", true); err != nil {
+		t.Fatal(err)
+	}
+	if cm.GetConfig().ChatUpstream[0].ModelImport != nil {
+		t.Fatal("governance not removed")
+	}
+	enableImport(t, cm, ModelImportPolicy{Enabled: true})
+	cm.config.ChatUpstream[0].SupportedModels = []string{"approved-raw"}
+	view, _ = cm.GetModelImport("import-channel")
+	if _, err := cm.RemoveModelImport("import-channel", view.Revision, "admin", false); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(cm.GetConfig().ChatUpstream[0].SupportedModels, []string{"approved-raw"}) {
+		t.Fatal("reset lost existing whitelist")
+	}
+}

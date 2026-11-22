@@ -189,6 +189,19 @@ func TestModelImportScopedAPIAndStaleReview(t *testing.T) {
 	if w = invoke("GET", path+"?protocol=responses", "key-admin", "", ""); w.Code != 404 {
 		t.Fatalf("wrong protocol accepted: %d", w.Code)
 	}
+	view, _ = a.cfgManager.GetModelImport("owned")
+	if w = invoke("DELETE", path, "key-operator", `{"allowUnrestricted":true}`, view.Revision); w.Code != 403 {
+		t.Fatalf("operator reset: %d", w.Code)
+	}
+	if w = invoke("DELETE", path, "key-admin", `{"allowUnrestricted":false}`, view.Revision); w.Code != 400 {
+		t.Fatalf("reset widened empty rules: %d %s", w.Code, w.Body.String())
+	}
+	if w = invoke("DELETE", path, "key-admin", `{"allowUnrestricted":true}`, view.Revision); w.Code != 200 {
+		t.Fatalf("explicit reset: %d %s", w.Code, w.Body.String())
+	}
+	if a.cfgManager.GetConfig().ChatUpstream[index].ModelImport != nil {
+		t.Fatal("reset did not restore legacy lifecycle")
+	}
 	logical := a.cfgManager.GetConfig().ChatUpstream[index].LogicalChannelUID
 	if logical != "" {
 		if err := a.cfgManager.PutAdminCredential(config.AdminCredential{ID: "logical", ActorID: "logical-actor", Role: "admin", KeyHash: config.EntryKeyHash("logical-key"), ChannelUIDs: []string{logical}}, ""); err != nil {
