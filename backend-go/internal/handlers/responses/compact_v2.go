@@ -126,6 +126,9 @@ func tryLocalCompactV2WithKey(
 
 	resp, err := common.SendRequest(req, upstream, envCfg, originalReq.Stream, "Responses")
 	if err != nil {
+		if budgetErr := compactBudgetError(err); budgetErr != nil {
+			return false, budgetErr
+		}
 		return false, &compactError{status: 502, body: []byte(`{"error":"本地 compact v2 上游请求失败"}`), shouldFailover: true, err: err}
 	}
 	defer errutil.IgnoreDeferred(resp.Body.Close)

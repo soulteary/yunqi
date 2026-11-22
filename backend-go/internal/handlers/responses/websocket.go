@@ -51,6 +51,7 @@ func WebSocketHandler(
 	bridgeRouter := httpbridge.NewApp()
 	bridgeRouter.Use(telemetry.BridgeMiddleware())
 	bridgeRouter.Use(middleware.ProxyAdmissionMiddleware(envCfg))
+	bridgeRouter.Use(middleware.ProxyBudgetMiddleware(envCfg, cfgManager))
 	bridgeRouter.Post("/v1/responses", httpHandler)
 	bridgeRouter.Post("/:routePrefix/v1/responses", httpHandler)
 

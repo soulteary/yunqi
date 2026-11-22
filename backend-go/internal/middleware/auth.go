@@ -118,7 +118,7 @@ func isDataPlaneRequest(method, path string) bool {
 func isDataPlaneEndpoint(method, path string) bool {
 	switch method {
 	case http.MethodGet:
-		if path == "/health" || path == "/v1/models" || path == "/v1/responses" {
+		if path == "/health" || path == "/v1/budget" || path == "/v1/models" || path == "/v1/responses" {
 			return true
 		}
 		if model, ok := strings.CutPrefix(path, "/v1/models/"); ok {

@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
+	"github.com/soulteary/yunqi/internal/entrybudget"
 	"os"
 	"strconv"
 	"strings"
@@ -16,6 +17,7 @@ type EnvConfig struct {
 	UsageDrainTimeoutMs   int             // opt-in client-cancel accounting drain, hard max 5s
 	ServiceContext        context.Context `json:"-"` // independent shutdown cancellation
 
+	BudgetManager             *entrybudget.Manager                 `json:"-"`
 	IdentityProxySecret       string                               `json:"-"`
 	IdentityProxyConfigLookup func() IdentityProxyConfig           `json:"-"`
 	ManagedAdminKeyLookup     func(string) (AdminCredential, bool) `json:"-"`

@@ -845,6 +845,9 @@ func imagesErrorResponse(c fiber.Ctx, statusCode int, message, errorType, code s
 }
 
 func handleAllChannelsFailed(c fiber.Ctx, failoverErr *common.FailoverError, lastError error) {
+	if common.HandleEntryBudgetError(c, lastError) {
+		return
+	}
 	if failoverErr != nil {
 		httpbridge.Data(c, failoverErr.Status, "application/json", failoverErr.Body)
 		return
@@ -857,6 +860,9 @@ func handleAllChannelsFailed(c fiber.Ctx, failoverErr *common.FailoverError, las
 }
 
 func handleAllKeysFailed(c fiber.Ctx, failoverErr *common.FailoverError, lastError error) {
+	if common.HandleEntryBudgetError(c, lastError) {
+		return
+	}
 	if failoverErr != nil {
 		httpbridge.Data(c, failoverErr.Status, "application/json", failoverErr.Body)
 		return
