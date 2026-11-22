@@ -1,4 +1,5 @@
 <template>
+  <ModelImportPanel :channels="(channelStore.currentChannelsData as any).channels || []" :channel-type="channelType" @updated="channelStore.refreshChannels()" />
   <!-- 渠道编排（高密度列表模式） -->
   <ChannelOrchestration
     v-if="(channelStore.currentChannelsData as any).channels?.length"
@@ -35,6 +36,7 @@ import { useDialogStore } from '@/stores/dialog'
 import { api } from '@/services/api'
 import type { ChannelHealthItem } from '@/services/api-types'
 import ChannelOrchestration from '@/components/ChannelOrchestration.vue'
+import ModelImportPanel from '@/components/ModelImportPanel.vue'
 import { useI18n } from '@/i18n'
 import { useGlobalTick } from '@/composables/useGlobalTick'
 import { useEventStream } from '@/composables/useEventStream'
