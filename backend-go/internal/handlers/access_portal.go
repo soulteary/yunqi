@@ -35,6 +35,16 @@ func AccessPortal(env *config.EnvConfig) fiber.Handler {
 		}
 		html := strings.ReplaceAll(accessPortalHTML, "__NONCE__", nonce)
 		html = strings.ReplaceAll(html, "__IDENTITY_PROXY_ENABLED__", enabled)
+		nativeEnabled := "false"
+		if env.NativeIdentity != nil {
+			nativeEnabled = "true"
+		}
+		html = strings.ReplaceAll(html, "__NATIVE_OIDC_ENABLED__", nativeEnabled)
+		nativeSessionPresent := "false"
+		if _, err := httpbridge.Request(c).Cookie("__Host-yunqi-session"); err == nil {
+			nativeSessionPresent = "true"
+		}
+		html = strings.ReplaceAll(html, "__NATIVE_SESSION_PRESENT__", nativeSessionPresent)
 		httpbridge.Data(c, 200, "text/html; charset=utf-8", []byte(html))
 		return nil
 	}

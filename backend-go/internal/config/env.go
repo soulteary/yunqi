@@ -13,6 +13,14 @@ import (
 )
 
 type EnvConfig struct {
+	NativeOIDCIssuer       string `json:"-"`
+	NativeOIDCClientID     string `json:"-"`
+	NativeOIDCClientSecret string `json:"-"`
+	NativeOIDCRedirectURL  string `json:"-"`
+	NativeOIDCRequiredAMR  string
+	NativeOIDCAllowedACR   string
+	NativeIdentity         NativeIdentityBackend `json:"-"`
+
 	IdentityProxyRevocationRedisURL       string `json:"-"`
 	IdentityProxyRevocationRedisNamespace string
 	IdentityProxyRevocations              IdentityRevocationBackend `json:"-"`
@@ -94,6 +102,12 @@ func NewEnvConfig() *EnvConfig {
 		IdentityProxyRevocationRedisURL:       getEnv("IDENTITY_PROXY_REVOCATION_REDIS_URL", ""),
 		IdentityProxyRevocationRedisNamespace: getEnv("IDENTITY_PROXY_REVOCATION_REDIS_NAMESPACE", "yunqi"),
 		IdentityProxySecret:                   getEnv("IDENTITY_PROXY_SECRET", ""),
+		NativeOIDCIssuer:                      getEnv("OIDC_ISSUER", ""),
+		NativeOIDCClientID:                    getEnv("OIDC_CLIENT_ID", ""),
+		NativeOIDCClientSecret:                getEnv("OIDC_CLIENT_SECRET", ""),
+		NativeOIDCRedirectURL:                 getEnv("OIDC_REDIRECT_URL", ""),
+		NativeOIDCRequiredAMR:                 getEnv("OIDC_REQUIRED_AMR", "mfa"),
+		NativeOIDCAllowedACR:                  getEnv("OIDC_ALLOWED_ACR", ""),
 		Port:                                  getEnvAsInt("PORT", 3000),
 		BindHost:                              strings.TrimSpace(getEnv("BIND_HOST", "")),
 		Env:                                   env,

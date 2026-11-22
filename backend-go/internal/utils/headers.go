@@ -219,6 +219,7 @@ func isLikelyClaudeCodeSubagent(req map[string]interface{}) bool {
 
 func PrepareUpstreamHeaders(c fiber.Ctx, targetHost string) http.Header {
 	headers := httpbridge.Request(c).Header.Clone()
+	StripNativeIdentityCookies(headers)
 	for name := range headers {
 		if strings.HasPrefix(strings.ToLower(name), "x-yunqi-identity-") || strings.EqualFold(name, "X-Yunqi-Management-Request") {
 			delete(headers, name)
@@ -328,6 +329,7 @@ func SetGeminiAuthenticationHeader(headers http.Header, apiKey string) {
 // 使用 http.Header.Set 会自动规范化 key 为 CanonicalHeaderKey 格式
 // 跳过空白 key 或 value
 func ApplyCustomHeaders(headers http.Header, customHeaders map[string]string) {
+	defer StripNativeIdentityCookies(headers)
 	for key, value := range customHeaders {
 		key = strings.TrimSpace(key)
 		if strings.HasPrefix(strings.ToLower(key), "x-yunqi-identity-") || strings.EqualFold(key, "X-Yunqi-Management-Request") {
@@ -355,6 +357,7 @@ var CopilotProtectedHeaders = map[string]bool{
 
 // ApplyCustomHeadersProtected 应用自定义请求头，但跳过受保护的头（大小写不敏感匹配）。
 func ApplyCustomHeadersProtected(headers http.Header, customHeaders map[string]string, protected map[string]bool) {
+	defer StripNativeIdentityCookies(headers)
 	for key, value := range customHeaders {
 		key = strings.TrimSpace(key)
 		if strings.HasPrefix(strings.ToLower(key), "x-yunqi-identity-") || strings.EqualFold(key, "X-Yunqi-Management-Request") {
@@ -408,6 +411,12 @@ func ForwardResponseHeaders(upstreamHeaders http.Header, clientWriter http.Respo
 
 		// 转发头部（可能有多个值）
 		for _, value := range values {
+			if lowerKey == "set-cookie" {
+				name, _, _ := strings.Cut(value, "=")
+				if isNativeIdentityCookie(strings.TrimSpace(name)) {
+					continue
+				}
+			}
 			clientWriter.Header().Add(key, value)
 		}
 	}
@@ -419,4 +428,29 @@ func ForwardContentType(upstreamHeaders http.Header, clientWriter http.ResponseW
 	if ct := upstreamHeaders.Get("Content-Type"); ct != "" {
 		clientWriter.Header().Set("Content-Type", ct)
 	}
+}
+
+// StripNativeIdentityCookies keeps management credentials out of every data
+// plane, including transparent Claude forwarding and configured custom headers.
+func StripNativeIdentityCookies(headers http.Header) {
+	request := &http.Request{Header: headers}
+	cookies := request.Cookies()
+	found := false
+	for _, cookie := range cookies {
+		if isNativeIdentityCookie(cookie.Name) {
+			found = true
+		}
+	}
+	if !found {
+		return
+	}
+	headers.Del("Cookie")
+	for _, cookie := range cookies {
+		if !isNativeIdentityCookie(cookie.Name) {
+			request.AddCookie(cookie)
+		}
+	}
+}
+func isNativeIdentityCookie(name string) bool {
+	return name == "__Host-yunqi-session" || name == "__Host-yunqi-oidc-flow"
 }

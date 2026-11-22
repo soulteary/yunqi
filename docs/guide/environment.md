@@ -981,3 +981,14 @@ Redis 此处只共享入口并发/RPM，不复制配置或 SQLite 预算账本�
 共享 SSO 撤销使用独立的 `IDENTITY_PROXY_REVOCATION_REDIS_URL` 与 `IDENTITY_PROXY_REVOCATION_REDIS_NAMESPACE`，并需在身份代理配置中显式选择 `revocationMode=shared`。该 URL 遵循全局出站限制，凭证不参与管理 JSON 展示；配置 URL 本身不会把默认 local 模式自动改为 shared。各节点应先配置可用后端，再统一启用共享模式。
 
 `PRESET_SOURCE_MAX_AGE`、`PRESET_SOURCE_FUTURE_SKEW` 使用 Go duration（如 `168h`、`5m`），默认 0 保持时间门槛未启用。远程更新检查和审核时若启用时间校验，需要有效发布时间，拒绝过旧或超过允许时钟偏差的来源；审核等待期间也会重新检查。即使未设时间门槛，待审来源仍显示发布时间和检查时间，不能将检查成功等同于来源新鲜。
+
+
+### 原生 OIDC 管理登录
+
+原生登录默认关闭，以 `OIDC_ISSUER` 显式启用；必须同时配置 `OIDC_CLIENT_ID`、`OIDC_REDIRECT_URL`。发行者及发现的授权、Token、JWKS 端点均要求 HTTPS。回调 URL 必须是控制台固定的 `https://<host>/auth/oidc/callback`，不从 Host 或转发头推断，不接受任意 return URL。机密客户端可通过 `OIDC_CLIENT_SECRET` 配置 secret；公开客户端仍强制 PKCE S256。IdP 注册客户端时允许 `openid groups` scope，并在签名 ID Token 中提供 `groups` 数组。
+
+`OIDC_REQUIRED_AMR` 默认为 `mfa`，逗号分隔的所有方法均须出现在签名 `amr` 数组中。`OIDC_ALLOWED_ACR` 默认为空；设置后签名 `acr` 还须匹配其中一项。仅当明确配置了非空 ACR 白名单时，才允许清空 REQUIRED_AMR；不能同时关闭两种强度校验。不同 IdP 的 MFA/Passkey 标识不一致，须依据 IdP 声明配置，例如 `OIDC_REQUIRED_AMR=fido` 配合所需的 ACR。Yunqi 不自行注册 Passkey 或保存 TOTP 种子。
+
+组映射复用持久配置 `identityProxy.groupMappings`，原生 OIDC 不要求启用身份代理或设置 `IDENTITY_PROXY_SECRET`。`identityProxy.revocationMode`、revocationEpoch 与已有身份撤销 Redis 后端同时约束原生会话。共享模式需在启用前完成现有撤销 realm 初始化；各节点保持 OIDC 配置、namespace、组映射与撤销策略一致。修改环境变量或 local/shared 存储模式后需手动重启，以重建原生后端；模式不匹配期间拒绝登录/鉴权。所有 IdP 请求遵循全局出站策略，发现或 Token/JWKS 重定向不会绕过网络限制；Token 端点重定向会被拒绝。
+
+认证强度策略摘要与撤销 epoch 均绑定到服务端会话和共享存储 realm；收紧认证强度并重启后不会沿用旧的低强度会话。组映射与较短的 MaxSessionSeconds 每次鉴权重新应用。

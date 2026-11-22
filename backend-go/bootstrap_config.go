@@ -24,7 +24,7 @@ func (a *application) configureGuardrails() {
 	// fail-open：guardrail 异常仅记日志放行，绝不阻断流量
 	credentialMasker := guardrails.NewCredentialMasker()
 	// 注入网关自身密钥
-	gatewayKeys := []string{a.envCfg.ProxyAccessKey, a.envCfg.GetAdminAccessKey()}
+	gatewayKeys := []string{a.envCfg.ProxyAccessKey, a.envCfg.GetAdminAccessKey(), a.envCfg.NativeOIDCClientSecret}
 	if a.envCfg.IdentityProxySecret != "" {
 		gatewayKeys = append(gatewayKeys, a.envCfg.IdentityProxySecret)
 	}
@@ -161,7 +161,7 @@ func (a *application) initConversations() {
 }
 
 func initializeCredentialRedaction(env *config.EnvConfig) func() {
-	keys := []string{env.ProxyAccessKey, env.GetAdminAccessKey(), env.IdentityProxySecret, env.ProxyRedisURL}
+	keys := []string{env.ProxyAccessKey, env.GetAdminAccessKey(), env.IdentityProxySecret, env.NativeOIDCClientSecret, env.ProxyRedisURL}
 	if parsed, err := url.Parse(env.ProxyRedisURL); err == nil && parsed.User != nil {
 		if password, ok := parsed.User.Password(); ok {
 			keys = append(keys, password)
