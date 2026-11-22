@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/joho/godotenv"
 	"github.com/soulteary/yunqi/internal/autopilot"
@@ -13,6 +14,7 @@ import (
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/conversation"
 	"github.com/soulteary/yunqi/internal/entrybudget"
+	"github.com/soulteary/yunqi/internal/entrylease"
 	"github.com/soulteary/yunqi/internal/errutil"
 	"github.com/soulteary/yunqi/internal/eventbus"
 	"github.com/soulteary/yunqi/internal/handlers"
@@ -106,6 +108,14 @@ func runService(cliOpts cliOptions) {
 
 	// Candidate keys must be observed before initial parsing/validation can log.
 	initializeCredentialRedaction(envCfg)
+	if envCfg.ProxyRedisURL != "" {
+		shared, leaseErr := entrylease.New(envCfg.ProxyRedisURL, envCfg.ProxyRedisNamespace, time.Duration(envCfg.ProxyRedisLeaseSeconds)*time.Second)
+		if leaseErr != nil {
+			log.Fatal("初始化共享入口准入失败: invalid Redis admission configuration")
+		}
+		envCfg.ProxyRedisAdmission = shared
+		defer shared.Close()
+	}
 	envCfg.BudgetManager = entrybudget.NewManager(filepath.Join(filepath.Dir(paths.ConfigPath), "entry-budget.db"))
 	defer envCfg.BudgetManager.Close()
 	cfgManager, err := config.NewConfigManager(paths.ConfigPath, paths.BackupDir)
