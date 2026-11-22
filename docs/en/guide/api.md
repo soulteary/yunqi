@@ -75,6 +75,10 @@ Trusted identity proxy authentication is disabled by default. Global admins conf
 
 POST /api/access/session/revoke revokes the current SSO session. Global admins can revoke a sessionFingerprint through POST /api/identity-proxy/sessions/revoke. Raw subject/session values are not stored or returned. Revocations persist and survive role mapping edits. SSO does not grant data-plane access.
 
+The external identity proxy and IdP perform OIDC login, Passkey and two-factor authentication. Yunqi verifies the trusted proxy, expiry, role/resource scope and revocation state. Copilot OAuth remains upstream authorization rather than administrator login.
+
+`identityProxy.revocationMode` defaults to `local`, guaranteeing revocation on the current node only. `shared` checks an explicitly configured Redis backend on every SSO authentication. Replicas need the same backend/namespace and consistent identity proxy policy. Missing backends or read/write failures return 503 without falling back locally. Identity views and logout operations display their revocation scope; local logout is not global revocation.
+
 Optional strict session routing atomically binds the first request before dispatch. An unavailable binding fails rather than migrating across channels or racing; retries of keys/URLs within that channel remain possible. See [environment settings](environment.md).
 
 ## Configuration and operational evidence
@@ -115,4 +119,4 @@ Requests freeze a content-derived pricing snapshot at start. `pricingVersionId` 
 
 The cost page includes remote preset price review and rollback. Global admins use `GET /api/presets/prices`, `POST /api/presets/prices/check`, `POST /api/presets/prices/approve` (reviewId, allowAnomalies), and `POST /api/presets/prices/rollback` (historical bundleHash). Downloaded price changes remain pending. Jumps above the default 50% threshold and pricing-dimension changes require explicit anomaly acknowledgement. Approval binds the entire current bundle and source digest, preventing stale-page overwrites.
 
-Activation, actor audit and rollback snapshots share one atomic durable file. Failure does not publish the new state. Up to 10 revisions are retained. Rollback restores the entire preset bundle, including model capabilities, without repricing settled requests. Source signature status and publication/check times are visible; see [environment settings](environment.md) for trust and freshness requirements.
+Activation, actor audit and rollback snapshots share one atomic durable file. Failure does not publish the new state. A bundle containing price changes waits as a whole; metadata-only updates that do not affect price selection retain the existing update flow. Up to 10 revisions are retained. Rollback restores the same entire preset bundle after restart, including model capabilities, without repricing settled requests. Legacy caches with different price selection and no approval become pending instead of silently replacing prices at startup. Source signature status and publication/check times are visible; see [environment settings](environment.md) for trust and freshness requirements.

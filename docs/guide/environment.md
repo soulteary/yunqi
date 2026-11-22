@@ -972,8 +972,12 @@ OTLP 也接受 `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`，或 `OTEL_EXPORTER_OTLP_EN
 
 预置更新器的 `PRESET_TRUSTED_ED25519_KEYS` 接受 key ID 到 Base64 Ed25519 公钥的 JSON 对象。未配置时可检查未签名来源，但会明确显示未验证；配置可信公钥后拒绝未签名、未知 key 和错误签名，审核时按当前公钥重新验证，不能绕过已撤销 key。来源 digest 绑定下载的索引与分片校验链。
 
-跨节点入口限额由 `PROXY_REDIS_URL` 显式启用，支持 redis/rediss；未设置仍使用本地准入。`PROXY_REDIS_NAMESPACE` 默认 yunqi，同一限额域的节点必须使用相同 namespace、稳定主体 ID 和限额策略；独立网关应使用不同 namespace。`PROXY_REDIS_MAX_RPM` 默认为 0（不额外限制），`PROXY_REDIS_LEASE_SECONDS` 默认 30，允许 5–300 秒。入口并发仍取主体策略或 `PROXY_MAX_CONCURRENCY`，共享租约限制各节点的总和，不按 Key 重试重复消耗逻辑请求 RPM。
+跨节点入口限额由 `PROXY_REDIS_URL` 显式启用，支持 redis/rediss；未设置仍使用本地准入。`PROXY_REDIS_NAMESPACE` 默认 yunqi，同一限额域的节点必须使用相同 namespace、稳定主体 ID 和限额策略；独立网关应使用不同 namespace。`PROXY_REDIS_MAX_RPM` 默认为 0（不额外限制），`PROXY_REDIS_LEASE_SECONDS` 默认 30，允许 5–300 秒。入口并发由 `PROXY_MAX_CONCURRENCY` 设置每主体上限，共享租约限制各节点的总和，不按 Key 重试重复消耗逻辑请求 RPM。
 
 Redis 不可用或续约失效时拒绝准入并取消受影响上游，不退回本地放行；活跃 Body（含后台计量读取）结束前保留租约。异常进程退出后等待 Redis 租约过期回收，不立即假定请求结束。
 
-`PRESET_SOURCE_MAX_AGE`、`PRESET_SOURCE_FUTURE_SKEW` 使用 Go duration（如 `168h`、`5m`），默认 0 保持时间门槛未启用。启用时间校验后需要有效发布时间，拒绝过旧或超过允许时钟偏差的来源；审核等待期间也会重新检查。即使未设时间门槛，待审来源仍显示发布时间和检查时间，不能将检查成功等同于来源新鲜。
+Redis 此处只共享入口并发/RPM，不复制配置或 SQLite 预算账本，也不改变严格会话的进程内绑定。独立预算数据库分别计算余额，不能视为统一团队预算；多副本部署需为同一预算主体保持单一账本入口。Redis 应保留在途租约状态，不能依赖清空或驱逐 key 回收额度；Redis 租约不能撤销供应商已开始的调用。
+
+共享 SSO 撤销使用独立的 `IDENTITY_PROXY_REVOCATION_REDIS_URL` 与 `IDENTITY_PROXY_REVOCATION_REDIS_NAMESPACE`，并需在身份代理配置中显式选择 `revocationMode=shared`。该 URL 遵循全局出站限制，凭证不参与管理 JSON 展示；配置 URL 本身不会把默认 local 模式自动改为 shared。各节点应先配置可用后端，再统一启用共享模式。
+
+`PRESET_SOURCE_MAX_AGE`、`PRESET_SOURCE_FUTURE_SKEW` 使用 Go duration（如 `168h`、`5m`），默认 0 保持时间门槛未启用。远程更新检查和审核时若启用时间校验，需要有效发布时间，拒绝过旧或超过允许时钟偏差的来源；审核等待期间也会重新检查。即使未设时间门槛，待审来源仍显示发布时间和检查时间，不能将检查成功等同于来源新鲜。
