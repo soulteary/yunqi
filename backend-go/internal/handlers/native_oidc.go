@@ -8,6 +8,7 @@ import (
 	"github.com/soulteary/yunqi/internal/middleware"
 	"github.com/soulteary/yunqi/internal/nativeoidc"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -83,8 +84,9 @@ func RegisterNativeOIDCRoutes(r fiber.Router, env *config.EnvConfig) {
 		return nil
 	})
 }
-func ClearNativeIdentityCookie(c fiber.Ctx) {
-	if middleware.GetAdminPrincipal(c).Source == "oidc" {
+func ClearNativeIdentityCookie(c fiber.Ctx, targetFingerprint string) {
+	principal := middleware.GetAdminPrincipal(c)
+	if principal.Source == "oidc" && strings.EqualFold(principal.SessionFingerprint, targetFingerprint) {
 		http.SetCookie(httpbridge.Writer(c), &http.Cookie{Name: nativeoidc.CookieName, Path: "/", Value: "", HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode, MaxAge: -1})
 	}
 }

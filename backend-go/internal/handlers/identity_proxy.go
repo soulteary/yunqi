@@ -97,7 +97,7 @@ func RegisterIdentityProxyRoutes(router fiber.Router, env *config.EnvConfig, cm 
 			httpbridge.JSON(c, 503, fiber.Map{"error": "session_revocation_failed"})
 			return nil
 		}
-		ClearNativeIdentityCookie(c)
+		ClearNativeIdentityCookie(c, req.SessionFingerprint)
 		httpbridge.JSON(c, 200, fiber.Map{"revoked": true, "revocationScope": scope})
 		return nil
 	})
@@ -110,7 +110,7 @@ func RegisterIdentityProxyRoutes(router fiber.Router, env *config.EnvConfig, cm 
 			httpbridge.JSON(c, 503, fiber.Map{"error": "session_revocation_failed"})
 			return nil
 		}
-		ClearNativeIdentityCookie(c)
+		ClearNativeIdentityCookie(c, middleware.GetAdminPrincipal(c).SessionFingerprint)
 		httpbridge.JSON(c, 200, fiber.Map{"revoked": true, "revocationScope": scope})
 		return nil
 	})

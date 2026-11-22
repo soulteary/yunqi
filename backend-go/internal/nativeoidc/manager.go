@@ -33,6 +33,7 @@ type Manager struct {
 	realm           string
 	policy          string
 	revocationEpoch string
+	now             func() time.Time
 }
 type flow struct {
 	Policy   string
@@ -84,7 +85,7 @@ func New(env *config.EnvConfig) (*Manager, error) {
 	// OIDC must not redirect a confidential token POST to another endpoint. The
 	// policy-aware transport still validates every discovery/token/JWKS request.
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	return &Manager{env: env, client: &client, store: store, realm: realm, origin: redirect.Scheme + "://" + redirect.Host, policy: identityPolicyHash(env), revocationEpoch: cfg.RevocationEpoch}, nil
+	return &Manager{env: env, client: &client, store: store, realm: realm, origin: redirect.Scheme + "://" + redirect.Host, policy: identityPolicyHash(env), revocationEpoch: cfg.RevocationEpoch, now: time.Now}, nil
 }
 func (m *Manager) Close() error   { return m.store.close() }
 func (m *Manager) Origin() string { return m.origin }
@@ -131,7 +132,7 @@ func (m *Manager) Begin(ctx context.Context) (authURL, browser string, err error
 	if err != nil {
 		return "", "", err
 	}
-	f := flow{Policy: m.policy, Epoch: m.revocationEpoch, Nonce: nonce, Verifier: verifier, Browser: hash(browser), Expires: time.Now().Add(5 * time.Minute).Unix()}
+	f := flow{Policy: m.policy, Epoch: m.revocationEpoch, Nonce: nonce, Verifier: verifier, Browser: hash(browser), Expires: m.now().Add(5 * time.Minute).Unix()}
 	if err = m.store.put(ctx, "flow:"+hash(state), marshal(f), "", f.Expires); err != nil {
 		return "", "", err
 	}
@@ -162,7 +163,7 @@ func (m *Manager) Complete(ctx context.Context, state, code, browser string) (st
 		return "", err
 	}
 	var f flow
-	if json.Unmarshal([]byte(raw), &f) != nil || f.Policy != m.policy || f.Epoch != m.revocationEpoch || f.Expires <= time.Now().Unix() || subtle.ConstantTimeCompare([]byte(f.Browser), []byte(hash(browser))) != 1 {
+	if json.Unmarshal([]byte(raw), &f) != nil || f.Policy != m.policy || f.Epoch != m.revocationEpoch || f.Expires <= m.now().Unix() || subtle.ConstantTimeCompare([]byte(f.Browser), []byte(hash(browser))) != 1 {
 		return "", errInvalid
 	}
 	p, ctx, err := m.provider(ctx)
@@ -179,7 +180,7 @@ func (m *Manager) Complete(ctx context.Context, state, code, browser string) (st
 		return "", errInvalid
 	}
 	verified, err := p.Verifier(&oidc.Config{ClientID: m.env.NativeOIDCClientID, SupportedSigningAlgs: []string{"RS256", "ES256", "EdDSA"}}).Verify(ctx, rawID)
-	if err != nil || verified.IssuedAt.IsZero() || verified.IssuedAt.After(time.Now().Add(30*time.Second)) || verified.Subject == "" || len(verified.Subject) > 256 || subtle.ConstantTimeCompare([]byte(verified.Nonce), []byte(f.Nonce)) != 1 {
+	if err != nil || verified.IssuedAt.IsZero() || verified.IssuedAt.After(m.now().Add(30*time.Second)) || verified.Subject == "" || len(verified.Subject) > 256 || subtle.ConstantTimeCompare([]byte(verified.Nonce), []byte(f.Nonce)) != 1 {
 		return "", errInvalid
 	}
 	var claims struct {
@@ -209,7 +210,7 @@ func (m *Manager) Complete(ctx context.Context, state, code, browser string) (st
 	}
 	subject := config.EntryKeyHash(m.env.NativeOIDCIssuer + "\x00" + verified.Subject)
 	cookie := subject + "." + randomID
-	issuedAt := time.Now().Unix()
+	issuedAt := m.now().Unix()
 	maxSession := int64(8 * 60 * 60)
 	if cfg.MaxSessionSeconds > 0 {
 		maxSession = min(maxSession, cfg.MaxSessionSeconds)
@@ -240,14 +241,18 @@ func (m *Manager) Lookup(ctx context.Context, cookie string) (config.NativeIdent
 		return config.NativeIdentitySession{}, err
 	}
 	var s session
-	if json.Unmarshal([]byte(raw), &s) != nil || s.Policy != m.policy || s.Epoch != m.revocationEpoch || s.SubjectID != subject || s.ExpiresAt <= time.Now().Unix() || s.Fingerprint != config.IdentitySessionHash(m.env.NativeOIDCIssuer, cookie) {
+	if json.Unmarshal([]byte(raw), &s) != nil || s.Policy != m.policy || s.Epoch != m.revocationEpoch || s.SubjectID != subject || s.ExpiresAt <= m.now().Unix() || s.Fingerprint != config.IdentitySessionHash(m.env.NativeOIDCIssuer, cookie) {
 		return config.NativeIdentitySession{}, errInvalid
 	}
 	cfg := m.env.IdentityProxyConfigLookup()
+	effectiveExpiry := s.ExpiresAt
 	if cfg.MaxSessionSeconds > 0 {
-		s.ExpiresAt = min(s.ExpiresAt, s.IssuedAt+cfg.MaxSessionSeconds)
+		effectiveExpiry = min(effectiveExpiry, s.IssuedAt+cfg.MaxSessionSeconds)
 	}
-	if s.IssuedAt <= 0 || s.ExpiresAt <= time.Now().Unix() {
+	// The principal must retain the original stored expiry for revocation TTL.
+	// Returning a temporary policy deadline could revive this cookie when that
+	// short revocation expires and an administrator later relaxes the policy.
+	if s.IssuedAt <= 0 || effectiveExpiry <= m.now().Unix() {
 		return config.NativeIdentitySession{}, errInvalid
 	}
 	if err = m.checkRevocation(ctx, s.Fingerprint); err != nil {
@@ -258,7 +263,7 @@ func (m *Manager) Lookup(ctx context.Context, cookie string) (config.NativeIdent
 func (m *Manager) checkRevocation(ctx context.Context, fingerprint string) error {
 	cfg := m.env.IdentityProxyConfigLookup()
 	for _, r := range cfg.RevokedSessions {
-		if r.Hash == fingerprint && (r.ExpiresAt == 0 || r.ExpiresAt > time.Now().Unix()) {
+		if r.Hash == fingerprint && (r.ExpiresAt == 0 || r.ExpiresAt > m.now().Unix()) {
 			return errInvalid
 		}
 	}

@@ -76,6 +76,8 @@ type testRevocations struct {
 	mu      sync.Mutex
 	lost    bool
 	revoked map[string]bool
+	until   map[string]int64
+	now     func() time.Time
 }
 
 func (b *testRevocations) Prepare(_ context.Context, epoch string, _ bool) (string, error) {
@@ -90,12 +92,20 @@ func (b *testRevocations) Sync(context.Context, []config.IdentitySessionRevocati
 func (b *testRevocations) IsRevoked(_ context.Context, key string) (bool, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.revoked[key], nil
+	now := time.Now().Unix()
+	if b.now != nil {
+		now = b.now().Unix()
+	}
+	return b.revoked[key] && (b.until[key] == 0 || b.until[key] > now), nil
 }
-func (b *testRevocations) Revoke(_ context.Context, key string, _ int64) error {
+func (b *testRevocations) Revoke(_ context.Context, key string, expires int64) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.revoked[key] = true
+	if b.until == nil {
+		b.until = make(map[string]int64)
+	}
+	b.until[key] = expires
 	return nil
 }
 func (b *testRevocations) Close() error { return nil }
@@ -238,5 +248,58 @@ func TestOIDCSharedPendingFlowsAreBoundedAndRecover(t *testing.T) {
 	}
 	if got := first.redis.ZCard(ctx, base+"sessions").Val(); got != maxPendingFlows {
 		t.Fatalf("flow index count=%d", got)
+	}
+}
+
+func TestOIDCLogoutCannotReviveAfterTemporaryLifetimeRestriction(t *testing.T) {
+	for _, mode := range []string{"local", "shared"} {
+		t.Run(mode, func(t *testing.T) {
+			manager, idp, cfg := fakeProvider(t)
+			clock := time.Now()
+			backend := &testRevocations{revoked: make(map[string]bool), now: func() time.Time { return clock }}
+			if mode == "shared" {
+				cfg.RevocationMode = "shared"
+				cfg.RevocationEpoch = strings.Repeat("a", 64)
+				manager.env.IdentityProxyRevocations = backend
+				manager.env.IdentityProxyRevocationRedisURL = "redis://127.0.0.1:1"
+				shared, err := New(manager.env)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_ = shared.store.redis.Close()
+				shared.store.redis = isolatedRedis(t)()
+				shared.client = idp.server.Client()
+				defer shared.Close()
+				manager = shared
+			}
+			manager.now = func() time.Time { return clock }
+			state, browser := startFlow(t, manager, idp)
+			cookie, err := manager.Complete(context.Background(), state, "code", browser)
+			if err != nil {
+				t.Fatal(err)
+			}
+			original, err := manager.Lookup(context.Background(), cookie)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg.MaxSessionSeconds = 60
+			restricted, err := manager.Lookup(context.Background(), cookie)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if restricted.ExpiresAt != original.ExpiresAt {
+				t.Fatal("temporary policy shortened authoritative revocation expiry")
+			}
+			if mode == "shared" {
+				_ = backend.Revoke(context.Background(), restricted.Fingerprint, restricted.ExpiresAt)
+			} else {
+				cfg.RevokedSessions = []config.IdentitySessionRevocation{{Hash: restricted.Fingerprint, ExpiresAt: restricted.ExpiresAt}}
+			}
+			clock = clock.Add(2 * time.Minute) // the temporary 60-second deadline has elapsed
+			cfg.MaxSessionSeconds = 0
+			if _, err = manager.Lookup(context.Background(), cookie); err == nil {
+				t.Fatal("logged-out cookie revived after policy was relaxed")
+			}
+		})
 	}
 }
