@@ -23,6 +23,8 @@ type IdentitySessionRevocation struct {
 // IdentityProxyConfig authorizes assertions only from configured peer networks
 // plus an environment-held shared secret. OAuth stays external.
 type IdentityProxyConfig struct {
+	RevocationEpoch   string                      `json:"revocationEpoch,omitempty"`
+	RevocationMode    string                      `json:"revocationMode,omitempty"`
 	RevokedSessions   []IdentitySessionRevocation `json:"revokedSessions,omitempty"`
 	AllowedOrigins    []string                    `json:"allowedOrigins,omitempty"`
 	Enabled           bool                        `json:"enabled"`
@@ -52,6 +54,17 @@ func (cm *ConfigManager) IdentityProxySnapshot() IdentityProxyConfig {
 }
 func (cm *ConfigManager) SetIdentityProxyConfig(cfg IdentityProxyConfig) error {
 	cfg = cloneIdentityProxy(cfg)
+	cfg.RevocationEpoch = strings.ToLower(cfg.RevocationEpoch)
+	if cfg.RevocationEpoch != "" {
+		decoded, err := hex.DecodeString(cfg.RevocationEpoch)
+		if err != nil || len(decoded) != 32 {
+			return errors.New("invalid identity revocation epoch")
+		}
+	}
+
+	if cfg.RevocationMode != "" && cfg.RevocationMode != "local" && cfg.RevocationMode != "shared" {
+		return errors.New("invalid identity revocation mode")
+	}
 	if len(cfg.AllowedOrigins) > 32 || len(cfg.TrustedCIDRs) > 256 || len(cfg.GroupMappings) > 256 || len(cfg.Issuer) > 128 || cfg.MaxSessionSeconds < 0 || cfg.MaxSessionSeconds > 30*24*60*60 {
 		return errors.New("invalid identity proxy configuration")
 	}
@@ -79,6 +92,24 @@ func (cm *ConfigManager) SetIdentityProxyConfig(cfg IdentityProxyConfig) error {
 	}
 	cm.mu.Lock()
 	next := cm.config.deepCopy()
+	// Omitted mode from an older client preserves the current scope atomically.
+	// Only an explicit "local" opts out of shared revocation.
+	if cfg.RevocationMode == "" {
+		cfg.RevocationMode = "local"
+		if next.IdentityProxy != nil {
+			cfg.RevocationMode = next.IdentityProxy.EffectiveRevocationMode()
+		}
+	}
+	// A bound realm survives explicit local mode and omitted legacy fields.
+	// API policy edits cannot reset a missing/corrupt shared revocation realm.
+	if next.IdentityProxy != nil && next.IdentityProxy.RevocationEpoch != "" {
+		previous := strings.ToLower(next.IdentityProxy.RevocationEpoch)
+		if cfg.RevocationEpoch != "" && cfg.RevocationEpoch != previous {
+			cm.mu.Unlock()
+			return errors.New("identity revocation epoch is immutable")
+		}
+		cfg.RevocationEpoch = previous
+	}
 	// Ordinary policy edits never silently revive revoked sessions.
 	cfg.RevokedSessions = nil
 	if next.IdentityProxy != nil {
