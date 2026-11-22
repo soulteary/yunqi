@@ -4,6 +4,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
+	"github.com/soulteary/yunqi/internal/entrybudget"
 	"os"
 	"strconv"
 	"strings"
@@ -11,6 +12,7 @@ import (
 )
 
 type EnvConfig struct {
+	BudgetManager             *entrybudget.Manager `json:"-"`
 	StrictSessionAffinity     bool
 	IdentityProxySecret       string                               `json:"-"`
 	IdentityProxyConfigLookup func() IdentityProxyConfig           `json:"-"`

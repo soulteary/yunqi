@@ -854,6 +854,9 @@ func handleModelRoutingError(c fiber.Ctx, lastFailoverError *FailoverError) bool
 // lastError: 最后一个错误
 // apiType: API 类型（用于错误消息）
 func HandleAllChannelsFailed(c fiber.Ctx, lastFailoverError *FailoverError, lastError error, apiType string) {
+	if HandleEntryBudgetError(c, lastError) {
+		return
+	}
 	if lastFailoverError == nil && httpclient.IsEgressError(lastError) {
 		httpbridge.JSON(c, 503, fiber.Map{"error": fiber.Map{"type": "network_egress_unavailable", "message": "Configured network egress is unavailable"}})
 		return
@@ -908,6 +911,9 @@ func respondContextCapacityExceeded(c fiber.Ctx, capErr *scheduler.ContextCapaci
 
 // HandleAllKeysFailed 处理所有密钥都失败的情况（单渠道模式）
 func HandleAllKeysFailed(c fiber.Ctx, lastFailoverError *FailoverError, lastError error, apiType string) {
+	if HandleEntryBudgetError(c, lastError) {
+		return
+	}
 	if lastFailoverError == nil && httpclient.IsEgressError(lastError) {
 		httpbridge.JSON(c, 503, fiber.Map{"error": fiber.Map{"type": "network_egress_unavailable", "message": "Configured network egress is unavailable"}})
 		return

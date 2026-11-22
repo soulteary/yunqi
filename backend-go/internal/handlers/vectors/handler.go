@@ -423,6 +423,9 @@ func vectorsErrorResponse(c fiber.Ctx, statusCode int, message, errorType, code 
 }
 
 func handleAllChannelsFailed(c fiber.Ctx, failoverErr *common.FailoverError, lastError error) {
+	if common.HandleEntryBudgetError(c, lastError) {
+		return
+	}
 	if failoverErr != nil {
 		httpbridge.Data(c, failoverErr.Status, "application/json", failoverErr.Body)
 		return

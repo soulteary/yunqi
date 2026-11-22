@@ -35,6 +35,7 @@ func (a *application) newRouter() *fiber.App {
 	r.Use(middleware.WebAuthMiddleware(a.envCfg, a.cfgManager))
 
 	r.Use(middleware.ProxyAdmissionMiddleware(a.envCfg))
+	r.Use(middleware.ProxyBudgetMiddleware(a.envCfg, a.cfgManager))
 
 	a.registerSystemRoutes(r)
 	apiGroup := r.Group("/api")

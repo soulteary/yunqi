@@ -386,6 +386,10 @@ func HandleMultiChannelFailoverWithSelectionFilter(
 	if localEgressFailures < failedAttempts && httpclient.IsEgressError(lastError) {
 		lastError = lastNonEgressError
 	}
+	if isEntryBudgetError(lastError) {
+		HandleAllChannelsFailed(c, nil, lastError, apiType)
+		return
+	}
 	handleAllFailed(c, lastFailoverError, lastError)
 	if pendingOutcome != nil {
 		notifyRoutingOutcome(pendingOutcome.selection, buildRoutingOutcome(
