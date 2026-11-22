@@ -459,3 +459,34 @@ func TestManagementAuditModelImportTransactionsKeepExplicitActorAndHistory(t *te
 	}
 	_ = auditEventFor(t, cm, removeAudit.OperationID)
 }
+
+func TestManagementAuditAccountDiscoveryHelperPreservesHumanAndSystemActors(t *testing.T) {
+	cm := newImportManager(t)
+	cm.config.ChatUpstream[0].AccountUID = "audit-account"
+	ctx := auditTestContext("account-human")
+	changes := []AccountChannelUpdate{{ChannelUID: "import-channel", APIKeys: []string{"new-key"}, BaseURLs: []string{"https://changed.invalid"}}}
+	if err := cm.ApplyAccountChannelChangesAudited(ctx, "audit-account", changes, nil); err != nil {
+		t.Fatal(err)
+	}
+	if event := auditEventFor(t, cm, ctx.OperationID); event.ActorID != ctx.ActorID {
+		t.Fatal("locked account helper discarded HTTP actor")
+	}
+	source := cm.GetConfig().ChatUpstream[0]
+	changes[0].APIKeys = []string{"discovery-key"}
+	if err := cm.ApplyDiscoveryAccountChannelChanges(&source, "audit-account", changes, nil); err != nil {
+		t.Fatal(err)
+	}
+	history := cm.ManagementAuditSnapshot().Events
+	last := history[len(history)-1]
+	if last.ActorID != "system" || last.OperationID == ctx.OperationID {
+		t.Fatal("discovery inherited authenticated caller")
+	}
+	enabled := true
+	if err := cm.UpdateDiscoveryChannel(&source, source.ChannelUID, UpstreamUpdate{LearnedClientFingerprint: &enabled}); err != nil {
+		t.Fatal(err)
+	}
+	history = cm.ManagementAuditSnapshot().Events
+	if history[len(history)-1].ActorID != "system" || history[len(history)-1].OperationID == last.OperationID {
+		t.Fatal("single discovery update reused human/previous operation")
+	}
+}
