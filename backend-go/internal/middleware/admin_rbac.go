@@ -40,7 +40,7 @@ func CanAdminAction(c fiber.Ctx, action, resourceUID string) bool {
 		return false
 	}
 	if action == "access.session.revoke" {
-		return p.Source == "identity_proxy" && p.SessionFingerprint != ""
+		return (p.Source == "identity_proxy" || p.Source == "oidc") && p.SessionFingerprint != ""
 	}
 	if action == "access.me" {
 		return true

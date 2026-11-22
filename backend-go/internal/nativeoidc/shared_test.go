@@ -1,0 +1,305 @@
+package nativeoidc
+
+import (
+	"context"
+	"errors"
+	"github.com/redis/go-redis/v9"
+	"github.com/soulteary/yunqi/internal/config"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+)
+
+func isolatedRedis(t *testing.T) func() *redis.Client {
+	t.Helper()
+	binary := os.Getenv("YUNQI_TEST_REDIS_SERVER")
+	if binary == "" {
+		var err error
+		binary, err = exec.LookPath("redis-server")
+		if err != nil {
+			t.Skip("Redis executable unavailable; set YUNQI_TEST_REDIS_SERVER for isolated integration test")
+		}
+	}
+	dir, dirErr := os.MkdirTemp("/tmp", "yqr-")
+	if dirErr != nil {
+		t.Fatal(dirErr)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	socket := filepath.Join(dir, "redis.sock")
+	output, err := os.Create(filepath.Join(dir, "server.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(binary, "--port", "0", "--unixsocket", socket, "--unixsocketperm", "700", "--save", "", "--appendonly", "no", "--daemonize", "no", "--dir", dir)
+	cmd.Stdout = output
+	cmd.Stderr = output
+	if err := cmd.Start(); err != nil {
+		_ = output.Close()
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	t.Cleanup(func() {
+		_ = cmd.Process.Signal(os.Interrupt)
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			_ = cmd.Process.Kill()
+			<-done
+		}
+		_ = output.Close()
+	})
+	newClient := func() *redis.Client {
+		return redis.NewClient(&redis.Options{Network: "unix", Addr: socket, ContextTimeoutEnabled: true, DialTimeout: time.Second, ReadTimeout: time.Second, WriteTimeout: time.Second, MaxRetries: -1, DisableIdentity: true})
+	}
+	probe := newClient()
+	defer probe.Close()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		if probe.Ping(context.Background()).Err() == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("isolated Redis did not become ready")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	return newClient
+}
+
+type testRevocations struct {
+	mu      sync.Mutex
+	lost    bool
+	revoked map[string]bool
+	until   map[string]int64
+	now     func() time.Time
+}
+
+func (b *testRevocations) Prepare(_ context.Context, epoch string, _ bool) (string, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.lost || epoch == "" {
+		return "", errors.New("lost epoch")
+	}
+	return epoch, nil
+}
+func (b *testRevocations) Sync(context.Context, []config.IdentitySessionRevocation) error { return nil }
+func (b *testRevocations) IsRevoked(_ context.Context, key string) (bool, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	now := time.Now().Unix()
+	if b.now != nil {
+		now = b.now().Unix()
+	}
+	return b.revoked[key] && (b.until[key] == 0 || b.until[key] > now), nil
+}
+func (b *testRevocations) Revoke(_ context.Context, key string, expires int64) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.revoked[key] = true
+	if b.until == nil {
+		b.until = make(map[string]int64)
+	}
+	b.until[key] = expires
+	return nil
+}
+func (b *testRevocations) Close() error { return nil }
+func TestOIDCSharedFlowSessionRevocationAndLostRealm(t *testing.T) {
+	newClient := isolatedRedis(t)
+	first, idp, cfg := fakeProvider(t)
+	backend := &testRevocations{revoked: make(map[string]bool)}
+	cfg.RevocationMode = "shared"
+	cfg.RevocationEpoch = strings.Repeat("a", 64)
+	first.env.IdentityProxyRevocations = backend
+	first.env.IdentityProxyRevocationRedisURL = "redis://127.0.0.1:1"
+	firstShared, err := New(first.env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = firstShared.store.redis.Close()
+	firstShared.store.redis = newClient()
+	firstShared.client = idp.server.Client()
+	first = firstShared
+	defer first.Close()
+	second, err := New(first.env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = second.store.redis.Close()
+	second.store.redis = newClient()
+	second.client = idp.server.Client()
+	defer second.Close()
+	// Same configured issuer/client/redirect must share the exact store prefix.
+	if second.store.prefix != first.store.prefix {
+		t.Fatal("node realm prefixes differ")
+	}
+	state, browser := startFlow(t, first, idp)
+	cookie, err := second.Complete(context.Background(), state, "code", browser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := first.Lookup(context.Background(), cookie)
+	if err != nil {
+		t.Fatal("node A could not authenticate node B session", err)
+	}
+	if err = backend.Revoke(context.Background(), session.Fingerprint, session.ExpiresAt); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = first.Lookup(context.Background(), cookie); err == nil {
+		t.Fatal("shared revoke did not reject on node A")
+	}
+	if _, err = second.Lookup(context.Background(), cookie); err == nil {
+		t.Fatal("shared revoke did not reject on node B")
+	}
+	state, browser = startFlow(t, first, idp)
+	cookie, err = first.Complete(context.Background(), state, "other-code", browser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend.lost = true
+	if _, err = second.Lookup(context.Background(), cookie); !IsUnavailable(err) {
+		t.Fatal("missing revocation realm did not fail closed", err)
+	}
+	backend.lost = false
+	cfg.RevocationMode = "local"
+	if _, err = first.Lookup(context.Background(), cookie); !IsUnavailable(err) {
+		t.Fatal("mode change silently downgraded shared session", err)
+	}
+	cfg.RevocationMode = "shared"
+	_ = second.store.redis.Close()
+	if _, err = second.Lookup(context.Background(), cookie); !IsUnavailable(err) {
+		t.Fatal("store outage did not fail closed", err)
+	}
+}
+
+func TestOIDCSharedSessionCapacityAndIssuanceAreAtomic(t *testing.T) {
+	newClient := isolatedRedis(t)
+	first := &storage{redis: newClient(), prefix: "oidc-capacity:"}
+	defer first.close()
+	second := &storage{redis: newClient(), prefix: "oidc-capacity:"}
+	defer second.close()
+	ctx := context.Background()
+	expires := time.Now().Add(time.Hour).Unix()
+	for i := 0; i < 100; i++ {
+		store := first
+		if i%2 == 1 {
+			store = second
+		}
+		if err := store.put(ctx, "session:"+strconv.Itoa(i), "value", "subject", expires); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := first.get(ctx, "session:0", "subject", false); err == nil {
+		t.Fatal("oldest session survived shared capacity limit")
+	}
+	if _, err := second.get(ctx, "session:99", "subject", false); err != nil {
+		t.Fatal("newest shared login blocked", err)
+	}
+	if err := first.put(ctx, "excess", "value", "subject", expires); err == nil {
+		t.Fatal("shared issuance limit ignored")
+	}
+	if _, err := second.get(ctx, "session:99", "subject", false); err != nil {
+		t.Fatal("rejected shared login evicted live session", err)
+	}
+}
+
+func TestOIDCSharedPendingFlowsAreBoundedAndRecover(t *testing.T) {
+	newClient := isolatedRedis(t)
+	first := &storage{redis: newClient(), prefix: "oidc-flow-bound:"}
+	defer first.close()
+	second := &storage{redis: newClient(), prefix: "oidc-flow-bound:"}
+	defer second.close()
+	ctx := context.Background()
+	expires := time.Now().Add(5 * time.Minute).Unix()
+	for i := 0; i < maxPendingFlows; i++ {
+		store := first
+		if i%2 == 1 {
+			store = second
+		}
+		if err := store.put(ctx, "flow:"+strconv.Itoa(i), "value", "", expires); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := second.put(ctx, "extra", "value", "", expires); err == nil {
+		t.Fatal("shared anonymous flow count was unbounded")
+	}
+	if _, err := first.get(ctx, "flow:0", "", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := second.put(ctx, "after-consume", "value", "", expires); err != nil {
+		t.Fatal("consuming flow did not restore capacity", err)
+	}
+	// Expiration uses Redis TIME and indexed server expiry, independently of node
+	// wall clocks. Model an expired key whose index member awaits lazy cleanup.
+	base := first.prefix + "{flows}:"
+	if err := first.redis.Del(ctx, base+"flow:1").Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.redis.ZAdd(ctx, base+"sessions", redis.Z{Score: 0, Member: base + "flow:1"}).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := second.put(ctx, "after-expiry", "value", "", expires); err != nil {
+		t.Fatal("expired indexed flow did not restore capacity", err)
+	}
+	if got := first.redis.ZCard(ctx, base+"sessions").Val(); got != maxPendingFlows {
+		t.Fatalf("flow index count=%d", got)
+	}
+}
+
+func TestOIDCLogoutCannotReviveAfterTemporaryLifetimeRestriction(t *testing.T) {
+	for _, mode := range []string{"local", "shared"} {
+		t.Run(mode, func(t *testing.T) {
+			manager, idp, cfg := fakeProvider(t)
+			clock := time.Now()
+			backend := &testRevocations{revoked: make(map[string]bool), now: func() time.Time { return clock }}
+			if mode == "shared" {
+				cfg.RevocationMode = "shared"
+				cfg.RevocationEpoch = strings.Repeat("a", 64)
+				manager.env.IdentityProxyRevocations = backend
+				manager.env.IdentityProxyRevocationRedisURL = "redis://127.0.0.1:1"
+				shared, err := New(manager.env)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_ = shared.store.redis.Close()
+				shared.store.redis = isolatedRedis(t)()
+				shared.client = idp.server.Client()
+				defer shared.Close()
+				manager = shared
+			}
+			manager.now = func() time.Time { return clock }
+			state, browser := startFlow(t, manager, idp)
+			cookie, err := manager.Complete(context.Background(), state, "code", browser)
+			if err != nil {
+				t.Fatal(err)
+			}
+			original, err := manager.Lookup(context.Background(), cookie)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg.MaxSessionSeconds = 60
+			restricted, err := manager.Lookup(context.Background(), cookie)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if restricted.ExpiresAt != original.ExpiresAt {
+				t.Fatal("temporary policy shortened authoritative revocation expiry")
+			}
+			if mode == "shared" {
+				_ = backend.Revoke(context.Background(), restricted.Fingerprint, restricted.ExpiresAt)
+			} else {
+				cfg.RevokedSessions = []config.IdentitySessionRevocation{{Hash: restricted.Fingerprint, ExpiresAt: restricted.ExpiresAt}}
+			}
+			clock = clock.Add(2 * time.Minute) // the temporary 60-second deadline has elapsed
+			cfg.MaxSessionSeconds = 0
+			if _, err = manager.Lookup(context.Background(), cookie); err == nil {
+				t.Fatal("logged-out cookie revived after policy was relaxed")
+			}
+		})
+	}
+}

@@ -75,7 +75,7 @@ Trusted identity proxy authentication is disabled by default. Global admins conf
 
 POST /api/access/session/revoke revokes the current SSO session. Global admins can revoke a sessionFingerprint through POST /api/identity-proxy/sessions/revoke. Raw subject/session values are not stored or returned. Revocations persist and survive role mapping edits. SSO does not grant data-plane access.
 
-The external identity proxy and IdP perform OIDC login, Passkey and two-factor authentication. Yunqi verifies the trusted proxy, expiry, role/resource scope and revocation state. Copilot OAuth remains upstream authorization rather than administrator login.
+Native OIDC login is available through `/auth/oidc/login` using Authorization Code + PKCE S256; trusted identity proxy mode remains supported. Passkey and MFA happen at the IdP, with signed `amr`/`acr` requirements verified by Yunqi. Native sessions use opaque Secure/HttpOnly cookies, current group mappings and the existing local/shared revocation policy. The `/access` portal provides login and revocation logout. See [environment configuration](environment.md#native-oidc-management-login). Copilot OAuth remains upstream authorization rather than administrator login.
 
 `identityProxy.revocationMode` defaults to `local`, guaranteeing revocation on the current node only. `shared` checks an explicitly configured Redis backend on every SSO authentication. Replicas need the same backend/namespace and consistent identity proxy policy. Missing backends or read/write failures return 503 without falling back locally. Identity views and logout operations display their revocation scope; local logout is not global revocation.
 

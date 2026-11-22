@@ -2,13 +2,15 @@
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Yunqi 访问管理</title>
 <style nonce="__NONCE__">body{font:16px/1.6 system-ui,sans-serif;max-width:1000px;margin:40px auto;padding:0 20px;color:#172334;background:#f5f7fb}section{background:white;padding:24px;border:1px solid #dce3ee;border-radius:12px;margin:20px 0}h1,h2{line-height:1.3}input,button{font:inherit;padding:9px 12px;border:1px solid #b6c3d5;border-radius:6px}input{max-width:100%;width:340px}button{cursor:pointer;background:#eef3fa;margin:4px}button:disabled{cursor:default;opacity:.55}table{border-collapse:collapse;width:100%}td,th{text-align:left;padding:12px 8px;border-bottom:1px solid #e4e9f1;overflow-wrap:anywhere}#identity,#status{overflow-wrap:anywhere}#status[role=alert]{color:#ad1828}.muted{color:#607086}.toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px}a{color:#24559a}@media(max-width:650px){td,th{font-size:14px;padding:8px 4px}}</style></head>
 <body><header><h1>Yunqi 访问管理</h1><p class="muted">查看授权范围内的渠道。运维与管理员可启停所属渠道，所有权限由服务端校验。</p></header>
-<section id="login"><h2>管理凭证</h2><form id="login-form"><label for="credential">访问密钥</label><br><input id="credential" type="password" autocomplete="off" required><button type="submit">验证并进入</button></form><button id="sso-login" type="button" hidden>使用团队身份登录</button><p class="muted">密钥仅保留在当前页面内存中，刷新或退出后清除。</p></section>
+<section id="login"><h2>管理凭证</h2><form id="login-form"><label for="credential">访问密钥</label><br><input id="credential" type="password" autocomplete="off" required><button type="submit">验证并进入</button></form><a id="oidc-login" href="/auth/oidc/login" hidden>使用 OIDC 团队身份登录</a><button id="sso-login" type="button" hidden>使用团队身份登录</button><p class="muted">密钥仅保留在当前页面内存中，刷新或退出后清除。</p></section>
 <section id="session" hidden><div class="toolbar"><h2>授权身份</h2><button id="logout" type="button">退出</button></div><p id="identity"></p><div class="toolbar"><h2>渠道状态</h2><button id="refresh" type="button">刷新实际状态</button></div><table><thead><tr><th>渠道</th><th>协议</th><th>实际状态</th><th>操作</th></tr></thead><tbody id="channels"></tbody></table><p id="empty" class="muted" hidden>当前没有可访问的渠道。</p></section>
 <p id="status" role="status" aria-live="polite"></p>
 <script nonce="__NONCE__">
 'use strict';
 let key='', principal=null, busy=false;
 const identityProxyEnabled=__IDENTITY_PROXY_ENABLED__;
+const nativeOIDCEnabled=__NATIVE_OIDC_ENABLED__;
+const nativeSessionPresent=__NATIVE_SESSION_PRESENT__;
 const el=id=>document.getElementById(id);
 function message(text,error=false){el('status').textContent=text;el('status').setAttribute('role',error?'alert':'status')}
 async function request(path,options={}){
@@ -39,16 +41,17 @@ async function setState(uid,state){
 }
 async function enter(identityProxy=false){
  lock(true);message('正在验证权限…');
- try{principal=await request('/access/me');el('logout').textContent=principal.source==='identity_proxy'?(principal.revocationScope==='shared'?'退出并在所有节点撤销本次会话':'退出并撤销当前节点会话'):'退出';el('identity').textContent=String(principal.id)+' · '+String(principal.role);await loadChannels();el('login').hidden=true;el('session').hidden=false;message('已加载授权范围内的渠道。')}
- catch(error){key='';principal=null;el('channels').replaceChildren();message(identityProxy&&error.status===503?'共享会话撤销服务不可用，已拒绝登录，请稍后重试。':identityProxy?'团队会话未通过验证。请通过配置的身份代理登录后重试。':'无法验证身份或读取授权渠道，请检查管理凭证。',true)}finally{lock(false)}
+ try{principal=await request('/access/me');el('logout').textContent=(principal.source==='identity_proxy'||principal.source==='oidc')?(principal.revocationScope==='shared'?'退出并在所有节点撤销本次会话':'退出并撤销当前节点会话'):'退出';el('identity').textContent=String(principal.id)+' · '+String(principal.role);await loadChannels();el('login').hidden=true;el('session').hidden=false;message('已加载授权范围内的渠道。')}
+ catch(error){key='';principal=null;el('channels').replaceChildren();message(identityProxy&&error.status===503?'共享会话撤销服务不可用，已拒绝登录，请稍后重试。':identityProxy?'团队会话未通过验证。请重新通过团队身份登录后重试。':'无法验证身份或读取授权渠道，请检查管理凭证。',true)}finally{lock(false)}
 }
 el('login-form').addEventListener('submit',async event=>{event.preventDefault();key=el('credential').value;el('credential').value='';await enter(false)});
+if(nativeOIDCEnabled){el('oidc-login').hidden=false;if(nativeSessionPresent)void enter(true)}
 if(identityProxyEnabled){el('sso-login').hidden=false;el('sso-login').addEventListener('click',async()=>{key='';el('credential').value='';await enter(true)})}
 el('refresh').addEventListener('click',async()=>{lock(true);try{await loadChannels();message('已刷新服务端实际状态。')}catch{el('channels').replaceChildren();message('无法读取实际状态，请检查凭证是否过期或已撤销。',true)}finally{lock(false)}});
 el('logout').addEventListener('click',async()=>{
- const sso=principal&&principal.source==='identity_proxy';let scope=principal&&principal.revocationScope||'local';let revoked=!sso;lock(true);
+ const sso=principal&&(principal.source==='identity_proxy'||principal.source==='oidc');let scope=principal&&principal.revocationScope||'local';let revoked=!sso;lock(true);
  if(sso){try{const result=await request('/access/session/revoke',{method:'POST',body:'{}'});scope=result.revocationScope||scope;revoked=result.revoked===true}catch{revoked=false}}
  key='';principal=null;el('identity').textContent='';el('channels').replaceChildren();el('credential').value='';el('session').hidden=true;el('login').hidden=false;
- message(sso?(revoked?(scope==='shared'?'本次会话已在共享节点撤销，请在身份代理重新登录。':'本次会话仅在当前节点撤销；其它节点请在身份代理退出。'):'已退出当前页面，但网关会话撤销失败，请联系管理员。'):'已清除当前页面凭证。',sso&&!revoked);lock(false)
+ message(sso?(revoked?(scope==='shared'?'本次会话已在共享节点撤销，请重新通过团队身份登录。':'本次会话仅在当前节点撤销；其他节点需分别退出。'):'已退出当前页面，但网关会话撤销失败，请联系管理员。'):'已清除当前页面凭证。',sso&&!revoked);lock(false)
 });
 </script></body></html>

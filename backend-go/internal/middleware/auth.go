@@ -61,7 +61,10 @@ func WebAuthMiddleware(envCfg *config.EnvConfig, cfgManager *config.ConfigManage
 
 			authenticated := envCfg.IsValidAdminAccessKey(providedKey)
 			if !authenticated && providedKey == "" {
-				authenticated = authenticateTrustedIdentity(c, envCfg)
+				authenticated = authenticateNativeIdentity(c, envCfg)
+				if !authenticated && !httpbridge.IsAborted(c) {
+					authenticated = authenticateTrustedIdentity(c, envCfg)
+				}
 			}
 			StripIdentityProxyHeaders(c)
 			if httpbridge.IsAborted(c) {

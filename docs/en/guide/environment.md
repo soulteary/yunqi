@@ -916,6 +916,18 @@ Shared SSO revocation uses separate IDENTITY_PROXY_REVOCATION_REDIS_URL and IDEN
 
 `PRESET_SOURCE_MAX_AGE` and `PRESET_SOURCE_FUTURE_SKEW` accept Go durations such as `168h` and `5m`. Both default to 0 (time limits disabled). Enabling freshness checks for remote updates and approvals requires a valid publication timestamp and rejects stale or excessively future-dated sources; approval checks again after waiting. Publication/check times remain visible when limits are disabled. Successful checking alone does not establish freshness.
 
+### Native OIDC management login
+
+Native OIDC is disabled unless `OIDC_ISSUER` is configured. Set `OIDC_CLIENT_ID`, optional `OIDC_CLIENT_SECRET`, and a fixed HTTPS `OIDC_REDIRECT_URL` ending in `/auth/oidc/callback`. The issuer and discovery endpoints must use HTTPS. Register `openid groups` scopes with the IdP. Login always uses Authorization Code + PKCE S256, state and nonce; ID-token signatures, issuer, audience, expiry and authentication assurance are verified.
+
+`OIDC_REQUIRED_AMR` defaults to `mfa` and requires every comma-separated method. Optional `OIDC_ALLOWED_ACR` requires one matching ACR as well. AMR may be empty only with a nonempty ACR allowlist. Configure IdP-specific Passkey/MFA values explicitly; Yunqi does not enroll local Passkeys or TOTP. Roles and channel scopes use the current `identityProxy.groupMappings`, independently of whether trusted-proxy authentication is enabled.
+
+The `/access` portal offers login and logout through the existing session-revocation API. Secure/HttpOnly/SameSite cookies contain only opaque server-session references. Writes require the configured console Origin and management-request header. Local sessions expire on restart; shared mode stores flows and sessions in the configured identity-revocation Redis backend and checks its revocation realm on every authenticated request. Backend loss fails closed. A principal has at most 20 active sessions (oldest evicted) and 100 issuances per hour. Sessions last at most eight hours and never outlive the ID token. Redis state is outside local file backups and must not be independently rolled back. Restart manually after changing environment settings or storage mode; no running process is restarted automatically. IdP HTTP traffic uses the global outbound policy and token redirects are rejected.
+
+Session records and shared storage realms bind the assurance-policy digest and revocation epoch. Tightening assurance and restarting cannot reuse older lower-assurance sessions. Current group mappings and shorter MaxSessionSeconds are reapplied on every authenticated request.
+
+Each realm admits at most 4096 pending anonymous login flows for five minutes. Shared Redis uses server time and an expiry index; consumption releases capacity atomically. Saturation rejects before IdP discovery and recovers after consumption or expiry cleanup.
+
 ### Shared channel admission and strict affinity
 
 Set `PROXY_REDIS_SHARED_ROUTING=true` to share configured channel RPM, window seconds, concurrency, and strict first-request affinity through `PROXY_REDIS_URL`. Nodes in the same `PROXY_REDIS_NAMESPACE` must use identical policies and stable channel UIDs. Each physical retry/racing attempt acquires capacity; releasing concurrency does not refund RPM. Discovered AIMD and key/quota-scope limits remain local safeguards. Capacity rejection returns 429 with Retry-After; backend failures return 503 without local fallback or provider-key penalties.
