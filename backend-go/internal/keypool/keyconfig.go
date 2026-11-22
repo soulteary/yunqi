@@ -331,3 +331,12 @@ func stableKeyID(key string) string {
 func isNaN64(v float64) bool {
 	return v != v
 }
+
+// ConfigForCandidateShared keeps explicit key/quota limits local without
+// charging the channel's Redis-owned limits again through inherited defaults.
+func ConfigForCandidateShared(channel config.UpstreamConfig, cfg config.APIKeyConfig) ratelimit.Config {
+	result := ConfigForCandidate(channel, cfg)
+	result.RPM = max(0, cfg.RateLimitRPM)
+	result.MaxConcurrent = max(0, cfg.RateLimitMaxConcurrent)
+	return result
+}

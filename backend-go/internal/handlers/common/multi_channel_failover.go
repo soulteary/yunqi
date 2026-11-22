@@ -230,7 +230,7 @@ func HandleMultiChannelFailoverWithSelectionFilter(
 			// OverflowRedirect 候选），外壳不再二次改写模型。
 			if failedAttempts > 0 && localEgressFailures == failedAttempts {
 				lastError = lastEgressError
-			} else {
+			} else if _, _, sharedCapacity := sharedChannelFailure(lastError); !sharedCapacity {
 				lastError = err
 			}
 			break

@@ -38,6 +38,7 @@ func acquireStrictSession(c fiber.Ctx, env *config.EnvConfig, s *scheduler.Chann
 		httpbridge.JSON(c, 503, fiber.Map{"error": code})
 		return nil, false
 	}
+	httpbridge.SetRequest(c, httpbridge.Request(c).WithContext(lease.Context(httpbridge.Request(c).Context())))
 	httpbridge.Header(c, "X-Yunqi-Session-Affinity", "strict")
 	return lease, true
 }

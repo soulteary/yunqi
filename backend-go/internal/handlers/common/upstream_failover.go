@@ -1094,7 +1094,11 @@ func TryUpstreamWithAllKeys(
 				releases := make([]func(), 0, 2)
 				if limiter := rateLimitMgr.Get(executionAPIType, executionIndex); limiter != nil {
 					endQueue := telemetry.Phase(httpbridge.Request(c).Context(), "queue")
-					release, rlErr := limiter.Acquire(httpbridge.Request(c).Context(), maxRateLimitWait, time.Now())
+					acquire := limiter.Acquire
+					if envCfg.ProxyRedisSharedRouting {
+						acquire = limiter.AcquireDiscovered
+					}
+					release, rlErr := acquire(httpbridge.Request(c).Context(), maxRateLimitWait, time.Now())
 					endQueue()
 					if rlErr != nil {
 						telemetry.Event(httpbridge.Request(c).Context(), "limiter", "scope")
@@ -1107,9 +1111,19 @@ func TryUpstreamWithAllKeys(
 					releases = append(releases, release)
 				}
 				if selection.LimiterScope != "" {
-					keyLimiter := rateLimitMgr.GetOrCreateScoped(executionAPIType, executionIndex, selection.LimiterScope, keypool.ConfigForCandidate(*upstream, selection.Config))
+					scopedConfig := keypool.ConfigForCandidate(*upstream, selection.Config)
+					if envCfg.ProxyRedisSharedRouting {
+						scopedConfig = keypool.ConfigForCandidateShared(*upstream, selection.Config)
+					}
+					keyLimiter := rateLimitMgr.GetOrCreateScoped(executionAPIType, executionIndex, selection.LimiterScope, scopedConfig)
 					endQueue := telemetry.Phase(httpbridge.Request(c).Context(), "queue")
-					release, rlErr := keyLimiter.Acquire(httpbridge.Request(c).Context(), maxRateLimitWait, time.Now())
+					var release func()
+					var rlErr error
+					if envCfg.ProxyRedisSharedRouting {
+						release, rlErr = keyLimiter.AcquireWithSharedLimits(httpbridge.Request(c).Context(), maxRateLimitWait, time.Now(), selection.Config.RateLimitRPM <= 0, selection.Config.RateLimitMaxConcurrent <= 0)
+					} else {
+						release, rlErr = keyLimiter.Acquire(httpbridge.Request(c).Context(), maxRateLimitWait, time.Now())
+					}
 					endQueue()
 					if rlErr != nil {
 						telemetry.Event(httpbridge.Request(c).Context(), "limiter", "scope")
@@ -1130,6 +1144,24 @@ func TryUpstreamWithAllKeys(
 				activeRateLimitRelease = func() {
 					for i := len(releases) - 1; i >= 0; i-- {
 						releases[i]()
+					}
+				}
+			}
+
+			// Shared admission is keyed by stable physical channel UID, never
+			// by a process-local index or upstream credential.
+			if envCfg.ProxyRedisSharedRouting {
+				previous := httpbridge.Request(c).Context()
+				cleanup, err := acquireSharedChannel(c, envCfg, upstreamCopy)
+				if err != nil {
+					return false, "", 0, nil, nil, err
+				}
+				localRelease := activeRateLimitRelease
+				activeRateLimitRelease = func() {
+					cleanup()
+					httpbridge.SetRequest(c, httpbridge.Request(c).WithContext(previous))
+					if localRelease != nil {
+						localRelease()
 					}
 				}
 			}
