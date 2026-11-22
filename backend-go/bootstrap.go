@@ -26,6 +26,7 @@ import (
 	"github.com/soulteary/yunqi/internal/presetstore"
 	"github.com/soulteary/yunqi/internal/quota"
 	"github.com/soulteary/yunqi/internal/ratelimit"
+	"github.com/soulteary/yunqi/internal/redisconn"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/session"
 	"github.com/soulteary/yunqi/internal/statebundle"
@@ -132,7 +133,23 @@ func runService(cliOpts cliOptions) {
 		envCfg.IdentityProxyRevocations = backend
 		defer backend.Close()
 	}
-	envCfg.BudgetManager = entrybudget.NewManager(filepath.Join(filepath.Dir(paths.ConfigPath), "entry-budget.db"))
+	if envCfg.BudgetRedisURL != "" {
+		if err := entrybudget.ValidateSharedTransition(filepath.Join(filepath.Dir(paths.ConfigPath), "entry-budget.db"), envCfg.BudgetRedisEpoch, envCfg.BudgetRedisNewDomainAck); err != nil {
+			log.Fatal("已有本地预算账本：拒绝切换到空共享账本；需完成迁移或显式确认新预算域")
+		}
+
+		client, clientErr := redisconn.New(envCfg.BudgetRedisURL)
+		if clientErr != nil {
+			log.Fatal("初始化共享预算失败: invalid Redis budget connection")
+		}
+		sharedBudget, budgetErr := entrybudget.NewRedisManager(client, envCfg.BudgetRedisNamespace, envCfg.BudgetRedisEpoch)
+		if budgetErr != nil {
+			log.Fatal("初始化共享预算失败: invalid Redis budget configuration")
+		}
+		envCfg.BudgetManager = sharedBudget
+	} else {
+		envCfg.BudgetManager = entrybudget.NewManager(filepath.Join(filepath.Dir(paths.ConfigPath), "entry-budget.db"))
+	}
 	defer envCfg.BudgetManager.Close()
 	cfgManager, err := config.NewConfigManager(paths.ConfigPath, paths.BackupDir)
 	if err != nil {

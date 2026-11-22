@@ -14,7 +14,10 @@ import (
 
 const LeaseSeconds int64 = 60
 
-type Store struct{ db *sql.DB }
+type Store struct {
+	db     *sql.DB
+	shared *redisLedger
+}
 
 func Open(path string) (*Store, error) {
 	if path == "" {
@@ -50,7 +53,12 @@ func Open(path string) (*Store, error) {
 	}
 	return s, nil
 }
-func (s *Store) Close() error { return s.db.Close() }
+func (s *Store) Close() error {
+	if s.shared != nil {
+		return s.shared.client.Close()
+	}
+	return s.db.Close()
+}
 
 type Snapshot struct {
 	Policy                      Policy
@@ -58,6 +66,9 @@ type Snapshot struct {
 }
 
 func (s *Store) Start(ctx context.Context, p Policy, id string, now time.Time) error {
+	if s.shared != nil {
+		return s.shared.Start(ctx, p, id, now)
+	}
 	if err := s.RecoverExpired(ctx, now); err != nil {
 		return err
 	}
@@ -80,6 +91,9 @@ func (s *Store) Start(ctx context.Context, p Policy, id string, now time.Time) e
 	return tx.Commit()
 }
 func (s *Store) Heartbeat(ctx context.Context, id string, now time.Time) error {
+	if s.shared != nil {
+		return s.shared.Heartbeat(ctx, id, now)
+	}
 	result, err := s.db.ExecContext(ctx, `UPDATE budget_requests SET lease_until=? WHERE id=? AND status='pending'`, now.Unix()+LeaseSeconds, id)
 	if err != nil {
 		return err
@@ -92,6 +106,9 @@ func (s *Store) Heartbeat(ctx context.Context, id string, now time.Time) error {
 }
 
 func (s *Store) Snapshot(ctx context.Context, p Policy, now time.Time) (Snapshot, error) {
+	if s.shared != nil {
+		return s.shared.Snapshot(ctx, p, now)
+	}
 	if err := s.RecoverExpired(ctx, now); err != nil {
 		return Snapshot{}, err
 	}
@@ -122,6 +139,9 @@ type AttemptQuote struct {
 }
 
 func (s *Store) Reserve(ctx context.Context, p Policy, requestID string, q AttemptQuote, now time.Time) error {
+	if s.shared != nil {
+		return s.shared.Reserve(ctx, p, requestID, q, now)
+	}
 	if q.Amount < 0 || q.Amount > MaxAmount || len(q.Pricing) > 64<<10 || q.ID == "" || !json.Valid(q.Pricing) || len(q.PricingVersion) > 128 || len(q.Model) > 512 || len(q.ChannelUID) > 128 {
 		return ErrPricing
 	}
@@ -195,6 +215,9 @@ func (s *Store) Complete(ctx context.Context, requestID, attemptID string, charg
 	return s.CompleteAccounting(ctx, requestID, attemptID, charge, reason, "unknown", nil)
 }
 func (s *Store) CompleteAccounting(ctx context.Context, requestID, attemptID string, charge *int64, reason, source string, usage json.RawMessage) error {
+	if s.shared != nil {
+		return s.shared.CompleteAccounting(ctx, requestID, attemptID, charge, reason, source, usage)
+	}
 	if source != "provider" && source != "unknown" {
 		return ErrPricing
 	}
@@ -262,6 +285,9 @@ func (s *Store) CompleteAccounting(ctx context.Context, requestID, attemptID str
 }
 
 func (s *Store) Finalize(ctx context.Context, id, reason string, now time.Time) error {
+	if s.shared != nil {
+		return s.shared.Finalize(ctx, id, reason, now)
+	}
 	return s.finalize(ctx, id, reason, now, false)
 }
 func (s *Store) finalize(ctx context.Context, id, reason string, now time.Time, expiredOnly bool) error {
@@ -328,6 +354,9 @@ func (s *Store) finalize(ctx context.Context, id, reason string, now time.Time, 
 	return tx.Commit()
 }
 func (s *Store) RecoverExpired(ctx context.Context, now time.Time) error {
+	if s.shared != nil {
+		return s.shared.RecoverExpired(ctx, now)
+	}
 	rows, err := s.db.QueryContext(ctx, `SELECT id FROM budget_requests WHERE status='pending' AND lease_until<=? LIMIT 1000`, now.Unix())
 	if err != nil {
 		return err
@@ -383,6 +412,9 @@ type AttemptRecord struct {
 }
 
 func (s *Store) Requests(ctx context.Context, principal string, limit int) ([]RequestRecord, error) {
+	if s.shared != nil {
+		return s.shared.Requests(ctx, principal, limit)
+	}
 	if limit < 1 || limit > 200 {
 		limit = 100
 	}
@@ -402,6 +434,9 @@ func (s *Store) Requests(ctx context.Context, principal string, limit int) ([]Re
 	return records, rows.Err()
 }
 func (s *Store) Attempts(ctx context.Context, id string) ([]AttemptRecord, error) {
+	if s.shared != nil {
+		return s.shared.Attempts(ctx, id)
+	}
 	rows, err := s.db.QueryContext(ctx, `SELECT id,request_id,model,channel_uid,pricing_version,pricing,quote,charged,status,reason,usage_source,billing_usage FROM budget_attempts WHERE request_id=? ORDER BY id LIMIT 1000`, id)
 	if err != nil {
 		return nil, err
@@ -422,6 +457,9 @@ func (s *Store) Attempts(ctx context.Context, id string) ([]AttemptRecord, error
 }
 
 func (s *Store) RequestOwned(ctx context.Context, id, principal string) (bool, error) {
+	if s.shared != nil {
+		return s.shared.RequestOwned(ctx, id, principal)
+	}
 	var exists int
 	err := s.db.QueryRowContext(ctx, `SELECT 1 FROM budget_requests WHERE id=? AND principal=?`, id, principal).Scan(&exists)
 	if errors.Is(err, sql.ErrNoRows) {
