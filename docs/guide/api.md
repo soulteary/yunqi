@@ -54,7 +54,7 @@ Chat `response_format`、Responses `text.format`、Claude `output_config.format`
 
 托管搜索与客户端函数工具保持区别。跨协议无法表达原生引用定位时保留可读来源、标题和引用文本，并附转换诊断；不暴露供应商 opaque 搜索数据，也不捏造字符位置。不能等价转换的原生托管搜索声明要求使用原生渠道。
 
-Responses 错误终帧区分上游错误和网关合成错误，已交付内容后不重放为另一次成功。Responses WebSocket 的 `response.cancel`/`response.interrupt` 只取消当前轮，连接可以继续下一轮；客户端断开仍触发取消。TTFT 从首个有效内容计时，纯元数据、空 delta 和心跳不算有效内容。
+Responses 错误终帧区分上游错误和网关合成错误，已交付内容后不重放为另一次成功。Responses WebSocket 的 `response.cancel`/`response.interrupt` 只取消当前轮，连接可以继续下一轮；客户端断开仍触发取消。TTFT 计量等待首个有效内容的耗时，纯元数据、空 delta 和心跳不结束首内容等待。
 
 `responsesClaudePrefixCache` 是渠道 JSON 选项，默认关闭，仅用于 Responses→Claude 的稳定历史前缀。存在显式 `cache_control` 时保留原设置，不推断供应商 TTL。OpenAI 原生缓存字段保留显式 false/null 的存在性；跨供应商不支持的提示会报告丢弃。
 
@@ -89,7 +89,7 @@ OIDC 登录、Passkey 和双因素认证由外置身份代理及其 IdP 执行�
 
 ## 配置与运行诊断
 
-全局管理员可通过 `POST /api/channels/:uid/request-preview` 使用当前渠道或白名单草稿字段运行真实请求 builder。预览不请求供应商、不刷新 OAuth、不执行 Copilot 会话交换，也不查询历史会话。样例及支持字段的检查范围会显式返回；未覆盖字段不能据此判定为有效。Responses 的历史响应 ID 等依赖在线状态的输入会拒绝，草稿凭证不会出现在预览结果中。
+全局管理员可通过 `POST /api/channels/:uid/request-preview` 对已有 messages/chat/responses/gemini 渠道及其白名单草稿字段运行真实请求 builder。预览不请求供应商、不刷新 OAuth、不查询历史会话；Copilot 不支持离线预览。样例及支持字段的检查范围会显式返回；未覆盖字段不能据此判定为有效。Responses 的历史响应 ID 等依赖在线状态的输入会拒绝，草稿凭证不会出现在预览结果中。
 
 | 方法与路径 | 结果与边界 |
 | --- | --- |

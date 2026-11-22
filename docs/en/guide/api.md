@@ -54,7 +54,7 @@ Tool images and inline files remain structured, with parallel call/result IDs pa
 
 Hosted search remains distinct from client function tools. When native citation positions cannot be represented, conversions preserve readable source/title/quoted text and report the fallback. Opaque search data and invented character positions are excluded. Unrepresentable hosted-search declarations require a native provider channel.
 
-Responses stream errors identify upstream versus gateway origin; output already delivered is not replayed into another success. Responses WebSocket response.cancel/response.interrupt cancel the current turn while allowing another turn on the connection; disconnect still cancels work. TTFT starts at meaningful content, excluding metadata, empty deltas, and heartbeats.
+Responses stream errors identify upstream versus gateway origin; output already delivered is not replayed into another success. Responses WebSocket response.cancel/response.interrupt cancel the current turn while allowing another turn on the connection; disconnect still cancels work. TTFT measures time until the first meaningful content; metadata, empty deltas and heartbeats do not end that wait.
 
 ## Team identities and caller policies
 
@@ -113,7 +113,7 @@ The independent durable ledger freezes the request's initial period and pricing 
 
 All four text endpoints validate source-protocol stream completion. EOF alone is not success. Missing terminal events, provider errors and incomplete compression remain failures; delivered content is not replayed through another attempt. Ordinary content streams promptly, with only a bounded unconfirmed terminal tail.
 
-Global admins can call `POST /api/channels/:uid/request-preview` to run the actual request builder with the current channel or allowed draft fields. This is offline: no provider request, OAuth refresh, Copilot session exchange or history lookup occurs. Results redact draft credentials and declare sample/field coverage. Inputs requiring online state, such as a previous Responses ID, are rejected. Uncovered fields are not proof of support.
+Global admins can call `POST /api/channels/:uid/request-preview` to run the actual request builder for an existing messages/chat/responses/gemini channel and its allowed draft fields. This is offline: no provider request, OAuth refresh or history lookup occurs; Copilot preview is unsupported. Results redact draft credentials and declare sample/field coverage. Inputs requiring online state, such as a previous Responses ID, are rejected. Uncovered fields are not proof of support.
 
 Model pricing supports input-length tiers, 5-minute/1-hour cache writes, separate reasoning output prices and image prices matched by quality/size. Token prices are per million tokens; image prices are per delivered image. Explicit zero is valid; negative and non-finite prices are rejected. Limits are 128 tiers, 64 image rules and 256 metering items, without user expression execution.
 
