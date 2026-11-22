@@ -32,3 +32,28 @@ func TestIdentityAssertionsNeverReachUpstreamOrClient(t *testing.T) {
 		t.Fatal("upstream response spoofed identity header")
 	}
 }
+
+func TestNativeManagementCookiesNeverReachProvidersOrGetOverwritten(t *testing.T) {
+	c, _ := httpbridge.TestContext(httptest.NewRecorder())
+	req := httptest.NewRequest("POST", "/v1/messages", nil)
+	req.Header.Add("Cookie", "ordinary=allowed; __Host-yunqi-session=secret")
+	req.Header.Add("Cookie", "__Host-yunqi-oidc-flow=nonce; other=allowed")
+	httpbridge.SetRequest(c, req)
+	headers := PrepareUpstreamHeaders(c, "provider.example")
+	if strings.Contains(headers.Get("Cookie"), "yunqi") || !strings.Contains(headers.Get("Cookie"), "ordinary=allowed") {
+		t.Fatalf("unsafe header %s", headers.Get("Cookie"))
+	}
+	ApplyCustomHeaders(headers, map[string]string{"Cookie": "__Host-yunqi-session=secret; ordinary=allowed"})
+	if strings.Contains(headers.Get("Cookie"), "yunqi") {
+		t.Fatal("custom header bypass")
+	}
+	ApplyCustomHeadersProtected(headers, map[string]string{"Cookie": "__Host-yunqi-oidc-flow=nonce; ordinary=allowed"}, nil)
+	if strings.Contains(headers.Get("Cookie"), "yunqi") {
+		t.Fatal("protected header bypass")
+	}
+	w := httptest.NewRecorder()
+	ForwardResponseHeaders(http.Header{"Set-Cookie": []string{"__Host-yunqi-session=spoof; Secure; Path=/", "__Host-yunqi-oidc-flow=spoof; Secure; Path=/", "ordinary=allowed"}}, w)
+	if cookies := w.Header().Values("Set-Cookie"); len(cookies) != 1 || cookies[0] != "ordinary=allowed" {
+		t.Fatalf("provider overwrote internal cookie: %v", cookies)
+	}
+}

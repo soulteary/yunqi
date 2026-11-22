@@ -85,3 +85,12 @@ func TestStartupObservesProgrammaticIdentityProxySecret(t *testing.T) {
 		t.Fatal("programmatic identity secret was not registered before config loading")
 	}
 }
+
+func TestStartupObservesNativeOIDCClientSecret(t *testing.T) {
+	const secret = "synthetic-native-oidc-client-secret-before-any-log"
+	restore := initializeCredentialRedaction(&config.EnvConfig{NativeOIDCClientSecret: secret})
+	defer restore()
+	if strings.Contains(redaction.String("client_secret="+secret), secret) {
+		t.Fatal("native OIDC secret not protected before config initialization")
+	}
+}

@@ -997,6 +997,18 @@ YUNQI_CONFIRM_EMPTY_ROUTING_REALM=yes go run ./cmd/routing-state-init
 共享状态要求专用、可靠持久化且禁止驱逐的 Redis；单独删除限额或会话 key 无法仅靠 epoch 标记检测。外部 Redis 不包含在本地配置备份中。跨节点严格会话仍需启用 `YUNQI_STRICT_SESSION_AFFINITY=true`：首个请求在供应商调用前原子绑定渠道 UID；失败不会迁移绑定，活动上游 Body 持续续租并保活会话，即使流长于空闲 TTL。共享状态续租失败会取消实际调用，包括后台 usage drain；异常退出后的容量等租约过期回收。节点之间不共享 Responses 完整历史缓存；需要服务端历史续接的客户端还需稳定节点入口。
 
 
+### 原生 OIDC 管理登录
+
+原生登录默认关闭，以 `OIDC_ISSUER` 显式启用；必须同时配置 `OIDC_CLIENT_ID`、`OIDC_REDIRECT_URL`。发行者及发现的授权、Token、JWKS 端点均要求 HTTPS。回调 URL 必须是控制台固定的 `https://<host>/auth/oidc/callback`，不从 Host 或转发头推断，不接受任意 return URL。机密客户端可通过 `OIDC_CLIENT_SECRET` 配置 secret；公开客户端仍强制 PKCE S256。IdP 注册客户端时允许 `openid groups` scope，并在签名 ID Token 中提供 `groups` 数组。
+
+`OIDC_REQUIRED_AMR` 默认为 `mfa`，逗号分隔的所有方法均须出现在签名 `amr` 数组中。`OIDC_ALLOWED_ACR` 默认为空；设置后签名 `acr` 还须匹配其中一项。仅当明确配置了非空 ACR 白名单时，才允许清空 REQUIRED_AMR；不能同时关闭两种强度校验。不同 IdP 的 MFA/Passkey 标识不一致，须依据 IdP 声明配置，例如 `OIDC_REQUIRED_AMR=fido` 配合所需的 ACR。Yunqi 不自行注册 Passkey 或保存 TOTP 种子。
+
+组映射复用持久配置 `identityProxy.groupMappings`，原生 OIDC 不要求启用身份代理或设置 `IDENTITY_PROXY_SECRET`。`identityProxy.revocationMode`、revocationEpoch 与已有身份撤销 Redis 后端同时约束原生会话。共享模式需在启用前完成现有撤销 realm 初始化；各节点保持 OIDC 配置、namespace、组映射与撤销策略一致。修改环境变量或 local/shared 存储模式后需手动重启，以重建原生后端；模式不匹配期间拒绝登录/鉴权。所有 IdP 请求遵循全局出站策略，发现或 Token/JWKS 重定向不会绕过网络限制；Token 端点重定向会被拒绝。
+
+认证强度策略摘要与撤销 epoch 均绑定到服务端会话和共享存储 realm；收紧认证强度并重启后不会沿用旧的低强度会话。组映射与较短的 MaxSessionSeconds 每次鉴权重新应用。
+
+匿名待完成登录流程每个 realm 最多 4096 个、最长 5 分钟；共享 Redis 使用服务器时间和过期索引约束总量，消费即释放容量。饱和时在请求 IdP 之前拒绝，消费或过期清理后恢复。
+
 ### 跨节点预算账本
 
 `BUDGET_REDIS_URL` 显式启用 Redis 共享预算；未设置时继续使用 `entry-budget.db`。`BUDGET_REDIS_NAMESPACE` 默认 `yunqi`，`BUDGET_REDIS_EPOCH` 必填，格式为 1–64 位字母、数字、冒号、下划线或短横线。同一预算域必须使用相同的 namespace、epoch、稳定 principal ID、时区及预算策略。入口租约 Redis 与预算 Redis 可以分开部署；二者互不替代。

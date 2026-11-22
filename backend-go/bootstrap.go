@@ -156,6 +156,11 @@ func runService(cliOpts cliOptions) {
 		log.Fatalf("初始化配置管理器失败: %v", err)
 	}
 	defer errutil.IgnoreDeferred(cfgManager.Close)
+	defer func() {
+		if envCfg.NativeIdentity != nil {
+			_ = envCfg.NativeIdentity.Close()
+		}
+	}()
 	initializeIdentityRevocationSync(envCfg, cfgManager)
 
 	a := &application{envCfg: envCfg, paths: paths, cfgManager: cfgManager}

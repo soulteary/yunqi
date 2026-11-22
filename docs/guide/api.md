@@ -79,7 +79,11 @@ viewer 只读，operator 可执行有限状态操作，admin 仍受其渠道范�
 
 `POST /api/access/session/revoke` 撤销当前 SSO 会话；全局管理员也可使用 `POST /api/identity-proxy/sessions/revoke` 按 sessionFingerprint 撤销。原始 subject/session 不保存或返回，撤销持久化，修改角色映射不会清除撤销记录。SSO 不自动授予数据面权限。
 
-OIDC 登录、Passkey 和双因素认证由外置身份代理及其 IdP 执行；Yunqi 验证可信代理、会话期限、角色范围和撤销状态。Copilot OAuth 仍是上游授权，不是管理员登录。
+Yunqi 可通过 `/auth/oidc/login` 原生发起 OIDC Authorization Code + PKCE S256 登录；也保留外置可信身份代理模式。Passkey 与双因素认证由 IdP 完成，原生模式验证签名 ID Token 的 `amr`/`acr` 是否满足所配认证强度，不能仅凭界面声称已开启 MFA。Copilot OAuth 仍是上游授权，不是管理员登录。
+
+原生 OIDC 默认关闭。浏览器仅保存 `__Host-yunqi-session` 随机会话引用（Secure、HttpOnly、SameSite=Lax），不保存 ID/Access/Refresh Token。`/access` 提供登录、当前身份与撤销退出入口；退出复用 `POST /api/access/session/revoke`。每次请求依据当前 `identityProxy.groupMappings` 重新计算角色与渠道范围，撤销检查沿用同一 local/shared 机制。Cookie 写请求须携带所配控制台 Origin 和 `X-Yunqi-Management-Request: 1`；登录不授予代理调用权限。
+
+本地会话仅驻留当前进程，重启后须重新登录；共享模式把授权流程和会话存入显式 Redis 后端，支持登录回调落到另一节点。后端或撤销 realm 不可用时拒绝认证，不退回本地模式。每主体保留最多 20 个会话，新登录淘汰最旧会话，每小时最多签发 100 个会话；达到签发限制时不淘汰现有会话。会话最多 8 小时且不超过 ID Token 到期时间。Redis 不包含在本地文件备份内，不能单独回滚旧 Redis 快照来恢复会话；共享撤销存储的持久化/禁止驱逐要求仍适用。
 
 `identityProxy.revocationMode` 默认为 `local`，只保证当前节点撤销；`shared` 使用显式配置的 Redis 撤销后端，每次 SSO 鉴权检查共享状态。多节点应使用同一撤销后端和 namespace，并保持身份代理策略一致；后端缺失或读写失败时返回 503，不退回本地放行。身份视图与退出操作会显示撤销范围，不能把本地退出当作全节点撤销。
 
