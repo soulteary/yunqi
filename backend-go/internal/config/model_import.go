@@ -531,19 +531,26 @@ func ModelImportRevision(channel *UpstreamConfig) string { return modelImportRev
 
 // ModelImportInventoryRevision prevents a pre-approval /models cache entry from
 // reappearing after policy activation/removal when an upstream is unavailable.
+// Desktop tier overrides are included so UI changes cannot reuse old metadata.
 func (cm *ConfigManager) ModelImportInventoryRevision() string {
 	cm.mu.RLock()
 	defer cm.mu.RUnlock()
 	type inventory struct {
-		UID     string
-		Enabled bool
-		Models  []ImportedModel
+		UID          string
+		Enabled      bool
+		Models       []ImportedModel
+		DesktopTiers map[string]string `json:",omitempty"`
 	}
 	entries := make([]inventory, 0)
 	for _, kind := range orderedChannelKinds() {
 		for _, up := range ChannelKindRegistry[kind].Slice(cm.config) {
-			if up.ModelImport != nil {
-				entries = append(entries, inventory{up.ChannelUID, up.ModelImport.Policy.Enabled, up.ModelImport.Approved})
+			if up.ModelImport != nil || len(up.ClaudeDesktopModelTiers) > 0 {
+				item := inventory{UID: up.ChannelUID, DesktopTiers: up.ClaudeDesktopModelTiers}
+				if up.ModelImport != nil {
+					item.Enabled = up.ModelImport.Policy.Enabled
+					item.Models = up.ModelImport.Approved
+				}
+				entries = append(entries, item)
 			}
 		}
 	}

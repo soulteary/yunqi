@@ -691,6 +691,7 @@ func (u *UpstreamConfig) Clone() *UpstreamConfig {
 		cloned.HistoricalAPIKeys = make([]string, len(u.HistoricalAPIKeys))
 		copy(cloned.HistoricalAPIKeys, u.HistoricalAPIKeys)
 	}
+	cloned.ClaudeDesktopModelTiers = CloneClaudeDesktopModelTiers(u.ClaudeDesktopModelTiers)
 	if u.ModelCapabilities != nil {
 		cloned.ModelCapabilities = make(map[string]UpstreamModelCapability, len(u.ModelCapabilities))
 		for k, v := range u.ModelCapabilities {

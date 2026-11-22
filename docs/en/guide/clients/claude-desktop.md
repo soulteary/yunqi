@@ -99,26 +99,27 @@ Claude Desktop can populate the model picker in two ways:
 - **Model discovery (automatic, on by default)**: requests `{Gateway base URL}/v1/models`. Yunqi implements this endpoint. Desktop filters model IDs that do not match its Claude naming rules unless the gateway supplies a valid `anthropic_family_tier`.
 - **Model list (manual)**: click **Add model** to list model IDs one by one. This overrides discovery, and the **first entry is the default model**.
 
-For non-Claude models, a manual list remains sufficient. To retain their actual IDs in automatic discovery, explicitly add `anthropicFamilyTier` to the existing `modelCapabilities` entries on the Messages channel:
+Non-Claude models can use a manual list or an explicit tier selected in Yunqi:
+
+1. Open the channel editor and find **Claude Desktop model mapping** under **Basic information**.
+2. The list contains models discovered or configured on its Messages route. Use **Add model ID** when no inventory is available.
+3. Choose `Sonnet`, `Opus`, `Haiku`, `Fable`, or `Mythos` for each model. For example, select `Sonnet` for `deepseek-v4-pro` and `Haiku` for `deepseek-flash`.
+4. Save the editor, then repeat Desktop's connection test. Cancelling the editor does not submit these changes.
+
+**None** clears an inherited compatibility tier for that model. Reopen the editor to check saved values. This is a client compatibility slot: it does not change model IDs, routing, provider identity, context limits, pricing, or verified protocol support, and it does not establish equivalence with Claude. Yunqi assigns no tier to DeepSeek by default. The first model in each tier is its default. Verify Messages inference and tool use separately.
+
+The editor stores a separate `claudeDesktopModelTiers` map on the channel, so no capability overrides or manual capability copies are required. A Messages protocol member can contain:
 
 ```json
 {
-  "modelCapabilities": {
-    "deepseek-v4-pro": {
-      "anthropicFamilyTier": "sonnet",
-      "contextWindowTokens": 1048576
-    },
-    "deepseek-flash": {
-      "anthropicFamilyTier": "haiku",
-      "contextWindowTokens": 1048576
-    }
+  "claudeDesktopModelTiers": {
+    "deepseek-v4-pro": "sonnet",
+    "deepseek-flash": "haiku"
   }
 }
 ```
 
-Merge this channel configuration fragment into the existing entries, retaining output limits, reasoning settings, pricing, and other capability fields. Do not replace the full configuration file. The example window is a declared model capability; use the input window the channel can actually serve. This setting uses the persisted configuration JSON; no new console form control is provided.
-
-Supported tiers are `sonnet`, `opus`, `haiku`, `fable`, and `mythos`. This is a Desktop compatibility slot, not a change in model identity, routing, provider, or verified protocol support. It does not establish equivalence with Claude. Yunqi does not assign DeepSeek a tier automatically. The first model in each tier is marked as its default. Verify Messages inference and tool use separately.
+Inherited wildcard tier rules appear separately as read-only text; dropdowns edit actual model IDs. Existing `anthropicFamilyTier` values in `modelCapabilities` remain supported. Dedicated values take precedence; an empty string explicitly clears inherited metadata. Removing the key from the map instead restores the old configuration or upstream metadata. Editing these settings does not run paid inference tests.
 
 The HTTP response includes `anthropic_family_tier`, `is_family_default`, `supports_1m`, and `max_input_tokens`, retaining the existing camelCase fields. The configuration key `anthropicFamilyTier` and the HTTP discovery fields belong to different interfaces. Check the running instance with:
 

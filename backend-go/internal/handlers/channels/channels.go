@@ -189,6 +189,7 @@ type UpdateRequest struct {
 	BaseURLs                      []string                                  `json:"baseUrls,omitzero"`
 	APIKeys                       []string                                  `json:"apiKeys,omitzero"`
 	APIKeyConfigs                 []config.APIKeyConfig                     `json:"apiKeyConfigs,omitzero"`
+	ClaudeDesktopModelTiers       map[string]string                         `json:"claudeDesktopModelTiers,omitzero"`
 	ModelCapabilities             map[string]config.UpstreamModelCapability `json:"modelCapabilities,omitzero"`
 	SupportedModels               []string                                  `json:"supportedModels,omitzero"`
 	CustomHeaders                 map[string]string                         `json:"customHeaders,omitzero"`
@@ -260,6 +261,13 @@ func (h *Handler) Update(c fiber.Ctx) error {
 		return nil
 	}
 
+	tiers, err := config.NormalizeClaudeDesktopModelTiers(req.ClaudeDesktopModelTiers)
+	if err != nil {
+		httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
+		return nil
+	}
+	req.ClaudeDesktopModelTiers = tiers
+
 	updates := config.UpstreamUpdate{
 		NullFields:                    req.NullFields,
 		Name:                          req.Name,
@@ -269,6 +277,7 @@ func (h *Handler) Update(c fiber.Ctx) error {
 		BaseURLs:                      req.BaseURLs,
 		APIKeys:                       req.APIKeys,
 		APIKeyConfigs:                 req.APIKeyConfigs,
+		ClaudeDesktopModelTiers:       req.ClaudeDesktopModelTiers,
 		ModelCapabilities:             req.ModelCapabilities,
 		SupportedModels:               req.SupportedModels,
 		CustomHeaders:                 req.CustomHeaders,

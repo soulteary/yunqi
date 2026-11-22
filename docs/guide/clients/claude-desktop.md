@@ -99,26 +99,27 @@ Claude Desktop 提供两种方式填充模型选择器：
 - **Model discovery（自动发现，默认开启）**：自动请求 `{Gateway base URL}/v1/models` 拉取模型列表。Yunqi 已实现该端点。Claude Desktop 会过滤非 Claude 风格的模型 ID；只有名称符合客户端规则，或网关返回有效的 `anthropic_family_tier` 时，才会进入自动发现结果。
 - **Model list（手动列表）**：点击 **Add model** 逐个添加模型 ID，会覆盖自动发现的结果，**第一项为默认模型**。
 
-非 Claude 模型可以继续使用手动列表。如果需要保留实际模型 ID 并启用自动发现，可在 Messages 渠道现有的 `modelCapabilities` 条目中显式设置 `anthropicFamilyTier`：
+非 Claude 模型可以继续使用手动列表，也可以在 Yunqi 界面配置自动发现：
+
+1. 打开渠道的「编辑」窗口，在「基础信息」找到「Claude Desktop 模型适配」。
+2. 列表会显示 Messages 路由已发现或已配置的模型。没有清单时，可用「添加模型 ID」补入实际 ID。
+3. 在每个模型的下拉框中选择 `Sonnet`、`Opus`、`Haiku`、`Fable` 或 `Mythos`。例如为 `deepseek-v4-pro` 选择 `Sonnet`，为 `deepseek-flash` 选择 `Haiku`。
+4. 点击窗口底部的「保存」，再运行 Desktop 的连接测试。取消编辑不会下发这些设置。
+
+「不指定」会清除该模型继承的兼容 tier；设置保存后可重新打开窗口核对。这里的 tier 是客户端兼容槽位，不改变模型 ID、上游路由、供应商身份、上下文、价格或协议验证状态，也不表示 DeepSeek 具备 Claude 的所有能力。Yunqi 不会默认给 DeepSeek 分配 tier；同一 tier 下按列表顺序选择一个默认项。仍需单独验证 Messages 推理和工具调用。
+
+界面通过渠道的独立 `claudeDesktopModelTiers` 字段保存，不需要编辑 `modelCapabilities` 或手动复制模型能力。例如，Messages 协议成员的配置包含：
 
 ```json
 {
-  "modelCapabilities": {
-    "deepseek-v4-pro": {
-      "anthropicFamilyTier": "sonnet",
-      "contextWindowTokens": 1048576
-    },
-    "deepseek-flash": {
-      "anthropicFamilyTier": "haiku",
-      "contextWindowTokens": 1048576
-    }
+  "claudeDesktopModelTiers": {
+    "deepseek-v4-pro": "sonnet",
+    "deepseek-flash": "haiku"
   }
 }
 ```
 
-这是渠道配置片段，需合并进现有条目，保留原来的输出上限、推理模式、价格和其他能力字段；不要直接替换整个配置文件。示例窗口来自模型能力声明，实际值应以渠道可承载的输入窗口为准。配置入口是持久化配置 JSON；本项没有新增控制台表单控件。
-
-`sonnet`、`opus`、`haiku`、`fable`、`mythos` 是客户端认可的 tier。这里的映射只指定 Desktop 的兼容槽位，不改变模型 ID、上游路由、供应商身份或协议验证状态，也不表示 DeepSeek 具备 Claude 的所有能力。Yunqi 不会默认给 DeepSeek 分配 tier；同一 tier 下按列表顺序选择一个默认项。仍需单独验证 Messages 推理和工具调用。
+旧版 `modelCapabilities` 中的通配 tier 规则会单独只读展示；下拉框只编辑具体模型 ID。旧版 `anthropicFamilyTier` 仍可读取；新的独立设置优先，空字符串表示显式清除继承值。若要仅移除独立覆盖、恢复旧配置或上游的自动元数据，可从该映射中删除对应键。界面操作不会触发收费推理测试。
 
 模型发现响应使用 `anthropic_family_tier`、`is_family_default`、`supports_1m` 和 `max_input_tokens`；原有驼峰字段继续保留。配置 JSON 中的 `anthropicFamilyTier` 与 HTTP 响应中的下划线字段属于不同接口。可用以下请求检查当前运行实例：
 

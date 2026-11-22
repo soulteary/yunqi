@@ -21,6 +21,9 @@ import (
 
 // UpstreamConfig 上游配置
 type UpstreamConfig struct {
+	// ClaudeDesktopModelTiers only affects model discovery, not routing capabilities.
+	ClaudeDesktopModelTiers map[string]string `json:"claudeDesktopModelTiers,omitempty"`
+
 	ModelImport *ModelImportState `json:"modelImport,omitempty"`
 	// ResponsesClaudePrefixCache opts into one automatic multi-turn prefix breakpoint.
 	// Disabled by default; only Claude wire, and cache writes may incur provider charges.
@@ -1293,6 +1296,8 @@ func (u *UpstreamConfig) GetEffectiveResponseHeaderTimeoutMs(fallbackMs int) int
 
 // UpstreamUpdate 用于部分更新 UpstreamConfig
 type UpstreamUpdate struct {
+	ClaudeDesktopModelTiers map[string]string `json:"claudeDesktopModelTiers,omitzero"`
+
 	// NullFields is populated by the JSON decoder; never accepted directly from clients.
 	NullFields               []string                           `json:"-"`
 	Name                     *string                            `json:"name,omitzero"`

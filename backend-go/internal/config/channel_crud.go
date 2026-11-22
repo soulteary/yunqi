@@ -371,6 +371,13 @@ func (cm *ConfigManager) updateUpstreamCommonAudited(auditContext ManagementAudi
 // 本函数不处理 baseURL/serviceType 相关逻辑，由调用方提前处理。
 func applyUpstreamUpdateFields(upstream *UpstreamConfig, updates UpstreamUpdate) (bool, error) {
 	var shouldResetMetrics bool
+	tiers, err := NormalizeClaudeDesktopModelTiers(updates.ClaudeDesktopModelTiers)
+	if err != nil {
+		return false, err
+	}
+	if tiers != nil {
+		upstream.ClaudeDesktopModelTiers = tiers
+	}
 	applyChannelNullFields(upstream, updates.NullFields)
 	network := upstream.OutboundNetwork
 	proxyURL := upstream.ProxyURL

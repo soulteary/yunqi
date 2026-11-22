@@ -507,7 +507,9 @@ export function useEditChannelModal(props: ResolvedEditChannelModalProps, emit: 
     protocolModelLimits.value = (channel.protocolRoutes?.length ? channel.protocolRoutes : [{
       kind: props.channelType, index: channel.index, channelUid: channel.channelUid,
       name: channel.name, serviceType: channel.serviceType, supportedModels: channel.supportedModels,
-    }]).map(route => ({ ...route, supportedModels: [...(route.supportedModels ?? [])] }))
+      claudeDesktopModelTiers: channel.claudeDesktopModelTiers,
+      claudeDesktopTierRules: channel.claudeDesktopTierRules,
+    }]).map(route => ({ ...route, supportedModels: [...(route.supportedModels ?? [])], claudeDesktopModelTiers: { ...(route.claudeDesktopModelTiers ?? {}) } }))
     form.name = channel.name
     form.remark = channel.remark || ''
     form.serviceType = props.channelType === 'images' || props.channelType === 'vectors' ? 'openai' : channel.serviceType

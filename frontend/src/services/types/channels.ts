@@ -96,6 +96,8 @@ export interface Channel {
   remark?: string
   website?: string
   insecureSkipVerify?: boolean
+  claudeDesktopModelTiers?: Record<string, string>
+  claudeDesktopTierRules?: Readonly<Record<string, string>>
   modelCapabilities?: Record<string, UpstreamModelCapability>
   embeddingCapabilities?: Record<string, EmbeddingCapability>
   defaultCapability?: UpstreamModelCapability
@@ -189,6 +191,8 @@ export interface ChannelModelBinding {
 }
 
 export interface ChannelProtocolRoute {
+  claudeDesktopModelTiers?: Record<string, string>
+  claudeDesktopTierRules?: Readonly<Record<string, string>>
   kind: ChannelKind
   upstreamKind?: ChannelKind
   index: number

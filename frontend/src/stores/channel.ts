@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { buildProtocolModelLimitUpdates } from '@/utils/protocolModelLimits'
+import { buildDesktopTierUpdates } from '@/utils/desktopModelTiers'
 import { ref, shallowReactive, computed, unref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { usePreferencesStore } from '@/stores/preferences'
@@ -493,10 +494,15 @@ export const useChannelStore = defineStore('channel', () => {
       const originalRoutes = original?.protocolRoutes?.length ? original.protocolRoutes : original ? [{
         kind: targetTab, index: editingChannelIndex, channelUid: original.channelUid,
         name: original.name, serviceType: original.serviceType, supportedModels: original.supportedModels,
+        claudeDesktopModelTiers: original.claudeDesktopModelTiers,
       }] : []
       for (const update of buildProtocolModelLimitUpdates(originalRoutes, channel.protocolRoutes ?? [])) {
         saveRequestCount++
         await api.updateChannelV2(update.channelUid, { kind: update.kind, supportedModels: update.supportedModels })
+      }
+      for (const update of buildDesktopTierUpdates(originalRoutes, channel.protocolRoutes ?? [])) {
+        saveRequestCount++
+        await api.updateChannelV2(update.channelUid, { kind: update.kind, claudeDesktopModelTiers: update.tiers })
       }
       const foldingRoutes = original?.protocolRoutes?.length ? original.protocolRoutes : original ? [{
         kind: targetTab, upstreamKind: targetTab, serviceType: original.serviceType,

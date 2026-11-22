@@ -185,3 +185,102 @@ func TestParseModelsResponseDesktopInputWindow(t *testing.T) {
 		})
 	}
 }
+
+func TestNormalizeModelEntryDedicatedDesktopTiers(t *testing.T) {
+	upstream := &config.UpstreamConfig{ClaudeDesktopModelTiers: map[string]string{"deepseek-v4-pro": "sonnet", "deepseek-flash": "haiku"}}
+	for _, id := range []string{"deepseek-v4-pro", "deepseek-flash"} {
+		baseline := normalizeModelEntry(ModelEntry{ID: id}, nil, nil)
+		model := normalizeModelEntry(ModelEntry{ID: id}, upstream, nil)
+		if model.AnthropicFamilyTier != upstream.ClaudeDesktopModelTiers[id] || model.ContextWindow != baseline.ContextWindow || model.MaxOutputTokens != baseline.MaxOutputTokens {
+			t.Fatalf("mapping changed capacity: %+v", model)
+		}
+	}
+	upstream.ModelCapabilities = map[string]config.UpstreamModelCapability{"deepseek-v4-pro": {AnthropicFamilyTier: "opus"}}
+	upstream.ClaudeDesktopModelTiers["deepseek-v4-pro"] = ""
+	cleared := normalizeModelEntry(ModelEntry{ID: "deepseek-v4-pro", AnthropicFamilyTier: "haiku", IsFamilyDefault: true}, upstream, nil)
+	if cleared.AnthropicFamilyTier != "" || cleared.IsFamilyDefault {
+		t.Fatalf("clear retained inherited tier: %+v", cleared)
+	}
+}
+
+func TestDesktopTierChangeInvalidatesDiscoveryCache(t *testing.T) {
+	var unavailable atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if unavailable.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"id":"deepseek-v4-pro","display_name":"Cached provider name"}]}`))
+	}))
+	defer server.Close()
+	cm := setupModelsConfigManager(t, config.Config{Upstream: []config.UpstreamConfig{{Name: "deepseek", BaseURL: server.URL, APIKeys: []string{"test"}, ServiceType: "claude", SupportedModels: []string{"deepseek-v4-pro"}, ClaudeDesktopModelTiers: map[string]string{"deepseek-v4-pro": "sonnet"}}}})
+	router := newModelsRouterForAggregate(&config.EnvConfig{ProxyAccessKey: "test-key"}, cm, newModelsTestScheduler(cm))
+	read := func() ModelEntry {
+		req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+		req.Header.Set("x-api-key", "test-key")
+		rec := httptest.NewRecorder()
+		httpbridge.Handler(router).ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("discovery failed: %d %s", rec.Code, rec.Body.String())
+		}
+		var response ModelsResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+			t.Fatal(err)
+		}
+		if len(response.Data) != 1 {
+			t.Fatalf("unexpected models: %+v", response.Data)
+		}
+		return response.Data[0]
+	}
+	if got := read().AnthropicFamilyTier; got != "sonnet" {
+		t.Fatalf("initial tier = %q", got)
+	}
+	unavailable.Store(true)
+	if _, err := cm.UpdateUpstream(0, config.UpstreamUpdate{ClaudeDesktopModelTiers: map[string]string{"deepseek-v4-pro": "haiku"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := read().AnthropicFamilyTier; got != "haiku" {
+		t.Fatalf("cache retained old tier: %q", got)
+	}
+	if _, err := cm.UpdateUpstream(0, config.UpstreamUpdate{ClaudeDesktopModelTiers: map[string]string{"deepseek-v4-pro": ""}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := read().AnthropicFamilyTier; got != "" {
+		t.Fatalf("cache retained cleared tier: %q", got)
+	}
+}
+
+func TestDesktopTierOverrideSurvivesProtocolMerge(t *testing.T) {
+	for _, tier := range []string{"sonnet", ""} {
+		t.Run("tier="+tier, func(t *testing.T) {
+			explicit := normalizeModelEntry(ModelEntry{ID: "deepseek-v4-pro"}, &config.UpstreamConfig{ClaudeDesktopModelTiers: map[string]string{"deepseek-v4-pro": tier}}, nil)
+			inherited := normalizeModelEntry(ModelEntry{ID: "deepseek-v4-pro", AnthropicFamilyTier: "opus", IsFamilyDefault: true}, nil, nil)
+			for _, entries := range [][]ModelEntry{mergeModels([]ModelEntry{explicit}, []ModelEntry{inherited}), mergeModels([]ModelEntry{inherited}, []ModelEntry{explicit})} {
+				result := buildModelsResponse(entries)
+				if len(result.Data) != 1 || result.Data[0].AnthropicFamilyTier != tier {
+					t.Fatalf("protocol merge replaced explicit setting: %+v", result.Data)
+				}
+				if tier == "" && result.Data[0].IsFamilyDefault {
+					t.Fatal("cleared tier retained a default flag")
+				}
+			}
+		})
+	}
+}
+
+func TestDesktopTierOverridesInheritedPatterns(t *testing.T) {
+	up := &config.UpstreamConfig{ModelCapabilities: map[string]config.UpstreamModelCapability{"deepseek-*": {AnthropicFamilyTier: "sonnet", ContextWindowTokens: 200000}}}
+	for _, id := range []string{"deepseek-v4-pro", "deepseek-flash"} {
+		if got := normalizeModelEntry(ModelEntry{ID: id}, up, nil).AnthropicFamilyTier; got != "sonnet" {
+			t.Fatalf("inherited tier for %s = %q", id, got)
+		}
+	}
+	up.ClaudeDesktopModelTiers = map[string]string{"deepseek-v4-pro": "haiku", "deepseek-flash": ""}
+	for id, want := range up.ClaudeDesktopModelTiers {
+		model := normalizeModelEntry(ModelEntry{ID: id}, up, nil)
+		if model.AnthropicFamilyTier != want || model.ContextWindow != 200000 {
+			t.Fatalf("override for %s ineffective: %+v", id, model)
+		}
+	}
+}

@@ -71,6 +71,7 @@
               />
               <RequestPreview v-if="isEditing && props.channel?.channelUid && ['messages', 'chat', 'responses', 'gemini'].includes(props.channelType)" :channel-uid="props.channel.channelUid" :channel-type="props.channelType" :draft="form" />
               <ProtocolModelLimits v-model="protocolModelLimits" :disabled="submitting" />
+              <ClaudeDesktopModels v-if="props.show" v-model="protocolModelLimits" :inventory-routes="protocolModelRoutes" :disabled="submitting" @menu-update="onMenuUpdate" />
               <ProtocolModelAvailability :routes="protocolModelRoutes" :loading="managedModelsLoading" @refreshed="handleProtocolModelsRefreshed" />
             </section>
 
@@ -484,6 +485,7 @@ import AddChannelSidebarNav from './edit-channel/AddChannelSidebarNav.vue'
 import BasicInfoSection from './edit-channel/BasicInfoSection.vue'
 import ProtocolModelAvailability from './edit-channel/ProtocolModelAvailability.vue'
 import ProtocolModelLimits from './edit-channel/ProtocolModelLimits.vue'
+import ClaudeDesktopModels from './edit-channel/ClaudeDesktopModels.vue'
 import ApiKeyManagementSection from './edit-channel/ApiKeyManagementSection.vue'
 import CustomHeadersSection from './edit-channel/CustomHeadersSection.vue'
 import NewApiAccountPanel from './edit-channel/NewApiAccountPanel.vue'
