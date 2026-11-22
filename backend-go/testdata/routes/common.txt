@@ -33,6 +33,7 @@ DELETE /api/vectors/channels/:id
 DELETE /api/vectors/channels/:id/keys/:apiKey
 GET /
 GET /:routePrefix/health
+GET /:routePrefix/v1/budget
 GET /:routePrefix/v1/models
 GET /:routePrefix/v1/models/:model
 GET /:routePrefix/v1/responses
@@ -46,7 +47,12 @@ GET /api/advisor/decisions
 GET /api/advisor/stats
 GET /api/autopilot/ab-test-results
 GET /api/autopilot/cost/exchange-rates
+GET /api/autopilot/evaluations
+GET /api/autopilot/evaluations/:id/dataset
 GET /api/autopilot/recommendations
+GET /api/budgets
+GET /api/budgets/:principal
+GET /api/budgets/:principal/requests/:request
 GET /api/channels
 GET /api/channels/:uid
 GET /api/channels/export
@@ -182,6 +188,7 @@ GET /api/vectors/models/stats/history
 GET /api/vectors/ping
 GET /api/vectors/ping/:id
 GET /health
+GET /v1/budget
 GET /v1/models
 GET /v1/models/:model
 GET /v1/responses
@@ -219,6 +226,7 @@ POST /api/accounts/:accountUid/credentials/:credentialUid/volcengine-plan-usage/
 POST /api/admin-credentials
 POST /api/admin-credentials/:id/rotate
 POST /api/autopilot/ab-test/emergency-stop
+POST /api/autopilot/evaluations
 POST /api/autopilot/route-preview
 POST /api/channel-discovery
 POST /api/channel-discovery-fast
@@ -421,6 +429,7 @@ PUT /api/accounts/:accountUid/credentials/:credentialUid/mimo-console-cookie
 PUT /api/accounts/:accountUid/credentials/:credentialUid/volcengine-access-key
 PUT /api/admin-credentials/:id
 PUT /api/autopilot/cost/exchange-rates
+PUT /api/budgets
 PUT /api/channels/:uid
 PUT /api/chat/channels/:id
 PUT /api/console/codex-auto-review
@@ -439,9 +448,3 @@ PUT /api/smart-routing/config
 PUT /api/subscriptions/:uid
 PUT /api/task-templates/:id
 PUT /api/vectors/channels/:id
-GET /v1/budget
-GET /:routePrefix/v1/budget
-GET /api/budgets
-GET /api/budgets/:principal
-GET /api/budgets/:principal/requests/:request
-PUT /api/budgets
