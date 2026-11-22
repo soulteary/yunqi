@@ -79,6 +79,8 @@ The external identity proxy and IdP perform OIDC login, Passkey and two-factor a
 
 `identityProxy.revocationMode` defaults to `local`, guaranteeing revocation on the current node only. `shared` checks an explicitly configured Redis backend on every SSO authentication. Replicas need the same backend/namespace and consistent identity proxy policy. Missing backends or read/write failures return 503 without falling back locally. Identity views and logout operations display their revocation scope; local logout is not global revocation.
 
+Shared mode persistently binds `revocationEpoch` to the revocation namespace. Only first-time explicit activation may initialize an empty namespace; normal authentication, startup and old-client saves omitting these fields never recreate it. Missing/changed markers reject authentication. Restore the original marker and revocation data rather than recreating a marker alone. The Redis backend must retain acknowledged revocation writes without data loss or eviction; an epoch cannot detect an individually lost revocation record.
+
 Optional strict session routing atomically binds the first request before dispatch. An unavailable binding fails rather than migrating across channels or racing; retries of keys/URLs within that channel remain possible. See [environment settings](environment.md).
 
 ## Configuration and operational evidence
