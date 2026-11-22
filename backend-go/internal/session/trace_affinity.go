@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/soulteary/yunqi/internal/entrylease"
 	"github.com/soulteary/yunqi/internal/routingref"
 )
 
@@ -22,11 +23,12 @@ type TraceAffinity struct {
 
 // TraceAffinityManager 管理 trace 与渠道的亲和性
 type TraceAffinityManager struct {
-	mu       sync.RWMutex
-	strict   map[string]*strictBinding
-	affinity map[string]*TraceAffinity // key: user_id
-	ttl      time.Duration
-	stopCh   chan struct{} // 用于停止清理 goroutine
+	mu           sync.RWMutex
+	strict       map[string]*strictBinding
+	sharedStrict *entrylease.Manager
+	affinity     map[string]*TraceAffinity // key: user_id
+	ttl          time.Duration
+	stopCh       chan struct{} // 用于停止清理 goroutine
 }
 
 // NewTraceAffinityManager 创建 Trace 亲和性管理器

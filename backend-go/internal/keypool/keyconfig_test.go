@@ -433,3 +433,15 @@ func TestCandidatesForModelWeighted_NoChannelUIDIgnoresAutoWeight(t *testing.T) 
 		t.Fatalf("无 ChannelUID 应忽略自动权重: %+v", weighted)
 	}
 }
+
+func TestConfigForCandidateSharedDoesNotDuplicateChannelLimits(t *testing.T) {
+	channel := config.UpstreamConfig{RateLimitRPM: 2, RateLimitWindowMinutes: 120, RateLimitMaxConcurrent: 1}
+	inherited := ConfigForCandidateShared(channel, config.APIKeyConfig{})
+	if inherited.RPM != 0 || inherited.MaxConcurrent != 0 || inherited.WindowSeconds != 120 {
+		t.Fatalf("inherited shared limits charged twice: %+v", inherited)
+	}
+	explicit := ConfigForCandidateShared(channel, config.APIKeyConfig{RateLimitRPM: 5, RateLimitMaxConcurrent: 3})
+	if explicit.RPM != 5 || explicit.MaxConcurrent != 3 {
+		t.Fatalf("explicit key safeguards lost: %+v", explicit)
+	}
+}

@@ -296,6 +296,10 @@ func (a *application) stopBackgroundTasks() {
 		}
 	}
 
+	if a.envCfg.SharedRoutingAdmission != nil {
+		_ = a.envCfg.SharedRoutingAdmission.Close()
+	}
+
 	// 停止调度器后台 reaper
 	a.channelScheduler.Stop()
 

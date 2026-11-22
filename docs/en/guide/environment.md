@@ -927,3 +927,11 @@ The `/access` portal offers login and logout through the existing session-revoca
 Session records and shared storage realms bind the assurance-policy digest and revocation epoch. Tightening assurance and restarting cannot reuse older lower-assurance sessions. Current group mappings and shorter MaxSessionSeconds are reapplied on every authenticated request.
 
 Each realm admits at most 4096 pending anonymous login flows for five minutes. Shared Redis uses server time and an expiry index; consumption releases capacity atomically. Saturation rejects before IdP discovery and recovers after consumption or expiry cleanup.
+
+### Shared channel admission and strict affinity
+
+Set `PROXY_REDIS_SHARED_ROUTING=true` to share configured channel RPM, window seconds, concurrency, and strict first-request affinity through `PROXY_REDIS_URL`. Nodes in the same `PROXY_REDIS_NAMESPACE` must use identical policies and stable channel UIDs. Each physical retry/racing attempt acquires capacity; releasing concurrency does not refund RPM. Discovered AIMD and key/quota-scope limits remain local safeguards. Capacity rejection returns 429 with Retry-After; backend failures return 503 without local fallback or provider-key penalties.
+
+Provision an empty realm **offline, with every gateway in that realm stopped**, by running `YUNQI_CONFIRM_EMPTY_ROUTING_REALM=yes go run ./cmd/routing-state-init` from `backend-go`. Save its random `PROXY_REDIS_ROUTING_EPOCH` in every node's deployment configuration. Ordinary startup never initializes state. Every acquire/bind/renew checks the epoch; missing or changed state rejects admission and cancels active upstream work, including detached usage drain. Restore the original epoch **and all routing data**, never just the marker. Use durable, non-evicting Redis: an epoch cannot detect individual record deletion. External Redis is outside local configuration backups.
+
+Strict affinity additionally requires `YUNQI_STRICT_SESSION_AFFINITY=true`. Binding occurs atomically before upstream dispatch and does not migrate after failure. Active response bodies renew both leases and session retention, even beyond idle TTL. Crashed-node capacity is recovered after lease expiry. Responses history caches remain node-local; clients using stored response continuation still require a stable node entry point.
