@@ -88,9 +88,16 @@ func InitializeRedis(ctx context.Context, client *redis.Client, namespace, epoch
 			return errors.New("budget namespace already initialized; restore its original data instead")
 		}
 		// Do not attach a new epoch to orphaned accounting records.
-		keys, err := tx.Keys(ctx, r.prefix+"*").Result()
-		if err != nil || len(keys) != 0 {
-			return ErrUnavailable
+		var cursor uint64
+		for {
+			keys, next, scanErr := tx.Scan(ctx, cursor, r.prefix+"*", 128).Result()
+			if scanErr != nil || len(keys) != 0 {
+				return ErrUnavailable
+			}
+			cursor = next
+			if cursor == 0 {
+				break
+			}
 		}
 		_, err = tx.TxPipelined(ctx, func(p redis.Pipeliner) error {
 			p.Set(ctx, r.prefix+"epoch", epoch, 0)
