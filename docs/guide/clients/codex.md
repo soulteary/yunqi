@@ -107,7 +107,7 @@ Yunqi 的渠道能力用于判断实际模型能否承载请求；Codex 使用�
 model_context_window = 1000000
 ```
 
-将这一行合并到 `~/.codex/config.toml` 的顶层，放在 `[model_providers.ccx]` 等表定义之前。导出不会修改本机文件，也不会设置自动压缩阈值。切换模型或备用路由后，应重新核对窗口，不要按客户端请求模型名推断上游容量。
+将这一行合并到 `~/.codex/config.toml` 的顶层，放在 `[model_providers.yunqi]` 等表定义之前。导出不会修改本机文件，也不会设置自动压缩阈值。切换模型或备用路由后，应重新核对窗口，不要按客户端请求模型名推断上游容量。
 
 字段说明见 [Codex 官方配置参考](https://developers.openai.com/codex/config-reference/)；是否支持该配置取决于客户端版本。
 

@@ -26,6 +26,6 @@ tar -C "$source_dir" \
 embedded_dist="$target_dir/backend-go/frontend/dist"
 if [ ! -f "$embedded_dist/index.html" ]; then
   mkdir -p "$embedded_dist"
-  printf '%s\n' '<!doctype html><title>CCX container verification</title>' \
+  printf '%s\n' '<!doctype html><title>Yunqi container verification</title>' \
     >"$embedded_dist/index.html"
 fi

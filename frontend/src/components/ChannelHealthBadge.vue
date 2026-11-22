@@ -16,7 +16,7 @@
       activator="parent"
       location="top"
       :open-delay="0"
-      content-class="ccx-tooltip"
+      content-class="yunqi-tooltip"
     >
       <div class="health-tooltip">
         <div class="health-tooltip-title font-weight-bold mb-1">

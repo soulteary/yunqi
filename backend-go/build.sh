@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# CCX Go 版本构建脚本
+# Yunqi Go 版本构建脚本
 
 set -e
 
@@ -12,7 +12,7 @@ GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 # 构建标志
 LDFLAGS="-X main.Version=${VERSION} -X main.BuildTime=${BUILD_TIME} -X main.GitCommit=${GIT_COMMIT}"
 
-echo "🚀 开始构建 CCX Go 版本..."
+echo "🚀 开始构建 Yunqi Go 版本..."
 echo "📌 版本: ${VERSION}"
 echo "🕐 构建时间: ${BUILD_TIME}"
 echo "🔖 Git提交: ${GIT_COMMIT}"
@@ -44,23 +44,23 @@ echo "🔨 构建二进制文件..."
 
 # Linux
 echo "  - 构建 Linux (amd64)..."
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o dist/ccx-linux-amd64 .
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o dist/yunqi-linux-amd64 .
 
 # Linux ARM64
 echo "  - 构建 Linux (arm64)..."
-CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o dist/ccx-linux-arm64 .
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o dist/yunqi-linux-arm64 .
 
 # macOS
 echo "  - 构建 macOS (amd64)..."
-CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o dist/ccx-darwin-amd64 .
+CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o dist/yunqi-darwin-amd64 .
 
 # macOS ARM64 (M1/M2)
 echo "  - 构建 macOS (arm64)..."
-CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o dist/ccx-darwin-arm64 .
+CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o dist/yunqi-darwin-arm64 .
 
 # Windows
 echo "  - 构建 Windows (amd64)..."
-CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o dist/ccx-windows-amd64.exe .
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o dist/yunqi-windows-amd64.exe .
 
 echo ""
 echo "✅ 构建完成！"
@@ -72,7 +72,7 @@ echo ""
 echo "💡 使用方法："
 echo "  1. 复制对应平台的二进制文件到目标机器"
 echo "  2. 创建 .env 文件配置环境变量"
-echo "  3. 运行: ./ccx-linux-amd64"
+echo "  3. 运行: ./yunqi-linux-amd64"
 echo ""
 echo "📌 版本信息已注入到二进制文件中"
 

@@ -15,7 +15,7 @@ export function clientConfig(
   codexContextWindow?: number
 ): { filename: string; content: string } {
   const root = gatewayRoot(address)
-  const key = 'YOUR_CCX_PROXY_KEY'
+  const key = 'YOUR_YUNQI_PROXY_KEY'
   model = model.trim()
   const hasControlCharacter = Array.from(model).some(character => {
     const code = character.charCodeAt(0)
@@ -37,7 +37,7 @@ export function clientConfig(
     const context = codexContextWindow === undefined ? '' : `model_context_window = ${codexContextWindow}\n`
     return {
       filename: 'codex-config.toml',
-      content: `model = ${JSON.stringify(model)}\nmodel_provider = "ccx"\n${context}\n[model_providers.ccx]\nname = "CCX"\nbase_url = ${JSON.stringify(root + '/v1')}\nwire_api = "responses"\nenv_key = "CCX_PROXY_KEY"\n`
+      content: `model = ${JSON.stringify(model)}\nmodel_provider = "yunqi"\n${context}\n[model_providers.yunqi]\nname = "Yunqi"\nbase_url = ${JSON.stringify(root + '/v1')}\nwire_api = "responses"\nenv_key = "YUNQI_PROXY_KEY"\n`
     }
   }
   return {
@@ -45,12 +45,12 @@ export function clientConfig(
     content: JSON.stringify(
       {
         $schema: 'https://opencode.ai/config.json',
-        model: `ccx/${model}`,
+        model: `yunqi/${model}`,
         provider: {
-          ccx: {
+          yunqi: {
             npm: '@ai-sdk/openai-compatible',
-            name: 'CCX',
-            options: { baseURL: root + '/v1', apiKey: '{env:CCX_PROXY_KEY}' },
+            name: 'Yunqi',
+            options: { baseURL: root + '/v1', apiKey: '{env:YUNQI_PROXY_KEY}' },
             models: { [model]: { name: model } }
           }
         }

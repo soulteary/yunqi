@@ -114,24 +114,24 @@
 
 /* Visual distinction for unavailable channels */
 .channel-row.is-tripped {
-  background: var(--ccx-channel-row-suspended-bg);
-  border-color: var(--ccx-channel-row-suspended-border);
-  box-shadow: var(--ccx-channel-row-shadow);
+  background: var(--yunqi-channel-row-suspended-bg);
+  border-color: var(--yunqi-channel-row-suspended-border);
+  box-shadow: var(--yunqi-channel-row-shadow);
 }
 .channel-row.is-tripped:hover {
-  background: var(--ccx-channel-row-suspended-hover-bg);
-  box-shadow: var(--ccx-channel-row-shadow-hover);
+  background: var(--yunqi-channel-row-suspended-hover-bg);
+  box-shadow: var(--yunqi-channel-row-shadow-hover);
 }
 
 .v-theme--dark .channel-row.is-tripped {
-  background: var(--ccx-channel-row-suspended-bg);
-  border-color: var(--ccx-channel-row-suspended-border);
-  box-shadow: var(--ccx-channel-row-shadow);
+  background: var(--yunqi-channel-row-suspended-bg);
+  border-color: var(--yunqi-channel-row-suspended-border);
+  box-shadow: var(--yunqi-channel-row-shadow);
 }
 
 .v-theme--dark .channel-row.is-tripped:hover {
-  background: var(--ccx-channel-row-suspended-hover-bg);
-  box-shadow: var(--ccx-channel-row-shadow-hover);
+  background: var(--yunqi-channel-row-suspended-hover-bg);
+  box-shadow: var(--yunqi-channel-row-shadow-hover);
 }
 
 .channel-row.ghost {

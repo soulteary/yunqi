@@ -894,7 +894,7 @@ export async function main() {
   if (skipDeepswe && skipBenchlm && skipDradar && skipLitellm && !artificialAnalysisEnabled) {
     throw new Error('all benchmark sources are skipped')
   }
-  console.log('CCX Benchmark Data Auto-Updater')
+  console.log('Yunqi Benchmark Data Auto-Updater')
   console.log('='.repeat(60))
   console.log(`Mode: ${dryRun ? 'DRY RUN' : 'UPDATE'}`)
   console.log(`Registry: ${registryPath}`)

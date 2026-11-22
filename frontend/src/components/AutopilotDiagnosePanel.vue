@@ -309,7 +309,7 @@
               {{ t('autopilot.diagnose.recommendation') }}
             </div>
             <div class="d-flex flex-wrap align-center ga-2 mt-1">
-              <v-tooltip :text="plan.selectedChannelUid || '-'" location="top" :open-delay="150" content-class="ccx-tooltip">
+              <v-tooltip :text="plan.selectedChannelUid || '-'" location="top" :open-delay="150" content-class="yunqi-tooltip">
                 <template #activator="{ props: tooltipProps }">
                   <span v-bind="tooltipProps" class="font-weight-bold">{{ channelName(plan.selectedChannelUid) }}</span>
                 </template>
@@ -360,7 +360,7 @@
                   <v-icon v-else size="16" color="grey">mdi-minus</v-icon>
                 </td>
                 <td class="text-caption">
-                  <v-tooltip :text="candidate.channelUid" location="top" :open-delay="150" content-class="ccx-tooltip">
+                  <v-tooltip :text="candidate.channelUid" location="top" :open-delay="150" content-class="yunqi-tooltip">
                     <template #activator="{ props: tooltipProps }">
                       <span v-bind="tooltipProps">{{ channelName(candidate.channelUid) }}</span>
                     </template>

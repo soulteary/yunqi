@@ -16,7 +16,7 @@
             <v-btn value="final" size="x-small">{{ t('channelLogs.filter.final') }}</v-btn>
             <v-btn value="racing" size="x-small">{{ t('channelLogs.filter.racing') }}</v-btn>
           </v-btn-toggle>
-          <v-tooltip :text="t('app.actions.close') + ' (Esc)'" location="bottom" content-class="ccx-tooltip">
+          <v-tooltip :text="t('app.actions.close') + ' (Esc)'" location="bottom" content-class="yunqi-tooltip">
             <template #activator="{ props: tooltipProps }">
               <v-btn icon size="small" variant="text" v-bind="tooltipProps" @click="$emit('update:modelValue', false)">
                 <v-icon>mdi-close</v-icon>
@@ -82,7 +82,7 @@
                 <v-tooltip
                   :text="copiedLogKey === row.key ? t('channelLogs.copiedEntry') : t('channelLogs.copyEntry')"
                   location="left"
-                  content-class="ccx-tooltip"
+                  content-class="yunqi-tooltip"
                 >
                   <template #activator="{ props: tooltipProps }">
                     <v-btn

@@ -329,7 +329,7 @@
 
           <div class="action-bar-right">
             <!-- 熔断器配置按钮 -->
-            <v-tooltip location="bottom" content-class="ccx-tooltip">
+            <v-tooltip location="bottom" content-class="yunqi-tooltip">
               <template #activator="{ props }">
                 <v-btn
                   v-bind="props"

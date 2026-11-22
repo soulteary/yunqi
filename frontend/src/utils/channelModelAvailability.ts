@@ -193,7 +193,7 @@ export async function loadLegacyManagedModelAvailability(
 
 /**
  * 将客户端入站路由折叠为上游原生协议，并附加 endpoint profile 的实际模型清单。
- * 保留 kind 作为 CCX 实际入站路由，upstreamKind 只供上游协议展示使用；
+ * 保留 kind 作为 Yunqi 实际入站路由，upstreamKind 只供上游协议展示使用；
  * 同一上游协议存在多条转换路由时，优先保留 kind 与原生协议一致的渠道。
  */
 export function buildNativeProtocolModelRoutes(

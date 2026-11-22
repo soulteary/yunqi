@@ -382,7 +382,7 @@
                       :text="t('channelCard.keyDetail')"
                       location="top"
                       :open-delay="150"
-                      content-class="ccx-tooltip"
+                      content-class="yunqi-tooltip"
                     >
                       <template #activator="{ props: tooltipProps }">
                         <v-btn

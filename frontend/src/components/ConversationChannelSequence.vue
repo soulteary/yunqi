@@ -96,7 +96,7 @@ const emit = defineEmits<{
 
 const channelTooltipProps = {
   attach: 'body',
-  contentClass: 'ccx-tooltip',
+  contentClass: 'yunqi-tooltip',
   location: 'top',
   locationStrategy: 'connected',
   openDelay: 150,
@@ -137,7 +137,7 @@ function getDemoteTooltip(ch: ChannelInfo, index: number): string {
 }
 
 .channel-item-animated {
-  animation: ccx-slide-in 0.18s ease both;
+  animation: yunqi-slide-in 0.18s ease both;
 }
 
 .channel-item.demoted {
@@ -173,7 +173,7 @@ function getDemoteTooltip(ch: ChannelInfo, index: number): string {
 
 .next-channel-chip {
   font-weight: 700;
-  animation: ccx-breathe 2s ease-in-out infinite;
+  animation: yunqi-breathe 2s ease-in-out infinite;
 }
 
 .next-channel-chip :deep(.v-chip__content),
@@ -184,10 +184,10 @@ function getDemoteTooltip(ch: ChannelInfo, index: number): string {
 .fused-chip {
   background: repeating-linear-gradient(
     -45deg,
-    var(--ccx-fused-stripe-b) 0px,
-    var(--ccx-fused-stripe-b) 4px,
-    var(--ccx-fused-stripe-a) 4px,
-    var(--ccx-fused-stripe-a) 8px
+    var(--yunqi-fused-stripe-b) 0px,
+    var(--yunqi-fused-stripe-b) 4px,
+    var(--yunqi-fused-stripe-a) 4px,
+    var(--yunqi-fused-stripe-a) 8px
   ) !important;
   color: #fff !important;
   border-radius: 0 !important;
@@ -226,7 +226,7 @@ function getDemoteTooltip(ch: ChannelInfo, index: number): string {
   opacity: 0.2;
 }
 
-@keyframes ccx-breathe {
+@keyframes yunqi-breathe {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.55; }
 }

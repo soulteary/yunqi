@@ -123,11 +123,11 @@
         <div class="d-flex align-center ga-1" @click.stop>
           <v-btn icon size="small" variant="text" color="primary" :loading="refreshingPrimary" @click.stop="refreshPrimaryAccount">
             <v-icon size="18">mdi-refresh</v-icon>
-            <v-tooltip activator="parent" location="top" content-class="ccx-tooltip">{{ t('subscription.newApi.refreshBalance') }}</v-tooltip>
+            <v-tooltip activator="parent" location="top" content-class="yunqi-tooltip">{{ t('subscription.newApi.refreshBalance') }}</v-tooltip>
           </v-btn>
           <v-btn icon size="small" variant="text" color="error" :loading="deletingPrimary" @click.stop="deletePrimaryAccount">
             <v-icon size="18">mdi-delete</v-icon>
-            <v-tooltip activator="parent" location="top" content-class="ccx-tooltip">{{ t('app.actions.delete') }}</v-tooltip>
+            <v-tooltip activator="parent" location="top" content-class="yunqi-tooltip">{{ t('app.actions.delete') }}</v-tooltip>
           </v-btn>
           <v-icon size="20" class="ml-1">{{ expandedPrimary ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
         </div>
@@ -277,11 +277,11 @@
           <div class="d-flex align-center ga-1" @click.stop>
             <v-btn icon size="small" variant="text" color="primary" :loading="refreshing === account.accountUid" @click.stop="refreshAccount(account.accountUid)">
               <v-icon size="18">mdi-refresh</v-icon>
-              <v-tooltip activator="parent" location="top" content-class="ccx-tooltip">{{ t('subscription.newApi.refreshBalance') }}</v-tooltip>
+              <v-tooltip activator="parent" location="top" content-class="yunqi-tooltip">{{ t('subscription.newApi.refreshBalance') }}</v-tooltip>
             </v-btn>
             <v-btn icon size="small" variant="text" color="error" :loading="deleting === account.accountUid" @click.stop="deleteAccount(account.accountUid)">
               <v-icon size="18">mdi-delete</v-icon>
-              <v-tooltip activator="parent" location="top" content-class="ccx-tooltip">{{ t('app.actions.delete') }}</v-tooltip>
+              <v-tooltip activator="parent" location="top" content-class="yunqi-tooltip">{{ t('app.actions.delete') }}</v-tooltip>
             </v-btn>
             <v-icon size="20" class="ml-1">{{ expandedAccountUid === account.accountUid ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
           </div>

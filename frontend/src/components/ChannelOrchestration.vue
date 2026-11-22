@@ -2,36 +2,36 @@
   <v-card elevation="0" rounded="lg" class="channel-orchestration" variant="flat">
     <!--
       全局共享 gradient 定义（7 档成功率色带）
-      所有渠道的 activity bar 通过 url(#ccx-act-g{0..6}) 引用，
+      所有渠道的 activity bar 通过 url(#yunqi-act-g{0..6}) 引用，
       避免每个 bar 独立定义 gradient 导致 SVG 节点爆炸（30+ 渠道 × 150 bar = 4500+ 节点）
     -->
     <svg class="activity-gradient-defs" aria-hidden="true" width="0" height="0" style="position:absolute;">
       <defs>
-        <linearGradient id="ccx-act-g0" x1="0%" y1="0%" x2="0%" y2="100%">
+        <linearGradient id="yunqi-act-g0" x1="0%" y1="0%" x2="0%" y2="100%">
           <stop offset="0%" stop-color="rgb(34, 197, 94)" stop-opacity="0.8" />
           <stop offset="100%" stop-color="rgb(34, 197, 94)" stop-opacity="0.3" />
         </linearGradient>
-        <linearGradient id="ccx-act-g1" x1="0%" y1="0%" x2="0%" y2="100%">
+        <linearGradient id="yunqi-act-g1" x1="0%" y1="0%" x2="0%" y2="100%">
           <stop offset="0%" stop-color="rgb(132, 204, 22)" stop-opacity="0.8" />
           <stop offset="100%" stop-color="rgb(132, 204, 22)" stop-opacity="0.3" />
         </linearGradient>
-        <linearGradient id="ccx-act-g2" x1="0%" y1="0%" x2="0%" y2="100%">
+        <linearGradient id="yunqi-act-g2" x1="0%" y1="0%" x2="0%" y2="100%">
           <stop offset="0%" stop-color="rgb(250, 204, 21)" stop-opacity="0.8" />
           <stop offset="100%" stop-color="rgb(250, 204, 21)" stop-opacity="0.3" />
         </linearGradient>
-        <linearGradient id="ccx-act-g3" x1="0%" y1="0%" x2="0%" y2="100%">
+        <linearGradient id="yunqi-act-g3" x1="0%" y1="0%" x2="0%" y2="100%">
           <stop offset="0%" stop-color="rgb(251, 146, 60)" stop-opacity="0.8" />
           <stop offset="100%" stop-color="rgb(251, 146, 60)" stop-opacity="0.3" />
         </linearGradient>
-        <linearGradient id="ccx-act-g4" x1="0%" y1="0%" x2="0%" y2="100%">
+        <linearGradient id="yunqi-act-g4" x1="0%" y1="0%" x2="0%" y2="100%">
           <stop offset="0%" stop-color="rgb(249, 115, 22)" stop-opacity="0.8" />
           <stop offset="100%" stop-color="rgb(249, 115, 22)" stop-opacity="0.3" />
         </linearGradient>
-        <linearGradient id="ccx-act-g5" x1="0%" y1="0%" x2="0%" y2="100%">
+        <linearGradient id="yunqi-act-g5" x1="0%" y1="0%" x2="0%" y2="100%">
           <stop offset="0%" stop-color="rgb(239, 68, 68)" stop-opacity="0.8" />
           <stop offset="100%" stop-color="rgb(239, 68, 68)" stop-opacity="0.3" />
         </linearGradient>
-        <linearGradient id="ccx-act-g6" x1="0%" y1="0%" x2="0%" y2="100%">
+        <linearGradient id="yunqi-act-g6" x1="0%" y1="0%" x2="0%" y2="100%">
           <stop offset="0%" stop-color="rgb(220, 38, 38)" stop-opacity="0.8" />
           <stop offset="100%" stop-color="rgb(220, 38, 38)" stop-opacity="0.3" />
         </linearGradient>
@@ -49,7 +49,7 @@
         <v-chip v-else size="small" color="warning" variant="tonal" class="ml-3 mode-chip"> {{ t('orchestration.singleChannel') }} </v-chip>
       </div>
       <div class="d-flex align-center ga-2">
-        <v-tooltip :text="t('schedulerDiagnose.title')" location="bottom" content-class="ccx-tooltip">
+        <v-tooltip :text="t('schedulerDiagnose.title')" location="bottom" content-class="yunqi-tooltip">
           <template #activator="{ props: tooltipProps }">
             <v-btn icon size="small" variant="text" v-bind="tooltipProps" @click="showSchedulerDiagnoseDialog = true">
               <v-icon size="small">mdi-routes</v-icon>
@@ -124,7 +124,7 @@
                   :y="bar.y"
                   :width="bar.width"
                   :height="bar.height"
-                  :fill="`url(#ccx-act-g${bar.g})`"
+                  :fill="`url(#yunqi-act-g${bar.g})`"
                   :rx="bar.radius"
                   :ry="bar.radius"
                   class="activity-bar"
@@ -162,7 +162,7 @@
                 :text="getChannelOriginalName(element)"
                 location="top"
                 :open-delay="150"
-                content-class="ccx-tooltip"
+                content-class="yunqi-tooltip"
               >
                 <template #activator="{ props: tooltipProps }">
                   <span
@@ -203,7 +203,7 @@
                 :text="websiteLinkLabel(link.kind)"
                 location="top"
                 :open-delay="150"
-                content-class="ccx-tooltip"
+                content-class="yunqi-tooltip"
               >
                 <template #activator="{ props: tooltipProps }">
                   <v-btn
@@ -326,7 +326,7 @@
                     activator="parent"
                     location="top"
                     :open-delay="150"
-                    content-class="ccx-tooltip"
+                    content-class="yunqi-tooltip"
                   >
                     <div class="metrics-tooltip">
                       <div class="text-caption font-weight-bold mb-1">{{ t('orchestration.requestStats') }}</div>
@@ -403,7 +403,7 @@
               <v-tooltip
                 v-if="isLongLatencyChannel(element)"
                 location="top"
-                content-class="ccx-tooltip"
+                content-class="yunqi-tooltip"
               >
                 <template #activator="{ props: tooltipProps }">
                   <v-chip
@@ -428,7 +428,7 @@
                 <v-icon start size="x-small">mdi-key</v-icon>
                 {{ availableChannelApiKeyCount(element) }}
               </v-chip>
-              <v-tooltip v-if="pausedChannelApiKeyCount(element)" :text="t('orchestration.pausedKeys', { count: pausedChannelApiKeyCount(element) })" location="top" color="warning" content-class="ccx-tooltip">
+              <v-tooltip v-if="pausedChannelApiKeyCount(element)" :text="t('orchestration.pausedKeys', { count: pausedChannelApiKeyCount(element) })" location="top" color="warning" content-class="yunqi-tooltip">
                 <template #activator="{ props: tip }">
                   <v-chip v-bind="tip" size="x-small" color="warning" variant="tonal" @click="$emit('edit', element)">
                     <v-icon start size="x-small">mdi-pause</v-icon>
@@ -436,7 +436,7 @@
                   </v-chip>
                 </template>
               </v-tooltip>
-              <v-tooltip v-if="disabledChannelApiKeyCount(element)" :text="t('orchestration.blacklistedKeys', { count: disabledChannelApiKeyCount(element) })" location="top" color="error" content-class="ccx-tooltip">
+              <v-tooltip v-if="disabledChannelApiKeyCount(element)" :text="t('orchestration.blacklistedKeys', { count: disabledChannelApiKeyCount(element) })" location="top" color="error" content-class="yunqi-tooltip">
                 <template #activator="{ props: tip }">
                   <v-chip v-bind="tip" size="x-small" color="error" variant="tonal" @click="$emit('edit', element)">
                     {{ disabledChannelApiKeyCount(element) }}
@@ -637,7 +637,7 @@
                 :text="getChannelOriginalName(channel)"
                 location="top"
                 :open-delay="150"
-                content-class="ccx-tooltip"
+                content-class="yunqi-tooltip"
               >
                 <template #activator="{ props: tooltipProps }">
                   <span
@@ -685,7 +685,7 @@
               <v-icon start size="x-small">mdi-key</v-icon>
               {{ availableChannelApiKeyCount(channel) }}
             </v-chip>
-            <v-tooltip v-if="pausedChannelApiKeyCount(channel)" :text="t('orchestration.pausedKeys', { count: pausedChannelApiKeyCount(channel) })" location="top" color="warning" content-class="ccx-tooltip">
+            <v-tooltip v-if="pausedChannelApiKeyCount(channel)" :text="t('orchestration.pausedKeys', { count: pausedChannelApiKeyCount(channel) })" location="top" color="warning" content-class="yunqi-tooltip">
               <template #activator="{ props: tip }">
                 <v-chip v-bind="tip" size="x-small" color="warning" variant="tonal" @click="$emit('edit', channel)">
                   <v-icon start size="x-small">mdi-pause</v-icon>
@@ -693,7 +693,7 @@
                 </v-chip>
               </template>
             </v-tooltip>
-            <v-tooltip v-if="disabledChannelApiKeyCount(channel)" :text="t('orchestration.blacklistedKeys', { count: disabledChannelApiKeyCount(channel) })" location="top" color="error" content-class="ccx-tooltip">
+            <v-tooltip v-if="disabledChannelApiKeyCount(channel)" :text="t('orchestration.blacklistedKeys', { count: disabledChannelApiKeyCount(channel) })" location="top" color="error" content-class="yunqi-tooltip">
               <template #activator="{ props: tip }">
                 <v-chip v-bind="tip" size="x-small" color="error" variant="tonal" @click="$emit('edit', channel)">
                   {{ disabledChannelApiKeyCount(channel) }}

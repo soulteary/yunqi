@@ -15,7 +15,7 @@
             v-if="detail"
             :text="copied ? t('autopilot.traceDetail.copied') : t('autopilot.traceDetail.copy')"
             location="bottom"
-            content-class="ccx-tooltip"
+            content-class="yunqi-tooltip"
           >
             <template #activator="{ props: tooltipProps }">
               <v-btn
@@ -30,7 +30,7 @@
               </v-btn>
             </template>
           </v-tooltip>
-          <v-tooltip :text="t('app.actions.close') + ' (Esc)'" location="bottom" content-class="ccx-tooltip">
+          <v-tooltip :text="t('app.actions.close') + ' (Esc)'" location="bottom" content-class="yunqi-tooltip">
             <template #activator="{ props: tooltipProps }">
               <v-btn icon size="small" variant="text" v-bind="tooltipProps" @click="$emit('update:modelValue', false)">
                 <v-icon>mdi-close</v-icon>

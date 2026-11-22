@@ -109,7 +109,7 @@ Select Codex in **Service & client setup** to enter an optional context window. 
 model_context_window = 1000000
 ```
 
-Place it before tables such as `[model_providers.ccx]` in `~/.codex/config.toml`. Export does not edit local files or set an automatic compaction threshold. Recheck capacity when changing models or fallback routes.
+Place it before tables such as `[model_providers.yunqi]` in `~/.codex/config.toml`. Export does not edit local files or set an automatic compaction threshold. Recheck capacity when changing models or fallback routes.
 
 See the [official Codex configuration reference](https://developers.openai.com/codex/config-reference/). Support depends on the client version.
 

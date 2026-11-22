@@ -471,8 +471,8 @@ func diagnoseClaudeChannelWithModel(channel *config.UpstreamConfig, apiKey, base
 			hasThinkingProbe = hasThinking
 			if hasThinking {
 				if shouldUseThinkingCache {
-					evid["passbackReasoningContent"] = "DeepSeek Claude thinking uses CCX SQLite cache; keep legacy reasoning_content passback disabled"
-					evid["passbackThinkingBlocks"] = "DeepSeek Claude thinking uses CCX SQLite cache; cached content[].thinking is injected only on exact history hits"
+					evid["passbackReasoningContent"] = "DeepSeek Claude thinking uses Yunqi SQLite cache; keep legacy reasoning_content passback disabled"
+					evid["passbackThinkingBlocks"] = "DeepSeek Claude thinking uses Yunqi SQLite cache; cached content[].thinking is injected only on exact history hits"
 				} else {
 					recs["passbackReasoningContent"] = true
 					evid["passbackReasoningContent"] = "upstream returned thinking block in stream"
@@ -531,8 +531,8 @@ func applyDeepSeekClaudeCacheRecommendations(recs map[string]bool, evid map[stri
 	recs["normalizeMetadataUserId"] = true
 	recs["stripBillingHeader"] = true
 
-	evid["passbackReasoningContent"] = "DeepSeek Claude thinking uses CCX SQLite cache; legacy reasoning_content passback must stay disabled"
-	evid["passbackThinkingBlocks"] = "DeepSeek Claude thinking uses CCX SQLite cache; do not project reasoning_content globally"
+	evid["passbackReasoningContent"] = "DeepSeek Claude thinking uses Yunqi SQLite cache; legacy reasoning_content passback must stay disabled"
+	evid["passbackThinkingBlocks"] = "DeepSeek Claude thinking uses Yunqi SQLite cache; do not project reasoning_content globally"
 	evid["stripEmptyTextBlocks"] = "DeepSeek Claude endpoint strictly validates empty text blocks before tool_use"
 	evid["normalizeMetadataUserId"] = "DeepSeek Claude endpoint expects flattened metadata.user_id"
 	evid["stripBillingHeader"] = "DeepSeek Claude endpoint should not receive Claude Code billing suffixes"

@@ -61,10 +61,10 @@ export function useAppVersion() {
 
   onMounted(() => {
     void checkVersion()
-    window.addEventListener('ccx-check-version', handleVersionCheck)
+    window.addEventListener('yunqi-check-version', handleVersionCheck)
   })
 
-  onUnmounted(() => window.removeEventListener('ccx-check-version', handleVersionCheck))
+  onUnmounted(() => window.removeEventListener('yunqi-check-version', handleVersionCheck))
 
   return { handleVersionClick }
 }

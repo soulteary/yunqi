@@ -196,15 +196,15 @@ function diagnostics() {
           <p v-if="kind === 'claude'">
             {{
               zh
-                ? '将 env 字段合并到 ~/.claude/settings.json，并将 YOUR_CCX_PROXY_KEY 替换为代理密钥。'
-                : 'Merge env into ~/.claude/settings.json and replace YOUR_CCX_PROXY_KEY with the proxy key.'
+                ? '将 env 字段合并到 ~/.claude/settings.json，并将 YOUR_YUNQI_PROXY_KEY 替换为 Yunqi 的 PROXY_ACCESS_KEY。'
+                : 'Merge env into ~/.claude/settings.json and replace YOUR_YUNQI_PROXY_KEY with Yunqi’s PROXY_ACCESS_KEY.'
             }}
           </p>
           <p v-else>
             {{
               zh
-                ? '设置环境变量 CCX_PROXY_KEY。Codex 合并到 ~/.codex/config.toml；OpenCode 合并到 ~/.config/opencode/opencode.json。'
-                : 'Set CCX_PROXY_KEY in the client environment. Merge Codex into ~/.codex/config.toml or OpenCode into ~/.config/opencode/opencode.json.'
+                ? '设置环境变量 YUNQI_PROXY_KEY。Codex 合并到 ~/.codex/config.toml；OpenCode 合并到 ~/.config/opencode/opencode.json。'
+                : 'Set YUNQI_PROXY_KEY in the client environment. Merge Codex into ~/.codex/config.toml or OpenCode into ~/.config/opencode/opencode.json.'
             }}
           </p>
         </template>
