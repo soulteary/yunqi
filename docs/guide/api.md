@@ -131,7 +131,7 @@ Yunqi 可通过 `/auth/oidc/login` 原生发起 OIDC Authorization Code + PKCE S
 
 ## 管理变更审计
 
-全局管理员可访问 `GET /api/audit`，按 `actorId`、`action`、`outcome`、`operationId` 筛选，`limit` 为 1–200（默认 100）。后续页携带返回的 `nextCursor` 并保持筛选和 limit 不变；游标冻结首屏序号上界并绑定快照事件摘要，不会串到另一副本的不同历史；新增事件不会挤入旧页，保留窗口已淘汰的页返回 409。有限角色和限定渠道范围的 admin 不可读取全局审计。响应还按同一 operationId 关联正文策略与价格审核的原子审计。
+全局管理员可访问 `GET /api/audit`，按 `actorId`、`action`、`outcome`、`operationId` 筛选，`limit` 为 1–200（默认 100）。后续页携带返回的 `nextCursor` 并保持筛选和 limit 不变；游标冻结首屏序号上界及保留下界，并绑定快照事件摘要，不会串到另一副本的不同历史；新增事件不会挤入旧页，首屏历史区间发生部分或全部淘汰时返回 409。有限角色和限定渠道范围的 admin 不可读取全局审计。响应还按同一 operationId 关联正文策略与价格审核的原子审计。
 
 已认证管理写请求先持久化 `intent`，再执行授权和处理器；`X-Yunqi-Audit-Operation` 返回服务端生成的关联 ID。真实配置成功提交的 `committed` 事件与配置在同一个原子文件替换中保存，包含 actor、操作类别、资源路径哈希、前后状态摘要及字段级差异摘要。值只保存 SHA256 和编码长度，动态 map 键也使用哈希，不保存明文配置值、正文或自由错误。后台与外部配置重载使用 system actor；请求 actor 通过显式上下文传递，不使用全局可变 actor。
 

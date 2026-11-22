@@ -56,7 +56,7 @@ type CreateLogicalChannelProtocol struct {
 
 // CreateLogicalChannel 在事务内创建一个逻辑渠道及一组物理渠道。
 // 内部使用 sync.Mutex (cm.mu) 保证原子性，失败时回滚已创建的物理渠道。
-func (cm *ConfigManager) CreateLogicalChannelAudited(auditContext ManagementAuditContext, in CreateLogicalChannelInput) (*LogicalChannel, error) {
+func (cm *ConfigManager) CreateLogicalChannelAudited(auditContext ManagementAuditContext, in CreateLogicalChannelInput) (result *LogicalChannel, operationErr error) {
 	auditContext = auditContext.normalized()
 
 	if strings.TrimSpace(in.Name) == "" {
@@ -88,6 +88,12 @@ func (cm *ConfigManager) CreateLogicalChannelAudited(auditContext ManagementAudi
 	}
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
+	before := cm.config.deepCopy()
+	defer func() {
+		if operationErr != nil {
+			cm.config = before
+		}
+	}()
 
 	// 重名检查：同 site + 同名不允许
 	primary := strings.TrimSpace(in.BaseURLs[0])
@@ -120,16 +126,12 @@ func (cm *ConfigManager) CreateLogicalChannelAudited(auditContext ManagementAudi
 	}
 	// 创建物理渠道
 	created := make([]physicalChannelEntry, 0, len(in.Protocols))
-	createdChannels := make([]UpstreamConfig, 0, len(in.Protocols))
 	for _, p := range in.Protocols {
 		up, err := cm.createPhysicalChannelForLogicalLocked(in, p, uid)
 		if err != nil {
-			// 回滚：删除已创建的物理渠道
-			cm.rollbackCreatedChannelsLocked(createdChannels)
 			return nil, fmt.Errorf("创建协议 %s 失败: %w", p.Kind, err)
 		}
 		created = append(created, physicalChannelEntry{slice: p.Kind, channel: up})
-		createdChannels = append(createdChannels, up)
 	}
 	// 写回 logical.Protocols
 	logical.Protocols = collectProtocolsFromEntries(created)
@@ -137,10 +139,6 @@ func (cm *ConfigManager) CreateLogicalChannelAudited(auditContext ManagementAudi
 	// 更新内存 + 落盘
 	cm.config.LogicalChannels = append(cm.config.LogicalChannels, *logical)
 	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
-		// 落盘失败也回滚
-		cm.rollbackCreatedChannelsLocked(createdChannels)
-		// 从 logical 列表中移除刚才追加的（删除切片最后一个元素）
-		cm.config.LogicalChannels = cm.config.LogicalChannels[:len(cm.config.LogicalChannels)-1]
 		return nil, err
 	}
 	log.Printf("[Config-LogicalChannel] 已创建逻辑渠道: uid=%s name=%s protocols=%d", uid, logical.Name, len(in.Protocols))
@@ -266,20 +264,6 @@ func appendUpstream(channels []UpstreamConfig, up UpstreamConfig) []UpstreamConf
 	return out
 }
 
-// rollbackCreatedChannelsLocked 锁内回滚：根据 ChannelUID 把已成功写入内存的物理渠道移除。
-// 注意：仅回滚内存，不写盘（上层决定是否继续）。
-func (cm *ConfigManager) rollbackCreatedChannelsLocked(channels []UpstreamConfig) {
-	if len(channels) == 0 {
-		return
-	}
-	cm.config.Upstream = removeByChannelUID(cm.config.Upstream, channels)
-	cm.config.ChatUpstream = removeByChannelUID(cm.config.ChatUpstream, channels)
-	cm.config.ResponsesUpstream = removeByChannelUID(cm.config.ResponsesUpstream, channels)
-	cm.config.GeminiUpstream = removeByChannelUID(cm.config.GeminiUpstream, channels)
-	cm.config.ImagesUpstream = removeByChannelUID(cm.config.ImagesUpstream, channels)
-	cm.config.VectorsUpstream = removeByChannelUID(cm.config.VectorsUpstream, channels)
-}
-
 func removeByChannelUID(channels []UpstreamConfig, removed []UpstreamConfig) []UpstreamConfig {
 	rm := make(map[string]struct{}, len(removed))
 	for _, r := range removed {
@@ -336,21 +320,23 @@ type UpdateLogicalChannelProtocol struct {
 
 // UpdateLogicalChannel 事务内更新逻辑渠道（含 protocols 的增删改）。
 // 失败时回滚所有改动。
-func (cm *ConfigManager) UpdateLogicalChannelAudited(auditContext ManagementAuditContext, in UpdateLogicalChannelInput) (*LogicalChannel, error) {
+func (cm *ConfigManager) UpdateLogicalChannelAudited(auditContext ManagementAuditContext, in UpdateLogicalChannelInput) (result *LogicalChannel, operationErr error) {
 	auditContext = auditContext.normalized()
 
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
+	before := cm.config.deepCopy()
+	defer func() {
+		if operationErr != nil {
+			cm.config = before
+		}
+	}()
 
 	idx := findLogicalChannelIndexLocked(&cm.config, in.LogicalChannelUID)
 	if idx < 0 {
 		return nil, fmt.Errorf("逻辑渠道 %s 不存在", in.LogicalChannelUID)
 	}
 	logical := &cm.config.LogicalChannels[idx]
-	// 记录原始快照以便回滚
-	backupLogical := *logical
-	backupSlices := backupAllUpstreamSlices(cm.config)
-	backupManaged := append([]ManagedAccountConfig(nil), cm.config.ManagedAccounts...)
 
 	// 1) 通用字段
 	if in.Common != nil {
@@ -426,10 +412,6 @@ func (cm *ConfigManager) UpdateLogicalChannelAudited(auditContext ManagementAudi
 			if _, drop := kinds[strings.ToLower(p.Kind)]; drop {
 				// 删除对应物理渠道
 				if err := cm.removePhysicalChannelByUIDLocked(p.Kind, p.ChannelUID); err != nil {
-					// 回滚
-					cm.restoreAllUpstreamSlicesLocked(backupSlices)
-					cm.config.ManagedAccounts = backupManaged
-					cm.config.LogicalChannels[idx] = backupLogical
 					return nil, err
 				}
 				continue
@@ -449,9 +431,7 @@ func (cm *ConfigManager) UpdateLogicalChannelAudited(auditContext ManagementAudi
 		if existing != nil {
 			// 找到已存在的 protocol：更新物理渠道字段
 			if err := cm.updatePhysicalChannelForLogicalLocked(kind, existing.ChannelUID, p, logical); err != nil {
-				cm.restoreAllUpstreamSlicesLocked(backupSlices)
-				cm.config.ManagedAccounts = backupManaged
-				cm.config.LogicalChannels[idx] = backupLogical
+
 				return nil, err
 			}
 			// 同步 logical.Protocols entry
@@ -485,9 +465,6 @@ func (cm *ConfigManager) UpdateLogicalChannelAudited(auditContext ManagementAudi
 				OutboundNetwork:   CloneOutboundNetwork(p.OutboundNetwork.Value),
 			}, logical.LogicalChannelUID)
 			if err != nil {
-				cm.restoreAllUpstreamSlicesLocked(backupSlices)
-				cm.config.ManagedAccounts = backupManaged
-				cm.config.LogicalChannels[idx] = backupLogical
 				return nil, fmt.Errorf("新增协议 %s 失败: %w", kind, err)
 			}
 			// 同步 protocols 列表
@@ -507,9 +484,6 @@ func (cm *ConfigManager) UpdateLogicalChannelAudited(auditContext ManagementAudi
 
 	logical.UpdatedAt = time.Now().UTC()
 	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
-		cm.restoreAllUpstreamSlicesLocked(backupSlices)
-		cm.config.ManagedAccounts = backupManaged
-		cm.config.LogicalChannels[idx] = backupLogical
 		return nil, err
 	}
 	log.Printf("[Config-LogicalChannel] 已更新逻辑渠道: uid=%s name=%s protocols=%d", logical.LogicalChannelUID, logical.Name, len(logical.Protocols))
@@ -518,11 +492,17 @@ func (cm *ConfigManager) UpdateLogicalChannelAudited(auditContext ManagementAudi
 
 // DeleteLogicalChannel 事务内删除逻辑渠道及全部下属物理渠道。
 // 成功后返回已删除的物理渠道列表（用于上层清理 metrics/log）。
-func (cm *ConfigManager) DeleteLogicalChannelAudited(auditContext ManagementAuditContext, uid string) ([]UpstreamConfig, error) {
+func (cm *ConfigManager) DeleteLogicalChannelAudited(auditContext ManagementAuditContext, uid string) (result []UpstreamConfig, operationErr error) {
 	auditContext = auditContext.normalized()
 
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
+	before := cm.config.deepCopy()
+	defer func() {
+		if operationErr != nil {
+			cm.config = before
+		}
+	}()
 
 	idx := findLogicalChannelIndexLocked(&cm.config, uid)
 	if idx < 0 {
@@ -912,27 +892,6 @@ func logicalUIDSet(cfg Config) map[string]struct{} {
 		}
 	}
 	return out
-}
-
-// backupAllUpstreamSlices 深拷贝六个 Upstream 切片（用于事务回滚）。
-func backupAllUpstreamSlices(cfg Config) [6][]UpstreamConfig {
-	up := append([]UpstreamConfig(nil), cfg.Upstream...)
-	chat := append([]UpstreamConfig(nil), cfg.ChatUpstream...)
-	res := append([]UpstreamConfig(nil), cfg.ResponsesUpstream...)
-	gem := append([]UpstreamConfig(nil), cfg.GeminiUpstream...)
-	img := append([]UpstreamConfig(nil), cfg.ImagesUpstream...)
-	vec := append([]UpstreamConfig(nil), cfg.VectorsUpstream...)
-	return [6][]UpstreamConfig{up, chat, res, gem, img, vec}
-}
-
-// restoreAllUpstreamSlicesLocked 把六个 Upstream 切片恢复为备份。
-func (cm *ConfigManager) restoreAllUpstreamSlicesLocked(backup [6][]UpstreamConfig) {
-	cm.config.Upstream = backup[0]
-	cm.config.ChatUpstream = backup[1]
-	cm.config.ResponsesUpstream = backup[2]
-	cm.config.GeminiUpstream = backup[3]
-	cm.config.ImagesUpstream = backup[4]
-	cm.config.VectorsUpstream = backup[5]
 }
 
 // baseURLSiteIdentitiesImport 调用 utils.BaseURLSiteIdentities。

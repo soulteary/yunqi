@@ -156,7 +156,7 @@ func TestManagementAuditExpiredRetentionCursorIsExplicit(t *testing.T) {
 		Filters map[string]string
 		Limit   int
 	}{filters, 100})
-	cursor := auditCursor{Before: 10, Snapshot: 10, Filter: config.EntryKeyHash(string(rawFilter))}
+	cursor := auditCursor{FirstRetained: 1, Before: 49, Snapshot: 50, Anchor: managementAuditAnchor(cm.ManagementAuditSnapshot(), 50), Filter: config.EntryKeyHash(string(rawFilter))}
 	encoded, _ := json.Marshal(cursor)
 	router := httpbridge.NewApp()
 	router.Use(func(c fiber.Ctx) error {
@@ -167,6 +167,20 @@ func TestManagementAuditExpiredRetentionCursorIsExplicit(t *testing.T) {
 	response := httptest.NewRecorder()
 	httpbridge.Handler(router).ServeHTTP(response, httptest.NewRequest("GET", "/audit?cursor="+base64.RawURLEncoding.EncodeToString(encoded), nil))
 	if response.Code != 409 {
-		t.Fatal("expired history was silently presented as an empty page", response.Code, response.Body.String())
+		t.Fatal("partially expired history was silently presented as a complete page", response.Code, response.Body.String())
+	}
+	legacy := map[string]interface{}{"before": 49, "snapshot": 50, "filter": cursor.Filter, "anchor": cursor.Anchor}
+	encoded, _ = json.Marshal(legacy)
+	response = httptest.NewRecorder()
+	httpbridge.Handler(router).ServeHTTP(response, httptest.NewRequest("GET", "/audit?cursor="+base64.RawURLEncoding.EncodeToString(encoded), nil))
+	if response.Code != 409 {
+		t.Fatal("legacy cursor inherited current retention floor", response.Code)
+	}
+	cursor.Before, cursor.Snapshot = 10, 10
+	encoded, _ = json.Marshal(cursor)
+	response = httptest.NewRecorder()
+	httpbridge.Handler(router).ServeHTTP(response, httptest.NewRequest("GET", "/audit?cursor="+base64.RawURLEncoding.EncodeToString(encoded), nil))
+	if response.Code != 409 {
+		t.Fatal("fully expired history was silently presented as empty", response.Code)
 	}
 }

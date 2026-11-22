@@ -125,7 +125,7 @@ Activation, actor audit and rollback snapshots share one atomic durable file. Fa
 
 ## Management change audit
 
-Global admins may query `GET /api/audit` with actorId/action/outcome/operationId filters and limit 1–200 (default 100). Continue with nextCursor and identical filters/limit. Cursors freeze the first-page sequence boundary and bind the snapshot event digest, preventing mixed histories across replicas; expired retention returns 409. Limited roles and channel-scoped admins cannot read the global history. Related body-policy and price-review audit entries share the same operationId.
+Global admins may query `GET /api/audit` with actorId/action/outcome/operationId filters and limit 1–200 (default 100). Continue with nextCursor and identical filters/limit. Cursors freeze the first-page upper sequence and retained lower boundary and bind the snapshot event digest, preventing mixed histories across replicas; partial or complete eviction of the initial history interval returns 409. Limited roles and channel-scoped admins cannot read the global history. Related body-policy and price-review audit entries share the same operationId.
 
 Authenticated mutations durably record intent before authorization/handler execution. X-Yunqi-Audit-Operation identifies the server-generated operation. Actual configuration publication appends a committed event in the same atomic file replacement; field values contain SHA256/encoded-length summaries only, and dynamic map keys are hashed. Background and external-reload changes use system actors. Context is passed explicitly rather than stored in a mutable global actor.
 

@@ -352,3 +352,55 @@ func TestManagementAuditOnlyPreservesBusinessSnapshotAndRevisions(t *testing.T) 
 		t.Fatal("audit-only metadata changed business config, revision or reload callbacks")
 	}
 }
+
+func TestManagementAuditLogicalTransactionsRollbackOnce(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		t.Run(strconv.FormatBool(existing), func(t *testing.T) {
+			cm := auditTestManager(t)
+			input := CreateLogicalChannelInput{Name: "first", BaseURLs: []string{"https://first.example"}, Protocols: []CreateLogicalChannelProtocol{{Kind: "messages", ServiceType: "claude", APIKeys: []string{"test"}}}}
+			var uid string
+			if existing {
+				created, err := cm.CreateLogicalChannel(input)
+				if err != nil {
+					t.Fatal(err)
+				}
+				uid = created.LogicalChannelUID
+			}
+			before, _ := json.Marshal(cm.GetConfig())
+			history := cm.ManagementAuditSnapshot()
+			path := cm.configFile
+			cm.configFile = t.TempDir()
+			input.Name = "second"
+			input.BaseURLs = []string{"https://second.example"}
+			if _, err := cm.CreateLogicalChannel(input); err == nil {
+				t.Fatal("failed create succeeded")
+			}
+			if existing {
+				if _, err := cm.DeleteLogicalChannel(uid); err == nil {
+					t.Fatal("failed delete succeeded")
+				}
+				name := "changed"
+				if _, err := cm.UpdateLogicalChannel(UpdateLogicalChannelInput{LogicalChannelUID: uid, Common: &UpdateLogicalChannelCommon{Name: &name}}); err == nil {
+					t.Fatal("failed update succeeded")
+				}
+			}
+			cm.configFile = path
+			after, _ := json.Marshal(cm.GetConfig())
+			if string(before) != string(after) {
+				t.Fatal("failed transaction changed existing channels")
+			}
+			if cm.ManagementAuditSnapshot().NextSequence != history.NextSequence {
+				t.Fatal("failure committed audit")
+			}
+		})
+	}
+}
+
+func TestManagementAuditContinuousSingleWriterDoesNotReportPendingReload(t *testing.T) {
+	cm := auditTestManager(t)
+	for i := 0; i < 8; i++ {
+		if err := cm.SetRacingEnabledAudited(auditTestContext(strconv.Itoa(i)), i%2 == 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+}

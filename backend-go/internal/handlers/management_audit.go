@@ -12,10 +12,11 @@ import (
 )
 
 type auditCursor struct {
-	Before   uint64 `json:"before"`
-	Snapshot uint64 `json:"snapshot"`
-	Filter   string `json:"filter"`
-	Anchor   string `json:"anchor"`
+	FirstRetained uint64 `json:"firstRetained"`
+	Before        uint64 `json:"before"`
+	Snapshot      uint64 `json:"snapshot"`
+	Filter        string `json:"filter"`
+	Anchor        string `json:"anchor"`
 }
 
 func RegisterManagementAuditRoutes(router fiber.Router, cm *config.ConfigManager, prices *presetstore.PresetUpdater) {
@@ -44,19 +45,24 @@ func RegisterManagementAuditRoutes(router fiber.Router, cm *config.ConfigManager
 		}{filters, limit})
 		digest := config.EntryKeyHash(string(encoded))
 		state := cm.ManagementAuditSnapshot()
-		cursor := auditCursor{Before: state.NextSequence + 1, Snapshot: state.NextSequence, Filter: digest, Anchor: managementAuditAnchor(state, state.NextSequence)}
+		firstRetained := uint64(0)
+		if len(state.Events) > 0 {
+			firstRetained = state.Events[0].Sequence
+		}
+		cursor := auditCursor{FirstRetained: firstRetained, Before: state.NextSequence + 1, Snapshot: state.NextSequence, Filter: digest, Anchor: managementAuditAnchor(state, state.NextSequence)}
 		raw := httpbridge.Query(c, "cursor")
 		if raw != "" {
 			if len(raw) > 512 {
 				httpbridge.JSON(c, 400, fiber.Map{"error": "invalid_audit_cursor"})
 				return nil
 			}
+			cursor = auditCursor{} // Missing fields must not inherit the current retention floor.
 			decoded, err := base64.RawURLEncoding.DecodeString(raw)
 			if err != nil || json.Unmarshal(decoded, &cursor) != nil || cursor.Filter != digest || cursor.Before == 0 || cursor.Before > cursor.Snapshot+1 || cursor.Snapshot > state.NextSequence {
 				httpbridge.JSON(c, 400, fiber.Map{"error": "invalid_audit_cursor"})
 				return nil
 			}
-			if len(state.Events) > 0 && cursor.Before <= state.Events[0].Sequence {
+			if len(state.Events) > 0 && (cursor.Before <= state.Events[0].Sequence || cursor.FirstRetained == 0 || cursor.FirstRetained < state.Events[0].Sequence) {
 				httpbridge.JSON(c, 409, fiber.Map{"error": "audit_history_expired"})
 				return nil
 			}
