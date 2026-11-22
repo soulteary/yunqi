@@ -119,7 +119,7 @@ Claude Desktop 提供两种方式填充模型选择器：
 }
 ```
 
-旧版 `modelCapabilities` 中的 `anthropicFamilyTier` 仍可读取；新的独立设置优先，空字符串表示显式清除继承值。若要仅移除独立覆盖、恢复旧配置或上游的自动元数据，可从该映射中删除对应键。界面操作不会触发收费推理测试。
+旧版 `modelCapabilities` 中的通配 tier 规则会单独只读展示；下拉框只编辑具体模型 ID。旧版 `anthropicFamilyTier` 仍可读取；新的独立设置优先，空字符串表示显式清除继承值。若要仅移除独立覆盖、恢复旧配置或上游的自动元数据，可从该映射中删除对应键。界面操作不会触发收费推理测试。
 
 模型发现响应使用 `anthropic_family_tier`、`is_family_default`、`supports_1m` 和 `max_input_tokens`；原有驼峰字段继续保留。配置 JSON 中的 `anthropicFamilyTier` 与 HTTP 响应中的下划线字段属于不同接口。可用以下请求检查当前运行实例：
 

@@ -119,7 +119,7 @@ The editor stores a separate `claudeDesktopModelTiers` map on the channel, so no
 }
 ```
 
-Existing `anthropicFamilyTier` values in `modelCapabilities` remain supported. Dedicated values take precedence; an empty string explicitly clears inherited metadata. Removing the key from the map instead restores the old configuration or upstream metadata. Editing these settings does not run paid inference tests.
+Inherited wildcard tier rules appear separately as read-only text; dropdowns edit actual model IDs. Existing `anthropicFamilyTier` values in `modelCapabilities` remain supported. Dedicated values take precedence; an empty string explicitly clears inherited metadata. Removing the key from the map instead restores the old configuration or upstream metadata. Editing these settings does not run paid inference tests.
 
 The HTTP response includes `anthropic_family_tier`, `is_family_default`, `supports_1m`, and `max_input_tokens`, retaining the existing camelCase fields. The configuration key `anthropicFamilyTier` and the HTTP discovery fields belong to different interfaces. Check the running instance with:
 

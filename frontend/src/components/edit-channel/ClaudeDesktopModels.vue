@@ -4,12 +4,15 @@
     <p class="text-caption text-medium-emphasis mb-3">{{ t('channelEditor.desktopModels.hint') }}</p>
     <div v-for="route in messageRoutes" :key="route.channelUid || route.index" class="mb-4" :data-route-uid="route.channelUid">
       <div class="text-body-2 mb-2">{{ route.name }}</div>
+      <p v-if="ruleSummary(route)" class="text-caption text-medium-emphasis mb-2">
+        {{ t('channelEditor.desktopModels.inheritedRules', { rules: ruleSummary(route) }) }}
+      </p>
       <v-select
         v-for="model in modelsFor(route)"
         :key="model"
         :data-model-id="model"
         :label="model"
-        :model-value="route.claudeDesktopModelTiers?.[model] || ''"
+        :model-value="selectedDesktopTier(route, model)"
         :items="tierOptions"
         :disabled="disabled || !route.channelUid"
         variant="outlined"
@@ -41,7 +44,7 @@
 import { computed, reactive } from 'vue'
 import type { ChannelProtocolRoute } from '../../services/api'
 import { useI18n } from '../../i18n'
-import { DESKTOP_TIERS } from '../../utils/desktopModelTiers'
+import { DESKTOP_TIERS, selectedDesktopTier } from '../../utils/desktopModelTiers'
 
 const props = defineProps<{ modelValue: ChannelProtocolRoute[]; inventoryRoutes?: ChannelProtocolRoute[]; disabled?: boolean }>()
 const emit = defineEmits<{
@@ -57,6 +60,7 @@ const tierOptions = computed(() => [
 const newModels = reactive<Record<string, string>>({})
 const addedModels = reactive<Record<string, string[]>>({})
 const keyFor = (route: ChannelProtocolRoute) => route.channelUid || `messages:${route.index}`
+const ruleSummary = (route: ChannelProtocolRoute) => Object.entries(route.claudeDesktopTierRules ?? {}).filter(([pattern]) => pattern.includes('*') || pattern.startsWith('!')).map(([pattern, tier]) => `${pattern} → ${tier || t('channelEditor.desktopModels.none')}`).join(', ')
 function modelsFor(route: ChannelProtocolRoute) {
   const inventory = props.inventoryRoutes?.find(item => item.channelUid === route.channelUid && item.kind === route.kind) ?? route
   return [...new Set([
@@ -69,7 +73,7 @@ function modelsFor(route: ChannelProtocolRoute) {
 }
 function addModel(route: ChannelProtocolRoute) {
   const model = newModels[keyFor(route)]?.trim()
-  if (!model || Array.from(model).length > 256 || /\p{Cc}/u.test(model)) return
+  if (!model || model.includes('*') || model.startsWith('!') || Array.from(model).length > 256 || /\p{Cc}/u.test(model)) return
   addedModels[keyFor(route)] = [...(addedModels[keyFor(route)] ?? []), model]
   newModels[keyFor(route)] = ''
 }

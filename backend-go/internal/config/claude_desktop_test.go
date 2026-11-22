@@ -93,3 +93,16 @@ func TestClaudeDesktopViewPreservesLegacyTierAndExplicitClear(t *testing.T) {
 		t.Fatal("view aliases live configuration")
 	}
 }
+
+func TestClaudeDesktopLegacyPatternsAreReadOnlyRules(t *testing.T) {
+	up := UpstreamConfig{ModelCapabilities: map[string]UpstreamModelCapability{"deepseek-*": {AnthropicFamilyTier: "sonnet"}, "deepseek-v4-pro": {AnthropicFamilyTier: "opus"}}}
+	if _, present := ClaudeDesktopModelTiersForView(up)["deepseek-*"]; present {
+		t.Fatal("pattern exposed as editable model ID")
+	}
+	if ClaudeDesktopTierRulesForView(up)["deepseek-*"] != "sonnet" {
+		t.Fatal("legacy rule lost")
+	}
+	if _, err := NormalizeClaudeDesktopModelTiers(map[string]string{"deepseek-*": "haiku"}); err == nil {
+		t.Fatal("accepted a pattern as an exact model ID")
+	}
+}

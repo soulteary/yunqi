@@ -277,11 +277,13 @@ func buildLogicalProtocolRoutes(cfg config.Config, lc config.LogicalChannel) []f
 			apiKeys := []string{}
 			var disabledGroupModels []config.DisabledGroupModelInfo
 			var desktopTiers map[string]string
+			var desktopRules map[string]string
 			if up != nil {
 				name = up.Name
 				apiKeys = up.APIKeys
 				disabledGroupModels = up.DisabledGroupModels
 				desktopTiers = config.ClaudeDesktopModelTiersForView(*up)
+				desktopRules = config.ClaudeDesktopTierRulesForView(*up)
 			}
 			out = append(out, fiber.Map{
 				"kind":        p.Kind,
@@ -295,6 +297,7 @@ func buildLogicalProtocolRoutes(cfg config.Config, lc config.LogicalChannel) []f
 				// 路由粒度上看到并定位到真正持有该限制的路由（否则只能展示/清理主路由那一份，
 				// 其它协议会残留，Web 侧已按 unifiedChannels 并集处理）。
 				"disabledGroupModels":     disabledGroupModels,
+				"claudeDesktopTierRules":  desktopRules,
 				"claudeDesktopModelTiers": desktopTiers,
 			})
 		}

@@ -15,3 +15,11 @@ describe('Desktop tier patches', () => {
     expect(buildDesktopTierUpdates([route], [{ ...route, claudeDesktopModelTiers: undefined }, { ...route, kind: 'chat' }, { ...route, channelUid: 'unknown' }, { ...route, channelUid: undefined }])).toEqual([])
   })
 })
+
+it('matches inherited rules with exact precedence and respects explicit clears', async () => {
+  const { selectedDesktopTier } = await import('./desktopModelTiers')
+  const inherited = { ...route, claudeDesktopModelTiers: {}, claudeDesktopTierRules: { 'deepseek-*': 'sonnet', 'deepseek-v4*': 'haiku', 'deepseek-flash': '' } }
+  expect(selectedDesktopTier(inherited, 'deepseek-v4-pro')).toBe('haiku')
+  expect(selectedDesktopTier(inherited, 'deepseek-flash')).toBe('')
+  expect(selectedDesktopTier({ ...inherited, claudeDesktopModelTiers: { 'deepseek-v4-pro': '' } }, 'deepseek-v4-pro')).toBe('')
+})

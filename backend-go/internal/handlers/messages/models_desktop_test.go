@@ -268,3 +268,19 @@ func TestDesktopTierOverrideSurvivesProtocolMerge(t *testing.T) {
 		})
 	}
 }
+
+func TestDesktopTierOverridesInheritedPatterns(t *testing.T) {
+	up := &config.UpstreamConfig{ModelCapabilities: map[string]config.UpstreamModelCapability{"deepseek-*": {AnthropicFamilyTier: "sonnet", ContextWindowTokens: 200000}}}
+	for _, id := range []string{"deepseek-v4-pro", "deepseek-flash"} {
+		if got := normalizeModelEntry(ModelEntry{ID: id}, up, nil).AnthropicFamilyTier; got != "sonnet" {
+			t.Fatalf("inherited tier for %s = %q", id, got)
+		}
+	}
+	up.ClaudeDesktopModelTiers = map[string]string{"deepseek-v4-pro": "haiku", "deepseek-flash": ""}
+	for id, want := range up.ClaudeDesktopModelTiers {
+		model := normalizeModelEntry(ModelEntry{ID: id}, up, nil)
+		if model.AnthropicFamilyTier != want || model.ContextWindow != 200000 {
+			t.Fatalf("override for %s ineffective: %+v", id, model)
+		}
+	}
+}

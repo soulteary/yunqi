@@ -508,6 +508,7 @@ export function useEditChannelModal(props: ResolvedEditChannelModalProps, emit: 
       kind: props.channelType, index: channel.index, channelUid: channel.channelUid,
       name: channel.name, serviceType: channel.serviceType, supportedModels: channel.supportedModels,
       claudeDesktopModelTiers: channel.claudeDesktopModelTiers,
+      claudeDesktopTierRules: channel.claudeDesktopTierRules,
     }]).map(route => ({ ...route, supportedModels: [...(route.supportedModels ?? [])], claudeDesktopModelTiers: { ...(route.claudeDesktopModelTiers ?? {}) } }))
     form.name = channel.name
     form.remark = channel.remark || ''

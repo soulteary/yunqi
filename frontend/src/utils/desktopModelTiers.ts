@@ -13,3 +13,18 @@ export function buildDesktopTierUpdates(original: ChannelProtocolRoute[], edited
     return [{ channelUid: route.channelUid, kind: route.upstreamKind ?? route.kind, tiers: { ...route.claudeDesktopModelTiers } }]
   })
 }
+
+/** Match the channel capability resolver's prefix/suffix/contains rules. */
+export function selectedDesktopTier(route: ChannelProtocolRoute, model: string): string {
+  if (Object.prototype.hasOwnProperty.call(route.claudeDesktopModelTiers ?? {}, model)) return route.claudeDesktopModelTiers![model] ?? ''
+  if (Object.prototype.hasOwnProperty.call(route.claudeDesktopTierRules ?? {}, model)) return route.claudeDesktopTierRules![model] ?? ''
+  const rules = Object.entries(route.claudeDesktopTierRules ?? {}).sort(([a], [b]) => b.length - a.length || (a < b ? -1 : a > b ? 1 : 0))
+  for (const [pattern, tier] of rules) {
+    const value = pattern.startsWith('!') ? pattern.slice(1).trim() : pattern
+    const stem = value.replace(/^\*|\*$/g, '')
+    const matches = value === '*' || (value.startsWith('*') && value.endsWith('*') ? model.includes(stem)
+      : value.startsWith('*') ? model.endsWith(stem) : value.endsWith('*') ? model.startsWith(stem) : value === model)
+    if (matches) return tier
+  }
+  return ''
+}

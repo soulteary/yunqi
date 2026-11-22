@@ -64,3 +64,16 @@ describe('ClaudeDesktopModels', () => {
     expect(unresolved.emitted('update:modelValue')).toBeUndefined()
   })
 })
+
+it('shows inherited wildcard rules read-only and writes overrides for actual model IDs', async () => {
+  const wrapper = setup([{ ...routes[0]!, claudeDesktopTierRules: { 'deepseek-*': 'sonnet' } }])
+  expect(wrapper.find('[data-model-id="deepseek-*"]').exists()).toBe(false)
+  expect((wrapper.get('[data-model-id="deepseek-v4-pro"]').element as HTMLSelectElement).value).toBe('sonnet')
+  await wrapper.get('[data-model-id="deepseek-v4-pro"]').setValue('haiku')
+  const edited = wrapper.emitted('update:modelValue')![0]![0] as ChannelProtocolRoute[]
+  expect(edited[0]!.claudeDesktopModelTiers).toEqual({ 'deepseek-v4-pro': 'haiku' })
+  await wrapper.setProps({ modelValue: edited })
+  await wrapper.get('[data-model-id="deepseek-flash"]').setValue('')
+  expect((wrapper.emitted('update:modelValue')![1]![0] as ChannelProtocolRoute[])[0]!.claudeDesktopModelTiers)
+    .toEqual({ 'deepseek-v4-pro': 'haiku', 'deepseek-flash': '' })
+})

@@ -1779,5 +1779,6 @@
   "channelEditor.desktopModels.hint": "Choose a Desktop tier per model. Model IDs, routing, and capabilities stay unchanged. None clears an inherited tier.",
   "channelEditor.desktopModels.none": "None",
   "channelEditor.desktopModels.modelId": "Add model ID",
-  "channelEditor.desktopModels.add": "Add"
+  "channelEditor.desktopModels.add": "Add",
+  "channelEditor.desktopModels.inheritedRules": "Inherited rules: {rules}. Rules are read-only; adjust a specific model below."
 }

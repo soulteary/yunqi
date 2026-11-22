@@ -26,7 +26,7 @@ func NormalizeClaudeDesktopModelTiers(input map[string]string) (map[string]strin
 	result := make(map[string]string, len(input))
 	for id, value := range input {
 		model := strings.TrimSpace(id)
-		if model == "" || len([]rune(model)) > 256 || strings.IndexFunc(model, unicode.IsControl) >= 0 {
+		if model == "" || strings.Contains(model, "*") || strings.HasPrefix(model, "!") || len([]rune(model)) > 256 || strings.IndexFunc(model, unicode.IsControl) >= 0 {
 			return nil, fmt.Errorf("invalid Claude Desktop model ID")
 		}
 		if _, exists := result[model]; exists {
@@ -50,6 +50,9 @@ func CloneClaudeDesktopModelTiers(input map[string]string) map[string]string {
 func ClaudeDesktopModelTiersForView(upstream UpstreamConfig) map[string]string {
 	result := make(map[string]string)
 	for model, capability := range upstream.ModelCapabilities {
+		if strings.Contains(model, "*") || strings.HasPrefix(model, "!") {
+			continue
+		}
 		if tier := NormalizeClaudeDesktopTier(capability.AnthropicFamilyTier); tier != "" {
 			result[model] = tier
 		}
@@ -58,4 +61,17 @@ func ClaudeDesktopModelTiersForView(upstream UpstreamConfig) map[string]string {
 		result[model] = tier
 	}
 	return result
+}
+
+// ClaudeDesktopTierRulesForView exposes legacy matching rules separately from
+// writable model IDs. Empty exact entries still block a less specific pattern.
+func ClaudeDesktopTierRulesForView(upstream UpstreamConfig) map[string]string {
+	rules := make(map[string]string)
+	for pattern, capability := range upstream.ModelCapabilities {
+		if (strings.Contains(pattern, "*") || strings.HasPrefix(pattern, "!")) && !isValidSupportedModelPattern(pattern) {
+			continue
+		}
+		rules[pattern] = NormalizeClaudeDesktopTier(capability.AnthropicFamilyTier)
+	}
+	return rules
 }
