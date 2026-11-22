@@ -976,8 +976,22 @@ OTLP 也接受 `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`，或 `OTEL_EXPORTER_OTLP_EN
 
 Redis 不可用或续约失效时拒绝准入并取消受影响上游，不退回本地放行；活跃 Body（含后台计量读取）结束前保留租约。异常进程退出后等待 Redis 租约过期回收，不立即假定请求结束。
 
-Redis 此处只共享入口并发/RPM，不复制配置或 SQLite 预算账本，也不改变严格会话的进程内绑定。独立预算数据库分别计算余额，不能视为统一团队预算；多副本部署需为同一预算主体保持单一账本入口。Redis 应保留在途租约状态，不能依赖清空或驱逐 key 回收额度；Redis 租约不能撤销供应商已开始的调用。
+Redis 的入口准入功能只共享入口并发/RPM，不复制配置或 SQLite 预算账本。严格会话默认仍为进程内绑定；显式启用下述共享路由模式后才跨节点绑定。独立预算数据库分别计算余额，不能视为统一团队预算；多副本部署需为同一预算主体保持单一账本入口。Redis 应保留在途租约状态，不能依赖清空或驱逐 key 回收额度；Redis 租约不能撤销供应商已开始的调用。
 
 共享 SSO 撤销使用独立的 `IDENTITY_PROXY_REVOCATION_REDIS_URL` 与 `IDENTITY_PROXY_REVOCATION_REDIS_NAMESPACE`，并需在身份代理配置中显式选择 `revocationMode=shared`。该 URL 遵循全局出站限制，凭证不参与管理 JSON 展示；配置 URL 本身不会把默认 local 模式自动改为 shared。各节点应先配置可用后端，再统一启用共享模式。
 
 `PRESET_SOURCE_MAX_AGE`、`PRESET_SOURCE_FUTURE_SKEW` 使用 Go duration（如 `168h`、`5m`），默认 0 保持时间门槛未启用。远程更新检查和审核时若启用时间校验，需要有效发布时间，拒绝过旧或超过允许时钟偏差的来源；审核等待期间也会重新检查。即使未设时间门槛，待审来源仍显示发布时间和检查时间，不能将检查成功等同于来源新鲜。
+
+### 跨节点渠道准入与严格会话
+
+`PROXY_REDIS_SHARED_ROUTING=true` 在现有 `PROXY_REDIS_URL` 上显式启用共享路由状态。`PROXY_REDIS_NAMESPACE` 隔离不同网关域；同一域必须使用一致配置及稳定渠道 UID。渠道显式配置的 RPM、窗口秒数、并发上限跨节点合并计算，Key/URL 重试与竞速的每次实际尝试分别准入；释放并发不返还已消耗 RPM。AIMD 自动发现值、Key/Quota scope 的限流仍保留本地保护，不能当作跨节点共享配置。共享容量拒绝返回 429 与 Retry-After，不处罚上游 Key；Redis 不可用返回 503，不回退本地放行。
+
+首次启用前，必须确保该 namespace 下所有网关都已停止，在独立运维环境执行：
+
+```sh
+YUNQI_CONFIRM_EMPTY_ROUTING_REALM=yes go run ./cmd/routing-state-init
+```
+
+该命令从 `PROXY_REDIS_URL`、`PROXY_REDIS_NAMESPACE` 读取目标，仅初始化空路由域，输出随机 `PROXY_REDIS_ROUTING_EPOCH`。将这个 epoch 作为稳定配置提供给所有节点；普通启动不会创建或修复 Redis 状态。切勿对正在处理请求的服务执行初始化，也不要清空 Redis 来释放容量。启动、准入、绑定及续租均验证 epoch，标记丢失/变化时拒绝新请求并取消受影响的在途调用。恢复必须同时恢复原 epoch 与完整路由数据，不能只重建标记。
+
+共享状态要求专用、可靠持久化且禁止驱逐的 Redis；单独删除限额或会话 key 无法仅靠 epoch 标记检测。外部 Redis 不包含在本地配置备份中。跨节点严格会话仍需启用 `YUNQI_STRICT_SESSION_AFFINITY=true`：首个请求在供应商调用前原子绑定渠道 UID；失败不会迁移绑定，活动上游 Body 持续续租并保活会话，即使流长于空闲 TTL。共享状态续租失败会取消实际调用，包括后台 usage drain；异常退出后的容量等租约过期回收。节点之间不共享 Responses 完整历史缓存；需要服务端历史续接的客户端还需稳定节点入口。

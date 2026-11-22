@@ -1134,6 +1134,24 @@ func TryUpstreamWithAllKeys(
 				}
 			}
 
+			// Shared admission is keyed by stable physical channel UID, never
+			// by a process-local index or upstream credential.
+			if envCfg.ProxyRedisSharedRouting {
+				previous := httpbridge.Request(c).Context()
+				cleanup, err := acquireSharedChannel(c, envCfg, upstreamCopy)
+				if err != nil {
+					return false, "", 0, nil, nil, err
+				}
+				localRelease := activeRateLimitRelease
+				activeRateLimitRelease = func() {
+					cleanup()
+					httpbridge.SetRequest(c, httpbridge.Request(c).WithContext(previous))
+					if localRelease != nil {
+						localRelease()
+					}
+				}
+			}
+
 			req, err := buildRequest(c, upstreamCopy, apiKey)
 			if err != nil {
 				_ = recordFinalConversion(c, requestBody, nil, apiType, upstreamCopy.ServiceType)
