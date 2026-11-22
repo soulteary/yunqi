@@ -158,6 +158,8 @@ func handleMultiChannel(
 		claudeReq.Stream,
 		agentRole,
 		func(c fiber.Ctx, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
+			managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 			upstream := selection.Upstream
 			executionRoute := selection.Route
 
@@ -195,7 +197,7 @@ func handleMultiChannel(
 					return req, err
 				},
 				func(apiKey string) {
-					if err := cfgManager.DeprioritizeAPIKeyForRoute(executionRoute.Kind, executionRoute.Index, apiKey); err != nil {
+					if err := cfgManager.DeprioritizeAPIKeyForRouteAudited(managementAuditContext, executionRoute.Kind, executionRoute.Index, apiKey); err != nil {
 						common.RequestLogf(c, "[Messages-Key] 警告: 密钥降级失败: %v", err)
 					}
 				},
@@ -272,6 +274,8 @@ func handleSingleChannel(
 	claudeReq types.ClaudeRequest,
 	startTime time.Time,
 ) {
+	managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 	upstream, channelIndex, err := cfgManager.GetCurrentUpstreamWithIndex()
 	if err != nil {
 		httpbridge.JSON(c, 503, fiber.Map{
@@ -333,7 +337,7 @@ func handleSingleChannel(
 			return req, err
 		},
 		func(apiKey string) {
-			if err := cfgManager.DeprioritizeAPIKey(apiKey); err != nil {
+			if err := cfgManager.DeprioritizeAPIKeyAudited(managementAuditContext, apiKey); err != nil {
 				common.RequestLogf(c, "[Messages-Key] 警告: 密钥降级失败: %v", err)
 			}
 		},

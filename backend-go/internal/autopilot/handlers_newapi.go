@@ -520,6 +520,8 @@ func handleNewApiVerify(deps *NewApiRouteDeps) fiber.Handler {
 // handleNewApiProvision 完整流程：建 profile + 建 key + 建渠道 + 触发 Discovery。
 func handleNewApiProvision(deps *NewApiRouteDeps) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		if deps.CfgManager == nil {
 			httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": "配置管理器未就绪，无法建渠道"})
 			return nil
@@ -793,17 +795,17 @@ func handleNewApiProvision(deps *NewApiRouteDeps) fiber.Handler {
 
 				switch req.ChannelKind {
 				case "messages":
-					err = deps.CfgManager.AddUpstream(upstream)
+					err = deps.CfgManager.AddUpstreamAudited(managementAuditContext, upstream)
 				case "chat":
-					err = deps.CfgManager.AddChatUpstream(upstream)
+					err = deps.CfgManager.AddChatUpstreamAudited(managementAuditContext, upstream)
 				case "responses":
-					err = deps.CfgManager.AddResponsesUpstream(upstream)
+					err = deps.CfgManager.AddResponsesUpstreamAudited(managementAuditContext, upstream)
 				case "gemini":
-					err = deps.CfgManager.AddGeminiUpstream(upstream)
+					err = deps.CfgManager.AddGeminiUpstreamAudited(managementAuditContext, upstream)
 				case "images":
-					err = deps.CfgManager.AddImagesUpstream(upstream)
+					err = deps.CfgManager.AddImagesUpstreamAudited(managementAuditContext, upstream)
 				case "vectors":
-					err = deps.CfgManager.AddVectorsUpstream(upstream)
+					err = deps.CfgManager.AddVectorsUpstreamAudited(managementAuditContext, upstream)
 				}
 				if err != nil {
 					// 渠道建失败：回滚 profile（最佳努力删除）

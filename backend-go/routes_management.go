@@ -1,6 +1,10 @@
 package main
 
 import (
+	"github.com/soulteary/yunqi/internal/config"
+)
+
+import (
 	"net/http"
 
 	"github.com/gofiber/fiber/v3"
@@ -35,6 +39,7 @@ func (a *application) registerManagementRoutes(apiGroup fiber.Router) {
 	handlers.RegisterEntryKeyRoutes(apiGroup, a.cfgManager)
 	handlers.RegisterPrincipalBudgetRoutes(apiGroup, a.envCfg, a.cfgManager)
 	handlers.RegisterAdminAccessRoutes(apiGroup, a.envCfg, a.cfgManager)
+	handlers.RegisterManagementAuditRoutes(apiGroup, a.cfgManager, a.presetUpdater)
 	handlers.RegisterIdentityProxyRoutes(apiGroup, a.envCfg, a.cfgManager)
 	apiGroup.Get("/network/interfaces", handlers.NetworkInterfaces())
 	apiGroup.Post("/network/diagnose", handlers.DiagnoseNetwork(a.cfgManager))
@@ -71,6 +76,8 @@ func (a *application) registerManagementRoutes(apiGroup fiber.Router) {
 		return nil
 	})
 	apiGroup.Put("/racing/config", func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		var req struct {
 			Enabled *bool `json:"enabled"`
 		}
@@ -78,7 +85,7 @@ func (a *application) registerManagementRoutes(apiGroup fiber.Router) {
 			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "无效的请求体，需提供 enabled 布尔值"})
 			return nil
 		}
-		if err := a.cfgManager.SetRacingEnabled(*req.Enabled); err != nil {
+		if err := a.cfgManager.SetRacingEnabledAudited(managementAuditContext, *req.Enabled); err != nil {
 			httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": "保存竞速配置失败"})
 			return nil
 		}

@@ -62,6 +62,8 @@ func handleGetExchangeRates(cfgManager *config.ConfigManager) fiber.Handler {
 
 func handlePutExchangeRates(cfgManager *config.ConfigManager) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		body, err := readExchangeRatesUpdateRequest(c)
 		if err != nil {
 			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
@@ -84,7 +86,7 @@ func handlePutExchangeRates(cfgManager *config.ConfigManager) fiber.Handler {
 			return nil
 		}
 
-		updated, err := cfgManager.ApplyExchangeRateUpdate(normalized, *snapshot, body.Quotes != nil && len(body.Quotes) == 0)
+		updated, err := cfgManager.ApplyExchangeRateUpdateAudited(managementAuditContext, normalized, *snapshot, body.Quotes != nil && len(body.Quotes) == 0)
 		if err != nil {
 			httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": err.Error()})
 			return nil

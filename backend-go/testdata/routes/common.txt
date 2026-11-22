@@ -445,3 +445,4 @@ GET /api/budgets
 GET /api/budgets/:principal
 GET /api/budgets/:principal/requests/:request
 PUT /api/budgets
+GET /api/audit

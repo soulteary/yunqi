@@ -70,6 +70,7 @@ type PriceRevision struct {
 	ActorID           string     `json:"actorId"`
 }
 type PriceAudit struct {
+	OperationID  string    `json:"operationId,omitempty"`
 	At           time.Time `json:"at"`
 	ActorID      string    `json:"actorId"`
 	Action       string    `json:"action"`
@@ -557,8 +558,8 @@ func appendPriceHistory(state *priceReviewDisk, bundle *PresetBundle, actor stri
 	}
 	return nil
 }
-func (u *PresetUpdater) activateReviewedBundle(state priceReviewDisk, bundle *PresetBundle, actor, action, digest string) error {
-	if strings.TrimSpace(actor) == "" || len(actor) > 256 {
+func (u *PresetUpdater) activateReviewedBundle(state priceReviewDisk, bundle *PresetBundle, actor, action, digest, operationID string) error {
+	if strings.TrimSpace(actor) == "" || len(actor) > 256 || len(operationID) > 256 || strings.ContainsAny(operationID, "\r\n\x00") {
 		return errors.New("price activation requires an audit actor")
 	}
 	if err := Validate(bundle); err != nil {
@@ -586,7 +587,7 @@ func (u *PresetUpdater) activateReviewedBundle(state priceReviewDisk, bundle *Pr
 	if err != nil {
 		return err
 	}
-	state.Audit = append(state.Audit, PriceAudit{At: time.Now().UTC(), ActorID: actor, Action: action, VersionID: version, SourceDigest: digest})
+	state.Audit = append(state.Audit, PriceAudit{OperationID: operationID, At: time.Now().UTC(), ActorID: actor, Action: action, VersionID: version, SourceDigest: digest})
 	if len(state.Audit) > 1000 {
 		state.Audit = state.Audit[len(state.Audit)-1000:]
 	}
@@ -618,7 +619,7 @@ func (u *PresetUpdater) activateReviewedBundle(state priceReviewDisk, bundle *Pr
 	u.mu.Unlock()
 	return nil
 }
-func (u *PresetUpdater) ApprovePriceReview(actor, reviewID string, allowAnomalies bool) error {
+func (u *PresetUpdater) ApprovePriceReview(actor, reviewID string, allowAnomalies bool, operationIDs ...string) error {
 	u.checkMu.Lock()
 	defer u.checkMu.Unlock()
 	state := u.priceDiskSnapshot()
@@ -641,15 +642,15 @@ func (u *PresetUpdater) ApprovePriceReview(actor, reviewID string, allowAnomalie
 	if state.Pending.Proposal.RequiresAnomalyAcknowledgement && !allowAnomalies {
 		return ErrPriceAnomalyAck
 	}
-	return u.activateReviewedBundle(state, state.Pending.Bundle, actor, "price_approval", state.Pending.Proposal.SourceDigest)
+	return u.activateReviewedBundle(state, state.Pending.Bundle, actor, "price_approval", state.Pending.Proposal.SourceDigest, firstAuditOperation(operationIDs))
 }
-func (u *PresetUpdater) RollbackPriceVersion(actor, bundleHashID string) error {
+func (u *PresetUpdater) RollbackPriceVersion(actor, bundleHashID string, operationIDs ...string) error {
 	u.checkMu.Lock()
 	defer u.checkMu.Unlock()
 	state := u.priceDiskSnapshot()
 	for _, entry := range state.History {
 		if entry.Revision.BundleHash == bundleHashID {
-			return u.activateReviewedBundle(state, entry.Bundle, actor, "price_rollback", entry.Revision.BundleHash)
+			return u.activateReviewedBundle(state, entry.Bundle, actor, "price_rollback", entry.Revision.BundleHash, firstAuditOperation(operationIDs))
 		}
 	}
 	return ErrPriceRollbackUnavailable
@@ -742,4 +743,11 @@ func (u *PresetUpdater) validAutomaticCache(bundle *PresetBundle, state priceRev
 	}
 
 	return true
+}
+
+func firstAuditOperation(ids []string) string {
+	if len(ids) > 0 {
+		return ids[0]
+	}
+	return ""
 }

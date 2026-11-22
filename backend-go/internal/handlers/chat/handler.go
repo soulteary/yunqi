@@ -135,6 +135,8 @@ func handleMultiChannel(
 		isStream,
 		agentRole,
 		func(c fiber.Ctx, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
+			managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 			upstream := selection.Upstream
 			channelIndex := selection.ChannelIndex
 
@@ -167,7 +169,7 @@ func handleMultiChannel(
 					return buildProviderRequest(c, upstreamCopy, upstreamCopy.BaseURL, apiKey, common.GetEffectiveRequestBody(c, bodyBytes), model, isStream)
 				},
 				func(apiKey string) {
-					_ = cfgManager.DeprioritizeAPIKey(apiKey)
+					_ = cfgManager.DeprioritizeAPIKeyAudited(managementAuditContext, apiKey)
 				},
 				func(url string) {
 					channelScheduler.MarkURLFailure(scheduler.ChannelKindChat, channelIndex, url)
@@ -214,6 +216,8 @@ func handleSingleChannel(
 	isStream bool,
 	startTime time.Time,
 ) {
+	managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 	upstream, channelIndex, err := cfgManager.GetCurrentChatUpstreamWithIndex()
 	if err != nil {
 		chatErrorResponse(c, 503, "No Chat upstream configured", "service_unavailable")
@@ -258,7 +262,7 @@ func handleSingleChannel(
 			return buildProviderRequest(c, upstreamCopy, upstreamCopy.BaseURL, apiKey, common.GetEffectiveRequestBody(c, bodyBytes), model, isStream)
 		},
 		func(apiKey string) {
-			_ = cfgManager.DeprioritizeAPIKey(apiKey)
+			_ = cfgManager.DeprioritizeAPIKeyAudited(managementAuditContext, apiKey)
 		},
 		nil,
 		nil,

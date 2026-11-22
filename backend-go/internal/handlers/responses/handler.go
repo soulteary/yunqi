@@ -152,6 +152,8 @@ func handleMultiChannel(
 		responsesReq.Stream,
 		agentRole,
 		func(c fiber.Ctx, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
+			managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 			responsesReq := responsesReq
 			if responsesReq.TransformerMetadata != nil {
 				metadata := make(map[string]interface{}, len(responsesReq.TransformerMetadata))
@@ -215,7 +217,7 @@ func handleMultiChannel(
 					return req, err
 				},
 				func(apiKey string) {
-					if err := cfgManager.DeprioritizeAPIKeyForRoute(executionRoute.Kind, executionRoute.Index, apiKey); err != nil {
+					if err := cfgManager.DeprioritizeAPIKeyForRouteAudited(managementAuditContext, executionRoute.Kind, executionRoute.Index, apiKey); err != nil {
 						common.RequestLogf(c, "[Responses-Key] 警告: 密钥降级失败: %v", err)
 					}
 				},
@@ -277,6 +279,8 @@ func handleSingleChannel(
 	startTime time.Time,
 	isCompactionV2 bool,
 ) {
+	managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 	upstream, channelIndex, err := cfgManager.GetCurrentResponsesUpstreamWithIndex()
 	if err != nil {
 		httpbridge.JSON(c, 503, fiber.Map{
@@ -354,7 +358,7 @@ func handleSingleChannel(
 			return req, err
 		},
 		func(apiKey string) {
-			if err := cfgManager.DeprioritizeAPIKey(apiKey); err != nil {
+			if err := cfgManager.DeprioritizeAPIKeyAudited(managementAuditContext, apiKey); err != nil {
 				common.RequestLogf(c, "[Responses-Key] 警告: 密钥降级失败: %v", err)
 			}
 		},

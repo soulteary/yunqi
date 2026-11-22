@@ -378,6 +378,8 @@ func ImportChannels(cfgManager *config.ConfigManager) fiber.Handler {
 // - 名称冲突时自动重命名（加 "-import" 后缀）
 func ImportChannelsConfirm(cfgManager *config.ConfigManager) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		var req ImportConfirmRequest
 		if err := httpbridge.BindJSON(c, &req); err != nil {
 			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "Invalid request body", "message": err.Error()})
@@ -464,17 +466,17 @@ func ImportChannelsConfirm(cfgManager *config.ConfigManager) fiber.Handler {
 			var addErr error
 			switch entry.ChannelType {
 			case "messages":
-				addErr = cfgManager.AddUpstream(ch)
+				addErr = cfgManager.AddUpstreamAudited(managementAuditContext, ch)
 			case "chat":
-				addErr = cfgManager.AddChatUpstream(ch)
+				addErr = cfgManager.AddChatUpstreamAudited(managementAuditContext, ch)
 			case "responses":
-				addErr = cfgManager.AddResponsesUpstream(ch)
+				addErr = cfgManager.AddResponsesUpstreamAudited(managementAuditContext, ch)
 			case "gemini":
-				addErr = cfgManager.AddGeminiUpstream(ch)
+				addErr = cfgManager.AddGeminiUpstreamAudited(managementAuditContext, ch)
 			case "images":
-				addErr = cfgManager.AddImagesUpstream(ch)
+				addErr = cfgManager.AddImagesUpstreamAudited(managementAuditContext, ch)
 			case "vectors":
-				addErr = cfgManager.AddVectorsUpstream(ch)
+				addErr = cfgManager.AddVectorsUpstreamAudited(managementAuditContext, ch)
 			}
 
 			if addErr != nil {

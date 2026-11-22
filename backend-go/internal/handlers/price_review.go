@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/gofiber/fiber/v3"
+	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/middleware"
 	"github.com/soulteary/yunqi/internal/presetstore"
@@ -47,13 +48,13 @@ func PriceReview(updater *presetstore.PresetUpdater, operation string) fiber.Han
 					httpbridge.JSON(c, 400, fiber.Map{"error": "reviewId is required"})
 					return nil
 				}
-				err = updater.ApprovePriceReview(actor, input.ReviewID, input.AllowAnomalies)
+				err = updater.ApprovePriceReview(actor, input.ReviewID, input.AllowAnomalies, config.ManagementAuditFromContext(httpbridge.Request(c).Context()).OperationID)
 			} else {
 				if len(input.BundleHash) != 64 {
 					httpbridge.JSON(c, 400, fiber.Map{"error": "bundleHash is required"})
 					return nil
 				}
-				err = updater.RollbackPriceVersion(actor, input.BundleHash)
+				err = updater.RollbackPriceVersion(actor, input.BundleHash, config.ManagementAuditFromContext(httpbridge.Request(c).Context()).OperationID)
 			}
 		default:
 			httpbridge.JSON(c, 400, fiber.Map{"error": "unsupported price review operation"})

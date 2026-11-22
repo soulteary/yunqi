@@ -380,6 +380,8 @@ func (h *Handler) Get(c fiber.Ctx) error {
 
 // Create POST /api/logical-channels
 func (h *Handler) Create(c fiber.Ctx) error {
+	managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 	var body CreateRequestBody
 	if err := httpbridge.BindJSON(c, &body); err != nil {
 		httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "Invalid request body: " + err.Error()})
@@ -429,7 +431,7 @@ func (h *Handler) Create(c fiber.Ctx) error {
 		// 未指定时按 protocols 推断
 		in.Kind = inferKindFromProtocols(in.Protocols)
 	}
-	logical, err := h.cm.CreateLogicalChannel(in)
+	logical, err := h.cm.CreateLogicalChannelAudited(managementAuditContext, in)
 	if err != nil {
 		httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
 		return nil
@@ -440,6 +442,8 @@ func (h *Handler) Create(c fiber.Ctx) error {
 
 // Update PUT /api/logical-channels/:uid
 func (h *Handler) Update(c fiber.Ctx) error {
+	managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 	uid := httpbridge.Param(c, "uid")
 	var body UpdateRequestBody
 	if err := httpbridge.BindJSON(c, &body); err != nil {
@@ -505,7 +509,7 @@ func (h *Handler) Update(c fiber.Ctx) error {
 			}
 		}
 	}
-	logical, err := h.cm.UpdateLogicalChannel(in)
+	logical, err := h.cm.UpdateLogicalChannelAudited(managementAuditContext, in)
 	if err != nil {
 		httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
 		return nil
@@ -520,8 +524,10 @@ func (h *Handler) Update(c fiber.Ctx) error {
 
 // Delete DELETE /api/logical-channels/:uid
 func (h *Handler) Delete(c fiber.Ctx) error {
+	managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 	uid := httpbridge.Param(c, "uid")
-	removed, err := h.cm.DeleteLogicalChannel(uid)
+	removed, err := h.cm.DeleteLogicalChannelAudited(managementAuditContext, uid)
 	if err != nil {
 		httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": err.Error()})
 		return nil

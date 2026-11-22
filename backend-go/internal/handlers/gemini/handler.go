@@ -166,6 +166,8 @@ func handleMultiChannel(
 		isStream,
 		agentRole,
 		func(c fiber.Ctx, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
+			managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 			upstream := selection.Upstream
 			channelIndex := selection.ChannelIndex
 
@@ -196,7 +198,7 @@ func handleMultiChannel(
 					return buildProviderRequest(c, upstreamCopy, upstreamCopy.BaseURL, apiKey, bodyBytes, geminiReq, model, isStream)
 				},
 				func(apiKey string) {
-					_ = cfgManager.DeprioritizeAPIKey(apiKey)
+					_ = cfgManager.DeprioritizeAPIKeyAudited(managementAuditContext, apiKey)
 				},
 				func(url string) {
 					channelScheduler.MarkURLFailure(scheduler.ChannelKindGemini, channelIndex, url)
@@ -243,6 +245,8 @@ func handleSingleChannel(
 	isStream bool,
 	startTime time.Time,
 ) {
+	managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 	upstream, channelIndex, err := cfgManager.GetCurrentGeminiUpstreamWithIndex()
 	if err != nil {
 		httpbridge.JSON(c, 503, types.GeminiError{
@@ -305,7 +309,7 @@ func handleSingleChannel(
 			return buildProviderRequest(c, upstreamCopy, upstreamCopy.BaseURL, apiKey, bodyBytes, geminiReq, model, isStream)
 		},
 		func(apiKey string) {
-			_ = cfgManager.DeprioritizeAPIKey(apiKey)
+			_ = cfgManager.DeprioritizeAPIKeyAudited(managementAuditContext, apiKey)
 		},
 		nil,
 		nil,

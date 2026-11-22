@@ -16,6 +16,8 @@ import (
 
 func handleRenameAccount(deps *AutoManagedDeps) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		if deps == nil || deps.CfgManager == nil {
 			httpbridge.JSON(c, http.StatusServiceUnavailable, fiber.Map{"error": "配置管理器不可用"})
 			return nil
@@ -28,7 +30,7 @@ func handleRenameAccount(deps *AutoManagedDeps) fiber.Handler {
 			return nil
 		}
 		accountUID := strings.TrimSpace(httpbridge.Param(c, "accountUid"))
-		if err := deps.CfgManager.RenameManagedAccount(accountUID, req.Name); err != nil {
+		if err := deps.CfgManager.RenameManagedAccountAudited(managementAuditContext, accountUID, req.Name); err != nil {
 			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
 			return nil
 		}
@@ -39,6 +41,8 @@ func handleRenameAccount(deps *AutoManagedDeps) fiber.Handler {
 
 func handleDeleteAccount(deps *AutoManagedDeps) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		if deps == nil || deps.CfgManager == nil {
 			httpbridge.JSON(c, http.StatusServiceUnavailable, fiber.Map{"error": "配置管理器不可用"})
 			return nil
@@ -50,7 +54,7 @@ func handleDeleteAccount(deps *AutoManagedDeps) fiber.Handler {
 			return nil
 		}
 		// 只级联删除自动托管渠道；非托管渠道保留并解除账号关联，避免误删用户手工渠道。
-		removed, skipped, err := deps.CfgManager.DeleteAccountChannels(accountUID)
+		removed, skipped, err := deps.CfgManager.DeleteAccountChannelsAudited(managementAuditContext, accountUID)
 		if err != nil {
 			httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": err.Error()})
 			return nil

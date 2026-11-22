@@ -40,6 +40,8 @@ func GetUpstreams(cfgManager *config.ConfigManager) fiber.Handler {
 // AddUpstream 添加 Images 上游
 func AddUpstream(cfgManager *config.ConfigManager) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		var req struct {
 			config.UpstreamConfig
 			Placement string `json:"placement"` // 故障转移位置：front（首位）| back（末尾，默认）
@@ -49,7 +51,7 @@ func AddUpstream(cfgManager *config.ConfigManager) fiber.Handler {
 			return nil
 		}
 
-		if err := cfgManager.AddImagesUpstream(req.UpstreamConfig, req.Placement); err != nil {
+		if err := cfgManager.AddImagesUpstreamAudited(managementAuditContext, req.UpstreamConfig, req.Placement); err != nil {
 			if strings.Contains(err.Error(), "仅支持 openai serviceType") {
 				httpbridge.JSON(c, 400, fiber.Map{"error": err.Error()})
 			} else {
@@ -65,6 +67,8 @@ func AddUpstream(cfgManager *config.ConfigManager) fiber.Handler {
 // UpdateUpstream 更新 Images 上游
 func UpdateUpstream(cfgManager *config.ConfigManager, sch *scheduler.ChannelScheduler) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		idStr := httpbridge.Param(c, "id")
 		id, err := strconv.Atoi(idStr)
 		if err != nil {
@@ -86,7 +90,7 @@ func UpdateUpstream(cfgManager *config.ConfigManager, sch *scheduler.ChannelSche
 			}
 		}
 
-		shouldResetMetrics, err := cfgManager.UpdateImagesUpstream(id, updates)
+		shouldResetMetrics, err := cfgManager.UpdateImagesUpstreamAudited(managementAuditContext, id, updates)
 		if err != nil {
 			if strings.Contains(err.Error(), "仅支持 openai serviceType") {
 				httpbridge.JSON(c, 400, fiber.Map{"error": err.Error()})
@@ -114,6 +118,8 @@ func UpdateUpstream(cfgManager *config.ConfigManager, sch *scheduler.ChannelSche
 // DeleteUpstream 删除 Images 上游
 func DeleteUpstream(cfgManager *config.ConfigManager, channelScheduler *scheduler.ChannelScheduler) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		idStr := httpbridge.Param(c, "id")
 		id, err := strconv.Atoi(idStr)
 		if err != nil {
@@ -121,7 +127,7 @@ func DeleteUpstream(cfgManager *config.ConfigManager, channelScheduler *schedule
 			return nil
 		}
 
-		removed, err := cfgManager.RemoveImagesUpstream(id)
+		removed, err := cfgManager.RemoveImagesUpstreamAudited(managementAuditContext, id)
 		if err != nil {
 			if strings.Contains(err.Error(), "无效的") {
 				httpbridge.JSON(c, 404, fiber.Map{"error": "Upstream not found"})
@@ -141,6 +147,8 @@ func DeleteUpstream(cfgManager *config.ConfigManager, channelScheduler *schedule
 // AddApiKey 添加 Images 渠道 API 密钥
 func AddApiKey(cfgManager *config.ConfigManager) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		idStr := httpbridge.Param(c, "id")
 		id, err := strconv.Atoi(idStr)
 		if err != nil {
@@ -156,7 +164,7 @@ func AddApiKey(cfgManager *config.ConfigManager) fiber.Handler {
 			return nil
 		}
 
-		if err := cfgManager.AddImagesAPIKey(id, req.APIKey); err != nil {
+		if err := cfgManager.AddImagesAPIKeyAudited(managementAuditContext, id, req.APIKey); err != nil {
 			if strings.Contains(err.Error(), "无效的上游索引") {
 				httpbridge.JSON(c, 404, fiber.Map{"error": "Upstream not found"})
 			} else if strings.Contains(err.Error(), "API密钥已存在") {
@@ -177,6 +185,8 @@ func AddApiKey(cfgManager *config.ConfigManager) fiber.Handler {
 // DeleteApiKey 删除 Images 渠道 API 密钥
 func DeleteApiKey(cfgManager *config.ConfigManager) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		idStr := httpbridge.Param(c, "id")
 		id, err := strconv.Atoi(idStr)
 		if err != nil {
@@ -190,7 +200,7 @@ func DeleteApiKey(cfgManager *config.ConfigManager) fiber.Handler {
 			return nil
 		}
 
-		if err := cfgManager.RemoveImagesAPIKey(id, apiKey); err != nil {
+		if err := cfgManager.RemoveImagesAPIKeyAudited(managementAuditContext, id, apiKey); err != nil {
 			if strings.Contains(err.Error(), "无效的上游索引") {
 				httpbridge.JSON(c, 404, fiber.Map{"error": "Upstream not found"})
 			} else if strings.Contains(err.Error(), "API密钥不存在") {
@@ -210,6 +220,8 @@ func DeleteApiKey(cfgManager *config.ConfigManager) fiber.Handler {
 // MoveApiKeyToTop 将 Images 渠道 API 密钥移到最前面
 func MoveApiKeyToTop(cfgManager *config.ConfigManager) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		id, err := strconv.Atoi(httpbridge.Param(c, "id"))
 		if err != nil {
 			httpbridge.JSON(c, 400, fiber.Map{"error": "Invalid upstream ID"})
@@ -217,7 +229,7 @@ func MoveApiKeyToTop(cfgManager *config.ConfigManager) fiber.Handler {
 		}
 		apiKey := httpbridge.Param(c, "apiKey")
 
-		if err := cfgManager.MoveImagesAPIKeyToTop(id, apiKey); err != nil {
+		if err := cfgManager.MoveImagesAPIKeyToTopAudited(managementAuditContext, id, apiKey); err != nil {
 			httpbridge.JSON(c, 400, fiber.Map{"error": err.Error()})
 			return nil
 		}
@@ -229,6 +241,8 @@ func MoveApiKeyToTop(cfgManager *config.ConfigManager) fiber.Handler {
 // MoveApiKeyToBottom 将 Images 渠道 API 密钥移到最后面
 func MoveApiKeyToBottom(cfgManager *config.ConfigManager) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		id, err := strconv.Atoi(httpbridge.Param(c, "id"))
 		if err != nil {
 			httpbridge.JSON(c, 400, fiber.Map{"error": "Invalid upstream ID"})
@@ -236,7 +250,7 @@ func MoveApiKeyToBottom(cfgManager *config.ConfigManager) fiber.Handler {
 		}
 		apiKey := httpbridge.Param(c, "apiKey")
 
-		if err := cfgManager.MoveImagesAPIKeyToBottom(id, apiKey); err != nil {
+		if err := cfgManager.MoveImagesAPIKeyToBottomAudited(managementAuditContext, id, apiKey); err != nil {
 			httpbridge.JSON(c, 400, fiber.Map{"error": err.Error()})
 			return nil
 		}
@@ -248,6 +262,8 @@ func MoveApiKeyToBottom(cfgManager *config.ConfigManager) fiber.Handler {
 // ReorderChannels 重新排序 Images 渠道优先级
 func ReorderChannels(cfgManager *config.ConfigManager) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		var req struct {
 			Order      []int `json:"order"`
 			Priorities []int `json:"priorities"`
@@ -257,7 +273,7 @@ func ReorderChannels(cfgManager *config.ConfigManager) fiber.Handler {
 			return nil
 		}
 
-		if err := cfgManager.ReorderImagesUpstreams(req.Order, req.Priorities); err != nil {
+		if err := cfgManager.ReorderImagesUpstreamsAudited(managementAuditContext, req.Order, req.Priorities); err != nil {
 			httpbridge.JSON(c, 400, fiber.Map{"error": err.Error()})
 			return nil
 		}
@@ -271,16 +287,16 @@ func ReorderChannels(cfgManager *config.ConfigManager) fiber.Handler {
 
 // SetChannelStatus 设置 Images 渠道状态
 func SetChannelStatus(cfgManager *config.ConfigManager) fiber.Handler {
-	adapter := handlers.ChannelStatusConfigManagerFunc(func(index int, status string) error {
-		return cfgManager.SetImagesChannelStatus(index, status)
+	adapter := handlers.AuditedChannelStatusConfigManagerFunc(func(audit config.ManagementAuditContext, index int, status string) error {
+		return cfgManager.SetImagesChannelStatusAudited(audit, index, status)
 	})
 	return handlers.NamedChannelStatusHandler(adapter, "Images 渠道状态已更新")
 }
 
 // SetChannelPromotion 设置 Images 渠道促销期
 func SetChannelPromotion(cfgManager *config.ConfigManager) fiber.Handler {
-	adapter := handlers.PromotionConfigManagerFunc(func(index int, duration time.Duration) error {
-		return cfgManager.SetImagesChannelPromotion(index, duration)
+	adapter := handlers.AuditedPromotionConfigManagerFunc(func(audit config.ManagementAuditContext, index int, duration time.Duration) error {
+		return cfgManager.SetImagesChannelPromotionAudited(audit, index, duration)
 	})
 	return handlers.NamedChannelPromotionHandler(adapter, "Invalid channel ID", "Invalid request body", "Images 渠道促销期已清除", "Images 渠道促销期已设置")
 }

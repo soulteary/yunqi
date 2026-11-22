@@ -93,6 +93,8 @@ func handleDeepSeekBalance(deps *AutoManagedDeps) fiber.Handler {
 
 func handleSetMiMoConsoleCookie(deps *AutoManagedDeps) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		var req struct {
 			Cookie         string `json:"cookie"`
 			AdoptCookieKey bool   `json:"adoptCookieKey"`
@@ -134,7 +136,7 @@ func handleSetMiMoConsoleCookie(deps *AutoManagedDeps) fiber.Handler {
 		if !matches {
 			replacementKey = verification.APIKey
 		}
-		if err := deps.CfgManager.BindManagedAccountMiMoConsole(accountUID, credentialUID, replacementKey, verification.Snapshot); err != nil {
+		if err := deps.CfgManager.BindManagedAccountMiMoConsoleAudited(managementAuditContext, accountUID, credentialUID, replacementKey, verification.Snapshot); err != nil {
 			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
 			return nil
 		}
@@ -165,6 +167,8 @@ func handleSetMiMoConsoleCookie(deps *AutoManagedDeps) fiber.Handler {
 
 func handleRefreshMiMoConsoleCookie(deps *AutoManagedDeps) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		if deps == nil || deps.CfgManager == nil {
 			httpbridge.JSON(c, http.StatusServiceUnavailable, fiber.Map{"error": "配置管理器不可用"})
 			return nil
@@ -184,7 +188,7 @@ func handleRefreshMiMoConsoleCookie(deps *AutoManagedDeps) fiber.Handler {
 			httpbridge.JSON(c, http.StatusConflict, fiber.Map{"error": "Cookie 所属 Key 已变化，请重新绑定并确认是否采用新 Key", "code": "mimo_cookie_key_mismatch"})
 			return nil
 		}
-		if err := deps.CfgManager.BindManagedAccountMiMoConsole(accountUID, credentialUID, "", verification.Snapshot); err != nil {
+		if err := deps.CfgManager.BindManagedAccountMiMoConsoleAudited(managementAuditContext, accountUID, credentialUID, "", verification.Snapshot); err != nil {
 			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
 			return nil
 		}
@@ -196,11 +200,13 @@ func handleRefreshMiMoConsoleCookie(deps *AutoManagedDeps) fiber.Handler {
 
 func handleClearMiMoConsoleCookie(deps *AutoManagedDeps) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		if deps == nil || deps.CfgManager == nil {
 			httpbridge.JSON(c, http.StatusServiceUnavailable, fiber.Map{"error": "配置管理器不可用"})
 			return nil
 		}
-		if err := deps.CfgManager.ClearManagedAccountMiMoConsole(strings.TrimSpace(httpbridge.Param(c, "accountUid")), strings.TrimSpace(httpbridge.Param(c, "credentialUid"))); err != nil {
+		if err := deps.CfgManager.ClearManagedAccountMiMoConsoleAudited(managementAuditContext, strings.TrimSpace(httpbridge.Param(c, "accountUid")), strings.TrimSpace(httpbridge.Param(c, "credentialUid"))); err != nil {
 			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
 			return nil
 		}
@@ -218,6 +224,8 @@ func mimoConsoleClient(deps *AutoManagedDeps) *MiMoConsoleClient {
 
 func handleSetCompshareConsoleCookie(deps *AutoManagedDeps) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		var req struct {
 			Cookie string `json:"cookie"`
 		}
@@ -245,7 +253,7 @@ func handleSetCompshareConsoleCookie(deps *AutoManagedDeps) fiber.Handler {
 			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
 			return nil
 		}
-		if err := deps.CfgManager.BindManagedAccountCompshareConsole(accountUID, credentialUID, *snapshot); err != nil {
+		if err := deps.CfgManager.BindManagedAccountCompshareConsoleAudited(managementAuditContext, accountUID, credentialUID, *snapshot); err != nil {
 			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
 			return nil
 		}
@@ -259,6 +267,8 @@ func handleSetCompshareConsoleCookie(deps *AutoManagedDeps) fiber.Handler {
 
 func handleRefreshCompshareConsoleCookie(deps *AutoManagedDeps) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		if deps == nil || deps.CfgManager == nil {
 			httpbridge.JSON(c, http.StatusServiceUnavailable, fiber.Map{"error": "配置管理器不可用"})
 			return nil
@@ -274,7 +284,7 @@ func handleRefreshCompshareConsoleCookie(deps *AutoManagedDeps) fiber.Handler {
 			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
 			return nil
 		}
-		if err := deps.CfgManager.BindManagedAccountCompshareConsole(accountUID, credentialUID, *snapshot); err != nil {
+		if err := deps.CfgManager.BindManagedAccountCompshareConsoleAudited(managementAuditContext, accountUID, credentialUID, *snapshot); err != nil {
 			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
 			return nil
 		}
@@ -286,11 +296,13 @@ func handleRefreshCompshareConsoleCookie(deps *AutoManagedDeps) fiber.Handler {
 
 func handleClearCompshareConsoleCookie(deps *AutoManagedDeps) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		if deps == nil || deps.CfgManager == nil {
 			httpbridge.JSON(c, http.StatusServiceUnavailable, fiber.Map{"error": "配置管理器不可用"})
 			return nil
 		}
-		if err := deps.CfgManager.ClearManagedAccountCompshareConsole(strings.TrimSpace(httpbridge.Param(c, "accountUid")), strings.TrimSpace(httpbridge.Param(c, "credentialUid"))); err != nil {
+		if err := deps.CfgManager.ClearManagedAccountCompshareConsoleAudited(managementAuditContext, strings.TrimSpace(httpbridge.Param(c, "accountUid")), strings.TrimSpace(httpbridge.Param(c, "credentialUid"))); err != nil {
 			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
 			return nil
 		}
@@ -308,6 +320,8 @@ func compshareConsoleClient(deps *AutoManagedDeps) *CompshareConsoleClient {
 
 func handleSetKimiConsoleToken(deps *AutoManagedDeps) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		var req struct {
 			AccessToken string `json:"accessToken"`
 		}
@@ -335,7 +349,7 @@ func handleSetKimiConsoleToken(deps *AutoManagedDeps) fiber.Handler {
 			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
 			return nil
 		}
-		if err := deps.CfgManager.BindManagedAccountKimiConsole(accountUID, credentialUID, *console); err != nil {
+		if err := deps.CfgManager.BindManagedAccountKimiConsoleAudited(managementAuditContext, accountUID, credentialUID, *console); err != nil {
 			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
 			return nil
 		}
@@ -349,6 +363,8 @@ func handleSetKimiConsoleToken(deps *AutoManagedDeps) fiber.Handler {
 
 func handleRefreshKimiConsoleToken(deps *AutoManagedDeps) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		if deps == nil || deps.CfgManager == nil {
 			httpbridge.JSON(c, http.StatusServiceUnavailable, fiber.Map{"error": "配置管理器不可用"})
 			return nil
@@ -364,7 +380,7 @@ func handleRefreshKimiConsoleToken(deps *AutoManagedDeps) fiber.Handler {
 			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
 			return nil
 		}
-		if err := deps.CfgManager.BindManagedAccountKimiConsole(accountUID, credentialUID, *console); err != nil {
+		if err := deps.CfgManager.BindManagedAccountKimiConsoleAudited(managementAuditContext, accountUID, credentialUID, *console); err != nil {
 			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
 			return nil
 		}
@@ -376,11 +392,13 @@ func handleRefreshKimiConsoleToken(deps *AutoManagedDeps) fiber.Handler {
 
 func handleClearKimiConsoleToken(deps *AutoManagedDeps) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		if deps == nil || deps.CfgManager == nil {
 			httpbridge.JSON(c, http.StatusServiceUnavailable, fiber.Map{"error": "配置管理器不可用"})
 			return nil
 		}
-		if err := deps.CfgManager.ClearManagedAccountKimiConsole(
+		if err := deps.CfgManager.ClearManagedAccountKimiConsoleAudited(managementAuditContext,
 			strings.TrimSpace(httpbridge.Param(c, "accountUid")), strings.TrimSpace(httpbridge.Param(c, "credentialUid")),
 		); err != nil {
 			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
