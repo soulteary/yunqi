@@ -333,3 +333,41 @@ func TestTerminalParserPromptFeedbackPlaceholderIsNotTerminal(t *testing.T) {
 		}
 	}
 }
+
+func TestTerminalWriterFlushesFragmentedFirstEventSeparator(t *testing.T) {
+	source := &upstreamTerminalBody{protocol: "responses"}
+	recorder := httptest.NewRecorder()
+	c, _ := httpbridge.TestContext(recorder)
+	writer := &streamTerminalWriter{ResponseWriter: httpbridge.Writer(c), source: source, protocol: "responses"}
+	frame := terminalGuardPrefixes["responses"]
+	for _, b := range []byte(frame) {
+		if _, err := writer.Write([]byte{b}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writer.Flush()
+	if recorder.Body.String() != frame {
+		t.Fatalf("first event separator delayed: %q", recorder.Body.String())
+	}
+}
+
+func TestTerminalWriterPostDataErrorHasSingleOriginalErrorEvent(t *testing.T) {
+	raw := "data: {\"message\":\"rejected\"}\nevent: error\n\n"
+	resp := &http.Response{Header: http.Header{}, Body: io.NopCloser(strings.NewReader(raw))}
+	recorder := httptest.NewRecorder()
+	c, _ := httpbridge.TestContext(recorder)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/responses", nil))
+	_, err := withStreamTerminalGuard(c, resp, "responses", "responses", func() (*types.Usage, error) {
+		_, _ = io.ReadAll(resp.Body)
+		for _, b := range []byte(raw) {
+			if _, e := httpbridge.Writer(c).Write([]byte{b}); e != nil {
+				return nil, e
+			}
+		}
+		httpbridge.Writer(c).Flush()
+		return nil, nil
+	})
+	if err == nil || recorder.Body.String() != raw {
+		t.Fatalf("post-data error duplicated/lost: err=%v body=%q", err, recorder.Body.String())
+	}
+}

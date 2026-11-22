@@ -139,6 +139,7 @@ type streamTerminalWriter struct {
 	failed        bool
 	rejected      error
 	doneSent      bool
+	lastPayload   string
 }
 
 func (w *streamTerminalWriter) Write(data []byte) (int, error) {
@@ -195,11 +196,27 @@ func (w *streamTerminalWriter) Unwrap() http.ResponseWriter          { return w.
 func (w *streamTerminalWriter) WriteString(data string) (int, error) { return w.Write([]byte(data)) }
 func (w *streamTerminalWriter) Flush() {
 	if w.clientContext == nil || w.clientContext.Err() == nil {
+		if w.buffer.Len() > 0 && strings.Trim(string(w.buffer.Bytes()), "\r\n") == "" {
+			frame := append([]byte(nil), w.buffer.Bytes()...)
+			w.buffer.Reset()
+			if err := w.frame(frame); err != nil {
+				w.rejected = err
+				return
+			}
+		}
 		w.ResponseWriter.Flush()
 	}
 }
 func (w *streamTerminalWriter) frame(frame []byte) error {
 	data, event := streamFrameData(frame)
+	if data == "" && event != "" {
+		data = w.lastPayload
+	}
+	if bytes.HasSuffix(frame, []byte("\n\n")) || bytes.HasSuffix(frame, []byte("\r\n\r\n")) || strings.Trim(string(frame), "\r\n") == "" {
+		w.lastPayload = ""
+	} else if data != "" {
+		w.lastPayload = data
+	}
 	terminal, failed := streamFrameTerminal(data, event, w.protocol, false)
 	sourceTerminal, sourceFailed := w.source.state()
 	if failed {
