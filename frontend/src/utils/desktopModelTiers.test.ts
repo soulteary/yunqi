@@ -9,6 +9,7 @@ describe('Desktop tier patches', () => {
   })
   it('sends explicit clears by UID despite reordered indices', () => {
     expect(buildDesktopTierUpdates([route], [{ ...route, index: 8, claudeDesktopModelTiers: { a: '' } }])).toEqual([{ channelUid: 'stable', kind: 'messages', tiers: { a: '' } }])
+    expect(buildDesktopTierUpdates([route], [{ ...route, upstreamKind: 'chat', claudeDesktopModelTiers: { a: 'haiku' } }])).toEqual([{ channelUid: 'stable', kind: 'messages', tiers: { a: 'haiku' } }])
     expect(buildDesktopTierUpdates([route], [{ ...route, claudeDesktopModelTiers: {} }])).toEqual([{ channelUid: 'stable', kind: 'messages', tiers: {} }])
   })
   it('omits missing values, non-Messages routes and unknown UIDs', () => {

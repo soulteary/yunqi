@@ -10,7 +10,7 @@ export function buildDesktopTierUpdates(original: ChannelProtocolRoute[], edited
     if (route.kind !== 'messages' || !route.channelUid || route.claudeDesktopModelTiers === undefined) return []
     const before = original.find(item => item.channelUid === route.channelUid && item.kind === route.kind)
     if (!before || JSON.stringify(ordered(before.claudeDesktopModelTiers)) === JSON.stringify(ordered(route.claudeDesktopModelTiers))) return []
-    return [{ channelUid: route.channelUid, kind: route.upstreamKind ?? route.kind, tiers: { ...route.claudeDesktopModelTiers } }]
+    return [{ channelUid: route.channelUid, kind: route.kind, tiers: { ...route.claudeDesktopModelTiers } }]
   })
 }
 
