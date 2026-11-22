@@ -404,3 +404,58 @@ func TestManagementAuditContinuousSingleWriterDoesNotReportPendingReload(t *test
 		}
 	}
 }
+
+func TestManagementAuditModelImportTransactionsKeepExplicitActorAndHistory(t *testing.T) {
+	cm := newImportManager(t)
+	view, _ := cm.GetModelImport("import-channel")
+	policyAudit := auditTestContext("model-policy")
+	view, err := cm.SetModelImportPolicyAudited(policyAudit, "import-channel", view.Revision, ModelImportPolicy{}, policyAudit.ActorID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.State.Audit[len(view.State.Audit)-1].OperationID != policyAudit.OperationID {
+		t.Fatal("policy domain audit lost operation")
+	}
+	if _, err = cm.StageModelImport("import-channel", []ModelImportCandidate{{ID: "background-model"}}, "discovery", view.Revision); err != nil {
+		t.Fatal(err)
+	}
+	background := cm.ManagementAuditSnapshot().Events
+	if background[len(background)-1].ActorID != "system" || background[len(background)-1].OperationID == policyAudit.OperationID {
+		t.Fatal("background discovery inherited human operation")
+	}
+	stageAudit := auditTestContext("model-stage")
+	review, err := cm.StageModelImportAudited(stageAudit, "import-channel", []ModelImportCandidate{{ID: "safe-model"}}, "operator", view.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approveAudit := auditTestContext("model-approve")
+	view, err = cm.ApproveModelImportAudited(approveAudit, "import-channel", review.ID, approveAudit.ActorID, false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.State.Audit[len(view.State.Audit)-1].OperationID != approveAudit.OperationID {
+		t.Fatal("approval domain audit lost operation")
+	}
+	for _, ctx := range []ManagementAuditContext{policyAudit, stageAudit, approveAudit} {
+		if event := auditEventFor(t, cm, ctx.OperationID); event.ActorID != ctx.ActorID {
+			t.Fatal("model transaction crossed actors")
+		}
+	}
+	before, _ := json.Marshal(cm.GetConfig())
+	sequence := cm.ManagementAuditSnapshot().NextSequence
+	path := cm.configFile
+	cm.configFile = t.TempDir()
+	if _, err = cm.RemoveModelImportAudited(auditTestContext("failed-remove"), "import-channel", view.Revision, "admin", true); err == nil {
+		t.Fatal("failed removal succeeded")
+	}
+	cm.configFile = path
+	after, _ := json.Marshal(cm.GetConfig())
+	if string(before) != string(after) || cm.ManagementAuditSnapshot().NextSequence != sequence {
+		t.Fatal("failed model save published state/audit")
+	}
+	removeAudit := auditTestContext("model-remove")
+	if _, err = cm.RemoveModelImportAudited(removeAudit, "import-channel", view.Revision, removeAudit.ActorID, true); err != nil {
+		t.Fatal(err)
+	}
+	_ = auditEventFor(t, cm, removeAudit.OperationID)
+}

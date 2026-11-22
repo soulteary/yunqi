@@ -63,11 +63,12 @@ type ModelImportReview struct {
 	PreviousSupportedModels []string        `json:"previousSupportedModels,omitempty"`
 }
 type ModelImportAudit struct {
-	At         time.Time `json:"at"`
-	ActorID    string    `json:"actorId"`
-	Action     string    `json:"action"`
-	ReviewID   string    `json:"reviewId,omitempty"`
-	ModelCount int       `json:"modelCount"`
+	OperationID string    `json:"operationId,omitempty"`
+	At          time.Time `json:"at"`
+	ActorID     string    `json:"actorId"`
+	Action      string    `json:"action"`
+	ReviewID    string    `json:"reviewId,omitempty"`
+	ModelCount  int       `json:"modelCount"`
 }
 type ModelImportState struct {
 	Policy   ModelImportPolicy  `json:"policy"`
@@ -344,8 +345,8 @@ func (cm *ConfigManager) GetModelImport(uid string) (ModelImportView, error) {
 	}
 	return modelImportView(channel), nil
 }
-func appendImportAudit(state *ModelImportState, actor, action, reviewID string) {
-	state.Audit = append(state.Audit, ModelImportAudit{At: time.Now().UTC(), ActorID: actor, Action: action, ReviewID: reviewID, ModelCount: len(state.Approved)})
+func appendImportAudit(state *ModelImportState, actor, action, reviewID, operationID string) {
+	state.Audit = append(state.Audit, ModelImportAudit{OperationID: operationID, At: time.Now().UTC(), ActorID: actor, Action: action, ReviewID: reviewID, ModelCount: len(state.Approved)})
 	if len(state.Audit) > 100 {
 		state.Audit = append([]ModelImportAudit(nil), state.Audit[len(state.Audit)-100:]...)
 	}
@@ -353,7 +354,8 @@ func appendImportAudit(state *ModelImportState, actor, action, reviewID string) 
 
 // SetModelImportPolicy commits policy and audit atomically. An enabled policy
 // with no approved models is closed, never the legacy empty=all fallback.
-func (cm *ConfigManager) SetModelImportPolicy(uid, expected string, policy ModelImportPolicy, actor string) (view ModelImportView, err error) {
+func (cm *ConfigManager) SetModelImportPolicyAudited(auditContext ManagementAuditContext, uid, expected string, policy ModelImportPolicy, actor string) (view ModelImportView, err error) {
+	auditContext = auditContext.normalized()
 	if actor == "" || len(actor) > 256 {
 		return view, invalidModelImport("model import policy requires an authenticated actor")
 	}
@@ -382,9 +384,9 @@ func (cm *ConfigManager) SetModelImportPolicy(uid, expected string, policy Model
 	state.Policy = policy
 	state = CloneModelImport(state)
 	state.Pending = nil
-	appendImportAudit(state, actor, "policy", "")
+	appendImportAudit(state, actor, "policy", "", auditContext.OperationID)
 	channel.ModelImport = state
-	if err = cm.saveConfigLocked(cm.config); err != nil {
+	if err = cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		return view, err
 	}
 	return modelImportView(cm.modelImportChannelLocked(uid)), nil
@@ -392,7 +394,8 @@ func (cm *ConfigManager) SetModelImportPolicy(uid, expected string, policy Model
 
 // StageModelImport stores a review bound to the full current channel snapshot.
 // Discovery only stages evidence; it never silently replaces an active catalog.
-func (cm *ConfigManager) StageModelImport(uid string, candidates []ModelImportCandidate, source string, expectedRevision ...string) (review ModelImportReview, err error) {
+func (cm *ConfigManager) StageModelImportAudited(auditContext ManagementAuditContext, uid string, candidates []ModelImportCandidate, source string, expectedRevision ...string) (review ModelImportReview, err error) {
+	auditContext = auditContext.normalized()
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 	channel := cm.modelImportChannelLocked(uid)
@@ -423,7 +426,7 @@ func (cm *ConfigManager) StageModelImport(uid string, candidates []ModelImportCa
 	pendingCopy := review
 	state.Pending = &pendingCopy
 	channel.ModelImport = state
-	if err = cm.saveConfigLocked(cm.config); err != nil {
+	if err = cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		return ModelImportReview{}, err
 	}
 	return *CloneModelImport(cm.modelImportChannelLocked(uid).ModelImport).Pending, nil
@@ -431,7 +434,8 @@ func (cm *ConfigManager) StageModelImport(uid string, candidates []ModelImportCa
 
 // ApproveModelImport activates exactly the reviewed inventory, with explicit
 // acknowledgement of empty/removal changes and rollback on persistence failure.
-func (cm *ConfigManager) ApproveModelImport(uid, reviewID, actor string, allowEmpty, allowRemovals bool) (view ModelImportView, err error) {
+func (cm *ConfigManager) ApproveModelImportAudited(auditContext ManagementAuditContext, uid, reviewID, actor string, allowEmpty, allowRemovals bool) (view ModelImportView, err error) {
+	auditContext = auditContext.normalized()
 	if actor == "" || len(actor) > 256 {
 		return view, invalidModelImport("model import approval requires an authenticated actor")
 	}
@@ -461,13 +465,13 @@ func (cm *ConfigManager) ApproveModelImport(uid, reviewID, actor string, allowEm
 	state.Policy.Enabled = true
 	state.Approved = state.Pending.Models
 	state.Pending = nil
-	appendImportAudit(state, actor, "approve", reviewID)
+	appendImportAudit(state, actor, "approve", reviewID, auditContext.OperationID)
 	channel.ModelImport = state
 	channel.SupportedModels = make([]string, 0, len(state.Approved))
 	for _, item := range state.Approved {
 		channel.SupportedModels = append(channel.SupportedModels, item.UpstreamID)
 	}
-	if err = cm.saveConfigLocked(cm.config); err != nil {
+	if err = cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		return view, err
 	}
 	return modelImportView(cm.modelImportChannelLocked(uid)), nil
@@ -554,7 +558,8 @@ func (cm *ConfigManager) ModelImportInventoryRevision() string {
 // RemoveModelImport explicitly restores legacy automatic configuration writes.
 // Keep the current supported-model rules; broadening an empty list to legacy
 // unrestricted admission requires a separate acknowledgement.
-func (cm *ConfigManager) RemoveModelImport(uid, expected, actor string, allowUnrestricted bool) (view ModelImportView, err error) {
+func (cm *ConfigManager) RemoveModelImportAudited(auditContext ManagementAuditContext, uid, expected, actor string, allowUnrestricted bool) (view ModelImportView, err error) {
+	auditContext = auditContext.normalized()
 	if actor == "" || len(actor) > 256 {
 		return view, invalidModelImport("model import removal requires an authenticated actor")
 	}
@@ -577,8 +582,24 @@ func (cm *ConfigManager) RemoveModelImport(uid, expected, actor string, allowUnr
 		}
 	}()
 	channel.ModelImport = nil
-	if err = cm.saveConfigLocked(cm.config); err != nil {
+	if err = cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		return view, err
 	}
 	return modelImportView(cm.modelImportChannelLocked(uid)), nil
+}
+
+func (cm *ConfigManager) SetModelImportPolicy(uid, expected string, policy ModelImportPolicy, actor string) (view ModelImportView, err error) {
+	return cm.SetModelImportPolicyAudited(ManagementAuditContext{}, uid, expected, policy, actor)
+}
+
+func (cm *ConfigManager) StageModelImport(uid string, candidates []ModelImportCandidate, source string, expectedRevision ...string) (review ModelImportReview, err error) {
+	return cm.StageModelImportAudited(ManagementAuditContext{}, uid, candidates, source, expectedRevision...)
+}
+
+func (cm *ConfigManager) ApproveModelImport(uid, reviewID, actor string, allowEmpty, allowRemovals bool) (view ModelImportView, err error) {
+	return cm.ApproveModelImportAudited(ManagementAuditContext{}, uid, reviewID, actor, allowEmpty, allowRemovals)
+}
+
+func (cm *ConfigManager) RemoveModelImport(uid, expected, actor string, allowUnrestricted bool) (view ModelImportView, err error) {
+	return cm.RemoveModelImportAudited(ManagementAuditContext{}, uid, expected, actor, allowUnrestricted)
 }

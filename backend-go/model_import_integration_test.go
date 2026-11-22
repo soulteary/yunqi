@@ -212,3 +212,50 @@ func TestModelImportScopedAPIAndStaleReview(t *testing.T) {
 		}
 	}
 }
+
+func TestManagementAuditModelImportHTTPKeepsFourMutationActors(t *testing.T) {
+	a := newRouteTestApplication(t, true, "production")
+	if err := a.cfgManager.AddChatUpstream(config.UpstreamConfig{ChannelUID: "audit-model", Name: "audit-model", BaseURL: "https://provider.invalid", APIKeys: []string{"provider-secret"}, ServiceType: "openai", Status: "active"}); err != nil {
+		t.Fatal(err)
+	}
+	handler := httpbridge.Handler(a.newRouter())
+	invoke := func(method, suffix, body, revision string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, "/api/channels/audit-model/model-import"+suffix, strings.NewReader(body))
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("x-api-key", "route-admin")
+		r.Header.Set("If-Match", revision)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, r)
+		if w.Code != 200 {
+			t.Fatalf("%s %s: %d %s", method, suffix, w.Code, w.Body.String())
+		}
+		op := w.Header().Get("X-Yunqi-Audit-Operation")
+		if op == "" {
+			t.Fatal("missing operation")
+		}
+		phases := map[string]bool{}
+		for _, event := range a.cfgManager.ManagementAuditSnapshot().Events {
+			if event.OperationID == op {
+				if event.ActorID != "owner:"+config.EntryKeyHash("route-admin") {
+					t.Fatal("HTTP model actor became system")
+				}
+				phases[event.Outcome] = true
+			}
+		}
+		if !phases["intent"] || !phases["committed"] || !phases["completed"] {
+			t.Fatal("model mutation missed persistent phases", phases)
+		}
+		return w
+	}
+	view, _ := a.cfgManager.GetModelImport("audit-model")
+	invoke("PUT", "/policy", `{"enabled":false}`, view.Revision)
+	view, _ = a.cfgManager.GetModelImport("audit-model")
+	w := invoke("POST", "/preview", `{"models":[{"id":"safe-model"}]}`, view.Revision)
+	var review config.ModelImportReview
+	if err := json.Unmarshal(w.Body.Bytes(), &review); err != nil {
+		t.Fatal(err)
+	}
+	invoke("POST", "/approve", `{"reviewId":"`+review.ID+`"}`, "")
+	view, _ = a.cfgManager.GetModelImport("audit-model")
+	invoke("DELETE", "", `{"allowUnrestricted":true}`, view.Revision)
+}
