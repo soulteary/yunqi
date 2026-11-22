@@ -198,3 +198,62 @@ func TestOutputAliasesCannotChangeSnapshotSources(t *testing.T) {
 		t.Fatalf("source bundle changed: %v", err)
 	}
 }
+
+func TestRelativePathsBackupVerifyRestoreSQLite(t *testing.T) {
+	opts, root := fixture(t)
+	db, err := sql.Open("sqlite", filepath.Join(opts.StateDir, "metrics.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec("CREATE TABLE values_saved(value INTEGER); INSERT INTO values_saved VALUES(42)"); err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Close()
+	t.Chdir(root)
+	opts.ConfigPath = filepath.Join("settings", "config.json")
+	opts.StateDir = "state"
+	opts.SecretsPath = "secrets.env"
+	if err = Backup(opts, "bundle"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = Verify("bundle"); err != nil {
+		t.Fatal(err)
+	}
+	if err = Restore("bundle", "restored"); err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := openDB(filepath.Join("restored", "state", "metrics.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer recovered.Close()
+	var value int
+	if err = recovered.QueryRow("SELECT value FROM values_saved").Scan(&value); err != nil || value != 42 {
+		t.Fatalf("value=%d err=%v", value, err)
+	}
+}
+func TestAcquireDeduplicatesDirectoryAliases(t *testing.T) {
+	opts, root := fixture(t)
+	alias := filepath.Join(root, "config-alias")
+	if err := os.Symlink(opts.StateDir, alias); err != nil {
+		t.Skip(err)
+	}
+	l, err := Acquire(filepath.Join(alias, "config.json"), opts.StateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(l.files) != 1 {
+		t.Fatal("same directory locked twice")
+	}
+	if _, err = Acquire(filepath.Join(alias, "config.json"), opts.StateDir); !errors.Is(err, ErrBusy) {
+		t.Fatalf("other instance admitted: %v", err)
+	}
+	if err = l.Close(); err != nil {
+		t.Fatal(err)
+	}
+	l, err = Acquire(filepath.Join(alias, "config.json"), opts.StateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = l.Close()
+}

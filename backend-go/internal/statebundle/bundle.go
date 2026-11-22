@@ -225,7 +225,11 @@ func isSQLite(path string) (bool, error) {
 	return string(b) == "SQLite format 3\x00", e
 }
 func openDB(path string) (*sql.DB, error) {
-	u := url.URL{Scheme: "file", Path: path}
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+	u := url.URL{Scheme: "file", Path: absolute}
 	q := url.Values{"mode": {"ro"}, "_pragma": {"busy_timeout(5000)"}}
 	u.RawQuery = q.Encode()
 	db, e := sql.Open("sqlite", u.String())

@@ -18,7 +18,14 @@ type Lock struct{ files []*os.File }
 func Acquire(configPath, stateDir string) (*Lock, error) {
 	dirs := []string{filepath.Dir(configPath), stateDir}
 	for i, d := range dirs {
-		a, err := filepath.Abs(d)
+		if err := os.MkdirAll(d, 0700); err != nil {
+			return nil, err
+		}
+		real, err := filepath.EvalSymlinks(d)
+		if err != nil {
+			return nil, err
+		}
+		a, err := filepath.Abs(real)
 		if err != nil {
 			return nil, err
 		}
