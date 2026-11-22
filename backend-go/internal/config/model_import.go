@@ -79,6 +79,7 @@ type ModelImportView struct {
 	ChannelUID           string           `json:"channelUid"`
 	Revision             string           `json:"revision"`
 	State                ModelImportState `json:"state"`
+	Configured           bool             `json:"configured"`
 	UnrestrictedOnRemove bool             `json:"unrestrictedOnRemove"`
 }
 
@@ -333,7 +334,7 @@ func modelImportView(channel *UpstreamConfig) ModelImportView {
 	if state == nil {
 		state = &ModelImportState{}
 	}
-	return ModelImportView{ChannelUID: channel.ChannelUID, Revision: modelImportRevision(channel), State: *state, UnrestrictedOnRemove: len(channel.SupportedModels) == 0}
+	return ModelImportView{ChannelUID: channel.ChannelUID, Revision: modelImportRevision(channel), State: *state, Configured: channel.ModelImport != nil, UnrestrictedOnRemove: len(channel.SupportedModels) == 0}
 }
 func (cm *ConfigManager) GetModelImport(uid string) (ModelImportView, error) {
 	cm.mu.RLock()

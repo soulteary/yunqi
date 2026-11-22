@@ -1,13 +1,18 @@
 package autopilot
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"github.com/soulteary/yunqi/internal/httpbridge"
+	"io"
+	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/soulteary/yunqi/internal/config"
 )
@@ -135,5 +140,64 @@ func TestModelImportDraftDiscoveryDoesNotWriteWhitelistOrStaleItself(t *testing.
 	}
 	if _, err = cm.ApproveModelImport("governed", staged.State.Pending.ID, "admin", false, false); err != nil {
 		t.Fatalf("first discovery invalidated its own draft: %v", err)
+	}
+}
+
+type modelImportRoundTrip func(*http.Request) (*http.Response, error)
+
+func (f modelImportRoundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+func TestModelImportLegacyDiscoveryReportsStaleStage(t *testing.T) {
+	cm := setupTestConfigManagerForDiscovery(t, "governed", []string{"legacy"})
+	view, _ := cm.GetModelImport("governed")
+	if _, err := cm.SetModelImportPolicy("governed", view.Revision, config.ModelImportPolicy{Enabled: false}, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	channel := cm.GetConfig().Upstream[0]
+	runner := NewAutoDiscoveryRunner(nil, nil)
+	var once sync.Once
+	runner.client = &http.Client{Transport: modelImportRoundTrip(func(r *http.Request) (*http.Response, error) {
+		once.Do(func() {
+			description := "concurrent edit"
+			if _, err := cm.UpdateUpstream(0, config.UpstreamUpdate{Description: &description}); err != nil {
+				t.Error(err)
+			}
+		})
+		raw := `{"object":"list","data":[{"id":"raw","object":"model"}],"id":"chat","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(raw)), Request: r}, nil
+	})}
+	task := &DiscoveryTask{ChannelUID: "governed"}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	runner.runDiscoveryLegacy(ctx, task, &channel, cm)
+	if task.Status != DiscoveryStatusFailed || !strings.Contains(task.Error, "review") {
+		t.Fatalf("legacy discovery hid staging failure: status=%s error=%s", task.Status, task.Error)
+	}
+	state, _ := cm.GetModelImport("governed")
+	if state.State.Pending != nil {
+		t.Fatal("stale legacy evidence staged")
+	}
+}
+
+func TestModelImportPolicyAddedDuringLegacyDiscoveryBlocksOldSnapshotWrites(t *testing.T) {
+	cm := setupTestConfigManagerForDiscovery(t, "governed", nil)
+	legacy := false
+	if _, err := cm.UpdateUpstream(0, config.UpstreamUpdate{AutoManaged: &legacy}); err != nil {
+		t.Fatal(err)
+	}
+	source := cm.GetConfig().Upstream[0]
+	view, _ := cm.GetModelImport(source.ChannelUID)
+	if _, err := cm.SetModelImportPolicy(source.ChannelUID, view.Revision, config.ModelImportPolicy{Enabled: false}, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	runner := NewAutoDiscoveryRunner(nil, nil)
+	endpoints := []EndpointDiscoveryResult{{ProtocolOk: true, Models: []string{"discovered"}, usedClientFingerprint: true}}
+	writeErr := runner.maybeAutoWriteChannelConfig(source.ChannelUID, &source, endpoints, cm)
+	runner.maybeLearnClientFingerprint(source.ChannelUID, &source, endpoints, cm)
+	current := cm.GetConfig().Upstream[0]
+	if len(current.SupportedModels) > 0 || current.LearnedClientFingerprint {
+		t.Fatalf("old discovery changed new draft: models=%v fingerprint=%v", current.SupportedModels, current.LearnedClientFingerprint)
+	}
+	if !errors.Is(writeErr, config.ErrModelImportConflict) {
+		t.Fatalf("stale legacy source was not rejected: %v", writeErr)
 	}
 }

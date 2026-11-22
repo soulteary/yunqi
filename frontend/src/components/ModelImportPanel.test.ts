@@ -44,7 +44,12 @@ function review(id = 'review-a') {
   }
 }
 function view(uid: string, pending = review()) {
-  return { channelUid: uid, revision: `rev-${uid}`, state: { policy: { enabled: false }, approved: [], pending } }
+  return {
+    configured: true,
+    channelUid: uid,
+    revision: `rev-${uid}`,
+    state: { policy: { enabled: false }, approved: [], pending }
+  }
 }
 function setup() {
   const channels = [
@@ -171,5 +176,23 @@ describe('independent reviewed model catalog', () => {
     await click(wrapper, 'removePolicy')
     expect(mocks.removeModelImport).toHaveBeenCalledExactlyOnceWith('a', 'chat', 'rev-a', true)
     expect(wrapper.text()).not.toContain('modelImport.approve')
+  })
+  it('requires persisted governance before discovery on a channel without policy', async () => {
+    mocks.getModelImport.mockResolvedValue({
+      ...view('a'),
+      configured: false,
+      state: { policy: { enabled: false }, approved: [] }
+    })
+    const wrapper = setup()
+    await wrapper.find('input[aria-label="modelImport.channel"]').setValue('a')
+    await click(wrapper, 'load')
+    expect(
+      wrapper
+        .findAll('button')
+        .find(button => button.text() === 'modelImport.discover')!
+        .attributes('disabled')
+    ).toBeDefined()
+    await click(wrapper, 'discover')
+    expect(mocks.discover).not.toHaveBeenCalled()
   })
 })

@@ -251,7 +251,9 @@ watch(modelText, () => {
   allowRemovals.value = false
 })
 const dirtyPolicy = computed(
-  () => !!view.value && normalizedPolicy(currentPolicy()) !== normalizedPolicy(view.value.state.policy)
+  () =>
+    !!view.value &&
+    (!view.value.configured || normalizedPolicy(currentPolicy()) !== normalizedPolicy(view.value.state.policy))
 )
 function apply(value: ModelImportView) {
   allowUnrestricted.value = false

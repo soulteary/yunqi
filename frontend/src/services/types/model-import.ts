@@ -32,6 +32,7 @@ export interface ModelImportReview {
 }
 export interface ModelImportView {
   unrestrictedOnRemove?: boolean
+  configured: boolean
   channelUid: string
   revision: string
   state: {

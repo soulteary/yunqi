@@ -1107,10 +1107,7 @@ func TestMaybeAutoWriteChannelConfig_TableDriven(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cfgManager := setupTestConfigManagerForDiscovery(t, tt.channelUID, tt.supportedModels)
 			runner := NewAutoDiscoveryRunner(nil, nil)
-			channel := &config.UpstreamConfig{
-				ChannelUID:      tt.channelUID,
-				SupportedModels: tt.supportedModels,
-			}
+			channel := legacyDiscoverySource(t, cfgManager)
 
 			runner.maybeAutoWriteChannelConfig(tt.channelUID, channel, tt.endpoints, cfgManager)
 
@@ -1578,4 +1575,16 @@ func TestReconcileModelProfilesFromEndpoints(t *testing.T) {
 	if got := modelStore.Get(channelUID, "messages", metricsKey, "kimi-k2.7-code"); got == nil {
 		t.Fatal("清单内模型画像应保留")
 	}
+}
+
+// Production discovery starts with a persisted full snapshot. Legacy-auto-write
+// tests explicitly opt out of automatic-account migration before taking it.
+func legacyDiscoverySource(t *testing.T, cm *config.ConfigManager) *config.UpstreamConfig {
+	t.Helper()
+	legacy := false
+	if _, err := cm.UpdateUpstream(0, config.UpstreamUpdate{AutoManaged: &legacy}); err != nil {
+		t.Fatal(err)
+	}
+	cfg := cm.GetConfig()
+	return cfg.Upstream[0].Clone()
 }
