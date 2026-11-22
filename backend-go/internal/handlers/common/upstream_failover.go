@@ -1921,14 +1921,13 @@ func TryUpstreamWithAllKeys(
 			// 竞争；claim 败者的头随 Discard 丢弃，不会并入真实客户端 writer。
 			writeEchoMappingHeaders(c, cfgManager, appliedMappedModel, actualAttemptModel, model)
 
-			var drainSetupErr error
-			if drainLifetime != nil {
-				drainSetupErr = utils.DecompressResponseBodyIfNeeded(resp)
-			}
+			// Capture decoded provider usage even when post-cancel drain is disabled.
+			// The helper clears encoding metadata, so handler decompression stays idempotent.
+			compressionSetupErr := utils.DecompressResponseBodyIfNeeded(resp)
 			capture := &usageCapture{ReadCloser: resp.Body, stream: strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream")}
 			resp.Body = capture
 			var drainBody *usageDrainBody
-			if drainLifetime != nil && drainSetupErr == nil {
+			if drainLifetime != nil && compressionSetupErr == nil {
 				capture.stream = true // the request is streaming even if the provider mislabels Content-Type
 				drainBody = newUsageDrainBody(capture, drainLifetime)
 				resp.Body = drainBody
@@ -1937,7 +1936,7 @@ func TryUpstreamWithAllKeys(
 			if drainBody != nil {
 				httpbridge.SetWriter(c, &usageDrainWriter{ResponseWriter: originalWriter, client: drainLifetime.client})
 			}
-			if drainSetupErr != nil {
+			if compressionSetupErr != nil {
 				usage = nil
 				err = fmt.Errorf("%w: invalid upstream compression", ErrInvalidResponseBody)
 			} else if isStream {
