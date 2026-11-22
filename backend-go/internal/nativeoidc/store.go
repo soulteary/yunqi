@@ -12,6 +12,8 @@ import (
 	"github.com/soulteary/yunqi/internal/redisconn"
 )
 
+const maxPendingFlows = 4096
+
 var errUnavailable = errors.New("native identity unavailable")
 var errInvalid = errors.New("invalid native identity")
 
@@ -47,7 +49,7 @@ func (s *storage) close() error {
 }
 func (s *storage) put(ctx context.Context, key, value, subject string, expires int64) error {
 	now := time.Now().Unix()
-	if expires <= now {
+	if expires <= now || (subject == "" && expires-now > 300) {
 		return errInvalid
 	}
 	if s.redis != nil {
@@ -69,6 +71,13 @@ if ARGV[4] ~= '' then
  redis.call('EXPIRE',idx,86400)
  local old=redis.call('ZRANGE',idx,0,-21)
  for _,v in ipairs(old) do redis.call('DEL',v);redis.call('ZREM',idx,v) end
+else
+ local clock=redis.call('TIME')
+ local now=tonumber(clock[1])+tonumber(clock[2])/1000000
+ redis.call('ZREMRANGEBYSCORE',idx,'-inf',now)
+ if redis.call('ZCARD',idx) >= tonumber(ARGV[3]) then return 0 end
+ redis.call('ZADD',idx,now+tonumber(ARGV[2])+1,k)
+ redis.call('EXPIRE',idx,302)
 end
 redis.call('SET',k,ARGV[1],'EX',ARGV[2])
 return 1`)
@@ -77,7 +86,7 @@ return 1`)
 			slot = "flows"
 		}
 		base := s.prefix + "{" + slot + "}:"
-		result, err := script.Run(ctx, s.redis, []string{base + key, base + "sessions", base + "issued"}, value, expires-now, time.Now().UnixMicro(), subject, now).Int()
+		result, err := script.Run(ctx, s.redis, []string{base + key, base + "sessions", base + "issued"}, value, expires-now, maxPendingFlows, subject).Int()
 		if err != nil || result != 1 {
 			return errUnavailable
 		}
@@ -118,7 +127,7 @@ return 1`)
 			delete(s.local, oldest)
 		}
 	}
-	if len(s.local) >= 4096 {
+	if len(s.local) >= maxPendingFlows {
 		return errUnavailable
 	}
 	s.local[key] = record{Value: value, Expires: expires, Subject: subject, Created: time.Now().UnixNano()}
@@ -134,7 +143,11 @@ func (s *storage) get(ctx context.Context, key, subject string, consume bool) (s
 		var value string
 		var err error
 		if consume {
-			value, err = s.redis.GetDel(ctx, k).Result()
+			value, err = redis.NewScript(`
+local value=redis.call('GET',KEYS[1])
+redis.call('DEL',KEYS[1])
+redis.call('ZREM',KEYS[2],KEYS[1])
+return value`).Run(ctx, s.redis, []string{k, s.prefix + "{" + slot + "}:sessions"}).Text()
 		} else {
 			value, err = s.redis.Get(ctx, k).Result()
 		}

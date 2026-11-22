@@ -115,11 +115,6 @@ func (m *Manager) Begin(ctx context.Context) (authURL, browser string, err error
 	if !m.unchanged() {
 		return "", "", errUnavailable
 	}
-	p, ctx, err := m.provider(ctx)
-	if err != nil {
-		return "", "", err
-	}
-	_ = ctx
 	state, err := random()
 	if err != nil {
 		return "", "", err
@@ -138,6 +133,11 @@ func (m *Manager) Begin(ctx context.Context) (authURL, browser string, err error
 	}
 	f := flow{Policy: m.policy, Epoch: m.revocationEpoch, Nonce: nonce, Verifier: verifier, Browser: hash(browser), Expires: time.Now().Add(5 * time.Minute).Unix()}
 	if err = m.store.put(ctx, "flow:"+hash(state), marshal(f), "", f.Expires); err != nil {
+		return "", "", err
+	}
+	p, _, err := m.provider(ctx)
+	if err != nil {
+		_, _ = m.store.get(ctx, "flow:"+hash(state), "", true)
 		return "", "", err
 	}
 	oauth := m.oauth(p)

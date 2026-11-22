@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -24,6 +25,7 @@ type fakeIDP struct {
 	claims           map[string]interface{}
 	key              *rsa.PrivateKey
 	calls            int
+	discoveryCalls   int
 	tokenEndpoint    string
 	keysEndpoint     string
 }
@@ -39,6 +41,7 @@ func fakeProvider(t *testing.T) (*Manager, *fakeIDP, *config.IdentityProxyConfig
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/.well-known/openid-configuration":
+			idp.discoveryCalls++
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{"issuer": idp.server.URL, "authorization_endpoint": idp.server.URL + "/authorize", "token_endpoint": idp.tokenURL(), "jwks_uri": idp.keysURL(), "id_token_signing_alg_values_supported": []string{"RS256"}})
 		case "/keys":
 			_ = json.NewEncoder(w).Encode(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{Key: &key.PublicKey, KeyID: "test", Algorithm: "RS256", Use: "sig"}}})
@@ -304,5 +307,18 @@ func TestOIDCAssurancePolicyChangeInvalidatesExistingSessions(t *testing.T) {
 	fresh.store.local = m.store.local
 	if _, err = fresh.Lookup(context.Background(), cookie); err == nil {
 		t.Fatal("stronger policy accepted low-assurance session")
+	}
+}
+
+func TestOIDCFlowSaturationDoesNotCallIdentityProvider(t *testing.T) {
+	m, idp, _ := fakeProvider(t)
+	for i := 0; i < maxPendingFlows; i++ {
+		m.store.local[strconv.Itoa(i)] = record{Value: "occupied", Expires: time.Now().Add(time.Minute).Unix()}
+	}
+	if _, _, err := m.Begin(context.Background()); !IsUnavailable(err) {
+		t.Fatal("full pending-flow store admitted login", err)
+	}
+	if idp.discoveryCalls != 0 {
+		t.Fatal("full pending-flow store still called discovery")
 	}
 }

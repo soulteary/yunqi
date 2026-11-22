@@ -992,3 +992,5 @@ Redis 此处只共享入口并发/RPM，不复制配置或 SQLite 预算账本�
 组映射复用持久配置 `identityProxy.groupMappings`，原生 OIDC 不要求启用身份代理或设置 `IDENTITY_PROXY_SECRET`。`identityProxy.revocationMode`、revocationEpoch 与已有身份撤销 Redis 后端同时约束原生会话。共享模式需在启用前完成现有撤销 realm 初始化；各节点保持 OIDC 配置、namespace、组映射与撤销策略一致。修改环境变量或 local/shared 存储模式后需手动重启，以重建原生后端；模式不匹配期间拒绝登录/鉴权。所有 IdP 请求遵循全局出站策略，发现或 Token/JWKS 重定向不会绕过网络限制；Token 端点重定向会被拒绝。
 
 认证强度策略摘要与撤销 epoch 均绑定到服务端会话和共享存储 realm；收紧认证强度并重启后不会沿用旧的低强度会话。组映射与较短的 MaxSessionSeconds 每次鉴权重新应用。
+
+匿名待完成登录流程每个 realm 最多 4096 个、最长 5 分钟；共享 Redis 使用服务器时间和过期索引约束总量，消费即释放容量。饱和时在请求 IdP 之前拒绝，消费或过期清理后恢复。

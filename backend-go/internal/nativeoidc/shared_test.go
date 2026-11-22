@@ -197,3 +197,46 @@ func TestOIDCSharedSessionCapacityAndIssuanceAreAtomic(t *testing.T) {
 		t.Fatal("rejected shared login evicted live session", err)
 	}
 }
+
+func TestOIDCSharedPendingFlowsAreBoundedAndRecover(t *testing.T) {
+	newClient := isolatedRedis(t)
+	first := &storage{redis: newClient(), prefix: "oidc-flow-bound:"}
+	defer first.close()
+	second := &storage{redis: newClient(), prefix: "oidc-flow-bound:"}
+	defer second.close()
+	ctx := context.Background()
+	expires := time.Now().Add(5 * time.Minute).Unix()
+	for i := 0; i < maxPendingFlows; i++ {
+		store := first
+		if i%2 == 1 {
+			store = second
+		}
+		if err := store.put(ctx, "flow:"+strconv.Itoa(i), "value", "", expires); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := second.put(ctx, "extra", "value", "", expires); err == nil {
+		t.Fatal("shared anonymous flow count was unbounded")
+	}
+	if _, err := first.get(ctx, "flow:0", "", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := second.put(ctx, "after-consume", "value", "", expires); err != nil {
+		t.Fatal("consuming flow did not restore capacity", err)
+	}
+	// Expiration uses Redis TIME and indexed server expiry, independently of node
+	// wall clocks. Model an expired key whose index member awaits lazy cleanup.
+	base := first.prefix + "{flows}:"
+	if err := first.redis.Del(ctx, base+"flow:1").Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.redis.ZAdd(ctx, base+"sessions", redis.Z{Score: 0, Member: base + "flow:1"}).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := second.put(ctx, "after-expiry", "value", "", expires); err != nil {
+		t.Fatal("expired indexed flow did not restore capacity", err)
+	}
+	if got := first.redis.ZCard(ctx, base+"sessions").Val(); got != maxPendingFlows {
+		t.Fatalf("flow index count=%d", got)
+	}
+}
