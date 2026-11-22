@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/soulteary/yunqi/internal/entrybudget"
+	"github.com/soulteary/yunqi/internal/entrylease"
 	"os"
 	"strconv"
 	"strings"
@@ -12,6 +13,11 @@ import (
 )
 
 type EnvConfig struct {
+	ProxyRedisURL             string `json:"-"`
+	ProxyRedisNamespace       string
+	ProxyRedisLeaseSeconds    int
+	ProxyRedisMaxRPM          int
+	ProxyRedisAdmission       *entrylease.Manager  `json:"-"`
 	BudgetManager             *entrybudget.Manager `json:"-"`
 	StrictSessionAffinity     bool
 	IdentityProxySecret       string                               `json:"-"`
@@ -78,30 +84,34 @@ func NewEnvConfig() *EnvConfig {
 	}
 
 	return &EnvConfig{
-		StrictSessionAffinity: getEnv("YUNQI_STRICT_SESSION_AFFINITY", "false") == "true",
-		IdentityProxySecret:   getEnv("IDENTITY_PROXY_SECRET", ""),
-		Port:                  getEnvAsInt("PORT", 3000),
-		BindHost:              strings.TrimSpace(getEnv("BIND_HOST", "")),
-		Env:                   env,
-		EnableHTTPS:           getEnv("ENABLE_HTTPS", "false") == "true",
-		TLSCertFile:           getEnv("TLS_CERT_FILE", ""),
-		TLSKeyFile:            getEnv("TLS_KEY_FILE", ""),
-		TLSAutoCert:           getEnv("TLS_AUTO_CERT", "true") != "false",
-		EnableWebUI:           getEnv("ENABLE_WEB_UI", "true") != "false",
-		UILanguage:            normalizeUILanguage(getEnv("APP_UI_LANGUAGE", "zh-CN")),
-		ProxyPrincipalIDs:     parseProxyPrincipalIDs(getEnv("PROXY_PRINCIPAL_IDS", "")),
-		ProxyMaxConcurrency:   max(0, getEnvAsInt("PROXY_MAX_CONCURRENCY", 0)),
-		ProxyAccessKey:        getEnv("PROXY_ACCESS_KEY", "your-proxy-access-key"),
-		ExtraProxyAccessKeys:  parseExtraProxyAccessKeys(getEnv("EXTRA_PROXY_ACCESS_KEYS", "")),
-		AdminAccessKey:        getEnv("ADMIN_ACCESS_KEY", ""), // 空值时回退到 ProxyAccessKey
-		LogLevel:              getEnv("LOG_LEVEL", "info"),
-		EnableRequestLogs:     getEnv("ENABLE_REQUEST_LOGS", "true") != "false",
-		EnableResponseLogs:    getEnv("ENABLE_RESPONSE_LOGS", "true") != "false",
-		QuietPollingLogs:      getEnv("QUIET_POLLING_LOGS", "true") != "false",
-		RawLogOutput:          getEnv("RAW_LOG_OUTPUT", "false") == "true",
-		SSEDebugLevel:         getEnv("SSE_DEBUG_LEVEL", "off"),
-		RewriteResponseModel:  getEnv("REWRITE_RESPONSE_MODEL", "false") == "true",
-		ServerReadTimeout:     clampInt(getEnvAsInt("SERVER_READ_TIMEOUT", 60000), 10000, 300000),
+		StrictSessionAffinity:  getEnv("YUNQI_STRICT_SESSION_AFFINITY", "false") == "true",
+		IdentityProxySecret:    getEnv("IDENTITY_PROXY_SECRET", ""),
+		Port:                   getEnvAsInt("PORT", 3000),
+		BindHost:               strings.TrimSpace(getEnv("BIND_HOST", "")),
+		Env:                    env,
+		EnableHTTPS:            getEnv("ENABLE_HTTPS", "false") == "true",
+		TLSCertFile:            getEnv("TLS_CERT_FILE", ""),
+		TLSKeyFile:             getEnv("TLS_KEY_FILE", ""),
+		TLSAutoCert:            getEnv("TLS_AUTO_CERT", "true") != "false",
+		EnableWebUI:            getEnv("ENABLE_WEB_UI", "true") != "false",
+		UILanguage:             normalizeUILanguage(getEnv("APP_UI_LANGUAGE", "zh-CN")),
+		ProxyPrincipalIDs:      parseProxyPrincipalIDs(getEnv("PROXY_PRINCIPAL_IDS", "")),
+		ProxyMaxConcurrency:    max(0, getEnvAsInt("PROXY_MAX_CONCURRENCY", 0)),
+		ProxyRedisURL:          getEnv("PROXY_REDIS_URL", ""),
+		ProxyRedisNamespace:    getEnv("PROXY_REDIS_NAMESPACE", "yunqi"),
+		ProxyRedisLeaseSeconds: getEnvAsInt("PROXY_REDIS_LEASE_SECONDS", 30),
+		ProxyRedisMaxRPM:       max(0, getEnvAsInt("PROXY_REDIS_MAX_RPM", 0)),
+		ProxyAccessKey:         getEnv("PROXY_ACCESS_KEY", "your-proxy-access-key"),
+		ExtraProxyAccessKeys:   parseExtraProxyAccessKeys(getEnv("EXTRA_PROXY_ACCESS_KEYS", "")),
+		AdminAccessKey:         getEnv("ADMIN_ACCESS_KEY", ""), // 空值时回退到 ProxyAccessKey
+		LogLevel:               getEnv("LOG_LEVEL", "info"),
+		EnableRequestLogs:      getEnv("ENABLE_REQUEST_LOGS", "true") != "false",
+		EnableResponseLogs:     getEnv("ENABLE_RESPONSE_LOGS", "true") != "false",
+		QuietPollingLogs:       getEnv("QUIET_POLLING_LOGS", "true") != "false",
+		RawLogOutput:           getEnv("RAW_LOG_OUTPUT", "false") == "true",
+		SSEDebugLevel:          getEnv("SSE_DEBUG_LEVEL", "off"),
+		RewriteResponseModel:   getEnv("REWRITE_RESPONSE_MODEL", "false") == "true",
+		ServerReadTimeout:      clampInt(getEnvAsInt("SERVER_READ_TIMEOUT", 60000), 10000, 300000),
 
 		RequestTimeout:     clampInt(getEnvAsInt("REQUEST_TIMEOUT", 300000), MinRequestTimeoutMs, MaxRequestTimeoutMs),
 		MaxRequestBodySize: getEnvAsInt64("MAX_REQUEST_BODY_SIZE_MB", 50) * 1024 * 1024, // MB 转换为字节
