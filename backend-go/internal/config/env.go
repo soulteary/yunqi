@@ -5,11 +5,11 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
-	"github.com/soulteary/yunqi/internal/entrybudget"
-	"os"
-	"strconv"
 	"strings"
 	"time"
+
+	clienv "github.com/soulteary/cli-kit/env"
+	"github.com/soulteary/yunqi/internal/entrybudget"
 )
 
 type EnvConfig struct {
@@ -356,42 +356,24 @@ func (c *EnvConfig) ShouldLog(level string) bool {
 	return requestLevel <= currentLevel
 }
 
-// getEnv 获取环境变量，如果不存在则返回默认值
+// getEnv returns the fallback for unset or empty environment variables.
 func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
+	return clienv.Get(key, defaultValue)
 }
 
-// getEnvAsInt 获取环境变量并转换为整数
+// getEnvAsInt retrieves an integer without changing fallback or whitespace handling.
 func getEnvAsInt(key string, defaultValue int) int {
-	if value := os.Getenv(key); value != "" {
-		if intValue, err := strconv.Atoi(value); err == nil {
-			return intValue
-		}
-	}
-	return defaultValue
+	return clienv.GetInt(key, defaultValue)
 }
 
-// getEnvAsInt64 获取环境变量并转换为 int64
+// getEnvAsInt64 retrieves a base-10 signed integer.
 func getEnvAsInt64(key string, defaultValue int64) int64 {
-	if value := os.Getenv(key); value != "" {
-		if intValue, err := strconv.ParseInt(value, 10, 64); err == nil {
-			return intValue
-		}
-	}
-	return defaultValue
+	return clienv.GetInt64(key, defaultValue)
 }
 
-// getEnvAsFloat 获取环境变量并转换为浮点数
+// getEnvAsFloat retrieves a float64, falling back when parsing fails.
 func getEnvAsFloat(key string, defaultValue float64) float64 {
-	if value := os.Getenv(key); value != "" {
-		if floatValue, err := strconv.ParseFloat(value, 64); err == nil {
-			return floatValue
-		}
-	}
-	return defaultValue
+	return clienv.GetFloat64(key, defaultValue)
 }
 
 // clampInt 将整数限制在指定范围内
