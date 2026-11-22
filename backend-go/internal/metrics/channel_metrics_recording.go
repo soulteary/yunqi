@@ -210,6 +210,8 @@ func (m *MetricsManager) recordRequestConnectedInternal(baseURL, apiKey, service
 
 // RequestCostContext 是在请求开始时固化的计费身份与汇率上下文。
 type RequestCostContext struct {
+	PrincipalID string
+
 	KeyUID                  string
 	SubscriptionUID         string
 	ExchangeSnapshotVersion uint64
@@ -237,6 +239,7 @@ func (m *MetricsManager) RecordRequestConnectedWithCostContext(baseURL, apiKey, 
 		return requestID
 	}
 	record := &metrics.requestHistory[idx]
+	record.PrincipalID = storedPrincipalID(cost.PrincipalID)
 	record.KeyUID = cost.KeyUID
 	record.SubscriptionUID = cost.SubscriptionUID
 	record.ExchangeSnapshotVersion = cost.ExchangeSnapshotVersion
@@ -408,6 +411,7 @@ func (m *MetricsManager) RecordRequestFinalizeOutcome(baseURL, apiKey, serviceTy
 
 		if m.store != nil {
 			m.store.AddRecord(PersistentRecord{
+				PrincipalID:               record.PrincipalID,
 				UsageProvenance:           record.UsageProvenance,
 				PricingVersionID:          record.PricingVersionID,
 				ChannelUID:                record.ChannelUID,
@@ -456,6 +460,7 @@ func (m *MetricsManager) RecordRequestFinalizeOutcome(baseURL, apiKey, serviceTy
 
 	if m.store != nil {
 		m.store.AddRecord(PersistentRecord{
+			PrincipalID:         record.PrincipalID,
 			PricingVersionID:    record.PricingVersionID,
 			MetricsKey:          metrics.MetricsKey,
 			BaseURL:             metrics.BaseURL,

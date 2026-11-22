@@ -17,6 +17,8 @@ var ErrHistoryCursor = errors.New("invalid history cursor")
 // RequestHistoryQuery selects persisted metadata only. Cursor is bound to filters
 // and a high-water ID, so inserts during paging cannot shift or duplicate pages.
 type RequestHistoryQuery struct {
+	PrincipalID string
+
 	APIType       string
 	Model         string
 	ChannelUID    string
@@ -27,6 +29,9 @@ type RequestHistoryQuery struct {
 	Cursor        string
 }
 type RequestHistoryEntry struct {
+	PrincipalID    string `json:"principalId"`
+	PrincipalLabel string `json:"principalLabel"`
+
 	PricingVersionID string                 `json:"pricingVersionId"`
 	UsageProvenance  *types.UsageProvenance `json:"usageProvenance"`
 	ID               int64                  `json:"id"`
@@ -52,7 +57,13 @@ type historyCursor struct {
 }
 
 func (q RequestHistoryQuery) fingerprint() string {
-	b, _ := json.Marshal([]any{q.APIType, q.Model, q.ChannelUID, q.CorrelationID, q.Since.Unix(), q.Until.Unix()})
+	// Keep the existing unscoped cursor protocol stable across this additive
+	// filter. New scoped cursors include a distinct principal component.
+	fields := []any{q.APIType, q.Model, q.ChannelUID, q.CorrelationID, q.Since.Unix(), q.Until.Unix()}
+	if q.PrincipalID != "" {
+		fields = append(fields, "principal", q.PrincipalID)
+	}
+	b, _ := json.Marshal(fields)
 	return fmt.Sprintf("%x", sha256.Sum256(b))
 }
 func (s *SQLiteStore) QueryRequestHistory(ctx context.Context, q RequestHistoryQuery) (RequestHistoryPage, error) {
@@ -62,7 +73,7 @@ func (s *SQLiteStore) QueryRequestHistory(ctx context.Context, q RequestHistoryQ
 	default:
 		return page, fmt.Errorf("invalid type")
 	}
-	if q.Limit < 1 || q.Limit > 200 || q.Since.IsZero() || q.Until.Before(q.Since) {
+	if (q.PrincipalID != "" && !ValidPrincipalAttributionID(q.PrincipalID)) || q.Limit < 1 || q.Limit > 200 || q.Since.IsZero() || q.Until.Before(q.Since) {
 		return page, fmt.Errorf("invalid history range or limit")
 	}
 	cur := historyCursor{Filter: q.fingerprint()}
@@ -83,6 +94,10 @@ func (s *SQLiteStore) QueryRequestHistory(ctx context.Context, q RequestHistoryQ
 		until = cur.Timestamp
 	}
 	args := []any{q.APIType, q.Since.Unix(), until, cur.HighID}
+	if q.PrincipalID != "" {
+		where = append(where, "principal_id = ?")
+		args = append(args, storedPrincipalID(q.PrincipalID))
+	}
 	for _, f := range []struct{ column, value string }{{"model", q.Model}, {"channel_uid", q.ChannelUID}, {"correlation_id", q.CorrelationID}} {
 		if f.value != "" {
 			where = append(where, f.column+" = ?")
@@ -96,7 +111,7 @@ func (s *SQLiteStore) QueryRequestHistory(ctx context.Context, q RequestHistoryQ
 		args = append(args, cur.Timestamp, cur.ID)
 	}
 	args = append(args, q.Limit+1)
-	rows, err := s.db.QueryContext(ctx, `SELECT id,timestamp,api_type,model,channel_uid,correlation_id,success,input_tokens,output_tokens,usage_provenance,pricing_version_id FROM `+historyTable(q)+` WHERE `+strings.Join(where, " AND ")+` ORDER BY timestamp DESC,id DESC LIMIT ?`, args...)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,timestamp,api_type,model,channel_uid,correlation_id,success,input_tokens,output_tokens,usage_provenance,pricing_version_id,principal_id FROM `+historyTable(q)+` WHERE `+strings.Join(where, " AND ")+` ORDER BY timestamp DESC,id DESC LIMIT ?`, args...)
 	if err != nil {
 		return page, err
 	}
@@ -104,9 +119,11 @@ func (s *SQLiteStore) QueryRequestHistory(ctx context.Context, q RequestHistoryQ
 	for rows.Next() {
 		var r RequestHistoryEntry
 		var provenance string
-		if err = rows.Scan(&r.ID, &r.Timestamp, &r.APIType, &r.Model, &r.ChannelUID, &r.CorrelationID, &r.Success, &r.InputTokens, &r.OutputTokens, &provenance, &r.PricingVersionID); err != nil {
+		if err = rows.Scan(&r.ID, &r.Timestamp, &r.APIType, &r.Model, &r.ChannelUID, &r.CorrelationID, &r.Success, &r.InputTokens, &r.OutputTokens, &provenance, &r.PricingVersionID, &r.PrincipalID); err != nil {
 			return page, err
 		}
+		r.PrincipalID = publicPrincipalID(r.PrincipalID)
+		r.PrincipalLabel = PrincipalAttributionLabel(r.PrincipalID)
 		r.UsageProvenance = unmarshalUsageProvenance(provenance)
 		page.Records = append(page.Records, r)
 	}
@@ -128,6 +145,8 @@ func (s *SQLiteStore) QueryRequestHistory(ctx context.Context, q RequestHistoryQ
 // exact correlation/model filter. Use only fixed, known indexes for each query.
 func historyTable(q RequestHistoryQuery) string {
 	switch {
+	case q.PrincipalID != "":
+		return "request_records INDEXED BY idx_history_principal_id"
 	case q.CorrelationID != "":
 		return "request_records INDEXED BY idx_history_correlation_id"
 	case q.ChannelUID != "":
