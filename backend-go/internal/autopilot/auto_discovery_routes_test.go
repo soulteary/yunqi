@@ -1,6 +1,7 @@
 package autopilot
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -340,5 +341,78 @@ func TestTriggerDiscoveryEnablesDetectedProtocolRoutes(t *testing.T) {
 	sort.Strings(kinds)
 	if got := strings.Join(kinds, ","); got != "chat,messages,responses" {
 		t.Fatalf("自动启用协议=%q", got)
+	}
+}
+
+func TestModelImportLegacyDiscoveryOnlyStagesGovernedProtocolEvidence(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch {
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/models":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[{"id":"model-a"}]}`))
+		case req.Method == http.MethodPost && req.URL.Path == "/v1/messages":
+			w.WriteHeader(http.StatusOK)
+		case req.Method == http.MethodPost && req.URL.Path == "/v1/chat/completions":
+			w.WriteHeader(http.StatusOK)
+		case req.Method == http.MethodPost && strings.HasPrefix(req.URL.Path, "/v1beta/models/"):
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			t.Errorf("未预期的发现请求: %s %s", req.Method, req.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	data := `{
+  "managedAccounts": [],
+  "upstream": [], "chatUpstream": [],
+  "responsesUpstream": [{"accountUid":"acct_trigger","channelUid":"ch_trigger_responses","name":"trigger-endpoint","serviceType":"responses","baseUrl":"` + server.URL + `","baseUrls":["` + server.URL + `"],"apiKeys":["sk-test"],"apiKeyConfigs":[{"key":"sk-test","credentialUid":"cred_trigger","baseUrl":"` + server.URL + `"}],"autoManaged":true,"status":"active"}],
+  "geminiUpstream": [], "imagesUpstream": [], "vectorsUpstream": []
+}`
+	if err := os.WriteFile(configPath, []byte(data), 0600); err != nil {
+		t.Fatalf("写测试配置失败: %v", err)
+	}
+	cfgManager, err := config.NewConfigManager(configPath, filepath.Join(dir, "backups"))
+	if err != nil {
+		t.Fatalf("NewConfigManager 失败: %v", err)
+	}
+	t.Cleanup(func() { _ = cfgManager.Close() })
+
+	db := newTestDB(t)
+	store, err := NewProfileStoreWithDB(db)
+	if err != nil {
+		t.Fatalf("NewProfileStoreWithDB 失败: %v", err)
+	}
+	modelStore, err := NewModelProfileStoreWithDB(db)
+	if err != nil {
+		t.Fatalf("NewModelProfileStoreWithDB 失败: %v", err)
+	}
+	runner := NewAutoDiscoveryRunner(store, nil)
+	runner.ModelProfileStore = modelStore
+	runner.client = server.Client()
+	inventory := buildEndpointInventory(cfgManager.GetConfig())
+	store.ReplaceActiveEndpointUIDs(inventory.EndpointUIDs)
+	modelStore.ReplaceActiveBindings(inventory.ModelProfileBindings)
+	view, _ := cfgManager.GetModelImport("ch_trigger_responses")
+	if _, err := cfgManager.SetModelImportPolicy("ch_trigger_responses", view.Revision, config.ModelImportPolicy{Enabled: false}, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	source := cfgManager.GetConfig().ResponsesUpstream[0]
+	task := &DiscoveryTask{ChannelUID: source.ChannelUID}
+	runner.runDiscoveryLegacy(context.Background(), task, &source, cfgManager)
+	if task.Status != DiscoveryStatusDone {
+		t.Fatalf("governed legacy discovery failed: %s", task.Error)
+	}
+	if got := len(cfgManager.GetAccountChannels("acct_trigger")); got != 1 {
+		t.Fatalf("governed legacy discovery silently enabled protocols: %d", got)
+	}
+	staged, _ := cfgManager.GetModelImport(source.ChannelUID)
+	if staged.State.Pending == nil {
+		t.Fatal("legacy discovery did not stage review")
+	}
+	if _, err := cfgManager.ApproveModelImport(source.ChannelUID, staged.State.Pending.ID, "admin", false, false); err != nil {
+		t.Fatalf("legacy discovery invalidated its own review: %v", err)
 	}
 }

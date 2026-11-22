@@ -133,13 +133,19 @@ func (k ChannelKind) Label() string {
 
 // addUpstreamCommonLocked 是六类 Add*Upstream 方法的通用实现。
 // 调用方必须已持有 cm.mu 写锁。
-func (cm *ConfigManager) addUpstreamCommonLocked(k ChannelKindConfig, upstream UpstreamConfig, placements ...string) (addErr error) {
+func (cm *ConfigManager) addUpstreamCommonLockedAudited(auditContext ManagementAuditContext, k ChannelKindConfig, upstream UpstreamConfig, placements ...string) (addErr error) {
+	auditContext = auditContext.normalized()
+
 	originalConfig := cm.config.deepCopy()
 	defer func() {
 		if addErr != nil {
 			cm.config = originalConfig
 		}
 	}()
+	if err := ValidateNewChannelModelImport(upstream.ModelImport); err != nil {
+		return err
+	}
+	upstream.ModelImport = ModelImportPolicyOnly(upstream.ModelImport)
 	if err := ValidateOutboundNetwork(upstream.OutboundNetwork, upstream.ProxyURL); err != nil {
 		return err
 	}
@@ -198,7 +204,7 @@ func (cm *ConfigManager) addUpstreamCommonLocked(k ChannelKindConfig, upstream U
 	assignChannelPriority(*sliceRef, &upstream, resolvePlacement(placements))
 	*sliceRef = append([]UpstreamConfig{upstream}, *sliceRef...)
 
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		return err
 	}
 
@@ -207,15 +213,19 @@ func (cm *ConfigManager) addUpstreamCommonLocked(k ChannelKindConfig, upstream U
 }
 
 // addUpstreamCommon 是 Add*Upstream 的公开薄封装，先加锁再调用通用实现。
-func (cm *ConfigManager) addUpstreamCommon(k ChannelKindConfig, upstream UpstreamConfig, placements ...string) error {
+func (cm *ConfigManager) addUpstreamCommonAudited(auditContext ManagementAuditContext, k ChannelKindConfig, upstream UpstreamConfig, placements ...string) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
-	return cm.addUpstreamCommonLocked(k, upstream, placements...)
+	return cm.addUpstreamCommonLockedAudited(auditContext, k, upstream, placements...)
 }
 
 // updateUpstreamCommonLocked 是六类 Update*Upstream 方法的通用实现。
 // 返回值 shouldResetMetrics 与旧方法语义一致。
-func (cm *ConfigManager) updateUpstreamCommonLocked(k ChannelKindConfig, index int, updates UpstreamUpdate) (reset bool, updateErr error) {
+func (cm *ConfigManager) updateUpstreamCommonLockedAudited(auditContext ManagementAuditContext, k ChannelKindConfig, index int, updates UpstreamUpdate) (reset bool, updateErr error) {
+	auditContext = auditContext.normalized()
+
 	slice := k.SliceRef(&cm.config)
 	if index < 0 || index >= len(*slice) {
 		return false, fmt.Errorf("无效的 %s 上游索引: %d", k.Kind.Label(), index)
@@ -304,7 +314,7 @@ func (cm *ConfigManager) updateUpstreamCommonLocked(k ChannelKindConfig, index i
 		return shouldResetMetrics, nil
 	}
 
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		return false, err
 	}
 
@@ -349,10 +359,12 @@ func orderedChannelKinds() []ChannelKind {
 }
 
 // updateUpstreamCommon 是 Update*Upstream 的公开薄封装。
-func (cm *ConfigManager) updateUpstreamCommon(k ChannelKindConfig, index int, updates UpstreamUpdate) (bool, error) {
+func (cm *ConfigManager) updateUpstreamCommonAudited(auditContext ManagementAuditContext, k ChannelKindConfig, index int, updates UpstreamUpdate) (bool, error) {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
-	return cm.updateUpstreamCommonLocked(k, index, updates)
+	return cm.updateUpstreamCommonLockedAudited(auditContext, k, index, updates)
 }
 
 // applyUpstreamUpdateFields 把 UpstreamUpdate 的各字段应用到 upstream，返回 (shouldResetMetrics, error)。
@@ -696,7 +708,9 @@ func (cm *ConfigManager) findUpstreamByUIDLocked(uid string) (ChannelLocation, *
 
 // removeUpstreamCommonLocked 是六类 Remove*Upstream 方法的通用实现。
 // clearFailedKeysLabel 用于 clearFailedKeysForUpstream 的标签。
-func (cm *ConfigManager) removeUpstreamCommonLocked(k ChannelKindConfig, index int, clearFailedKeysLabel string) (*UpstreamConfig, error) {
+func (cm *ConfigManager) removeUpstreamCommonLockedAudited(auditContext ManagementAuditContext, k ChannelKindConfig, index int, clearFailedKeysLabel string) (*UpstreamConfig, error) {
+	auditContext = auditContext.normalized()
+
 	slice := k.SliceRef(&cm.config)
 	if index < 0 || index >= len(*slice) {
 		return nil, fmt.Errorf("无效的 %s 上游索引: %d", k.Kind.Label(), index)
@@ -707,7 +721,7 @@ func (cm *ConfigManager) removeUpstreamCommonLocked(k ChannelKindConfig, index i
 
 	cm.clearFailedKeysForUpstream(&removed, clearFailedKeysLabel)
 
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		return nil, err
 	}
 
@@ -716,7 +730,9 @@ func (cm *ConfigManager) removeUpstreamCommonLocked(k ChannelKindConfig, index i
 }
 
 // addChannelKeyCommonLocked 是六类 Add*APIKey 方法的通用实现。
-func (cm *ConfigManager) addChannelKeyCommonLocked(k ChannelKindConfig, index int, apiKey string) error {
+func (cm *ConfigManager) addChannelKeyCommonLockedAudited(auditContext ManagementAuditContext, k ChannelKindConfig, index int, apiKey string) error {
+	auditContext = auditContext.normalized()
+
 	slice := k.SliceRef(&cm.config)
 	if index < 0 || index >= len(*slice) {
 		return fmt.Errorf("无效的 %s 上游索引: %d", k.Kind.Label(), index)
@@ -750,7 +766,7 @@ func (cm *ConfigManager) addChannelKeyCommonLocked(k ChannelKindConfig, index in
 	}
 	upstream.HistoricalAPIKeys = newHistoricalKeys
 
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		return err
 	}
 
@@ -759,7 +775,9 @@ func (cm *ConfigManager) addChannelKeyCommonLocked(k ChannelKindConfig, index in
 }
 
 // removeChannelKeyCommonLocked 是六类 Remove*APIKey 方法的通用实现。
-func (cm *ConfigManager) removeChannelKeyCommonLocked(k ChannelKindConfig, index int, apiKey string) error {
+func (cm *ConfigManager) removeChannelKeyCommonLockedAudited(auditContext ManagementAuditContext, k ChannelKindConfig, index int, apiKey string) error {
+	auditContext = auditContext.normalized()
+
 	slice := k.SliceRef(&cm.config)
 	if index < 0 || index >= len(*slice) {
 		return fmt.Errorf("无效的 %s 上游索引: %d", k.Kind.Label(), index)
@@ -796,7 +814,7 @@ func (cm *ConfigManager) removeChannelKeyCommonLocked(k ChannelKindConfig, index
 		log.Printf("[%s-Key] 上游 [%d] %s: Key %s 已移入历史列表", k.Kind.Label(), index, upstream.Name, utils.MaskAPIKey(apiKey))
 	}
 
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		return err
 	}
 
@@ -956,4 +974,39 @@ func validateCopilotProtocol(protocol string) error {
 	default:
 		return fmt.Errorf("无效的 Copilot HTTP 协议: %s", protocol)
 	}
+}
+
+// addChannelKeyCommonLocked preserves the system/background call contract. HTTP callers use addChannelKeyCommonLockedAudited.
+func (cm *ConfigManager) addChannelKeyCommonLocked(k ChannelKindConfig, index int, apiKey string) error {
+	return cm.addChannelKeyCommonLockedAudited(ManagementAuditContext{}, k, index, apiKey)
+}
+
+// addUpstreamCommon preserves the system/background call contract. HTTP callers use addUpstreamCommonAudited.
+func (cm *ConfigManager) addUpstreamCommon(k ChannelKindConfig, upstream UpstreamConfig, placements ...string) error {
+	return cm.addUpstreamCommonAudited(ManagementAuditContext{}, k, upstream, placements...)
+}
+
+// addUpstreamCommonLocked preserves the system/background call contract. HTTP callers use addUpstreamCommonLockedAudited.
+func (cm *ConfigManager) addUpstreamCommonLocked(k ChannelKindConfig, upstream UpstreamConfig, placements ...string) (addErr error) {
+	return cm.addUpstreamCommonLockedAudited(ManagementAuditContext{}, k, upstream, placements...)
+}
+
+// removeChannelKeyCommonLocked preserves the system/background call contract. HTTP callers use removeChannelKeyCommonLockedAudited.
+func (cm *ConfigManager) removeChannelKeyCommonLocked(k ChannelKindConfig, index int, apiKey string) error {
+	return cm.removeChannelKeyCommonLockedAudited(ManagementAuditContext{}, k, index, apiKey)
+}
+
+// removeUpstreamCommonLocked preserves the system/background call contract. HTTP callers use removeUpstreamCommonLockedAudited.
+func (cm *ConfigManager) removeUpstreamCommonLocked(k ChannelKindConfig, index int, clearFailedKeysLabel string) (*UpstreamConfig, error) {
+	return cm.removeUpstreamCommonLockedAudited(ManagementAuditContext{}, k, index, clearFailedKeysLabel)
+}
+
+// updateUpstreamCommon preserves the system/background call contract. HTTP callers use updateUpstreamCommonAudited.
+func (cm *ConfigManager) updateUpstreamCommon(k ChannelKindConfig, index int, updates UpstreamUpdate) (bool, error) {
+	return cm.updateUpstreamCommonAudited(ManagementAuditContext{}, k, index, updates)
+}
+
+// updateUpstreamCommonLocked preserves the system/background call contract. HTTP callers use updateUpstreamCommonLockedAudited.
+func (cm *ConfigManager) updateUpstreamCommonLocked(k ChannelKindConfig, index int, updates UpstreamUpdate) (reset bool, updateErr error) {
+	return cm.updateUpstreamCommonLockedAudited(ManagementAuditContext{}, k, index, updates)
 }

@@ -507,6 +507,8 @@ func TryUpstreamWithAllKeys(
 	channelLogStore *metrics.ChannelLogStore,
 	opts ...TryUpstreamOption,
 ) (handled bool, successKey string, successBaseURLIdx int, failoverErr *FailoverError, usage *types.Usage, lastError error) {
+	managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 	if upstream != nil && !middleware.AuthorizeProxyRoute(c, envCfg, model, upstream.ChannelUID) {
 		return true, "", 0, nil, nil, nil
 	}
@@ -592,6 +594,26 @@ func TryUpstreamWithAllKeys(
 	// 回显头）以"发生了跨模型改写"为触发条件，改写后 model 已等于
 	// executionModel，直接比较会恒假。
 	originalModel := model
+	importedAlias := false
+	if upstream.ModelImportEnabled() {
+		item, ok := upstream.ImportedModel(model)
+		if ok {
+			// A reviewed exact identity must not enter family mapping. An
+			// explicit overflow selection already chose a different window;
+			// retain that target and validate it at the final execution gate.
+			importedAlias = true
+		}
+		if ok && item.UpstreamID != model && (!tryOpts.overflowRedirect || tryOpts.executionModel == "") {
+			tryOpts.executionModel = item.UpstreamID
+			tryOpts.endpointPolicy = nil // rebuild binding filters for the actual ID
+			if kind == scheduler.ChannelKindImages || kind == scheduler.ChannelKindGemini {
+				// These builders carry model outside the JSON body (multipart /
+				// URI). They resolve the reviewed ID directly below.
+				model = item.UpstreamID
+				tryOpts.executionModel = ""
+			}
+		}
+	}
 	if tryOpts.executionModel != "" && tryOpts.executionModel != model {
 		rewritten, rewriteErr := sjson.SetBytes(requestBody, "model", tryOpts.executionModel)
 		if rewriteErr != nil {
@@ -833,7 +855,7 @@ func TryUpstreamWithAllKeys(
 			attemptModel := redirectedModel
 			var appliedMappedModel string
 			var resolvedAttemptTarget *autopilot.ResolvedRouteTarget
-			if endpointPolicy != nil {
+			if endpointPolicy != nil && !importedAlias {
 				keyHash := autopilot.KeyHashFromAPIKey(apiKey)
 				euid := autopilot.GenerateEndpointUID(upstream.ChannelUID, currentBaseURL, keyHash)
 
@@ -1038,6 +1060,12 @@ func TryUpstreamWithAllKeys(
 			// 内容启发式兼容项（无上游报错信号）：首次遇到该组合时异步探测一次并记忆，
 			// 不阻塞当前请求，结论对后续请求生效。替代原先要用户手工点诊断按钮的做法。
 			maybeTriggerCompatProbe(upstream, apiKey, currentBaseURL, attemptModel)
+
+			if upstream.ModelImportEnabled() {
+				if _, ok := upstream.ImportedModel(attemptModel); !ok {
+					return false, "", 0, nil, nil, errors.New("resolved model is outside approved import catalog")
+				}
+			}
 
 			// 渠道兼容性自学习（主动侧）：命中记忆时把学习结论注入本次请求所用的上游副本
 			// （LearnedCompatTraits，仅当次请求生效，不落盘）。实际改写由各 provider 在
@@ -1566,7 +1594,7 @@ func TryUpstreamWithAllKeys(
 						if strings.EqualFold(apiType, "Vectors") {
 							blacklistMessage = errorBodySummaryForLog(apiType, resp.StatusCode, respBodyBytes)
 						}
-						if err := cfgManager.BlacklistKeyWithRecoverAt(executionAPIType, executionIndex, apiKey, blResult.Reason, blacklistMessage, recoverAt); err != nil {
+						if err := cfgManager.BlacklistKeyWithRecoverAtAudited(managementAuditContext, executionAPIType, executionIndex, apiKey, blResult.Reason, blacklistMessage, recoverAt); err != nil {
 							RequestLogf(c, "[%s-Blacklist] 拉黑 Key 失败: %v", apiType, err)
 						}
 						// 认证/权限错误写入 global 桶：整把 Key 不可用，所有模型都受影响。
@@ -1598,7 +1626,7 @@ func TryUpstreamWithAllKeys(
 						// 上游明确声明该模型或其 Codex 图片工具不受支持：限制该 Key 对这个实际模型的路由。
 						// 仅限制 (Key, 模型) 组合（持久化+定时恢复），保留 failover 换渠道，不连累该 Key 其他模型。
 						summary := errorBodySummaryForLog(apiType, resp.StatusCode, respBodyBytes)
-						if err := cfgManager.DisableKeyModel(executionAPIType, executionIndex, apiKey, actualAttemptModel, restrictionReason, summary, ""); err != nil {
+						if err := cfgManager.DisableKeyModelAudited(managementAuditContext, executionAPIType, executionIndex, apiKey, actualAttemptModel, restrictionReason, summary, ""); err != nil {
 							RequestLogf(c, "[%s-KeyModel] 限制 (Key,模型) 组合失败: %v", apiType, err)
 						}
 					}
@@ -2153,7 +2181,7 @@ func TryUpstreamWithAllKeys(
 								apiType, utils.MaskAPIKey(apiKey))
 						}
 					} else if !isBalanceError || upstream.IsAutoBlacklistBalanceEnabled() {
-						if blacklistErr := cfgManager.BlacklistKey(executionAPIType, executionIndex, apiKey, blErr.Reason, blErr.Message); blacklistErr != nil {
+						if blacklistErr := cfgManager.BlacklistKeyAudited(managementAuditContext, executionAPIType, executionIndex, apiKey, blErr.Reason, blErr.Message); blacklistErr != nil {
 							RequestLogf(c, "[%s-Blacklist] 拉黑 Key 失败: %v", apiType, blacklistErr)
 						}
 					}

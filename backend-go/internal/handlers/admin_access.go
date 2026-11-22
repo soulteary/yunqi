@@ -59,6 +59,8 @@ func RegisterAdminAccessRoutes(router fiber.Router, env *config.EnvConfig, cm *c
 		return nil
 	})
 	router.Put("/access/channels/:uid/state", func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		uid := httpbridge.Param(c, "uid")
 		if !middleware.AuthorizeAdminAction(c, "channels.state", uid) {
 			return nil
@@ -70,7 +72,7 @@ func RegisterAdminAccessRoutes(router fiber.Router, env *config.EnvConfig, cm *c
 			httpbridge.JSON(c, 400, fiber.Map{"error": "invalid_channel_state"})
 			return nil
 		}
-		if err := cm.SetChannelStatusByUID(uid, req.Status); err != nil {
+		if err := cm.SetChannelStatusByUIDAudited(managementAuditContext, uid, req.Status); err != nil {
 			httpbridge.JSON(c, 400, fiber.Map{"error": "invalid_channel_state"})
 			return nil
 		}
@@ -89,6 +91,8 @@ func RegisterAdminAccessRoutes(router fiber.Router, env *config.EnvConfig, cm *c
 		return nil
 	})
 	router.Post("/admin-credentials", func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		if !middleware.AuthorizeAdminAction(c, "admin.credentials", "") {
 			return nil
 		}
@@ -121,7 +125,7 @@ func RegisterAdminAccessRoutes(router fiber.Router, env *config.EnvConfig, cm *c
 			actorID = "actor_" + id
 		}
 		key := config.AdminCredential{ID: "ak_" + id, KeyHash: config.EntryKeyHash(raw), ActorID: actorID, Role: req.Role, ChannelUIDs: req.ChannelUIDs, Disabled: req.Disabled, ExpiresAt: req.ExpiresAt}
-		if err := cm.PutAdminCredential(key, ""); err != nil {
+		if err := cm.PutAdminCredentialAudited(managementAuditContext, key, ""); err != nil {
 			httpbridge.JSON(c, 400, fiber.Map{"error": "invalid_admin_credential"})
 			return nil
 		}
@@ -130,6 +134,8 @@ func RegisterAdminAccessRoutes(router fiber.Router, env *config.EnvConfig, cm *c
 		return nil
 	})
 	router.Put("/admin-credentials/:id", func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		if !middleware.AuthorizeAdminAction(c, "admin.credentials", "") {
 			return nil
 		}
@@ -151,7 +157,7 @@ func RegisterAdminAccessRoutes(router fiber.Router, env *config.EnvConfig, cm *c
 		key.ChannelUIDs = req.ChannelUIDs
 		key.ExpiresAt = req.ExpiresAt
 		key.Disabled = req.Disabled
-		if err := cm.PutAdminCredential(key, ""); err != nil {
+		if err := cm.PutAdminCredentialAudited(managementAuditContext, key, ""); err != nil {
 			httpbridge.JSON(c, 400, fiber.Map{"error": "invalid_admin_credential"})
 			return nil
 		}
@@ -159,6 +165,8 @@ func RegisterAdminAccessRoutes(router fiber.Router, env *config.EnvConfig, cm *c
 		return nil
 	})
 	router.Post("/admin-credentials/:id/rotate", func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		if !middleware.AuthorizeAdminAction(c, "admin.credentials", "") {
 			return nil
 		}
@@ -180,7 +188,7 @@ func RegisterAdminAccessRoutes(router fiber.Router, env *config.EnvConfig, cm *c
 		key.ID = "ak_" + id
 		key.KeyHash = config.EntryKeyHash(raw)
 		key.Disabled = false
-		if err := cm.PutAdminCredential(key, source); err != nil {
+		if err := cm.PutAdminCredentialAudited(managementAuditContext, key, source); err != nil {
 			return err
 		}
 		httpbridge.Writer(c).Header().Set("Cache-Control", "no-store")

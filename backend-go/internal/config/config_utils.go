@@ -669,6 +669,7 @@ func IsChannelInPromotion(upstream *UpstreamConfig) bool {
 // 使用深拷贝可避免并发请求之间的竞态条件
 func (u *UpstreamConfig) Clone() *UpstreamConfig {
 	cloned := *u // 浅拷贝
+	cloned.ModelImport = CloneModelImport(u.ModelImport)
 	cloned.OutboundNetwork = CloneOutboundNetwork(u.OutboundNetwork)
 
 	// 深拷贝切片字段
@@ -1016,6 +1017,13 @@ func (u *UpstreamConfig) SupportsModel(model string) bool {
 
 // ExplainModelSupport 返回渠道是否支持指定模型，以及不支持时的原因。
 func (u *UpstreamConfig) ExplainModelSupport(model string) (bool, string) {
+	if u.ModelImportEnabled() {
+		item, ok := u.ImportedModel(model)
+		if !ok {
+			return false, "model is outside approved import catalog"
+		}
+		model = item.UpstreamID
+	}
 	if len(u.SupportedModels) == 0 {
 		return true, ""
 	}

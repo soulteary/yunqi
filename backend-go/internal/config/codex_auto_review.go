@@ -37,7 +37,9 @@ func (cm *ConfigManager) GetCodexAutoReviewMapping() CodexAutoReviewMapping {
 	return cm.config.CodexAutoReview
 }
 
-func (cm *ConfigManager) SetCodexAutoReviewMapping(mapping CodexAutoReviewMapping) error {
+func (cm *ConfigManager) SetCodexAutoReviewMappingAudited(auditContext ManagementAuditContext, mapping CodexAutoReviewMapping) error {
+	auditContext = auditContext.normalized()
+
 	mapping.TargetModel = strings.TrimSpace(mapping.TargetModel)
 	if err := mapping.Validate(); err != nil {
 		return err
@@ -45,11 +47,16 @@ func (cm *ConfigManager) SetCodexAutoReviewMapping(mapping CodexAutoReviewMappin
 	cm.mu.Lock()
 	previous := cm.config.CodexAutoReview
 	cm.config.CodexAutoReview = mapping
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		cm.config.CodexAutoReview = previous
 		cm.mu.Unlock()
 		return err
 	}
 	cm.fireConfigChangeCallbacks()
 	return nil
+}
+
+// SetCodexAutoReviewMapping preserves the system/background call contract. HTTP callers use SetCodexAutoReviewMappingAudited.
+func (cm *ConfigManager) SetCodexAutoReviewMapping(mapping CodexAutoReviewMapping) error {
+	return cm.SetCodexAutoReviewMappingAudited(ManagementAuditContext{}, mapping)
 }

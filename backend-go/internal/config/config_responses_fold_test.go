@@ -32,6 +32,10 @@ func TestResponsesReasoningFoldDefaultsAndPersistsUpdates(t *testing.T) {
 		}
 		got := stored.GetConfig().ResponsesUpstream[0].ResponsesReasoningFold
 		_ = stored.Close()
+		// A second manager may persist canonical migration defaults; synchronize this writer.
+		if err := cm.loadConfig(); err != nil {
+			t.Fatal(err)
+		}
 		if got != enabled {
 			t.Fatalf("落盘 folding = %v, want %v", got, enabled)
 		}

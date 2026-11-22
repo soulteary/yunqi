@@ -14,6 +14,8 @@ import (
 // Body: {"apiKey": "sk-xxx"}
 func RestoreBlacklistedKey(cfgManager *config.ConfigManager, apiType string) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		idStr := httpbridge.Param(c, "id")
 		id, err := strconv.Atoi(idStr)
 		if err != nil {
@@ -29,7 +31,7 @@ func RestoreBlacklistedKey(cfgManager *config.ConfigManager, apiType string) fib
 			return nil
 		}
 
-		if err := cfgManager.RestoreKey(apiType, id, req.APIKey); err != nil {
+		if err := cfgManager.RestoreKeyAudited(managementAuditContext, apiType, id, req.APIKey); err != nil {
 			httpbridge.JSON(c, 400, fiber.Map{"error": err.Error()})
 			return nil
 		}
@@ -46,6 +48,8 @@ func RestoreBlacklistedKey(cfgManager *config.ConfigManager, apiType string) fib
 // Body: {"apiKey": "sk-xxx", "model": "gpt-5.6-sol"}
 func RestoreKeyModel(cfgManager *config.ConfigManager, apiType string) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		idStr := httpbridge.Param(c, "id")
 		id, err := strconv.Atoi(idStr)
 		if err != nil {
@@ -62,7 +66,7 @@ func RestoreKeyModel(cfgManager *config.ConfigManager, apiType string) fiber.Han
 			return nil
 		}
 
-		if err := cfgManager.RestoreKeyModel(apiType, id, req.APIKey, req.Model); err != nil {
+		if err := cfgManager.RestoreKeyModelAudited(managementAuditContext, apiType, id, req.APIKey, req.Model); err != nil {
 			httpbridge.JSON(c, 400, fiber.Map{"error": err.Error()})
 			return nil
 		}
@@ -77,6 +81,8 @@ func RestoreKeyModel(cfgManager *config.ConfigManager, apiType string) fiber.Han
 // DisableGroupModel 人工禁用目标 Key 所属配额组的模型。
 func DisableGroupModel(cfgManager *config.ConfigManager, apiType string) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		id, err := strconv.Atoi(httpbridge.Param(c, "id"))
 		if err != nil {
 			httpbridge.JSON(c, 400, fiber.Map{"error": "Invalid channel ID"})
@@ -90,7 +96,7 @@ func DisableGroupModel(cfgManager *config.ConfigManager, apiType string) fiber.H
 			httpbridge.JSON(c, 400, fiber.Map{"error": "apiKey and model are required"})
 			return nil
 		}
-		quotaGroup, affectedKeyCount, err := cfgManager.DisableGroupModel(apiType, id, req.APIKey, req.Model)
+		quotaGroup, affectedKeyCount, err := cfgManager.DisableGroupModelAudited(managementAuditContext, apiType, id, req.APIKey, req.Model)
 		if err != nil {
 			httpbridge.JSON(c, 400, fiber.Map{"error": err.Error()})
 			return nil
@@ -108,6 +114,8 @@ func DisableGroupModel(cfgManager *config.ConfigManager, apiType string) fiber.H
 // RestoreGroupModel 移除人工分组模型限制。
 func RestoreGroupModel(cfgManager *config.ConfigManager, apiType string) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		id, err := strconv.Atoi(httpbridge.Param(c, "id"))
 		if err != nil {
 			httpbridge.JSON(c, 400, fiber.Map{"error": "Invalid channel ID"})
@@ -123,7 +131,7 @@ func RestoreGroupModel(cfgManager *config.ConfigManager, apiType string) fiber.H
 			httpbridge.JSON(c, 400, fiber.Map{"error": "model and apiKey or quotaGroup are required"})
 			return nil
 		}
-		quotaGroup, affectedKeyCount, err := cfgManager.RestoreGroupModel(apiType, id, req.APIKey, req.QuotaGroup, req.Model)
+		quotaGroup, affectedKeyCount, err := cfgManager.RestoreGroupModelAudited(managementAuditContext, apiType, id, req.APIKey, req.QuotaGroup, req.Model)
 		if err != nil {
 			httpbridge.JSON(c, 400, fiber.Map{"error": err.Error()})
 			return nil

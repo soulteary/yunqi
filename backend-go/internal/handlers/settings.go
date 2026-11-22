@@ -30,6 +30,8 @@ func GetCircuitBreaker(getCurrent func() metrics.CircuitBreakerParams, envCfg *c
 // SetCircuitBreaker 更新熔断器运行时配置
 func SetCircuitBreaker(cfgManager *config.ConfigManager) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		var req struct {
 			WindowSize                   *int     `json:"windowSize"`
 			FailureThreshold             *float64 `json:"failureThreshold"`
@@ -95,7 +97,7 @@ func SetCircuitBreaker(cfgManager *config.ConfigManager) fiber.Handler {
 			}
 		}
 
-		if err := cfgManager.SetCircuitBreakerConfig(config.CircuitBreakerConfig{
+		if err := cfgManager.SetCircuitBreakerConfigAudited(managementAuditContext, config.CircuitBreakerConfig{
 			WindowSize:                   req.WindowSize,
 			FailureThreshold:             req.FailureThreshold,
 			ConsecutiveFailuresThreshold: req.ConsecutiveFailuresThreshold,

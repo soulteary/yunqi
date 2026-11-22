@@ -31,6 +31,8 @@ func (a *application) newRouter() *fiber.App {
 	// 静态资源 Gzip 压缩（排除 API 端点）
 	r.Use(middleware.GzipMiddleware())
 
+	r.Use(middleware.ManagementAuditMiddleware(a.cfgManager))
+
 	// Web UI 访问控制中间件
 	r.Use(middleware.WebAuthMiddleware(a.envCfg, a.cfgManager))
 

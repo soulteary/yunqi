@@ -190,7 +190,10 @@ func (s *ChannelScheduler) federateDefaultCandidates(ctx context.Context, reques
 				continue
 			}
 			actualModel := model
-			if resolver != nil {
+			imported, reviewed := upstream.ImportedModel(model)
+			if reviewed {
+				actualModel = imported.UpstreamID
+			} else if resolver != nil {
 				supported, resolvedModel, _, _ := resolver(ctx, kind, upstream, model)
 				if !supported || resolvedModel == "" {
 					trace.skipChannel(sibling, "protocol_federation", "unsupported_model", model)
@@ -200,6 +203,12 @@ func (s *ChannelScheduler) federateDefaultCandidates(ctx context.Context, reques
 			} else if supported, reason := s.resolveModelSupport(ctx, kind, upstream, model); !supported {
 				trace.skipChannel(sibling, "protocol_federation", "unsupported_model", reason)
 				continue
+			}
+			if upstream.ModelImportEnabled() {
+				if _, ok := upstream.ImportedModel(actualModel); !ok {
+					trace.skipChannel(sibling, "protocol_federation", "unsupported_model", "outside approved import catalog")
+					continue
+				}
 			}
 			sibling.ActualModel = actualModel
 			if s.channelModelCircuitOpenByRoute(upstream, sibling.Route, actualModel) {
@@ -1677,13 +1686,26 @@ func (s *ChannelScheduler) getActiveChannelsWithTrace(ctx context.Context, kind 
 // UpstreamConfig.ExplainModelSupport；权威拒绝则直接过滤，避免空 SupportedModels
 // 把画像已确认不支持的模型重新放回候选。
 func (s *ChannelScheduler) resolveModelSupport(ctx context.Context, kind ChannelKind, upstream *config.UpstreamConfig, model string) (bool, string) {
+	if upstream.ModelImportEnabled() {
+		if _, ok := upstream.ImportedModel(model); ok {
+			return upstream.ExplainModelSupport(model)
+		}
+	}
 	s.mu.RLock()
 	resolver := s.modelSupportResolverFunc
 	s.mu.RUnlock()
 
 	if resolver != nil {
-		supported, _, source, reason := resolver(ctx, kind, upstream, model)
+		supported, actual, source, reason := resolver(ctx, kind, upstream, model)
 		if supported {
+			if actual == "" {
+				actual = model
+			}
+			if upstream.ModelImportEnabled() {
+				if _, ok := upstream.ImportedModel(actual); !ok {
+					return false, "resolved model is outside approved import catalog"
+				}
+			}
 			return true, ""
 		}
 		if source == ModelSupportSourceAuthoritativeDeny {

@@ -35,6 +35,8 @@ func GetBodyLogging(cm *config.ConfigManager, env *config.EnvConfig) fiber.Handl
 }
 func UpdateBodyLogging(cm *config.ConfigManager, env *config.EnvConfig) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		if !middleware.AuthorizeAdminAction(c, "logs.body.configure", "") {
 			return nil
 		}
@@ -82,7 +84,7 @@ func UpdateBodyLogging(cm *config.ConfigManager, env *config.EnvConfig) fiber.Ha
 		if revision == "" {
 			revision = before.Revision
 		}
-		state, err := cm.UpdateBodyLogging(middleware.GetAdminActorID(c), revision, settings)
+		state, err := cm.UpdateBodyLoggingAudited(managementAuditContext, middleware.GetAdminActorID(c), revision, settings)
 		if err != nil {
 			status := http.StatusInternalServerError
 			if errors.Is(err, config.ErrBodyLogRevisionConflict) {

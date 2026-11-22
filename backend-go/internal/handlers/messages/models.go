@@ -54,21 +54,23 @@ type ModelsResponse struct {
 
 // ModelEntry 单个模型条目
 type ModelEntry struct {
-	ID                  string   `json:"id"`
-	Name                string   `json:"name,omitempty"`
-	Object              string   `json:"object"`
-	Type                string   `json:"type,omitempty"`
-	Created             int64    `json:"created"`
-	CreatedAt           string   `json:"created_at,omitempty"`
-	OwnedBy             string   `json:"owned_by"`
-	DisplayName         string   `json:"display_name,omitempty"`
-	LabelOverride       string   `json:"labelOverride,omitempty"`
-	Supports1M          bool     `json:"supports1m,omitempty"`
-	ContextWindow       int      `json:"context_window,omitempty"`
-	MaxOutputTokens     int      `json:"max_output_tokens,omitempty"`
-	AnthropicFamilyTier string   `json:"anthropicFamilyTier,omitempty"`
-	IsFamilyDefault     bool     `json:"isFamilyDefault,omitempty"`
-	InputModalities     []string `json:"input_modalities,omitempty"`
+	SupportedEndpointTypes []string                       `json:"supported_endpoint_types,omitempty"`
+	EndpointMetadata       []config.ModelEndpointMetadata `json:"endpoint_metadata,omitempty"`
+	ID                     string                         `json:"id"`
+	Name                   string                         `json:"name,omitempty"`
+	Object                 string                         `json:"object"`
+	Type                   string                         `json:"type,omitempty"`
+	Created                int64                          `json:"created"`
+	CreatedAt              string                         `json:"created_at,omitempty"`
+	OwnedBy                string                         `json:"owned_by"`
+	DisplayName            string                         `json:"display_name,omitempty"`
+	LabelOverride          string                         `json:"labelOverride,omitempty"`
+	Supports1M             bool                           `json:"supports1m,omitempty"`
+	ContextWindow          int                            `json:"context_window,omitempty"`
+	MaxOutputTokens        int                            `json:"max_output_tokens,omitempty"`
+	AnthropicFamilyTier    string                         `json:"anthropicFamilyTier,omitempty"`
+	IsFamilyDefault        bool                           `json:"isFamilyDefault,omitempty"`
+	InputModalities        []string                       `json:"input_modalities,omitempty"`
 }
 
 // ModelsHandler 处理 /v1/models 请求，从 Messages、Responses、Chat、Gemini、Images 和 Vectors 渠道获取并合并模型列表
@@ -88,10 +90,7 @@ func ModelsHandler(envCfg *config.EnvConfig, cfgManager *config.ConfigManager, c
 			routePrefix:      httpbridge.Param(c, "routePrefix"),
 			channelName:      httpbridge.GetHeader(c, "X-Channel"),
 		}
-		cacheKey := modelsDiscoveryCacheKey{
-			routePrefix: req.routePrefix,
-			channelName: req.channelName,
-		}
+		cacheKey := modelsDiscoveryCacheKey{routePrefix: req.routePrefix, channelName: req.channelName, importRevision: cfgManager.ModelImportInventoryRevision()}
 
 		results := collectModelsFromAllKinds(req)
 		messagesModels := results[scheduler.ChannelKindMessages]
@@ -146,8 +145,9 @@ func ModelsHandler(envCfg *config.EnvConfig, cfgManager *config.ConfigManager, c
 }
 
 type modelsDiscoveryCacheKey struct {
-	routePrefix string
-	channelName string
+	importRevision string
+	routePrefix    string
+	channelName    string
 }
 
 type modelsDiscoveryCacheEntry struct {
@@ -208,6 +208,8 @@ func cloneModelsResponse(response ModelsResponse) ModelsResponse {
 		if model.InputModalities != nil {
 			model.InputModalities = append([]string(nil), model.InputModalities...)
 		}
+		model.SupportedEndpointTypes = append([]string(nil), model.SupportedEndpointTypes...)
+		model.EndpointMetadata = append([]config.ModelEndpointMetadata(nil), model.EndpointMetadata...)
 		clone.Data[i] = model
 	}
 	return clone
@@ -240,7 +242,21 @@ func ModelsDetailHandler(envCfg *config.EnvConfig, cfgManager *config.ConfigMana
 			scheduler.ChannelKindImages,
 			scheduler.ChannelKindVectors,
 		} {
-			if body, _, ok := tryModelsRequest(c, cfgManager, channelScheduler, "GET", "/"+modelID, kind); ok {
+			if body, upstream, ok := tryModelsRequest(c, cfgManager, channelScheduler, "GET", "/"+modelID, kind); ok {
+				if upstream.ModelImportEnabled() {
+					var entry ModelEntry
+					if json.Unmarshal(body, &entry) != nil {
+						continue
+					}
+					if entry.ID == "" {
+						entry.ID = strings.TrimPrefix(entry.Name, "models/")
+					}
+					entries := enrichModelsForUpstream([]ModelEntry{entry}, upstream, cfgManager.UpstreamModelCapabilitiesSnapshot())
+					if len(entries) != 1 {
+						continue
+					}
+					body, _ = json.Marshal(entries[0])
+				}
 				httpbridge.Data(c, http.StatusOK, "application/json", body)
 				return nil
 			}
@@ -622,7 +638,51 @@ func enrichModelsForUpstream(models []ModelEntry, upstream *config.UpstreamConfi
 		if modelID == "" {
 			modelID = strings.TrimSpace(model.Name)
 		}
+		declared := append([]string(nil), model.SupportedEndpointTypes...)
+		for _, ep := range model.EndpointMetadata {
+			declared = append(declared, ep.Type)
+		}
+		model.SupportedEndpointTypes = nil
+		model.EndpointMetadata = nil
+		seenDeclarations := map[string]bool{}
+		for _, typ := range declared {
+			typ = config.NormalizeEndpointType(typ)
+			if typ != "" && !seenDeclarations[typ] {
+				model.EndpointMetadata = append(model.EndpointMetadata, config.ModelEndpointMetadata{Type: typ, Source: "provider_declared"})
+				seenDeclarations[typ] = true
+			}
+		}
+		if len(model.EndpointMetadata) == 0 {
+			typ := config.NormalizeEndpointType(upstream.ServiceType)
+			if upstream.ServiceType == "copilot" {
+				typ = config.NormalizeEndpointType(upstream.CopilotProtocol)
+			}
+			if typ != "" {
+				model.EndpointMetadata = []config.ModelEndpointMetadata{{Type: typ, Source: "configured"}}
+			}
+		}
 		model.InputModalities = inputModalitiesForActualModel(upstream, modelID)
+		if upstream.ModelImportEnabled() {
+			imported, ok := upstream.ImportedModel(modelID)
+			if !ok {
+				continue
+			}
+			model.ID = imported.ID
+			if model.Name == "" || model.Name == modelID {
+				model.Name = imported.ID
+			}
+			model.EndpointMetadata = append([]config.ModelEndpointMetadata(nil), imported.Endpoints...)
+			types := map[string]bool{}
+			for _, ep := range imported.Endpoints {
+				if ep.Verified {
+					types[ep.Type] = true
+				}
+			}
+			for typ := range types {
+				model.SupportedEndpointTypes = append(model.SupportedEndpointTypes, typ)
+			}
+			sort.Strings(model.SupportedEndpointTypes)
+		}
 		addOrUpdate(model)
 	}
 
@@ -683,6 +743,28 @@ func normalizeModelEntry(model ModelEntry, upstream *config.UpstreamConfig, glob
 }
 
 func mergeModelEntryMetadata(existing, incoming ModelEntry) ModelEntry {
+	existing.SupportedEndpointTypes = mergeModelListMetadata(existing.SupportedEndpointTypes, incoming.SupportedEndpointTypes)
+	seenEndpoints := map[config.ModelEndpointMetadata]bool{}
+	for _, ep := range existing.EndpointMetadata {
+		seenEndpoints[ep] = true
+	}
+	for _, ep := range incoming.EndpointMetadata {
+		if !seenEndpoints[ep] {
+			existing.EndpointMetadata = append(existing.EndpointMetadata, ep)
+			seenEndpoints[ep] = true
+		}
+	}
+
+	sort.Slice(existing.EndpointMetadata, func(i, j int) bool {
+		a, b := existing.EndpointMetadata[i], existing.EndpointMetadata[j]
+		if a.Type != b.Type {
+			return a.Type < b.Type
+		}
+		if a.Source != b.Source {
+			return a.Source < b.Source
+		}
+		return !a.Verified && b.Verified
+	})
 	existing.InputModalities = mergeInputModalities(existing.InputModalities, incoming.InputModalities)
 	if existing.Name == "" {
 		existing.Name = incoming.Name
@@ -993,6 +1075,13 @@ func tryModelsRequest(c fiber.Ctx, cfgManager *config.ConfigManager, channelSche
 func requestModelsFromSelection(ctx context.Context, cfgManager *config.ConfigManager, selection *scheduler.SelectionResult, method, suffix string, kind scheduler.ChannelKind) ([]byte, *config.UpstreamConfig, bool) {
 	channelType := channelKindLabel(kind)
 	upstream := selection.Upstream
+	if upstream.ModelImportEnabled() && suffix != "" {
+		actual, err := upstream.CheckImportedModel(strings.TrimPrefix(suffix, "/"))
+		if err != nil {
+			return nil, upstream, false
+		}
+		suffix = "/" + url.PathEscape(actual)
+	}
 
 	var candidateURLs []string
 	var copilotRuntimeToken string
@@ -1358,4 +1447,20 @@ func buildClaudeCompatibleModelsURLs(baseURL string) []string {
 	}
 
 	return candidates
+}
+
+func mergeModelListMetadata(a, b []string) []string {
+	out := append([]string(nil), a...)
+	seen := map[string]bool{}
+	for _, v := range out {
+		seen[v] = true
+	}
+	for _, v := range b {
+		if !seen[v] {
+			out = append(out, v)
+			seen[v] = true
+		}
+	}
+	sort.Strings(out)
+	return out
 }

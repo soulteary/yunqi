@@ -54,18 +54,24 @@ func (cm *ConfigManager) GetCurrentUpstreamWithIndex() (*UpstreamConfig, int, er
 
 // AddUpstream 添加上游
 // placements 可选传 "front"（故障转移序列首位），缺省为追加到序列末尾（见 assignChannelPriority）
-func (cm *ConfigManager) AddUpstream(upstream UpstreamConfig, placements ...string) error {
-	return cm.addUpstreamCommon(ChannelKindRegistry[ChannelKindMessages], upstream, placements...)
+func (cm *ConfigManager) AddUpstreamAudited(auditContext ManagementAuditContext, upstream UpstreamConfig, placements ...string) error {
+	auditContext = auditContext.normalized()
+
+	return cm.addUpstreamCommonAudited(auditContext, ChannelKindRegistry[ChannelKindMessages], upstream, placements...)
 }
 
 // UpdateUpstream 更新上游
 // 返回值：shouldResetMetrics 表示是否需要重置渠道指标（熔断状态）
-func (cm *ConfigManager) UpdateUpstream(index int, updates UpstreamUpdate) (shouldResetMetrics bool, err error) {
-	return cm.updateUpstreamCommon(ChannelKindRegistry[ChannelKindMessages], index, updates)
+func (cm *ConfigManager) UpdateUpstreamAudited(auditContext ManagementAuditContext, index int, updates UpstreamUpdate) (shouldResetMetrics bool, err error) {
+	auditContext = auditContext.normalized()
+
+	return cm.updateUpstreamCommonAudited(auditContext, ChannelKindRegistry[ChannelKindMessages], index, updates)
 }
 
 // RemoveUpstream 删除上游
-func (cm *ConfigManager) RemoveUpstream(index int) (*UpstreamConfig, error) {
+func (cm *ConfigManager) RemoveUpstreamAudited(auditContext ManagementAuditContext, index int) (*UpstreamConfig, error) {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -78,7 +84,7 @@ func (cm *ConfigManager) RemoveUpstream(index int) (*UpstreamConfig, error) {
 
 	cm.clearFailedKeysForUpstream(&removed, "Messages")
 
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		return nil, err
 	}
 
@@ -87,7 +93,9 @@ func (cm *ConfigManager) RemoveUpstream(index int) (*UpstreamConfig, error) {
 }
 
 // AddAPIKey 添加API密钥
-func (cm *ConfigManager) AddAPIKey(index int, apiKey string) error {
+func (cm *ConfigManager) AddAPIKeyAudited(auditContext ManagementAuditContext, index int, apiKey string) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -124,7 +132,7 @@ func (cm *ConfigManager) AddAPIKey(index int, apiKey string) error {
 	}
 	cm.config.Upstream[index].HistoricalAPIKeys = newHistoricalKeys
 
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		return err
 	}
 
@@ -133,7 +141,9 @@ func (cm *ConfigManager) AddAPIKey(index int, apiKey string) error {
 }
 
 // RemoveAPIKey 删除API密钥
-func (cm *ConfigManager) RemoveAPIKey(index int, apiKey string) error {
+func (cm *ConfigManager) RemoveAPIKeyAudited(auditContext ManagementAuditContext, index int, apiKey string) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -174,7 +184,7 @@ func (cm *ConfigManager) RemoveAPIKey(index int, apiKey string) error {
 		log.Printf("[Messages-Key] 上游 [%d] %s: Key %s 已移入历史列表", index, cm.config.Upstream[index].Name, utils.MaskAPIKey(apiKey))
 	}
 
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		return err
 	}
 
@@ -183,7 +193,9 @@ func (cm *ConfigManager) RemoveAPIKey(index int, apiKey string) error {
 }
 
 // MoveAPIKeyToTop 将指定渠道的 API 密钥移到最前面
-func (cm *ConfigManager) MoveAPIKeyToTop(upstreamIndex int, apiKey string) error {
+func (cm *ConfigManager) MoveAPIKeyToTopAudited(auditContext ManagementAuditContext, upstreamIndex int, apiKey string) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -206,11 +218,13 @@ func (cm *ConfigManager) MoveAPIKeyToTop(upstreamIndex int, apiKey string) error
 
 	// 移动到开头
 	upstream.APIKeys = append([]string{apiKey}, append(upstream.APIKeys[:index], upstream.APIKeys[index+1:]...)...)
-	return cm.saveConfigLocked(cm.config)
+	return cm.saveConfigLockedAudited(auditContext, cm.config)
 }
 
 // MoveAPIKeyToBottom 将指定渠道的 API 密钥移到最后面
-func (cm *ConfigManager) MoveAPIKeyToBottom(upstreamIndex int, apiKey string) error {
+func (cm *ConfigManager) MoveAPIKeyToBottomAudited(auditContext ManagementAuditContext, upstreamIndex int, apiKey string) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -234,13 +248,15 @@ func (cm *ConfigManager) MoveAPIKeyToBottom(upstreamIndex int, apiKey string) er
 	// 移动到末尾
 	upstream.APIKeys = append(upstream.APIKeys[:index], upstream.APIKeys[index+1:]...)
 	upstream.APIKeys = append(upstream.APIKeys, apiKey)
-	return cm.saveConfigLocked(cm.config)
+	return cm.saveConfigLockedAudited(auditContext, cm.config)
 }
 
 // ReorderUpstreams 重新排序 Messages 渠道优先级
 // order 是渠道索引数组，按新的优先级顺序排列（只更新传入的渠道，支持部分排序）
 // priorities 可选：与 order 平行的显式优先级值（统一 LLM 视图按全局位次提交），缺省按位次 1..N
-func (cm *ConfigManager) ReorderUpstreams(order []int, priorities ...[]int) error {
+func (cm *ConfigManager) ReorderUpstreamsAudited(auditContext ManagementAuditContext, order []int, priorities ...[]int) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -270,7 +286,7 @@ func (cm *ConfigManager) ReorderUpstreams(order []int, priorities ...[]int) erro
 		cm.config.Upstream[idx].Priority = values[i]
 	}
 
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		return err
 	}
 
@@ -279,7 +295,9 @@ func (cm *ConfigManager) ReorderUpstreams(order []int, priorities ...[]int) erro
 }
 
 // SetChannelStatus 设置 Messages 渠道状态
-func (cm *ConfigManager) SetChannelStatus(index int, status string) error {
+func (cm *ConfigManager) SetChannelStatusAudited(auditContext ManagementAuditContext, index int, status string) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -299,7 +317,7 @@ func (cm *ConfigManager) SetChannelStatus(index int, status string) error {
 		log.Printf("[Config-Status] 已清除渠道 [%d] %s 的促销期", index, cm.config.Upstream[index].Name)
 	}
 
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		return err
 	}
 
@@ -309,7 +327,9 @@ func (cm *ConfigManager) SetChannelStatus(index int, status string) error {
 
 // SetChannelPromotion 设置渠道促销期
 // duration 为促销持续时间，传入 0 表示清除促销期
-func (cm *ConfigManager) SetChannelPromotion(index int, duration time.Duration) error {
+func (cm *ConfigManager) SetChannelPromotionAudited(auditContext ManagementAuditContext, index int, duration time.Duration) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -332,7 +352,7 @@ func (cm *ConfigManager) SetChannelPromotion(index int, duration time.Duration) 
 		log.Printf("[Config-Promotion] 已设置渠道 [%d] %s 进入促销期，截止: %s", index, cm.config.Upstream[index].Name, promotionEnd.Format(time.RFC3339))
 	}
 
-	return cm.saveConfigLocked(cm.config)
+	return cm.saveConfigLockedAudited(auditContext, cm.config)
 }
 
 // GetPromotedChannel 获取当前处于促销期的渠道索引（返回优先级最高的）
@@ -349,7 +369,9 @@ func (cm *ConfigManager) GetPromotedChannel() (int, bool) {
 }
 
 // DeprioritizeAPIKey 降低API密钥优先级（在所有渠道中查找）
-func (cm *ConfigManager) DeprioritizeAPIKey(apiKey string) error {
+func (cm *ConfigManager) DeprioritizeAPIKeyAudited(auditContext ManagementAuditContext, apiKey string) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -369,7 +391,7 @@ func (cm *ConfigManager) DeprioritizeAPIKey(apiKey string) error {
 			upstream.APIKeys = append(upstream.APIKeys[:index], upstream.APIKeys[index+1:]...)
 			upstream.APIKeys = append(upstream.APIKeys, apiKey)
 			log.Printf("[Messages-Key] 已将API密钥移动到末尾以降低优先级: %s (渠道: %s)", utils.MaskAPIKey(apiKey), upstream.Name)
-			return cm.saveConfigLocked(cm.config)
+			return cm.saveConfigLockedAudited(auditContext, cm.config)
 		}
 	}
 
@@ -389,7 +411,7 @@ func (cm *ConfigManager) DeprioritizeAPIKey(apiKey string) error {
 			upstream.APIKeys = append(upstream.APIKeys[:index], upstream.APIKeys[index+1:]...)
 			upstream.APIKeys = append(upstream.APIKeys, apiKey)
 			log.Printf("[Responses-Key] 已将API密钥移动到末尾以降低优先级: %s (Responses渠道: %s)", utils.MaskAPIKey(apiKey), upstream.Name)
-			return cm.saveConfigLocked(cm.config)
+			return cm.saveConfigLockedAudited(auditContext, cm.config)
 		}
 	}
 
@@ -409,7 +431,7 @@ func (cm *ConfigManager) DeprioritizeAPIKey(apiKey string) error {
 			upstream.APIKeys = append(upstream.APIKeys[:index], upstream.APIKeys[index+1:]...)
 			upstream.APIKeys = append(upstream.APIKeys, apiKey)
 			log.Printf("[Chat-Key] 已将API密钥移动到末尾以降低优先级: %s (Chat渠道: %s)", utils.MaskAPIKey(apiKey), upstream.Name)
-			return cm.saveConfigLocked(cm.config)
+			return cm.saveConfigLockedAudited(auditContext, cm.config)
 		}
 	}
 
@@ -429,7 +451,7 @@ func (cm *ConfigManager) DeprioritizeAPIKey(apiKey string) error {
 			upstream.APIKeys = append(upstream.APIKeys[:index], upstream.APIKeys[index+1:]...)
 			upstream.APIKeys = append(upstream.APIKeys, apiKey)
 			log.Printf("[Images-Key] 已将API密钥移动到末尾以降低优先级: %s (Images渠道: %s)", utils.MaskAPIKey(apiKey), upstream.Name)
-			return cm.saveConfigLocked(cm.config)
+			return cm.saveConfigLockedAudited(auditContext, cm.config)
 		}
 	}
 
@@ -437,19 +459,81 @@ func (cm *ConfigManager) DeprioritizeAPIKey(apiKey string) error {
 }
 
 // DeprioritizeAPIKeyForRoute 只调整指定物理协议池与渠道索引中的 Key 顺序。
-func (cm *ConfigManager) DeprioritizeAPIKeyForRoute(apiType string, channelIndex int, apiKey string) error {
+func (cm *ConfigManager) DeprioritizeAPIKeyForRouteAudited(auditContext ManagementAuditContext, apiType string, channelIndex int, apiKey string) error {
+	auditContext = auditContext.normalized()
+
 	switch strings.ToLower(strings.TrimSpace(apiType)) {
 	case "responses":
-		return cm.MoveResponsesAPIKeyToBottom(channelIndex, apiKey)
+		return cm.MoveResponsesAPIKeyToBottomAudited(auditContext, channelIndex, apiKey)
 	case "gemini":
-		return cm.MoveGeminiAPIKeyToBottom(channelIndex, apiKey)
+		return cm.MoveGeminiAPIKeyToBottomAudited(auditContext, channelIndex, apiKey)
 	case "chat":
-		return cm.MoveChatAPIKeyToBottom(channelIndex, apiKey)
+		return cm.MoveChatAPIKeyToBottomAudited(auditContext, channelIndex, apiKey)
 	case "images":
-		return cm.MoveImagesAPIKeyToBottom(channelIndex, apiKey)
+		return cm.MoveImagesAPIKeyToBottomAudited(auditContext, channelIndex, apiKey)
 	case "vectors":
-		return cm.MoveVectorsAPIKeyToBottom(channelIndex, apiKey)
+		return cm.MoveVectorsAPIKeyToBottomAudited(auditContext, channelIndex, apiKey)
 	default:
-		return cm.MoveAPIKeyToBottom(channelIndex, apiKey)
+		return cm.MoveAPIKeyToBottomAudited(auditContext, channelIndex, apiKey)
 	}
+}
+
+// AddAPIKey preserves the system/background call contract. HTTP callers use AddAPIKeyAudited.
+func (cm *ConfigManager) AddAPIKey(index int, apiKey string) error {
+	return cm.AddAPIKeyAudited(ManagementAuditContext{}, index, apiKey)
+}
+
+// AddUpstream preserves the system/background call contract. HTTP callers use AddUpstreamAudited.
+func (cm *ConfigManager) AddUpstream(upstream UpstreamConfig, placements ...string) error {
+	return cm.AddUpstreamAudited(ManagementAuditContext{}, upstream, placements...)
+}
+
+// DeprioritizeAPIKey preserves the system/background call contract. HTTP callers use DeprioritizeAPIKeyAudited.
+func (cm *ConfigManager) DeprioritizeAPIKey(apiKey string) error {
+	return cm.DeprioritizeAPIKeyAudited(ManagementAuditContext{}, apiKey)
+}
+
+// DeprioritizeAPIKeyForRoute preserves the system/background call contract. HTTP callers use DeprioritizeAPIKeyForRouteAudited.
+func (cm *ConfigManager) DeprioritizeAPIKeyForRoute(apiType string, channelIndex int, apiKey string) error {
+	return cm.DeprioritizeAPIKeyForRouteAudited(ManagementAuditContext{}, apiType, channelIndex, apiKey)
+}
+
+// MoveAPIKeyToBottom preserves the system/background call contract. HTTP callers use MoveAPIKeyToBottomAudited.
+func (cm *ConfigManager) MoveAPIKeyToBottom(upstreamIndex int, apiKey string) error {
+	return cm.MoveAPIKeyToBottomAudited(ManagementAuditContext{}, upstreamIndex, apiKey)
+}
+
+// MoveAPIKeyToTop preserves the system/background call contract. HTTP callers use MoveAPIKeyToTopAudited.
+func (cm *ConfigManager) MoveAPIKeyToTop(upstreamIndex int, apiKey string) error {
+	return cm.MoveAPIKeyToTopAudited(ManagementAuditContext{}, upstreamIndex, apiKey)
+}
+
+// RemoveAPIKey preserves the system/background call contract. HTTP callers use RemoveAPIKeyAudited.
+func (cm *ConfigManager) RemoveAPIKey(index int, apiKey string) error {
+	return cm.RemoveAPIKeyAudited(ManagementAuditContext{}, index, apiKey)
+}
+
+// RemoveUpstream preserves the system/background call contract. HTTP callers use RemoveUpstreamAudited.
+func (cm *ConfigManager) RemoveUpstream(index int) (*UpstreamConfig, error) {
+	return cm.RemoveUpstreamAudited(ManagementAuditContext{}, index)
+}
+
+// ReorderUpstreams preserves the system/background call contract. HTTP callers use ReorderUpstreamsAudited.
+func (cm *ConfigManager) ReorderUpstreams(order []int, priorities ...[]int) error {
+	return cm.ReorderUpstreamsAudited(ManagementAuditContext{}, order, priorities...)
+}
+
+// SetChannelPromotion preserves the system/background call contract. HTTP callers use SetChannelPromotionAudited.
+func (cm *ConfigManager) SetChannelPromotion(index int, duration time.Duration) error {
+	return cm.SetChannelPromotionAudited(ManagementAuditContext{}, index, duration)
+}
+
+// SetChannelStatus preserves the system/background call contract. HTTP callers use SetChannelStatusAudited.
+func (cm *ConfigManager) SetChannelStatus(index int, status string) error {
+	return cm.SetChannelStatusAudited(ManagementAuditContext{}, index, status)
+}
+
+// UpdateUpstream preserves the system/background call contract. HTTP callers use UpdateUpstreamAudited.
+func (cm *ConfigManager) UpdateUpstream(index int, updates UpstreamUpdate) (shouldResetMetrics bool, err error) {
+	return cm.UpdateUpstreamAudited(ManagementAuditContext{}, index, updates)
 }

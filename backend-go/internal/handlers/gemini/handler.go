@@ -166,6 +166,8 @@ func handleMultiChannel(
 		isStream,
 		agentRole,
 		func(c fiber.Ctx, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
+			managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 			upstream := selection.Upstream
 			channelIndex := selection.ChannelIndex
 
@@ -196,7 +198,7 @@ func handleMultiChannel(
 					return buildProviderRequest(c, upstreamCopy, upstreamCopy.BaseURL, apiKey, bodyBytes, geminiReq, model, isStream)
 				},
 				func(apiKey string) {
-					_ = cfgManager.DeprioritizeAPIKey(apiKey)
+					_ = cfgManager.DeprioritizeAPIKeyAudited(managementAuditContext, apiKey)
 				},
 				func(url string) {
 					channelScheduler.MarkURLFailure(scheduler.ChannelKindGemini, channelIndex, url)
@@ -243,6 +245,8 @@ func handleSingleChannel(
 	isStream bool,
 	startTime time.Time,
 ) {
+	managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 	upstream, channelIndex, err := cfgManager.GetCurrentGeminiUpstreamWithIndex()
 	if err != nil {
 		httpbridge.JSON(c, 503, types.GeminiError{
@@ -305,7 +309,7 @@ func handleSingleChannel(
 			return buildProviderRequest(c, upstreamCopy, upstreamCopy.BaseURL, apiKey, bodyBytes, geminiReq, model, isStream)
 		},
 		func(apiKey string) {
-			_ = cfgManager.DeprioritizeAPIKey(apiKey)
+			_ = cfgManager.DeprioritizeAPIKeyAudited(managementAuditContext, apiKey)
 		},
 		nil,
 		nil,
@@ -420,7 +424,10 @@ func buildProviderRequest(
 ) (*http.Request, error) {
 	baseURL = strings.TrimSuffix(strings.TrimRight(baseURL, "/"), "#")
 	// 显式 ModelMapping 已退役：请求模型直接作为上游执行模型
-	mappedModel := model
+	mappedModel, importErr := upstream.CheckImportedModel(model)
+	if importErr != nil {
+		return nil, importErr
+	}
 
 	// 使用 context 中的最新请求体（已经过 failover 内的历史图片轮次限制替换等处理）。
 	// 若替换后的 body 与原始不同，需同步重新解析 geminiReq，使 claude/openai/responses

@@ -1670,6 +1670,15 @@ func (r *ModelResolver) refreshAutoDiscoveryCapabilities(
 		upstream = r.findUpstream(channelUID, channelKind)
 	}
 
+	if upstream.ModelImportEnabled() {
+		reviewed := make([]ModelProfile, 0, len(candidates))
+		for _, candidate := range candidates {
+			if _, ok := upstream.ImportedModel(candidate.ModelID); ok {
+				reviewed = append(reviewed, candidate)
+			}
+		}
+		candidates = reviewed
+	}
 	refreshed := append([]ModelProfile(nil), candidates...)
 	for i := range refreshed {
 		profile := &refreshed[i]

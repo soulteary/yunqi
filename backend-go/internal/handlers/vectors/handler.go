@@ -160,6 +160,8 @@ func handleVectorsFailover(
 		agentRole,
 		newEmbeddingCompatibilityFilter(c, model, dimensions),
 		func(c fiber.Ctx, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
+			managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 			upstream := selection.Upstream
 			channelIndex := selection.ChannelIndex
 			if upstream == nil {
@@ -188,7 +190,7 @@ func handleVectorsFailover(
 					return buildProviderRequest(c, upstreamCopy, upstreamCopy.BaseURL, apiKey, common.GetEffectiveRequestBody(c, bodyBytes), model)
 				},
 				func(apiKey string) {
-					_ = cfgManager.DeprioritizeAPIKey(apiKey)
+					_ = cfgManager.DeprioritizeAPIKeyAudited(managementAuditContext, apiKey)
 				},
 				func(url string) {
 					channelScheduler.MarkURLFailure(scheduler.ChannelKindVectors, channelIndex, url)
@@ -239,7 +241,10 @@ func buildProviderRequest(
 	}
 	upstream.ServiceType = serviceType
 
-	redirectedModel := model
+	redirectedModel, importErr := upstream.CheckImportedModel(model)
+	if importErr != nil {
+		return nil, importErr
+	}
 	requestBody, err := buildEmbeddingsRequestBody(bodyBytes, model, redirectedModel)
 	if err != nil {
 		common.RequestLogf(c, "[Vectors-BuildRequest] base_url=%q key_mask=%s model=%q stage=build_json reason=invalid_json error=%q",

@@ -80,6 +80,8 @@ func handleGetRoutingConfig(deps *RoutingConfigDeps) fiber.Handler {
 // 更新智能路由配置。只允许修改 costPreference 和 scenario。
 func handleUpdateRoutingConfig(deps *RoutingConfigDeps) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		var req RoutingConfigUpdateRequest
 		if err := httpbridge.BindJSON(c, &req); err != nil {
 			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "无效的请求体"})
@@ -93,7 +95,7 @@ func handleUpdateRoutingConfig(deps *RoutingConfigDeps) fiber.Handler {
 				httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "无效的 costPreference，可选值: quality_first/balanced/cost_first"})
 				return nil
 			}
-			if err := deps.CfgManager.SetCostPreferenceMode(req.CostPreference); err != nil {
+			if err := deps.CfgManager.SetCostPreferenceModeAudited(managementAuditContext, req.CostPreference); err != nil {
 				httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": "保存价格偏向失败"})
 				return nil
 			}
@@ -105,7 +107,7 @@ func handleUpdateRoutingConfig(deps *RoutingConfigDeps) fiber.Handler {
 				httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "无效的 scenario，可选值: " + strings.Join(config.ValidScenarioModes, "/")})
 				return nil
 			}
-			if err := deps.CfgManager.SetScenarioMode(req.Scenario); err != nil {
+			if err := deps.CfgManager.SetScenarioModeAudited(managementAuditContext, req.Scenario); err != nil {
 				httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": "保存场景预设失败"})
 				return nil
 			}
@@ -113,7 +115,7 @@ func handleUpdateRoutingConfig(deps *RoutingConfigDeps) fiber.Handler {
 
 		// 竞速模式全局开关（racing.enabled）
 		if req.RacingEnabled != nil {
-			if err := deps.CfgManager.SetRacingEnabled(*req.RacingEnabled); err != nil {
+			if err := deps.CfgManager.SetRacingEnabledAudited(managementAuditContext, *req.RacingEnabled); err != nil {
 				httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": "保存竞速配置失败"})
 				return nil
 			}

@@ -42,6 +42,8 @@ func inferAutoAddProviderID(baseURLs, apiKeys []string) string {
 }
 
 func handleProviderAutoAdd(c fiber.Ctx, deps *AutoManagedDeps, requestKind string, req AutoAddRequest) {
+	managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 	tmpl, ok := config.GetProviderTemplate(req.ProviderID)
 	if !ok {
 		httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": fmt.Sprintf("未知的 provider: %s", req.ProviderID)})
@@ -122,7 +124,7 @@ func handleProviderAutoAdd(c fiber.Ctx, deps *AutoManagedDeps, requestKind strin
 		config.ApplyProviderUpstreamDefaults(tmpl.ProviderID, &upstream)
 		additions = append(additions, config.AccountChannelAddition{Kind: item.route.ChannelKind, Upstream: upstream, Placement: req.Placement})
 	}
-	if err := deps.CfgManager.ApplyAccountChannelChanges(accountUID, nil, additions); err != nil {
+	if err := deps.CfgManager.ApplyAccountChannelChangesAudited(managementAuditContext, accountUID, nil, additions); err != nil {
 		httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": fmt.Sprintf("创建渠道失败: %v", err)})
 		return
 	}
@@ -171,6 +173,8 @@ func managedAccountUIDForProvider(cfg config.Config, providerID string) string {
 }
 
 func appendCredentialsToProviderAccount(c fiber.Ctx, deps *AutoManagedDeps, requestKind, accountUID string, apiKeys []string) {
+	managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 	channels := deps.CfgManager.GetAccountChannels(accountUID)
 	if len(channels) == 0 {
 		httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "provider 账号不存在"})
@@ -200,7 +204,7 @@ func appendCredentialsToProviderAccount(c fiber.Ctx, deps *AutoManagedDeps, requ
 		return
 	}
 	changed := channelsWithAddedKeys(channels, desired)
-	if err := deps.CfgManager.ApplyAccountChannelChanges(accountUID, updates, additions); err != nil {
+	if err := deps.CfgManager.ApplyAccountChannelChangesAudited(managementAuditContext, accountUID, updates, additions); err != nil {
 		httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": err.Error()})
 		return
 	}

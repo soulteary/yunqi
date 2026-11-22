@@ -30,6 +30,11 @@ func RegisterRoutes(apiGroup fiber.Router, cfgManager *config.ConfigManager, cha
 	apiGroup.Get("/channels", h.List)
 	apiGroup.Get("/channels/:uid", h.Get)
 	apiGroup.Post("/channels/:uid/request-preview", h.RequestPreview)
+	apiGroup.Get("/channels/:uid/model-import", h.GetModelImport)
+	apiGroup.Delete("/channels/:uid/model-import", h.RemoveModelImport)
+	apiGroup.Put("/channels/:uid/model-import/policy", h.SetModelImportPolicy)
+	apiGroup.Post("/channels/:uid/model-import/preview", h.PreviewModelImport)
+	apiGroup.Post("/channels/:uid/model-import/approve", h.ApproveModelImport)
 	apiGroup.Post("/channels", h.Create)
 	apiGroup.Put("/channels/:uid", h.Update)
 	apiGroup.Delete("/channels/:uid", h.Delete)
@@ -240,6 +245,8 @@ type UpdateRequest struct {
 
 // Update 更新渠道（按 ChannelUID 寻址，内部按 kind 路由）。
 func (h *Handler) Update(c fiber.Ctx) error {
+	managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 	uid := httpbridge.Param(c, "uid")
 	_, _, found := h.cm.FindUpstreamByUID(uid)
 	if !found {
@@ -316,7 +323,7 @@ func (h *Handler) Update(c fiber.Ctx) error {
 		BalanceCheck:                  req.BalanceCheck,
 	}
 
-	receipt, loc, shouldResetMetrics, err := h.cm.UpdateChannelWithReceipt(uid, httpbridge.Request(c).Header.Get("If-Match"), updates)
+	receipt, loc, shouldResetMetrics, err := h.cm.UpdateChannelWithReceiptAudited(managementAuditContext, uid, httpbridge.Request(c).Header.Get("If-Match"), updates)
 	if err != nil {
 		if errors.Is(err, config.ErrChannelRevisionConflict) {
 			httpbridge.JSON(c, http.StatusConflict, fiber.Map{"error": err.Error(), "persisted": false})

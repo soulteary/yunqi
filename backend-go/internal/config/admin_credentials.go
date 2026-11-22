@@ -47,7 +47,9 @@ func (cm *ConfigManager) FindAdminCredential(raw string) (AdminCredential, bool)
 	}
 	return AdminCredential{}, false
 }
-func (cm *ConfigManager) PutAdminCredential(key AdminCredential, rotateFrom string) error {
+func (cm *ConfigManager) PutAdminCredentialAudited(auditContext ManagementAuditContext, key AdminCredential, rotateFrom string) error {
+	auditContext = auditContext.normalized()
+
 	if err := validateEntryKey(EntryKey{ID: key.ID, KeyHash: key.KeyHash, PrincipalID: key.ActorID, ChannelUIDs: key.ChannelUIDs}); err != nil {
 		return err
 	}
@@ -92,7 +94,7 @@ func (cm *ConfigManager) PutAdminCredential(key AdminCredential, rotateFrom stri
 		}
 		next.AdminCredentials = append(next.AdminCredentials, cloneAdminCredential(key))
 	}
-	if err := cm.saveConfigLocked(next); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, next); err != nil {
 		cm.mu.Unlock()
 		return err
 	}
@@ -102,7 +104,9 @@ func (cm *ConfigManager) PutAdminCredential(key AdminCredential, rotateFrom stri
 
 // SetChannelStatusByUID resolves and mutates under the same lock, so reorderings
 // cannot change which resource a scoped administrator is allowed to operate.
-func (cm *ConfigManager) SetChannelStatusByUID(uid, status string) error {
+func (cm *ConfigManager) SetChannelStatusByUIDAudited(auditContext ManagementAuditContext, uid, status string) error {
+	auditContext = auditContext.normalized()
+
 	if status != "active" && status != "suspended" && status != "disabled" {
 		return errors.New("invalid channel state")
 	}
@@ -119,10 +123,20 @@ func (cm *ConfigManager) SetChannelStatusByUID(uid, status string) error {
 		return errors.New("channel not found")
 	}
 	applyAdministrativeChannelStatus(target, status)
-	if err := cm.saveConfigLocked(next); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, next); err != nil {
 		cm.mu.Unlock()
 		return err
 	}
 	cm.fireConfigChangeCallbacks()
 	return nil
+}
+
+// PutAdminCredential preserves the system/background call contract. HTTP callers use PutAdminCredentialAudited.
+func (cm *ConfigManager) PutAdminCredential(key AdminCredential, rotateFrom string) error {
+	return cm.PutAdminCredentialAudited(ManagementAuditContext{}, key, rotateFrom)
+}
+
+// SetChannelStatusByUID preserves the system/background call contract. HTTP callers use SetChannelStatusByUIDAudited.
+func (cm *ConfigManager) SetChannelStatusByUID(uid, status string) error {
+	return cm.SetChannelStatusByUIDAudited(ManagementAuditContext{}, uid, status)
 }

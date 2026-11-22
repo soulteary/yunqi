@@ -53,7 +53,9 @@ func (cm *ConfigManager) IdentityProxySnapshot() IdentityProxyConfig {
 	}
 	return cloneIdentityProxy(*cm.config.IdentityProxy)
 }
-func (cm *ConfigManager) SetIdentityProxyConfig(cfg IdentityProxyConfig) error {
+func (cm *ConfigManager) SetIdentityProxyConfigAudited(auditContext ManagementAuditContext, cfg IdentityProxyConfig) error {
+	auditContext = auditContext.normalized()
+
 	cfg = cloneIdentityProxy(cfg)
 	cfg.RevocationEpoch = strings.ToLower(cfg.RevocationEpoch)
 	if cfg.RevocationEpoch != "" {
@@ -122,20 +124,26 @@ func (cm *ConfigManager) SetIdentityProxyConfig(cfg IdentityProxyConfig) error {
 	}
 	copy := cloneIdentityProxy(cfg)
 	next.IdentityProxy = &copy
-	if err := cm.saveConfigLocked(next); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, next); err != nil {
 		cm.mu.Unlock()
 		return err
 	}
 	cm.fireConfigChangeCallbacks()
 	return nil
 }
-func (cm *ConfigManager) RevokeIdentitySession(hash string) error {
-	return cm.RevokeIdentitySessionUntil(hash, 0)
+func (cm *ConfigManager) RevokeIdentitySessionAudited(auditContext ManagementAuditContext, hash string) error {
+	auditContext = auditContext.normalized()
+
+	return cm.RevokeIdentitySessionUntilAudited(auditContext, hash, 0)
 }
-func (cm *ConfigManager) RevokeIdentitySessionUntil(hash string, expiresAt int64) error {
-	return cm.revokeIdentitySessionUntilAt(hash, expiresAt, time.Now().Unix())
+func (cm *ConfigManager) RevokeIdentitySessionUntilAudited(auditContext ManagementAuditContext, hash string, expiresAt int64) error {
+	auditContext = auditContext.normalized()
+
+	return cm.revokeIdentitySessionUntilAtAudited(auditContext, hash, expiresAt, time.Now().Unix())
 }
-func (cm *ConfigManager) revokeIdentitySessionUntilAt(hash string, expiresAt, now int64) error {
+func (cm *ConfigManager) revokeIdentitySessionUntilAtAudited(auditContext ManagementAuditContext, hash string, expiresAt, now int64) error {
+	auditContext = auditContext.normalized()
+
 	hash = strings.ToLower(hash)
 	decoded, err := hex.DecodeString(hash)
 	if err != nil || len(decoded) != 32 || expiresAt < 0 {
@@ -172,7 +180,7 @@ func (cm *ConfigManager) revokeIdentitySessionUntilAt(hash string, expiresAt, no
 		active = append(active, IdentitySessionRevocation{Hash: hash, ExpiresAt: expiresAt})
 	}
 	next.IdentityProxy.RevokedSessions = active
-	if err := cm.saveConfigLocked(next); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, next); err != nil {
 		cm.mu.Unlock()
 		return err
 	}
@@ -192,4 +200,24 @@ func NormalizeIdentityOrigin(raw string) (string, error) {
 		return "", errors.New("invalid identity proxy origin")
 	}
 	return strings.ToLower(u.Scheme) + "://" + strings.ToLower(u.Host), nil
+}
+
+// RevokeIdentitySession preserves the system/background call contract. HTTP callers use RevokeIdentitySessionAudited.
+func (cm *ConfigManager) RevokeIdentitySession(hash string) error {
+	return cm.RevokeIdentitySessionAudited(ManagementAuditContext{}, hash)
+}
+
+// RevokeIdentitySessionUntil preserves the system/background call contract. HTTP callers use RevokeIdentitySessionUntilAudited.
+func (cm *ConfigManager) RevokeIdentitySessionUntil(hash string, expiresAt int64) error {
+	return cm.RevokeIdentitySessionUntilAudited(ManagementAuditContext{}, hash, expiresAt)
+}
+
+// SetIdentityProxyConfig preserves the system/background call contract. HTTP callers use SetIdentityProxyConfigAudited.
+func (cm *ConfigManager) SetIdentityProxyConfig(cfg IdentityProxyConfig) error {
+	return cm.SetIdentityProxyConfigAudited(ManagementAuditContext{}, cfg)
+}
+
+// revokeIdentitySessionUntilAt preserves the system/background call contract. HTTP callers use revokeIdentitySessionUntilAtAudited.
+func (cm *ConfigManager) revokeIdentitySessionUntilAt(hash string, expiresAt, now int64) error {
+	return cm.revokeIdentitySessionUntilAtAudited(ManagementAuditContext{}, hash, expiresAt, now)
 }

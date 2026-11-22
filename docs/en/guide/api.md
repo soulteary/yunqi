@@ -123,6 +123,17 @@ The cost page includes remote preset price review and rollback. Global admins us
 
 Activation, actor audit and rollback snapshots share one atomic durable file. Failure does not publish the new state. A bundle containing price changes waits as a whole; metadata-only updates that do not affect price selection retain the existing update flow. Up to 10 revisions are retained. Rollback restores the same entire preset bundle after restart, including model capabilities, without repricing settled requests. Legacy caches with different price selection and no approval become pending instead of silently replacing prices at startup. Source signature status and publication/check times are visible; see [environment settings](environment.md) for trust and freshness requirements.
 
+## Management change audit
+
+Global admins may query `GET /api/audit` with actorId/action/outcome/operationId filters and limit 1–200 (default 100). Continue with nextCursor and identical filters/limit. Cursors freeze the first-page upper sequence and retained lower boundary and bind the snapshot event digest, preventing mixed histories across replicas; partial or complete eviction of the initial history interval returns 409. Limited roles and channel-scoped admins cannot read the global history. Related body-policy and price-review audit entries share the same operationId.
+
+Authenticated mutations durably record intent before authorization/handler execution. X-Yunqi-Audit-Operation identifies the server-generated operation. Actual configuration publication appends a committed event in the same atomic file replacement; field values contain SHA256/encoded-length summaries only, and dynamic map keys are hashed. Background and external-reload changes use system actors. Context is passed explicitly rather than stored in a mutable global actor.
+
+Completed describes HTTP completion; accepted only acknowledges a queued task. Neither substitutes for committed state or background-job completion. Audit-intent persistence failure prevents mutation. If outcome persistence fails after response delivery, existing intent/commit records remain and no completion is invented. Unauthenticated denials use existing authentication logs without config writes.
+
+History retains at most 1000 entries and 2 MiB in the config document and follows consistent backups. Replicas retain node-local history. Ordinary config snapshots/import candidates cannot overwrite authoritative audit history. Pending external file edits block management audit/writes until normal reload, preventing audit-only writes from swallowing external ACL changes. POST route/request previews also record audit metadata while preserving business-config, scheduling, budget and trace read-only behavior; metadata does not change channel revisions or price-review IDs.
+
+A failed outcome does not imply that every external side effect was undone; use intent, committed events and domain state to establish the actual result.
 
 ## Stable caller cost attribution
 
@@ -131,3 +142,5 @@ Global administrators can use `GET /api/reports/cost?groupBy=principal&type=chat
 The attribution column contains a domain-separated SHA-256 fingerprint of the authenticated server-side identity, never a client-supplied identity header or raw credential/subject/email. `p_` identities represent configured stable principals and combine rotated keys; `k_` identities remain credential-bound. Short fingerprints are display labels; full opaque IDs are used for filters and CSV. Legacy rows remain `unknown`, even when their old display mask matches a current key. SQLite v12 adds the column and index without inventing historical ownership or changing captured costs.
 
 The cost page retains principal scope during model/key drilldown and CSV export. Request history accepts the same `principalId`, and cursors cannot change scope between pages. History uses the report time range and existing metrics retention, with no request bodies or credentials. Stale asynchronous responses cannot overwrite a newly selected scope. Reports aggregate persisted metrics under the existing pricing-completeness rules; they do not replace the independent budget ledger or promise a single database snapshot across live queries. Proxy credentials do not grant management-report access.
+
+Model-import policy, preview, approval and explicit removal publish their management audit commit in the same config transaction. HTTP calls preserve the authenticated actor and operation ID; automatic discovery uses a fresh system operation. Policy/approval domain entries retain the matching operationId. Failed persistence publishes neither the new catalog state nor a committed event.

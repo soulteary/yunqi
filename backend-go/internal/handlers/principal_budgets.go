@@ -64,6 +64,8 @@ func RegisterPrincipalBudgetRoutes(router fiber.Router, env *config.EnvConfig, c
 		return nil
 	})
 	router.Put("/budgets", func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		if !middleware.AuthorizeAdminAction(c, "budgets.configure", "") {
 			return nil
 		}
@@ -80,7 +82,7 @@ func RegisterPrincipalBudgetRoutes(router fiber.Router, env *config.EnvConfig, c
 			httpbridge.JSON(c, 400, fiber.Map{"error": "invalid_budget_policy"})
 			return nil
 		}
-		if cm.PutPrincipalBudget(normalized) != nil {
+		if cm.PutPrincipalBudgetAudited(managementAuditContext, normalized) != nil {
 			httpbridge.JSON(c, 500, fiber.Map{"error": "budget_policy_save_failed"})
 			return nil
 		}
