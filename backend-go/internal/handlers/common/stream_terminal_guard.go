@@ -390,7 +390,7 @@ func streamFrameTerminal(payload, event, protocol string, source bool) (bool, bo
 		}
 	case "gemini":
 		if feedback, ok := object["promptFeedback"].(map[string]interface{}); ok {
-			if reason, ok := feedback["blockReason"].(string); ok && strings.TrimSpace(reason) != "" {
+			if reason, ok := feedback["blockReason"].(string); ok && types.GeminiPromptBlocked(reason) {
 				return true, false
 			}
 		}

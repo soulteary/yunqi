@@ -324,3 +324,12 @@ func TestTerminalParserRecognizesEventAfterData(t *testing.T) {
 		t.Fatalf("post-data error lost: terminal=%v failed=%v", terminal, failed)
 	}
 }
+
+func TestTerminalParserPromptFeedbackPlaceholderIsNotTerminal(t *testing.T) {
+	for _, reason := range []string{"BLOCK_REASON_UNSPECIFIED", "SAFETY", "OTHER"} {
+		terminal, failed := streamFrameTerminal(`{"promptFeedback":{"blockReason":"`+reason+`"}}`, "", "gemini", true)
+		if terminal != (reason != "BLOCK_REASON_UNSPECIFIED") || failed {
+			t.Fatalf("reason=%s terminal=%v failed=%v", reason, terminal, failed)
+		}
+	}
+}
