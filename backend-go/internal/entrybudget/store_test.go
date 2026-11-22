@@ -223,3 +223,33 @@ func TestRollingBudgetUsesActualSlidingWindowAndKeepsActiveHolds(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestBudgetAuditOwnerLookupDoesNotDependOnRecentPage(t *testing.T) {
+	s := testStore(t)
+	p := testPolicy(t, 100, 100)
+	ctx := context.Background()
+	now := time.Unix(1000, 0)
+	if err := s.Start(ctx, p, "a-old", now); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 201; i++ {
+		if err := s.Start(ctx, p, fmt.Sprintf("z-new-%03d", i), now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	recent, err := s.Requests(ctx, p.PrincipalID, 200)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range recent {
+		if r.ID == "a-old" {
+			t.Fatal("fixture did not leave recent page")
+		}
+	}
+	if owned, err := s.RequestOwned(ctx, "a-old", p.PrincipalID); err != nil || !owned {
+		t.Fatalf("old own record denied %v %v", owned, err)
+	}
+	if owned, err := s.RequestOwned(ctx, "a-old", "different-owner"); err != nil || owned {
+		t.Fatalf("cross-owner record exposed %v %v", owned, err)
+	}
+}

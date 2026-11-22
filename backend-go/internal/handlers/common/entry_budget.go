@@ -2,8 +2,6 @@ package common
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -23,24 +21,23 @@ import (
 	"github.com/soulteary/yunqi/internal/middleware"
 	"github.com/soulteary/yunqi/internal/requestscope"
 	"github.com/soulteary/yunqi/internal/types"
-	"github.com/soulteary/yunqi/internal/utils"
 	"github.com/tidwall/gjson"
 )
 
 func budgetProtocol(req *http.Request, upstream *config.UpstreamConfig) string {
-	path := req.URL.Path
+	path := strings.TrimRight(strings.ToLower(req.URL.Path), "/")
 	switch {
-	case strings.Contains(path, "/models/") && strings.Contains(path, ":"):
+	case strings.HasSuffix(path, ":generatecontent") || strings.HasSuffix(path, ":streamgeneratecontent"):
 		return "gemini"
-	case strings.Contains(path, "/chat/completions"):
+	case strings.HasSuffix(path, "/chat/completions"):
 		return "chat"
 	case strings.HasSuffix(path, "/messages"):
 		return "messages"
-	case strings.Contains(path, "/responses"):
+	case strings.HasSuffix(path, "/responses") || strings.HasSuffix(path, "/responses/compact"):
 		return "responses"
-	case strings.Contains(path, "/embeddings"):
+	case strings.HasSuffix(path, "/embeddings"):
 		return "vectors"
-	case strings.Contains(path, "/images/"):
+	case strings.HasSuffix(path, "/images/generations") || strings.HasSuffix(path, "/images/edits") || strings.HasSuffix(path, "/images/variations"):
 		return "images"
 	}
 	switch upstream.ServiceType {
@@ -63,6 +60,9 @@ func budgetHasMedia(value interface{}) bool {
 		}
 	case map[string]interface{}:
 		for key, item := range v {
+			if key == "tools" || key == "tool_choice" || key == "response_format" {
+				continue
+			}
 			switch strings.ToLower(key) {
 			case "image_url", "input_audio", "audio", "video", "inlinedata", "filedata", "modalities", "responsemodalities", "mime_type", "mimetype":
 				return true
@@ -73,6 +73,35 @@ func budgetHasMedia(value interface{}) bool {
 				}
 			}
 			if budgetHasMedia(item) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// Hosted tools have per-call/storage/search fees outside the token price schema.
+// Inspect tool declarations only: client function/custom schemas may legitimately
+// contain any of these words without asking the provider to run a hosted tool.
+func budgetHasUnpricedServerTools(value interface{}) bool {
+	root, ok := value.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	tools, _ := root["tools"].([]interface{})
+	for _, item := range tools {
+		tool, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		kind, _ := tool["type"].(string)
+		kind = strings.ToLower(kind)
+		if kind == "web_search" || strings.HasPrefix(kind, "web_search_") || kind == "file_search" || kind == "code_interpreter" || kind == "image_generation" || strings.HasPrefix(kind, "web_fetch_") || strings.HasPrefix(kind, "code_execution_") {
+			return true
+		}
+		for key := range tool {
+			switch strings.ReplaceAll(strings.ToLower(key), "_", "") {
+			case "googlesearch", "googlesearchretrieval", "enterprisesearch", "enterprisewebsearch", "urlcontext", "codeexecution", "googlemaps", "retrieval":
 				return true
 			}
 		}
@@ -102,13 +131,13 @@ func beginEntryBudget(req *http.Request, upstream *config.UpstreamConfig, env *c
 		return nil, nil, protocol, entrybudget.ErrPricing
 	}
 	var parsed interface{}
-	if json.Unmarshal(body, &parsed) != nil || budgetHasMedia(parsed) || protocol == "images" {
+	if json.Unmarshal(body, &parsed) != nil || budgetHasMedia(parsed) || budgetHasUnpricedServerTools(parsed) || protocol == "images" {
 		return nil, nil, protocol, entrybudget.ErrPricing
 	}
 	model := gjson.GetBytes(body, "model").String()
 	if model == "" && protocol == "gemini" {
-		if _, suffix, ok := strings.Cut(req.URL.Path, "/models/"); ok {
-			model, _, _ = strings.Cut(suffix, ":")
+		if index := strings.LastIndex(req.URL.Path, "/models/"); index >= 0 {
+			model, _, _ = strings.Cut(req.URL.Path[index+len("/models/"):], ":")
 		}
 	}
 	if model == "" {
@@ -119,8 +148,8 @@ func beginEntryBudget(req *http.Request, upstream *config.UpstreamConfig, env *c
 		caps = cm.UpstreamModelCapabilitiesSnapshot()
 	}
 	resolved := config.ResolveUpstreamCapability(model, upstream, caps)
-	pricing := resolved.Capability.Pricing
-	if pricing == nil || pricing.Currency != "" && !strings.EqualFold(pricing.Currency, "USD") && !strings.EqualFold(pricing.Currency, "CNY") {
+	pricing := config.SnapshotModelPricing(resolved.Capability.Pricing)
+	if pricing == nil {
 		return nil, nil, protocol, entrybudget.ErrPricing
 	}
 	output := int64(0)
@@ -146,21 +175,18 @@ func beginEntryBudget(req *http.Request, upstream *config.UpstreamConfig, env *c
 	if protocol != "vectors" && output <= 0 {
 		return nil, nil, protocol, entrybudget.ErrPricing
 	}
-	input := int64(utils.EstimateRequestTokens(body))
-	input += input/4 + 64
-	// Cache state is unknown before execution: reserve the highest supported
-	// input/cache unit scenario, including the complete requested output upper bound.
-	scenarios := [][4]int64{{input, output, 0, 0}, {0, output, input, 0}, {0, output, 0, input}}
-	upper := float64(0)
-	for _, units := range scenarios {
-		cost, complete := metrics.CalculateTokenCostUSDWithPricingAndStatus(pricing, units[0], units[1], units[2], units[3])
-		if !complete {
-			return nil, nil, protocol, entrybudget.ErrPricing
-		}
-		if cost > upper {
-			upper = cost
-		}
+	// A generic messages estimator omits Responses input, Gemini contents and
+	// embeddings input. Reserve one token per final wire byte plus framing: this
+	// deliberately conservative envelope covers every serialized input field,
+	// Unicode and whitespace without claiming an exact provider tokenizer.
+	input := int64(len(body)) + 64
+	// The shared F47 evaluator includes all reachable tiers and the highest
+	// unknown cache TTL/reasoning dimensions, using this same immutable snapshot.
+	upper, complete := metrics.CalculateUsageReservationUSDWithPricing(pricing, &types.Usage{InputTokens: int(input), OutputTokens: int(output)})
+	if !complete {
+		return nil, nil, protocol, entrybudget.ErrPricing
 	}
+
 	amount, err := entrybudget.FromUSD(upper)
 	if err != nil {
 		return nil, nil, protocol, err
@@ -169,16 +195,14 @@ func beginEntryBudget(req *http.Request, upstream *config.UpstreamConfig, env *c
 	if err != nil {
 		return nil, nil, protocol, entrybudget.ErrPricing
 	}
-	sum := sha256.Sum256(snapshot)
-	version := "sha256:" + hex.EncodeToString(sum[:])
-	if explicitVersion := gjson.GetBytes(snapshot, "versionId").String(); explicitVersion != "" {
-		version = explicitVersion
-	}
+	version := config.PricingVersionID(pricing)
 	attempt, err := session.Begin(req.Context(), entrybudget.AttemptQuote{Model: model, ChannelUID: upstream.ChannelUID, PricingVersion: version, Pricing: snapshot, Amount: amount})
 	return attempt, pricing, protocol, err
 }
 
 func rawBudgetCounter(raw map[string]json.RawMessage, paths ...string) (int64, bool) {
+	var result int64
+	found := false
 	for _, path := range paths {
 		current := raw
 		parts := strings.Split(path, ".")
@@ -192,7 +216,12 @@ func rawBudgetCounter(raw map[string]json.RawMessage, paths ...string) (int64, b
 				if err != nil || number < 0 || number > int64(math.MaxInt/4) {
 					return 0, false
 				}
-				return number, true
+				if found && result != number {
+					return 0, false
+				}
+				result = number
+				found = true
+				break
 			}
 			var nested map[string]json.RawMessage
 			if json.Unmarshal(value, &nested) != nil {
@@ -201,8 +230,9 @@ func rawBudgetCounter(raw map[string]json.RawMessage, paths ...string) (int64, b
 			current = nested
 		}
 	}
-	return 0, false
+	return result, found
 }
+
 func rawBudgetOptionalCounter(raw map[string]json.RawMessage, paths ...string) (int64, bool) {
 	n, ok := rawBudgetCounter(raw, paths...)
 	if ok {
@@ -225,7 +255,7 @@ func (r *usageCapture) billingUsage(protocol string) (*types.Usage, bool) {
 		r.captureJSON(r.pending)
 	}
 	r.pending = nil
-	if r.truncated || r.overflow || len(r.raw) == 0 || r.stream && !r.terminal {
+	if r.truncated || r.overflow || len(r.raw) == 0 || r.stream && !r.terminals[protocol] {
 		return nil, false
 	}
 	var input, output, cache, creation int64
@@ -235,13 +265,32 @@ func (r *usageCapture) billingUsage(protocol string) (*types.Usage, bool) {
 		input, inputOK = rawBudgetCounter(r.raw, "promptTokenCount")
 		output, outputOK = rawBudgetCounter(r.raw, "candidatesTokenCount")
 		thoughts, thoughtsOK := rawBudgetOptionalCounter(r.raw, "thoughtsTokenCount")
-		countersValid = countersValid && thoughtsOK
-		if total, ok := rawBudgetCounter(r.raw, "totalTokenCount"); ok && inputOK && total >= input {
-			output = total - input
-			outputOK = true
-		} else if outputOK {
-			output += thoughts
+		toolInput, toolOK := rawBudgetOptionalCounter(r.raw, "toolUsePromptTokenCount")
+		// Additional tool-use input cannot be charged at the output token rate.
+		if !thoughtsOK || !toolOK || toolInput > 0 {
+			return nil, false
 		}
+		if _, exists := r.raw["totalTokenCount"]; exists {
+			total, totalOK := rawBudgetCounter(r.raw, "totalTokenCount")
+			if !totalOK || !inputOK || total < input {
+				return nil, false
+			}
+			if outputOK {
+				if total != input+output+thoughts {
+					return nil, false
+				}
+			} else {
+				if _, present := r.raw["candidatesTokenCount"]; present {
+					return nil, false
+				}
+				output = total - input - thoughts
+				if output < 0 {
+					return nil, false
+				}
+				outputOK = true
+			}
+		}
+
 		var cacheOK bool
 		cache, cacheOK = rawBudgetOptionalCounter(r.raw, "cachedContentTokenCount")
 		countersValid = countersValid && cacheOK
@@ -309,11 +358,10 @@ func (b *budgetResponseBody) Close() error {
 			_ = b.attempt.Complete(nil, "incomplete_or_missing_provider_usage")
 			return
 		}
-		creation := int64(usage.CacheCreationInputTokens)
-		if creation == 0 {
-			creation = int64(usage.CacheCreation5mInputTokens + usage.CacheCreation1hInputTokens)
-		}
-		cost, complete := metrics.CalculateTokenCostUSDWithPricingAndStatus(b.pricing, int64(usage.InputTokens), int64(usage.OutputTokens), creation, int64(usage.CacheReadInputTokens))
+		// Gemini canonical output is candidate-only. F47 reads raw thoughts as an
+		// additional dimension; OpenAI reasoning is a subset, never charged twice.
+		cost, complete := metrics.CalculateUsageCostUSDWithPricingAndStatus(b.pricing, usage)
+
 		if !complete {
 			_ = b.attempt.Complete(nil, "unpriced_provider_usage")
 			return

@@ -55,7 +55,7 @@ func pricingCoversTokenUsage(pricing *config.ModelPricing, inputTokens, outputTo
 }
 
 func hasAnyTokenPrice(pricing *config.ModelPricing) bool {
-	if pricing.InputCacheHitPrice != nil || pricing.InputCacheMissPrice != nil || pricing.OutputPrice != nil {
+	if pricing.InputCacheHitPrice != nil || pricing.InputCacheMissPrice != nil || pricing.OutputPrice != nil || pricing.CacheCreation5mPrice != nil || pricing.CacheCreation1hPrice != nil || pricing.ReasoningOutputPrice != nil {
 		return true
 	}
 	for _, tier := range pricing.Tiers {

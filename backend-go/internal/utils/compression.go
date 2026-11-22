@@ -53,6 +53,12 @@ func DecompressResponseBodyIfNeeded(resp *http.Response) error {
 		return err
 	}
 	resp.Body = reader
+	if encoding := strings.ToLower(strings.TrimSpace(resp.Header.Get("Content-Encoding"))); encoding != "" && encoding != "identity" {
+		resp.Header.Del("Content-Encoding")
+		resp.Header.Del("Content-Length")
+		resp.ContentLength = -1
+		resp.Uncompressed = true
+	}
 	return nil
 }
 

@@ -1,8 +1,10 @@
 package main
 
 import (
+	"compress/gzip"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -37,10 +39,17 @@ func TestPrincipalBudgetRealProxyPreflightAndSettlement(t *testing.T) {
 			return
 		}
 		usage := `"prompt_tokens":2,"completion_tokens":1`
-		if mode.Load() == 2 {
+		if mode.Load() == 2 || mode.Load() == 6 {
 			usage = `"prompt_tokens":0,"completion_tokens":0`
 		}
-		_, _ = w.Write([]byte(`{"id":"chat","object":"chat.completion","model":"budget-model","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{` + usage + `}}`))
+		var output io.Writer = w
+		if mode.Load() == 5 || mode.Load() == 6 {
+			w.Header().Set("Content-Encoding", "gzip")
+			encoded := gzip.NewWriter(w)
+			defer encoded.Close()
+			output = encoded
+		}
+		_, _ = output.Write([]byte(`{"id":"chat","object":"chat.completion","model":"budget-model","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{` + usage + `}}`))
 	}))
 	defer upstream.Close()
 	a := newRouteTestApplication(t, true, "production")
@@ -54,6 +63,12 @@ func TestPrincipalBudgetRealProxyPreflightAndSettlement(t *testing.T) {
 	}
 	if err := a.cfgManager.PutEntryKey(config.EntryKey{ID: "budget_key", KeyHash: config.EntryKeyHash("route-proxy"), PrincipalID: "budget-team"}, ""); err != nil {
 		t.Fatal(err)
+	}
+	for index, add := range []func(config.UpstreamConfig, ...string) error{a.cfgManager.AddResponsesUpstream, a.cfgManager.AddGeminiUpstream, a.cfgManager.AddVectorsUpstream} {
+		service := []string{"responses", "gemini", "openai"}[index]
+		if err := add(config.UpstreamConfig{ChannelUID: fmt.Sprintf("budget_input_%d", index), Name: service, BaseURL: upstream.URL, APIKeys: []string{"fake-provider"}, ServiceType: service, SupportedModels: []string{"budget-model"}, Status: "active", ModelCapabilities: map[string]config.UpstreamModelCapability{"budget-model": {MaxOutputTokens: 100, Pricing: &config.ModelPricing{InputCacheMissPrice: &price, InputCacheHitPrice: &price, OutputPrice: &price}}}}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	policy := entrybudget.Policy{PrincipalID: "budget-team", Period: "month", Timezone: "UTC", LimitNanoUSD: 1, RequestCapNanoUSD: 1_000_000_000}
 	if err := a.cfgManager.PutPrincipalBudget(policy); err != nil {
@@ -74,6 +89,25 @@ func TestPrincipalBudgetRealProxyPreflightAndSettlement(t *testing.T) {
 	}
 	if calls.Load() != 0 {
 		t.Fatal("budget rejection contacted provider")
+	}
+	// Every non-messages schema must reserve its actual serialized input, not
+	// only a fixed framing amount. The 5k input cannot fit this tiny allowance.
+	policy.LimitNanoUSD = 200000
+	if err := a.cfgManager.PutPrincipalBudget(policy); err != nil {
+		t.Fatal(err)
+	}
+	large := strings.Repeat("x", 5000)
+	for _, tc := range []struct{ path, body string }{
+		{"/v1/responses", `{"model":"budget-model","max_output_tokens":10,"input":"` + large + `"}`},
+		{"/v1beta/models/budget-model:generateContent", `{"contents":[{"role":"user","parts":[{"text":"` + large + `"}]}],"generationConfig":{"maxOutputTokens":10}}`},
+		{"/v1/embeddings", `{"model":"budget-model","input":"` + large + `"}`},
+	} {
+		if w := invoke("POST", tc.path, "route-proxy", tc.body); w.Code != 429 {
+			t.Fatalf("large input bypass %s %d %s", tc.path, w.Code, w.Body.String())
+		}
+	}
+	if calls.Load() != 0 {
+		t.Fatal("large non-messages input called provider despite insufficient input reservation")
 	}
 	policy.LimitNanoUSD = 1_000_000_000
 	if w := invoke("PUT", "/api/budgets", "route-admin", `{"principalId":"budget-team","period":"month","timezone":"UTC","limitUsd":"1","requestCapUsd":"1"}`); w.Code != 200 {
@@ -129,7 +163,8 @@ func TestPrincipalBudgetRealProxyPreflightAndSettlement(t *testing.T) {
 	if err != nil || state.Spent != 3000 || state.Reserved != 0 {
 		t.Fatalf("failed upstream retained hold %+v %v", state, err)
 	}
-	for _, bad := range []string{strings.Replace(body, `"max_tokens":10`, `"max_tokens":"10"`, 1), strings.Replace(body, `"content":"hello"`, `"content":[{"type":"image_url","image_url":{"url":"private"}}]`, 1)} {
+	for _, bad := range []string{
+		strings.Replace(body, `"max_tokens":10`, `"max_tokens":10,"tools":[{"type":"web_search_preview"}]`, 1), strings.Replace(body, `"max_tokens":10`, `"max_tokens":"10"`, 1), strings.Replace(body, `"content":"hello"`, `"content":[{"type":"image_url","image_url":{"url":"private"}}]`, 1)} {
 		if w := invoke("POST", "/v1/chat/completions", "route-proxy", bad); w.Code != 400 {
 			t.Fatalf("incomplete quote %d %s", w.Code, w.Body.String())
 		}
@@ -138,7 +173,7 @@ func TestPrincipalBudgetRealProxyPreflightAndSettlement(t *testing.T) {
 		t.Fatalf("pricing rejection called provider %d", calls.Load())
 	}
 	w := invoke("GET", "/v1/budget?principalId=another-team", "route-proxy", "")
-	if w.Code != 200 || !strings.Contains(w.Body.String(), "budget-team") || strings.Contains(w.Body.String(), "another-team") {
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "list_price_usd") || !strings.Contains(w.Body.String(), "budget-team") || strings.Contains(w.Body.String(), "another-team") {
 		t.Fatalf("own budget %d %s", w.Code, w.Body.String())
 	}
 	if w := invoke("GET", "/v1/budget", "wrong", ""); w.Code != 401 {
@@ -163,6 +198,29 @@ func TestPrincipalBudgetRealProxyPreflightAndSettlement(t *testing.T) {
 	}
 	if provider != 1 {
 		t.Fatalf("non-idempotent settlement %d", provider)
+	}
+	if w := invoke("GET", "/api/budgets/budget-team/requests/"+diagnosticID, "route-admin", ""); w.Code != 200 {
+		t.Fatalf("own audit %d %s", w.Code, w.Body.String())
+	}
+	other := policy
+	other.PrincipalID = "other-team"
+	if err := a.cfgManager.PutPrincipalBudget(other); err != nil {
+		t.Fatal(err)
+	}
+	if w := invoke("GET", "/api/budgets/other-team/requests/"+diagnosticID, "route-admin", ""); w.Code != 404 {
+		t.Fatalf("cross owner audit %d %s", w.Code, w.Body.String())
+	}
+	// Explicit compressed provider responses must retain exact known and zero
+	// accounting despite the protocol handler also normalizing decompression.
+	for _, compressedMode := range []int64{5, 6} {
+		mode.Store(compressedMode)
+		if w := invoke("POST", "/v1/chat/completions", "route-proxy", body); w.Code != 200 {
+			t.Fatalf("gzip mode %d: %d %s", compressedMode, w.Code, w.Body.String())
+		}
+	}
+	state, err = store.Snapshot(context.Background(), policy, time.Now())
+	if err != nil || state.Spent != 6000 || state.Reserved != 0 {
+		t.Fatalf("gzip known/zero not exact %+v %v", state, err)
 	}
 	// A gateway-owned duration lease cancels actual supplier work, retains an
 	// explicit conservative charge, and never damages provider key health.

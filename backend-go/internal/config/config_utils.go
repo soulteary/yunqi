@@ -986,39 +986,7 @@ func cloneUpstreamModelCapability(capability UpstreamModelCapability) UpstreamMo
 		}
 		capability.Capabilities = capabilities
 	}
-	if capability.Pricing != nil {
-		pricing := *capability.Pricing
-		if capability.Pricing.InputCacheHitPrice != nil {
-			value := *capability.Pricing.InputCacheHitPrice
-			pricing.InputCacheHitPrice = &value
-		}
-		if capability.Pricing.InputCacheMissPrice != nil {
-			value := *capability.Pricing.InputCacheMissPrice
-			pricing.InputCacheMissPrice = &value
-		}
-		if capability.Pricing.OutputPrice != nil {
-			value := *capability.Pricing.OutputPrice
-			pricing.OutputPrice = &value
-		}
-		if capability.Pricing.Tiers != nil {
-			pricing.Tiers = append([]ModelPricingTier(nil), capability.Pricing.Tiers...)
-			for i := range pricing.Tiers {
-				if pricing.Tiers[i].InputCacheHitPrice != nil {
-					value := *pricing.Tiers[i].InputCacheHitPrice
-					pricing.Tiers[i].InputCacheHitPrice = &value
-				}
-				if pricing.Tiers[i].InputCacheMissPrice != nil {
-					value := *pricing.Tiers[i].InputCacheMissPrice
-					pricing.Tiers[i].InputCacheMissPrice = &value
-				}
-				if pricing.Tiers[i].OutputPrice != nil {
-					value := *pricing.Tiers[i].OutputPrice
-					pricing.Tiers[i].OutputPrice = &value
-				}
-			}
-		}
-		capability.Pricing = &pricing
-	}
+	capability.Pricing = SnapshotModelPricing(capability.Pricing)
 	if capability.Sources != nil {
 		capability.Sources = append([]string(nil), capability.Sources...)
 	}

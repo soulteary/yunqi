@@ -39,7 +39,7 @@ func budgetState(c fiber.Ctx, env *config.EnvConfig, p entrybudget.Policy, audit
 		httpbridge.JSON(c, 503, fiber.Map{"error": "entry_budget_unavailable"})
 		return nil
 	}
-	response := fiber.Map{"budgeted": !p.Disabled, "reservationMethod": "estimated_input_plus_output_limit", "absoluteCostGuarantee": false, "policy": publicBudget(p), "periodStart": state.Start, "periodEnd": state.End, "spentUsd": entrybudget.FormatUSD(state.Spent), "reservedUsd": entrybudget.FormatUSD(state.Reserved), "remainingUsd": entrybudget.FormatUSD(p.LimitNanoUSD - state.Spent - state.Reserved)}
+	response := fiber.Map{"costBasis": "list_price_usd", "budgeted": !p.Disabled, "reservationMethod": "serialized_input_byte_bound_plus_output_limit", "absoluteCostGuarantee": false, "policy": publicBudget(p), "periodStart": state.Start, "periodEnd": state.End, "spentUsd": entrybudget.FormatUSD(state.Spent), "reservedUsd": entrybudget.FormatUSD(state.Reserved), "remainingUsd": entrybudget.FormatUSD(p.LimitNanoUSD - state.Spent - state.Reserved)}
 	if audit {
 		requests, err := store.Requests(httpbridge.Request(c).Context(), p.PrincipalID, 100)
 		if err != nil {
@@ -60,7 +60,7 @@ func RegisterPrincipalBudgetRoutes(router fiber.Router, env *config.EnvConfig, c
 		for _, p := range cm.PrincipalBudgetsSnapshot() {
 			policies = append(policies, publicBudget(p))
 		}
-		httpbridge.JSON(c, 200, fiber.Map{"budgets": policies})
+		httpbridge.JSON(c, 200, fiber.Map{"costBasis": "list_price_usd", "budgets": policies})
 		return nil
 	})
 	router.Put("/budgets", func(c fiber.Ctx) error {
@@ -84,7 +84,7 @@ func RegisterPrincipalBudgetRoutes(router fiber.Router, env *config.EnvConfig, c
 			httpbridge.JSON(c, 500, fiber.Map{"error": "budget_policy_save_failed"})
 			return nil
 		}
-		httpbridge.JSON(c, 200, fiber.Map{"policy": publicBudget(normalized)})
+		httpbridge.JSON(c, 200, fiber.Map{"costBasis": "list_price_usd", "policy": publicBudget(normalized)})
 		return nil
 	})
 	router.Get("/budgets/:principal", func(c fiber.Ctx) error {
@@ -115,19 +115,14 @@ func RegisterPrincipalBudgetRoutes(router fiber.Router, env *config.EnvConfig, c
 		if err != nil {
 			return err
 		}
-		// Scope by owner as well as server-generated request ID; an ID is never authority.
-		records, err := store.Requests(httpbridge.Request(c).Context(), principal, 200)
+		// A request ID is never authority; query its owner directly without a
+		// recent-history limit that would make old legitimate records inaccessible.
+		id := httpbridge.Param(c, "request")
+		found, err := store.RequestOwned(httpbridge.Request(c).Context(), id, principal)
 		if err != nil {
 			return err
 		}
-		id := httpbridge.Param(c, "request")
-		found := false
-		for _, r := range records {
-			if r.ID == id {
-				found = true
-				break
-			}
-		}
+
 		if !found {
 			httpbridge.JSON(c, 404, fiber.Map{"error": "budget_request_not_found"})
 			return nil
@@ -145,7 +140,7 @@ func CallerBudgetHandler(env *config.EnvConfig, cm *config.ConfigManager) fiber.
 		principal := middleware.GetPrincipalID(c)
 		p, ok := cm.FindPrincipalBudget(principal)
 		if !ok {
-			httpbridge.JSON(c, 200, fiber.Map{"budgeted": false, "stablePrincipal": strings.HasPrefix(principal, "principal:")})
+			httpbridge.JSON(c, 200, fiber.Map{"costBasis": "list_price_usd", "budgeted": false, "stablePrincipal": strings.HasPrefix(principal, "principal:")})
 			return nil
 		}
 		return budgetState(c, env, p, false)

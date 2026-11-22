@@ -72,11 +72,17 @@ func (s *Source) ParentDone() {
 		done()
 	}
 }
-func (s *Source) Cancel(cause error) {
+
+// Signal cancels live work without invoking a potentially blocking completion
+// callback inline. Shutdown must signal every source before waiting for cleanup.
+func (s *Source) Signal(cause error) {
 	if cause == nil {
 		cause = ErrClosed
 	}
 	s.cancel(cause)
+}
+func (s *Source) Cancel(cause error) {
+	s.Signal(cause)
 	s.ParentDone()
 }
 

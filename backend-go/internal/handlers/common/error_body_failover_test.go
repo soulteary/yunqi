@@ -35,13 +35,13 @@ func TestStreamingErrorBodyTimeoutAllowsBackupChannel(t *testing.T) {
 			var backupCalls atomic.Int64
 			backup := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				backupCalls.Add(1)
-				_, _ = io.WriteString(w, "data: backup\n\n")
+				_, _ = io.WriteString(w, "data: backup\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
 			}))
 			defer backup.Close()
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
 			w, _, _ := runErrorBodyFailover(t, ctx, primary.URL, backup.URL, 30, nil)
-			if backupCalls.Load() != 1 || w.Body.String() != "data: backup\n\n" {
+			if backupCalls.Load() != 1 || w.Body.String() != "data: backup\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n" {
 				t.Fatalf("backup calls=%d response=%q; stalled error body prevented failover", backupCalls.Load(), w.Body.String())
 			}
 			if ctx.Err() != nil {
