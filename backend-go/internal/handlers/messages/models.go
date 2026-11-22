@@ -17,6 +17,7 @@ import (
 	"unicode"
 
 	"github.com/gofiber/fiber/v3"
+	"github.com/soulteary/cache-kit/v2/ttlcache"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/copilot"
 	"github.com/soulteary/yunqi/internal/httpbridge"
@@ -150,51 +151,38 @@ type modelsDiscoveryCacheKey struct {
 	channelName    string
 }
 
-type modelsDiscoveryCacheEntry struct {
-	response  ModelsResponse
-	expiresAt time.Time
-}
-
 type modelsDiscoveryCache struct {
-	mu      sync.RWMutex
-	entries map[modelsDiscoveryCacheKey]modelsDiscoveryCacheEntry
+	entries *ttlcache.Memory[modelsDiscoveryCacheKey, ModelsResponse]
 }
 
 func newModelsDiscoveryCache() *modelsDiscoveryCache {
+	return newModelsDiscoveryCacheWithClock(nil)
+}
+
+func newModelsDiscoveryCacheWithClock(clock ttlcache.Clock) *modelsDiscoveryCache {
 	return &modelsDiscoveryCache{
-		entries: make(map[modelsDiscoveryCacheKey]modelsDiscoveryCacheEntry),
+		entries: ttlcache.New(ttlcache.Config[modelsDiscoveryCacheKey, ModelsResponse]{
+			// The previous cache expired strictly after the deadline, not at it.
+			DefaultTTL: modelsDiscoveryCacheTTL + time.Nanosecond,
+			Clock:      clock,
+			// Handler closures have no shutdown hook; clean up during writes instead.
+			CleanupInterval: 0,
+		}),
 	}
 }
 
 func (cache *modelsDiscoveryCache) Get(key modelsDiscoveryCacheKey) (ModelsResponse, bool) {
-	now := time.Now()
-
-	cache.mu.RLock()
-	entry, ok := cache.entries[key]
-	if !ok || now.After(entry.expiresAt) {
-		cache.mu.RUnlock()
+	response, ok := cache.entries.Get(key)
+	if !ok {
 		return ModelsResponse{}, false
 	}
-	response := cloneModelsResponse(entry.response)
-	cache.mu.RUnlock()
-
-	return response, true
+	return cloneModelsResponse(response), true
 }
 
 func (cache *modelsDiscoveryCache) Set(key modelsDiscoveryCacheKey, response ModelsResponse) {
-	now := time.Now()
-
-	cache.mu.Lock()
-	for cachedKey, entry := range cache.entries {
-		if now.After(entry.expiresAt) {
-			delete(cache.entries, cachedKey)
-		}
-	}
-	cache.entries[key] = modelsDiscoveryCacheEntry{
-		response:  cloneModelsResponse(response),
-		expiresAt: now.Add(modelsDiscoveryCacheTTL),
-	}
-	cache.mu.Unlock()
+	cache.entries.Len() // Remove expired entries on each write, as before.
+	// The cache is never closed, has no capacity limit, and has a fixed positive TTL.
+	_ = cache.entries.Set(key, cloneModelsResponse(response), 0)
 }
 
 func cloneModelsResponse(response ModelsResponse) ModelsResponse {

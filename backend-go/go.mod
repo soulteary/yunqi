@@ -13,6 +13,7 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/klauspost/compress v1.20.3
 	github.com/redis/go-redis/v9 v9.23.0
+	github.com/soulteary/cache-kit/v2 v2.1.2
 	github.com/soulteary/cli-kit v1.9.4
 	github.com/stretchr/testify v1.12.1
 	github.com/tidwall/gjson v1.19.0
