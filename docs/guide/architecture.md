@@ -289,7 +289,7 @@ DTO 位于 `services/types/`，原 `api-types.ts` 和 `console-types.ts` 作为�
 
 ## Fiber 路由与 HTTP 传输
 
-后端统一使用 Fiber v3.7.0，最低 Go 版本为 1.26，已移除 Gin 及其压缩中间件依赖。所有路由、鉴权中间件和 Handler 使用原生 Fiber 类型。
+后端统一使用 Fiber v3.7.0，最低 Go 版本为 1.27.4，已移除 Gin 及其压缩中间件依赖。所有路由、鉴权中间件和 Handler 使用原生 Fiber 类型。
 
 `internal/httpbridge/` 连接 Fiber 路由与现有 `net/http` 传输。HTTP 服务器、TLS、同端口 HTTP/HTTPS 和优雅关闭仍由 `server.go` 与 TLS 模块负责；请求体不在路由前额外缓冲，客户端取消、HTTP/2、SSE 刷新和 WebSocket 升级继续使用原始请求和响应写入器。桥接层还处理 JSON 校验、并发请求状态、竞速上下文副本，以及静态路由相对参数路由的优先级。配置文件和数据库格式不变。
 

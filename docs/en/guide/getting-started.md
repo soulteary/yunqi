@@ -24,7 +24,7 @@ This builds `yunqi:local` from the repository. The default service address is `h
 
 ### Go Binary Built From Source
 
-With Go 1.26+, Bun and Make installed, run from the repository root:
+With Go 1.27.4+, Bun and Make installed, run from the repository root:
 
 ```bash
 (cd frontend && bun install)
