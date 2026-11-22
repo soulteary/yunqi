@@ -59,7 +59,7 @@ export function translate(
   key: string,
   params?: Record<string, string | number>,
 ): string {
-  const i18n = globalThis.__CCX_I18N__
+  const i18n = globalThis.__YUNQI_I18N__
   if (!i18n) return key
   const prev = i18n.global.locale.value
   i18n.global.locale.value = normalizeLocale(locale)
