@@ -23,7 +23,6 @@ import (
 	"github.com/soulteary/yunqi/internal/middleware"
 	"github.com/soulteary/yunqi/internal/requestscope"
 	"github.com/soulteary/yunqi/internal/types"
-	"github.com/soulteary/yunqi/internal/utils"
 	"github.com/tidwall/gjson"
 )
 
@@ -178,8 +177,11 @@ func beginEntryBudget(req *http.Request, upstream *config.UpstreamConfig, env *c
 	if protocol != "vectors" && output <= 0 {
 		return nil, nil, protocol, entrybudget.ErrPricing
 	}
-	input := int64(utils.EstimateRequestTokens(body))
-	input += input/4 + 64
+	// A generic messages estimator omits Responses input, Gemini contents and
+	// embeddings input. Reserve one token per final wire byte plus framing: this
+	// deliberately conservative envelope covers every serialized input field,
+	// Unicode and whitespace without claiming an exact provider tokenizer.
+	input := int64(len(body)) + 64
 	// Cache state is unknown before execution: reserve the highest supported
 	// input/cache unit scenario, including the complete requested output upper bound.
 	scenarios := [][4]int64{{input, output, 0, 0}, {0, output, input, 0}, {0, output, 0, input}}

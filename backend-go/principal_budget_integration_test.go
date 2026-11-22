@@ -4,6 +4,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -63,6 +64,12 @@ func TestPrincipalBudgetRealProxyPreflightAndSettlement(t *testing.T) {
 	if err := a.cfgManager.PutEntryKey(config.EntryKey{ID: "budget_key", KeyHash: config.EntryKeyHash("route-proxy"), PrincipalID: "budget-team"}, ""); err != nil {
 		t.Fatal(err)
 	}
+	for index, add := range []func(config.UpstreamConfig, ...string) error{a.cfgManager.AddResponsesUpstream, a.cfgManager.AddGeminiUpstream, a.cfgManager.AddVectorsUpstream} {
+		service := []string{"responses", "gemini", "openai"}[index]
+		if err := add(config.UpstreamConfig{ChannelUID: fmt.Sprintf("budget_input_%d", index), Name: service, BaseURL: upstream.URL, APIKeys: []string{"fake-provider"}, ServiceType: service, SupportedModels: []string{"budget-model"}, Status: "active", ModelCapabilities: map[string]config.UpstreamModelCapability{"budget-model": {MaxOutputTokens: 100, Pricing: &config.ModelPricing{InputCacheMissPrice: &price, InputCacheHitPrice: &price, OutputPrice: &price}}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	policy := entrybudget.Policy{PrincipalID: "budget-team", Period: "month", Timezone: "UTC", LimitNanoUSD: 1, RequestCapNanoUSD: 1_000_000_000}
 	if err := a.cfgManager.PutPrincipalBudget(policy); err != nil {
 		t.Fatal(err)
@@ -82,6 +89,25 @@ func TestPrincipalBudgetRealProxyPreflightAndSettlement(t *testing.T) {
 	}
 	if calls.Load() != 0 {
 		t.Fatal("budget rejection contacted provider")
+	}
+	// Every non-messages schema must reserve its actual serialized input, not
+	// only a fixed framing amount. The 5k input cannot fit this tiny allowance.
+	policy.LimitNanoUSD = 200000
+	if err := a.cfgManager.PutPrincipalBudget(policy); err != nil {
+		t.Fatal(err)
+	}
+	large := strings.Repeat("x", 5000)
+	for _, tc := range []struct{ path, body string }{
+		{"/v1/responses", `{"model":"budget-model","max_output_tokens":10,"input":"` + large + `"}`},
+		{"/v1beta/models/budget-model:generateContent", `{"contents":[{"role":"user","parts":[{"text":"` + large + `"}]}],"generationConfig":{"maxOutputTokens":10}}`},
+		{"/v1/embeddings", `{"model":"budget-model","input":"` + large + `"}`},
+	} {
+		if w := invoke("POST", tc.path, "route-proxy", tc.body); w.Code != 429 {
+			t.Fatalf("large input bypass %s %d %s", tc.path, w.Code, w.Body.String())
+		}
+	}
+	if calls.Load() != 0 {
+		t.Fatal("large non-messages input called provider despite insufficient input reservation")
 	}
 	policy.LimitNanoUSD = 1_000_000_000
 	if w := invoke("PUT", "/api/budgets", "route-admin", `{"principalId":"budget-team","period":"month","timezone":"UTC","limitUsd":"1","requestCapUsd":"1"}`); w.Code != 200 {

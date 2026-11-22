@@ -100,6 +100,11 @@ func TestBudgetZeroUsageWithoutRealSourceTerminalKeepsConservativeCharge(t *test
 		{"claude-stop-reason-only", "messages", "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"input_tokens\":0,\"output_tokens\":0}}\n\n", 50},
 		{"chat-usage-only", "chat", "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":0,\"completion_tokens\":0}}\n\n", 50},
 		{"gemini-placeholder", "gemini", "data: {\"candidates\":[{\"finishReason\":\"FINISH_REASON_UNSPECIFIED\"}],\"usageMetadata\":{\"promptTokenCount\":0,\"candidatesTokenCount\":0,\"totalTokenCount\":0}}\n\n", 50},
+		{"responses-bare-done", "responses", "data: {\"usage\":{\"input_tokens\":0,\"output_tokens\":0}}\n\ndata: [DONE]\n\n", 50},
+		{"responses-real-terminal", "responses", "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":0,\"output_tokens\":0}}}\n\n", 0},
+		{"chat-real-done", "chat", "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":0,\"completion_tokens\":0}}\n\ndata: [DONE]\n\n", 0},
+		{"chat-real-finish", "chat", "data: {\"usage\":{\"prompt_tokens\":0,\"completion_tokens\":0}}\n\ndata: {\"choices\":[{\"finish_reason\":\"stop\"}]}\n\n", 0},
+		{"gemini-real-terminal", "gemini", "data: {\"usageMetadata\":{\"promptTokenCount\":0,\"candidatesTokenCount\":0,\"totalTokenCount\":0}}\n\ndata: {\"candidates\":[{\"finishReason\":\"STOP\"}]}\n\n", 0},
 		{"claude-real-stop", "messages", "data: {\"usage\":{\"input_tokens\":0,\"output_tokens\":0}}\n\ndata: {\"type\":\"message_stop\"}\n\n", 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
