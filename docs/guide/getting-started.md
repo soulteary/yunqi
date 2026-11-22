@@ -24,7 +24,7 @@ docker compose up --build -d
 
 ### 从源码构建 Go 二进制
 
-准备好 Go 1.26+、Bun 和 Make 后，在仓库根目录执行：
+准备好 Go 1.27.4+、Bun 和 Make 后，在仓库根目录执行：
 
 ```bash
 (cd frontend && bun install)
