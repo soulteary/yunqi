@@ -113,6 +113,7 @@ func runService(cliOpts cliOptions) {
 	a := &application{envCfg: envCfg, paths: paths, cfgManager: cfgManager}
 	a.initTelemetry()
 	a.configureGuardrails()
+	a.configureBodyLogging()
 	a.startPresetUpdater()
 	a.configureThinkingCache()
 	defer errutil.IgnoreDeferred(thinkingcache.Close)

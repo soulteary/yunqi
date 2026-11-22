@@ -6,6 +6,7 @@ import (
 
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/routingref"
+	"github.com/soulteary/yunqi/internal/session"
 	"github.com/soulteary/yunqi/internal/transitions"
 )
 
@@ -68,6 +69,7 @@ type CandidateFilterFunc func(
 
 // SelectionOptions 描述一次渠道选择所需的上下文。
 type SelectionOptions struct {
+	StrictSession      *session.StrictLease
 	UserID             string
 	FailedChannels     map[int]bool // legacy: indexes within Kind
 	FailedRoutes       map[routingref.Key]bool

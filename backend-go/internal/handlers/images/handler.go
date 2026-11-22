@@ -808,7 +808,7 @@ func passthroughStreamingResponseWithLog(c fiber.Ctx, resp *http.Response, envCf
 
 	// post-commit：Header 已发送后的 chunk 活动 watchdog，Images 无语义结构，任何有效 chunk 均视为活动
 	logBuffer := common.NewLimitedLogBuffer(common.MaxUpstreamResponseLogBytes)
-	streamLoggingEnabled := envCfg.EnableResponseLogs && envCfg.IsDevelopment()
+	streamLoggingEnabled := envCfg.ShouldLogResponseBodies()
 	var postCommitTimer *time.Timer
 	var postCommitChan <-chan time.Time
 	if timeouts.InactivityTimeoutMs > 0 {

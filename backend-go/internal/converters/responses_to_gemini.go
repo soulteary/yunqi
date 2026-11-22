@@ -32,7 +32,10 @@ func ResponsesToGeminiRequest(sess *session.Session, req *types.ResponsesRequest
 
 	// 2. 转换历史消息
 	for _, item := range sess.Messages {
-		contents := responsesItemToGeminiContents(item)
+		contents, convertErr := responsesItemToGeminiContents(item)
+		if convertErr != nil {
+			return nil, convertErr
+		}
 		geminiReq.Contents = append(geminiReq.Contents, contents...)
 	}
 
@@ -43,7 +46,10 @@ func ResponsesToGeminiRequest(sess *session.Session, req *types.ResponsesRequest
 	}
 
 	for _, item := range newItems {
-		contents := responsesItemToGeminiContents(item)
+		contents, convertErr := responsesItemToGeminiContents(item)
+		if convertErr != nil {
+			return nil, convertErr
+		}
 		geminiReq.Contents = append(geminiReq.Contents, contents...)
 	}
 
@@ -80,11 +86,30 @@ func ResponsesToGeminiRequest(sess *session.Session, req *types.ResponsesRequest
 		geminiReq.Tools = responsesToolsToGemini(req.Tools)
 	}
 
+	names := map[string]string{}
+	for _, item := range append(append([]types.ResponsesItem(nil), sess.Messages...), newItems...) {
+		if item.Type == "function_call" {
+			if id, name, _, err := resolveFunctionCallItem(item); err == nil {
+				names[id] = name
+			}
+		} else if item.Type == "custom_tool_call" && item.CallID != "" {
+			names[item.CallID] = item.Name
+		}
+	}
+	for _, content := range geminiReq.Contents {
+		for _, part := range content.Parts {
+			if response := part.FunctionResponse; response != nil {
+				if name := names[response.ID]; name != "" {
+					response.Name = name
+				}
+			}
+		}
+	}
 	return geminiReq, nil
 }
 
 // responsesItemToGeminiContents 将 Responses Item 转换为 Gemini Contents
-func responsesItemToGeminiContents(item types.ResponsesItem) []types.GeminiContent {
+func responsesItemToGeminiContents(item types.ResponsesItem) ([]types.GeminiContent, error) {
 	item = types.NormalizeResponsesItem(item)
 	contents := []types.GeminiContent{}
 
@@ -92,7 +117,7 @@ func responsesItemToGeminiContents(item types.ResponsesItem) []types.GeminiConte
 	case "reasoning":
 		thinking := extractResponsesReasoningText(item)
 		if thinking == "" {
-			return nil
+			return nil, nil
 		}
 		contents = append(contents, types.GeminiContent{
 			Role: "model",
@@ -106,7 +131,7 @@ func responsesItemToGeminiContents(item types.ResponsesItem) []types.GeminiConte
 		role, contentText := resolveResponsesTextItem(item)
 		role = normalizeGeminiRole(role)
 		if contentText == "" {
-			return nil
+			return nil, nil
 		}
 
 		contents = append(contents, types.GeminiContent{
@@ -121,7 +146,7 @@ func responsesItemToGeminiContents(item types.ResponsesItem) []types.GeminiConte
 		role, contentStr := resolveResponsesTextItem(item)
 		role = normalizeGeminiRole(role)
 		if contentStr == "" {
-			return nil
+			return nil, nil
 		}
 
 		contents = append(contents, types.GeminiContent{
@@ -132,9 +157,9 @@ func responsesItemToGeminiContents(item types.ResponsesItem) []types.GeminiConte
 		})
 
 	case "function_call":
-		_, name, arguments, err := resolveFunctionCallItem(item)
+		callID, name, arguments, err := resolveFunctionCallItem(item)
 		if err != nil {
-			return nil
+			return nil, nil
 		}
 
 		contents = append(contents, types.GeminiContent{
@@ -142,6 +167,7 @@ func responsesItemToGeminiContents(item types.ResponsesItem) []types.GeminiConte
 			Parts: []types.GeminiPart{
 				{
 					FunctionCall: &types.GeminiFunctionCall{
+						ID:               callID,
 						Name:             name,
 						Args:             parseGeminiFunctionCallArgs(arguments),
 						ThoughtSignature: types.DummyThoughtSignature,
@@ -153,16 +179,22 @@ func responsesItemToGeminiContents(item types.ResponsesItem) []types.GeminiConte
 	case "function_call_output":
 		callID, output, err := resolveFunctionCallOutputItem(item)
 		if err != nil {
-			return nil
+			return nil, nil
 		}
 
+		payload, mediaParts, mediaErr := geminiToolOutputMedia(output)
+		if mediaErr != nil {
+			return nil, mediaErr
+		}
 		contents = append(contents, types.GeminiContent{
 			Role: "user",
 			Parts: []types.GeminiPart{
 				{
 					FunctionResponse: &types.GeminiFunctionResponse{
+						ID:       callID,
 						Name:     callID,
-						Response: buildGeminiFunctionResponsePayload(output),
+						Response: payload,
+						Parts:    mediaParts,
 					},
 				},
 			},
@@ -175,7 +207,7 @@ func responsesItemToGeminiContents(item types.ResponsesItem) []types.GeminiConte
 		// 所以这里只校验 name 是否有效；call_id 仅在 *_output 一侧需要回填。
 		name := item.Name
 		if name == "" {
-			return nil
+			return nil, nil
 		}
 		// customToolInputFromItem 返回的 string 已经是 JSON 字符串（与 function_call 的 arguments 同形），
 		// 必须直接传给 parseGeminiFunctionCallArgs 解析为 map；
@@ -186,6 +218,7 @@ func responsesItemToGeminiContents(item types.ResponsesItem) []types.GeminiConte
 			Parts: []types.GeminiPart{
 				{
 					FunctionCall: &types.GeminiFunctionCall{
+						ID:               item.CallID,
 						Name:             name,
 						Args:             parseGeminiFunctionCallArgs(argsJSON),
 						ThoughtSignature: types.DummyThoughtSignature,
@@ -203,23 +236,29 @@ func responsesItemToGeminiContents(item types.ResponsesItem) []types.GeminiConte
 			callID = item.Name
 		}
 		if callID == "" {
-			return nil
+			return nil, nil
 		}
 
+		payload, mediaParts, mediaErr := geminiToolOutputMedia(output)
+		if mediaErr != nil {
+			return nil, mediaErr
+		}
 		contents = append(contents, types.GeminiContent{
 			Role: "user",
 			Parts: []types.GeminiPart{
 				{
 					FunctionResponse: &types.GeminiFunctionResponse{
+						ID:       callID,
 						Name:     callID,
-						Response: buildGeminiFunctionResponsePayload(output),
+						Response: payload,
+						Parts:    mediaParts,
 					},
 				},
 			},
 		})
 	}
 
-	return contents
+	return contents, nil
 }
 
 // ============== Gemini → Responses 响应转换 ==============

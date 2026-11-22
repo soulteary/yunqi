@@ -132,6 +132,13 @@ func HandleMultiChannelFailoverWithSelectionFilter(
 	if !middleware.AuthorizeProxyModel(c, model) {
 		return
 	}
+	strictLease, strictOK := acquireStrictSession(c, envCfg, channelScheduler, kind, userID, agentRole)
+	if !strictOK {
+		return
+	}
+	if strictLease != nil {
+		defer strictLease.Release()
+	}
 	if policy := middleware.EntryPolicy(c); policy != nil && len(policy.ChannelUIDs) > 0 {
 		originalFilter := candidateFilter
 		candidateFilter = func(channels []scheduler.ChannelInfo, upstreamFor func(scheduler.ChannelInfo) *config.UpstreamConfig, available func(scheduler.ChannelInfo, *config.UpstreamConfig) bool) ([]scheduler.ChannelInfo, error) {
@@ -202,6 +209,7 @@ func HandleMultiChannelFailoverWithSelectionFilter(
 		}
 
 		selectionOpts := scheduler.SelectionOptions{
+			StrictSession:      strictLease,
 			UserID:             userID,
 			FailedRoutes:       failedRoutes,
 			Kind:               kind,

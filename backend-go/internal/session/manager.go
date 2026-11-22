@@ -36,6 +36,17 @@ type SessionManager struct {
 
 // NewSessionManager 创建会话管理器
 func NewSessionManager(maxAge time.Duration, maxMessages int, maxTokens int) *SessionManager {
+	sm := NewEphemeralSessionManager(maxAge, maxMessages, maxTokens)
+
+	// 启动定期清理
+	go sm.cleanupLoop()
+
+	return sm
+}
+
+// NewEphemeralSessionManager creates request-local state with no background
+// cleanup goroutine. It must never be used as the live conversation store.
+func NewEphemeralSessionManager(maxAge time.Duration, maxMessages int, maxTokens int) *SessionManager {
 	sm := &SessionManager{
 		sessions:        make(map[string]*Session),
 		responseMapping: make(map[string]string),
@@ -43,9 +54,6 @@ func NewSessionManager(maxAge time.Duration, maxMessages int, maxTokens int) *Se
 		maxMessages:     maxMessages,
 		maxTokens:       maxTokens,
 	}
-
-	// 启动定期清理
-	go sm.cleanupLoop()
 
 	return sm
 }

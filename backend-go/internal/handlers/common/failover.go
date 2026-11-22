@@ -4,6 +4,7 @@ package common
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/soulteary/yunqi/internal/config"
 	"strings"
 
 	"github.com/gofiber/fiber/v3"
@@ -120,7 +121,7 @@ func classifyByErrorMessageWithLogTag(bodyBytes []byte, apiType string, logTag s
 
 	if errValue, ok := errResp["error"].(string); ok {
 		if failover, quota := classifyMessage(errValue); failover {
-			LogWithTag(logTag, "[%s-Failover-Debug] 提取到字符串 error: %s", apiType, errValue)
+			LogWithTag(logTag, "[%s-Failover-Debug] 提取到字符串 error（正文省略）", apiType)
 			return true, quota
 		}
 	}
@@ -132,11 +133,11 @@ func classifyByErrorMessageWithLogTag(bodyBytes []byte, apiType string, logTag s
 
 	if errCode, ok := firstStringField(errResp, "code", "status", "reason"); ok {
 		if isNonRetryableErrorCode(errCode) {
-			LogWithTag(logTag, "[%s-Failover-Debug] 检测到顶层不可重试错误码: %s", apiType, errCode)
+			LogWithTag(logTag, "[%s-Failover-Debug] 检测到顶层不可重试错误码: %s", apiType, sanitizeVectorsErrorToken(errCode))
 			return false, false
 		}
 		if failover, quota := classifyErrorCode(errCode); failover {
-			LogWithTag(logTag, "[%s-Failover-Debug] 提取到顶层错误码: %s", apiType, errCode)
+			LogWithTag(logTag, "[%s-Failover-Debug] 提取到顶层错误码: %s", apiType, sanitizeVectorsErrorToken(errCode))
 			return true, quota
 		}
 	}
@@ -146,14 +147,14 @@ func classifyByErrorMessageWithLogTag(bodyBytes []byte, apiType string, logTag s
 	}
 	if errType, ok := errResp["type"].(string); ok {
 		if failover, quota := classifyErrorType(errType); failover {
-			LogWithTag(logTag, "[%s-Failover-Debug] 提取到顶层 type: %s", apiType, errType)
+			LogWithTag(logTag, "[%s-Failover-Debug] 提取到顶层 type: %s", apiType, sanitizeVectorsErrorToken(errType))
 			return true, quota
 		}
 	}
 
 	errObj, ok := errResp["error"].(map[string]interface{})
 	if !ok {
-		LogWithTag(logTag, "[%s-Failover-Debug] 未找到error对象, keys=%v", apiType, getMapKeys(errResp))
+		LogWithTag(logTag, "[%s-Failover-Debug] 未找到error对象, fieldCount=%d", apiType, len(errResp))
 		return false, false
 	}
 
@@ -165,17 +166,17 @@ func classifyByErrorMessageWithLogTag(bodyBytes []byte, apiType string, logTag s
 	// 检查 error.code 字段，参数校验类错误码不应重试
 	if errCode, ok := errObj["code"].(string); ok {
 		if isNonRetryableErrorCode(errCode) {
-			LogWithTag(logTag, "[%s-Failover-Debug] 检测到不可重试错误码: %s", apiType, errCode)
+			LogWithTag(logTag, "[%s-Failover-Debug] 检测到不可重试错误码: %s", apiType, sanitizeVectorsErrorToken(errCode))
 			return false, false
 		}
 		if failover, quota := classifyErrorCode(errCode); failover {
-			LogWithTag(logTag, "[%s-Failover-Debug] 提取到 error.code: %s", apiType, errCode)
+			LogWithTag(logTag, "[%s-Failover-Debug] 提取到 error.code: %s", apiType, sanitizeVectorsErrorToken(errCode))
 			return true, quota
 		}
 	}
 	if errCode, ok := firstStringField(errObj, "status", "reason"); ok {
 		if failover, quota := classifyErrorCode(errCode); failover {
-			LogWithTag(logTag, "[%s-Failover-Debug] 提取到 error.%s: %s", apiType, "status/reason", errCode)
+			LogWithTag(logTag, "[%s-Failover-Debug] 提取到 error.%s: %s", apiType, "status/reason", sanitizeVectorsErrorToken(errCode))
 			return true, quota
 		}
 	}
@@ -197,11 +198,11 @@ func classifyByErrorMessageWithLogTag(bodyBytes []byte, apiType string, logTag s
 		}
 		if errCode, ok := firstStringField(upstreamErr, "code", "status", "reason"); ok {
 			if isNonRetryableErrorCode(errCode) {
-				LogWithTag(logTag, "[%s-Failover-Debug] 检测到嵌套 upstream_error 不可重试错误码: %s", apiType, errCode)
+				LogWithTag(logTag, "[%s-Failover-Debug] 检测到嵌套 upstream_error 不可重试错误码: %s", apiType, sanitizeVectorsErrorToken(errCode))
 				return false, false
 			}
 			if failover, quota := classifyErrorCode(errCode); failover {
-				LogWithTag(logTag, "[%s-Failover-Debug] 提取到嵌套 upstream_error 错误码: %s", apiType, errCode)
+				LogWithTag(logTag, "[%s-Failover-Debug] 提取到嵌套 upstream_error 错误码: %s", apiType, sanitizeVectorsErrorToken(errCode))
 				return true, quota
 			}
 		}
@@ -218,7 +219,7 @@ func classifyByErrorMessageWithLogTag(bodyBytes []byte, apiType string, logTag s
 		}
 	}
 
-	LogWithTag(logTag, "[%s-Failover-Debug] 未匹配任何关键词, errObj keys=%v", apiType, getMapKeys(errObj))
+	LogWithTag(logTag, "[%s-Failover-Debug] 未匹配任何关键词, fieldCount=%d", apiType, len(errObj))
 	return false, false
 }
 
@@ -1763,11 +1764,11 @@ func truncateErrorSummary(msg string) string {
 }
 
 func errorBodySummaryForLog(apiType string, statusCode int, bodyBytes []byte) string {
-	if strings.EqualFold(apiType, "Vectors") {
+	if strings.EqualFold(apiType, "Vectors") || !config.RuntimeBodyLogging().ResponseBodies {
 		return vectorsErrorSummaryForLog(statusCode, bodyBytes)
 	}
 	msg := strings.ReplaceAll(strings.ReplaceAll(strings.TrimSpace(string(bodyBytes)), "\n", " "), "\r", " ")
-	return truncateErrorSummary(msg)
+	return ResponseBodyTextForLog(truncateErrorSummary(msg))
 }
 
 func vectorsErrorSummaryForLog(statusCode int, bodyBytes []byte) string {

@@ -4,10 +4,13 @@ package common
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gofiber/fiber/v3"
+	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/types"
@@ -282,7 +285,7 @@ func CompleteLog(
 
 	// 先按原始错误分类终态，再做文案归一化：归一会把竞速败出前缀改写为中文，分类必须在前。
 	status := getStatusFromResult(success, errorInfo)
-	errorInfo = normalizeChannelLogErrorInfo(errorInfo)
+	errorInfo = normalizeChannelLogErrorInfo(errorInfo, statusCode)
 	// 日志侧 guardrail：写日志前扫描 errorInfo 中的凭据，防御性掩码。
 	// 与请求侧豁免头解耦——日志脱敏是安全底线，始终生效。
 	if errorInfo != "" {
@@ -292,6 +295,9 @@ func CompleteLog(
 	}
 	if len(errorInfo) > 200 {
 		errorInfo = errorInfo[:200]
+		for !utf8.ValidString(errorInfo) {
+			errorInfo = errorInfo[:len(errorInfo)-1]
+		}
 	}
 
 	now := time.Now()
@@ -389,7 +395,7 @@ func RecordChannelLogWithSource(
 	}
 	// 先按原始错误分类终态，再做文案归一化：归一会把竞速败出前缀改写为中文，分类必须在前。
 	status := getStatusFromResult(success, errorInfo)
-	errorInfo = normalizeChannelLogErrorInfo(errorInfo)
+	errorInfo = normalizeChannelLogErrorInfo(errorInfo, statusCode)
 	// 日志侧 guardrail：写日志前扫描 errorInfo 中的凭据，防御性掩码。
 	if errorInfo != "" {
 		if masked := MaskForLog(errorInfo); masked != errorInfo {
@@ -398,6 +404,9 @@ func RecordChannelLogWithSource(
 	}
 	if len(errorInfo) > 200 {
 		errorInfo = errorInfo[:200]
+		for !utf8.ValidString(errorInfo) {
+			errorInfo = errorInfo[:len(errorInfo)-1]
+		}
 	}
 	if requestSource == "" {
 		requestSource = metrics.RequestSourceProxy
@@ -433,7 +442,7 @@ func RecordChannelLogWithSource(
 	})
 }
 
-func normalizeChannelLogErrorInfo(errorInfo string) string {
+func normalizeChannelLogErrorInfo(errorInfo string, statusCode int) string {
 	trimmed := strings.TrimSpace(errorInfo)
 	switch {
 	case strings.HasPrefix(trimmed, racingLostErrorPrefix):
@@ -441,7 +450,7 @@ func normalizeChannelLogErrorInfo(errorInfo string) string {
 	case strings.HasPrefix(trimmed, ErrEmptyStreamResponse.Error()):
 		diagnostic := strings.TrimSpace(strings.TrimPrefix(trimmed, ErrEmptyStreamResponse.Error()))
 		diagnostic = strings.TrimSpace(strings.TrimPrefix(diagnostic, ":"))
-		if diagnostic != "" {
+		if diagnostic != "" && config.RuntimeBodyLogging().ResponseBodies {
 			return "空流响应：上游 HTTP 200 返回 SSE 流后结束，但未检测到文本或语义内容（" + diagnostic + "）"
 		}
 		return "空流响应：上游 HTTP 200 返回 SSE 流后结束，但未检测到文本或语义内容"
@@ -456,6 +465,49 @@ func normalizeChannelLogErrorInfo(errorInfo string) string {
 	case strings.HasPrefix(trimmed, ErrStreamRepetitionLoop.Error()):
 		return "模型输出无限重复：同一短语/段落无限复述，已中止当前流并强制隔离该渠道模型"
 	default:
+		if trimmed == "" {
+			return ""
+		}
+		if !config.RuntimeBodyLogging().ResponseBodies {
+			if isMinimalErrorSummary(trimmed) {
+				return trimmed
+			}
+			return vectorsErrorSummaryForLog(statusCode, []byte(errorInfo))
+		}
 		return errorInfo
 	}
+}
+
+func isMinimalErrorSummary(text string) bool {
+	fields := strings.Fields(text)
+	if len(fields) == 0 || !strings.HasPrefix(fields[0], "status=") {
+		return false
+	}
+	status, err := strconv.Atoi(strings.TrimPrefix(fields[0], "status="))
+	if err != nil || status < 0 || status > 599 {
+		return false
+	}
+	for _, field := range fields[1:] {
+		key, value, ok := strings.Cut(field, "=")
+		if !ok {
+			return false
+		}
+		switch key {
+		case "type", "code":
+			if value == "" || sanitizeVectorsErrorToken(value) != value {
+				return false
+			}
+		case "param":
+			if value == "" || sanitizeVectorsErrorParam(value) != value {
+				return false
+			}
+		case "body":
+			if value != "omitted" {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
 }
