@@ -46,6 +46,7 @@ func (a *application) registerAutopilotRoutes(apiGroup fiber.Router) {
 		autopilot.RegisterRecommendationRoutes(apiGroup, a.autopilotManager)
 
 		// Phase 4 Item 8: A/B 测试结果 + 紧急停止 API
+		autopilot.RegisterRoutingEvaluationRoutes(apiGroup, a.autopilotManager.ABTestStore())
 		if a.autopilotManager.ABTestSampler() != nil && a.autopilotManager.ABTestStore() != nil {
 			autopilot.RegisterABTestRoutes(apiGroup, &autopilot.ABTestDeps{
 				Sampler:    a.autopilotManager.ABTestSampler(),
