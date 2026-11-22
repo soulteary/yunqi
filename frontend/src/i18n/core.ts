@@ -31,8 +31,9 @@ export function resolveInitialLocale(
 }
 
 export function getRuntimeLocale(): SupportedLocale {
-  if (typeof window !== 'undefined' && window.__CCX_RUNTIME_CONFIG__?.uiLanguage) {
-    return normalizeLocale(window.__CCX_RUNTIME_CONFIG__.uiLanguage)
+  if (typeof window !== 'undefined') {
+    const runtimeLanguage = window.__YUNQI_RUNTIME_CONFIG__?.uiLanguage || window.__CCX_RUNTIME_CONFIG__?.uiLanguage
+    if (runtimeLanguage) return normalizeLocale(runtimeLanguage)
   }
 
   if (typeof globalThis.__APP_UI_LANGUAGE__ !== 'undefined') {

@@ -20,7 +20,7 @@
       v-model="hovered"
       activator="parent"
       location="top"
-      content-class="ccx-tooltip"
+      content-class="yunqi-tooltip"
     >
       <div class="tooltip-content">
         <div class="font-weight-bold mb-1">{{ statusLabel }}</div>
@@ -208,66 +208,66 @@ const formatTime = (dateStr: string): string => {
 
 /* 状态样式 - 高对比度实心边框 */
 .status-normal .badge-content {
-  background: var(--ccx-status-active-bg);
-  color: var(--ccx-status-active-fg);
-  border-color: var(--ccx-status-active-fg);
+  background: var(--yunqi-status-active-bg);
+  color: var(--yunqi-status-active-fg);
+  border-color: var(--yunqi-status-active-fg);
 }
 
 .status-normal .badge-content .status-icon {
-  color: var(--ccx-status-active-fg) !important;
+  color: var(--yunqi-status-active-fg) !important;
 }
 
 .status-partial .badge-content,
 .status-paused .badge-content {
-  background: var(--ccx-status-suspended-bg);
-  color: var(--ccx-status-suspended-fg);
-  border-color: var(--ccx-status-suspended-fg);
+  background: var(--yunqi-status-suspended-bg);
+  color: var(--yunqi-status-suspended-fg);
+  border-color: var(--yunqi-status-suspended-fg);
 }
 
 .status-partial .badge-content .status-icon,
 .status-paused .badge-content .status-icon {
-  color: var(--ccx-status-suspended-fg) !important;
+  color: var(--yunqi-status-suspended-fg) !important;
 }
 
 .status-tripped .badge-content {
-  background: var(--ccx-status-error-bg);
-  color: var(--ccx-status-error-fg);
-  border-color: var(--ccx-status-error-fg);
+  background: var(--yunqi-status-error-bg);
+  color: var(--yunqi-status-error-fg);
+  border-color: var(--yunqi-status-error-fg);
   animation: pixel-blink 1.2s step-end infinite;
 }
 
 .status-tripped .badge-content .status-icon {
-  color: var(--ccx-status-error-fg) !important;
+  color: var(--yunqi-status-error-fg) !important;
 }
 
 .status-disabled .badge-content {
-  background: var(--ccx-status-disabled-bg);
-  color: var(--ccx-status-disabled-fg);
-  border-color: var(--ccx-status-disabled-fg);
+  background: var(--yunqi-status-disabled-bg);
+  color: var(--yunqi-status-disabled-fg);
+  border-color: var(--yunqi-status-disabled-fg);
 }
 
 .status-disabled .badge-content .status-icon {
-  color: var(--ccx-status-disabled-fg) !important;
+  color: var(--yunqi-status-disabled-fg) !important;
 }
 
 .status-error .badge-content {
-  background: var(--ccx-status-error-bg);
-  color: var(--ccx-status-error-fg);
-  border-color: var(--ccx-status-error-fg);
+  background: var(--yunqi-status-error-bg);
+  color: var(--yunqi-status-error-fg);
+  border-color: var(--yunqi-status-error-fg);
 }
 
 .status-error .badge-content .status-icon {
-  color: var(--ccx-status-error-fg) !important;
+  color: var(--yunqi-status-error-fg) !important;
 }
 
 .status-unknown .badge-content {
-  background: var(--ccx-status-unknown-bg);
-  color: var(--ccx-status-unknown-fg);
-  border-color: var(--ccx-status-unknown-fg);
+  background: var(--yunqi-status-unknown-bg);
+  color: var(--yunqi-status-unknown-fg);
+  border-color: var(--yunqi-status-unknown-fg);
 }
 
 .status-unknown .badge-content .status-icon {
-  color: var(--ccx-status-unknown-fg) !important;
+  color: var(--yunqi-status-unknown-fg) !important;
 }
 
 /* 手机端隐藏状态文字，改为像素点样式 */
@@ -291,8 +291,8 @@ const formatTime = (dateStr: string): string => {
   }
 
   .status-normal .badge-content .v-icon {
-    background: var(--ccx-status-active-dot-bg);
-    border: 2px solid var(--ccx-status-active-dot-border);
+    background: var(--yunqi-status-active-dot-bg);
+    border: 2px solid var(--yunqi-status-active-dot-border);
   }
 
   .status-normal .badge-content .v-icon::after {
@@ -302,15 +302,15 @@ const formatTime = (dateStr: string): string => {
     left: -3px;
     width: 14px;
     height: 14px;
-    background: var(--ccx-status-active-dot-glow);
+    background: var(--yunqi-status-active-dot-glow);
     animation: pixel-pulse 1s step-end infinite;
   }
 
   /* 暂停状态 - 橙色像素点 */
   .status-partial .badge-content .v-icon,
   .status-paused .badge-content .v-icon {
-    background: var(--ccx-status-suspended-dot-bg);
-    border: 2px solid var(--ccx-status-suspended-dot-border);
+    background: var(--yunqi-status-suspended-dot-bg);
+    border: 2px solid var(--yunqi-status-suspended-dot-border);
   }
 
   .status-partial .badge-content .v-icon::after,
@@ -321,14 +321,14 @@ const formatTime = (dateStr: string): string => {
     left: -3px;
     width: 14px;
     height: 14px;
-    background: var(--ccx-status-suspended-dot-glow);
+    background: var(--yunqi-status-suspended-dot-glow);
     animation: pixel-pulse 1s step-end infinite;
   }
 
   /* 熔断状态 - 红色闪烁像素点 */
   .status-tripped .badge-content .v-icon {
-    background: var(--ccx-status-breaker-open-dot-bg);
-    border: 2px solid var(--ccx-status-breaker-open-dot-border);
+    background: var(--yunqi-status-breaker-open-dot-bg);
+    border: 2px solid var(--yunqi-status-breaker-open-dot-border);
   }
 
   .status-tripped .badge-content .v-icon::after {
@@ -338,15 +338,15 @@ const formatTime = (dateStr: string): string => {
     left: -3px;
     width: 14px;
     height: 14px;
-    background: var(--ccx-status-breaker-open-dot-glow);
+    background: var(--yunqi-status-breaker-open-dot-glow);
     animation: pixel-pulse 0.75s step-end infinite;
   }
 
   /* 禁用状态 - 灰色像素点 */
   .status-disabled .badge-content .v-icon,
   .status-unknown .badge-content .v-icon {
-    background: var(--ccx-status-disabled-dot-bg);
-    border: 2px solid var(--ccx-status-disabled-dot-border);
+    background: var(--yunqi-status-disabled-dot-bg);
+    border: 2px solid var(--yunqi-status-disabled-dot-border);
   }
 
   @keyframes pixel-pulse {

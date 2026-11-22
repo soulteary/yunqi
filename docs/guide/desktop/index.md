@@ -26,7 +26,7 @@ Yunqi 已移除 Wails 桌面外壳，统一使用 Go 服务内置的 Web 控制�
 服务启动参数可继续使用：
 
 ```bash
-ccx --config /path/to/config.json --statedir /path/to/state --logdir /path/to/logs --backupdir /path/to/backups
+yunqi --config /path/to/config.json --statedir /path/to/state --logdir /path/to/logs --backupdir /path/to/backups
 ```
 
 `.env` 的加载位置不会因这些参数而自动改变。按[环境变量说明](../environment)配置原有代理密钥、管理密钥及端口，或通过进程管理器显式传入环境变量。

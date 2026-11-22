@@ -13,7 +13,7 @@ describe('browser client setup', () => {
     const toml = JSON.parse(parsed.stdout)
     expect(toml.model_context_window).toBe(1_000_000)
     expect(toml.model).toBe('gpt-5.2')
-    expect(toml.model_providers.ccx.model_context_window).toBeUndefined()
+    expect(toml.model_providers.yunqi.model_context_window).toBeUndefined()
     expect(toml.model_auto_compact_token_limit).toBeUndefined()
   })
   it.each([0, -1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1])(
@@ -42,13 +42,13 @@ describe('browser client setup', () => {
     expect(parsed.status, parsed.stderr).toBe(0)
     expect(JSON.parse(parsed.stdout)).toEqual({
       model: 'model"with\\escapes',
-      model_provider: 'ccx',
+      model_provider: 'yunqi',
       model_providers: {
-        ccx: {
-          name: 'CCX',
+        yunqi: {
+          name: 'Yunqi',
           base_url: 'https://gateway.example/team/v1',
           wire_api: 'responses',
-          env_key: 'CCX_PROXY_KEY'
+          env_key: 'YUNQI_PROXY_KEY'
         }
       }
     })
@@ -74,8 +74,8 @@ describe('browser client setup', () => {
   })
   it('escapes user input and never substitutes an administrator credential', () => {
     const model = 'a"b'
-    expect(JSON.parse(clientConfig('opencode', 'http://localhost:3000', model).content).model).toBe('ccx/' + model)
-    expect(clientConfig('codex', 'http://localhost:3000', model).content).toContain('env_key = "CCX_PROXY_KEY"')
+    expect(JSON.parse(clientConfig('opencode', 'http://localhost:3000', model).content).model).toBe('yunqi/' + model)
+    expect(clientConfig('codex', 'http://localhost:3000', model).content).toContain('env_key = "YUNQI_PROXY_KEY"')
     expect(() => clientConfig('codex', 'http://localhost', 'a\nb')).toThrow()
   })
   it.each(['claude', 'codex', 'opencode'] as const)(
@@ -103,4 +103,25 @@ describe('browser client setup', () => {
     )
     expect(() => clientConfig('codex', 'https://gateway.example', 'model\u0000name')).toThrow()
   })
+})
+
+it('exports Yunqi identities and client key names consistently', () => {
+  const claude = JSON.parse(clientConfig('claude', 'https://gateway.example', 'model').content)
+  expect(claude.env.ANTHROPIC_API_KEY).toBe('YOUR_YUNQI_PROXY_KEY')
+  const codex = clientConfig('codex', 'https://gateway.example', 'model').content
+  expect(codex).toContain('model_provider = "yunqi"')
+  expect(codex).toContain('[model_providers.yunqi]')
+  expect(codex).toContain('name = "Yunqi"')
+  expect(codex).toContain('env_key = "YUNQI_PROXY_KEY"')
+  const opencode = JSON.parse(clientConfig('opencode', 'https://gateway.example', 'model').content)
+  expect(opencode.model).toBe('yunqi/model')
+  expect(opencode.provider.yunqi.name).toBe('Yunqi')
+  expect(opencode.provider.yunqi.options.apiKey).toBe('{env:YUNQI_PROXY_KEY}')
+})
+
+it('preserves caller-supplied model IDs containing the legacy project name', () => {
+  const model = 'ccx-custom-model'
+  expect(JSON.parse(clientConfig('claude', 'https://gateway.example', model).content).env.ANTHROPIC_MODEL).toBe(model)
+  expect(JSON.parse(clientConfig('opencode', 'https://gateway.example', model).content).model).toBe(`yunqi/${model}`)
+  expect(clientConfig('codex', 'https://gateway.example', model).content).toContain(`model = "${model}"`)
 })

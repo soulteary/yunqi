@@ -11,7 +11,7 @@
           <v-icon color="primary">mdi-update</v-icon>
           <span>{{ t('update.title') }}</span>
         </div>
-        <v-tooltip location="bottom" :text="t('app.actions.close') + ' (Esc)'" content-class="ccx-tooltip">
+        <v-tooltip location="bottom" :text="t('app.actions.close') + ' (Esc)'" content-class="yunqi-tooltip">
           <template #activator="{ props: tooltipProps }">
             <v-btn icon variant="text" v-bind="tooltipProps" @click="$emit('update:modelValue', false)">
               <v-icon>mdi-close</v-icon>
@@ -97,6 +97,6 @@ const getVersionInfo = () => unref(systemStore.versionInfo)
 const releaseUrl = computed(() => getVersionInfo().releaseUrl || undefined)
 
 async function handleCheck() {
-  window.dispatchEvent(new CustomEvent('ccx-check-version'))
+  window.dispatchEvent(new CustomEvent('yunqi-check-version'))
 }
 </script>

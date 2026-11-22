@@ -14,7 +14,7 @@
         <span class="text-caption text-medium-emphasis mr-3 d-none d-sm-inline">
           {{ t('guide.stepIndicator', { current: step + 1, total: STEP_COUNT }) }}
         </span>
-        <v-tooltip :text="t('app.actions.close') + ' (Esc)'" location="bottom" content-class="ccx-tooltip">
+        <v-tooltip :text="t('app.actions.close') + ' (Esc)'" location="bottom" content-class="yunqi-tooltip">
           <template #activator="{ props: tooltipProps }">
             <v-btn icon size="small" variant="text" v-bind="tooltipProps" @click="close">
               <v-icon size="20">mdi-close</v-icon>
@@ -317,7 +317,7 @@ useDialogHotkeys(
 }
 
 .demo-row.is-paused {
-  border-color: var(--ccx-status-suspended-fg);
+  border-color: var(--yunqi-status-suspended-fg);
   background: rgba(var(--v-theme-warning), 0.08);
 }
 

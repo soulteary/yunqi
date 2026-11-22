@@ -18,7 +18,7 @@ export interface ProviderCandidate {
   priority?: number
 }
 
-// Provider 在某个 CCX 协议渠道下的原生上游入口
+// Provider 在某个 Yunqi 协议渠道下的原生上游入口
 export interface ProviderRoute {
   channelKind: string
   serviceType: string

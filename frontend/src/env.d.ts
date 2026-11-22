@@ -18,12 +18,16 @@ declare global {
   var __APP_UI_LANGUAGE__: string
 
   interface Window {
+    __YUNQI_RUNTIME_CONFIG__?: {
+      uiLanguage?: string
+    }
+    /** Legacy deployment input. New integrations should use the Yunqi name. */
     __CCX_RUNTIME_CONFIG__?: {
       uiLanguage?: string
     }
   }
 
-  var __CCX_I18N__: {
+  var __YUNQI_I18N__: {
     global: {
       locale: { value: SupportedLocale }
       t: {

@@ -97,14 +97,14 @@
 
           <!-- 操作 -->
           <td class="text-right">
-            <v-tooltip v-if="item.autoRefreshEnabled && item.autoRefreshSupported" text="Refresh" location="top" content-class="ccx-tooltip">
+            <v-tooltip v-if="item.autoRefreshEnabled && item.autoRefreshSupported" text="Refresh" location="top" content-class="yunqi-tooltip">
               <template #activator="{ props }">
                 <v-btn v-bind="props" icon size="small" variant="text" color="primary" @click="$emit('refresh', item)">
                   <v-icon size="18">mdi-refresh</v-icon>
                 </v-btn>
               </template>
             </v-tooltip>
-            <v-tooltip :text="t('subscription.linkChannel')" location="top" content-class="ccx-tooltip">
+            <v-tooltip :text="t('subscription.linkChannel')" location="top" content-class="yunqi-tooltip">
               <template #activator="{ props }">
                 <v-btn v-bind="props" icon size="small" variant="text" color="primary" @click="$emit('link', item)">
                   <v-icon size="18">mdi-link</v-icon>

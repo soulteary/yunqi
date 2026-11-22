@@ -396,7 +396,7 @@
                     <div class="d-flex align-center mb-1">
                       <div class="text-caption text-medium-emphasis">{{ t('channelEditor.balance.lastResult') }}</div>
                       <v-spacer />
-                      <v-tooltip content-class="ccx-tooltip" location="top">
+                      <v-tooltip content-class="yunqi-tooltip" location="top">
                         <template #activator="{ props: tooltipProps }">
                           <v-btn
                             v-bind="tooltipProps"

@@ -396,7 +396,7 @@
 - 触发入口：`App.vue:378`（`v-model=systemStore.updateDialogOpen`）；版本徽标点击 `handleVersionClick`。
 - props：`modelValue`；emit `update:modelValue`。
 - 字段/内容：当前版本、最新版本 chip、状态 alert（error/hasUpdate/upToDate）。
-- 操作：检查更新（`handleCheck` 派发 `ccx-check-version` 事件）、下载（`releaseUrl` 外链）。
+- 操作：检查更新（`handleCheck` 派发 `yunqi-check-version` 事件）、下载（`releaseUrl` 外链）。
 
 布局示意图：
 

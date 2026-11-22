@@ -132,7 +132,7 @@ func tlsPathHint(certFile, keyFile string) string {
 	if filepath.IsAbs(certFile) && filepath.IsAbs(keyFile) {
 		return ""
 	}
-	return "；TLS_CERT_FILE/TLS_KEY_FILE 建议使用展开后的绝对路径，相对路径会按 CCX 进程工作目录解析"
+	return "；TLS_CERT_FILE/TLS_KEY_FILE 建议使用展开后的绝对路径，相对路径会按 Yunqi 进程工作目录解析"
 }
 
 type protocolDetectingListener struct {

@@ -1,7 +1,7 @@
 <template>
   <v-card
     :class="['conversation-card', { 'override-active': hasOverride }]"
-    :style="{ '--ccx-kind-color': kindCssColor }"
+    :style="{ '--yunqi-kind-color': kindCssColor }"
     elevation="0"
     role="button"
     tabindex="0"
@@ -12,12 +12,12 @@
   >
     <v-card-text class="pa-4">
       <div class="task-card-title-row">
-        <v-tooltip :text="statusTooltip" location="top" :open-delay="150" content-class="ccx-tooltip">
+        <v-tooltip :text="statusTooltip" location="top" :open-delay="150" content-class="yunqi-tooltip">
           <template #activator="{ props: tooltipProps }">
             <span v-bind="tooltipProps" :class="['status-led', `status-led--${conversation.status}`]"></span>
           </template>
         </v-tooltip>
-        <v-tooltip :text="kindTooltip" location="top" :open-delay="150" content-class="ccx-tooltip">
+        <v-tooltip :text="kindTooltip" location="top" :open-delay="150" content-class="yunqi-tooltip">
           <template #activator="{ props: tooltipProps }">
             <span v-bind="tooltipProps" :class="['kind-chip', `kind-chip--${conversation.kind}`]">{{ kindLabel }}</span>
           </template>
@@ -25,17 +25,17 @@
         <span class="task-card-title" :title="tooltipText">
           <span :class="['display-label-text', { 'display-label-text--expanded': expanded }]">{{ displayLabel }}</span>
         </span>
-        <v-tooltip :text="requestCountTooltip" location="top" :open-delay="150" content-class="ccx-tooltip">
+        <v-tooltip :text="requestCountTooltip" location="top" :open-delay="150" content-class="yunqi-tooltip">
           <template #activator="{ props: tooltipProps }">
             <span v-bind="tooltipProps" class="task-meta-item task-title-stat">{{ conversation.requestCount }}x</span>
           </template>
         </v-tooltip>
-        <v-tooltip :text="durationTooltip" location="top" :open-delay="150" content-class="ccx-tooltip">
+        <v-tooltip :text="durationTooltip" location="top" :open-delay="150" content-class="yunqi-tooltip">
           <template #activator="{ props: tooltipProps }">
             <span v-bind="tooltipProps" class="task-meta-item task-title-stat">{{ duration }}</span>
           </template>
         </v-tooltip>
-        <v-tooltip v-if="hasSubagentActivity" :text="subagentCountTooltip" location="top" :open-delay="150" content-class="ccx-tooltip">
+        <v-tooltip v-if="hasSubagentActivity" :text="subagentCountTooltip" location="top" :open-delay="150" content-class="yunqi-tooltip">
           <template #activator="{ props: tooltipProps }">
             <span v-bind="tooltipProps" class="task-subagent-chip">
               SA {{ displaySubagentCount }}
@@ -54,7 +54,7 @@
           :text="parentConversationTooltip"
           location="top"
           :open-delay="150"
-          content-class="ccx-tooltip"
+          content-class="yunqi-tooltip"
         >
           <template #activator="{ props: tooltipProps }">
             <button
@@ -73,7 +73,7 @@
           :text="parentThreadTooltip"
           location="top"
           :open-delay="150"
-          content-class="ccx-tooltip"
+          content-class="yunqi-tooltip"
         >
           <template #activator="{ props: tooltipProps }">
             <span
@@ -91,7 +91,7 @@
           :text="childConversationTooltip"
           location="top"
           :open-delay="150"
-          content-class="ccx-tooltip"
+          content-class="yunqi-tooltip"
         >
           <template #activator="{ props: tooltipProps }">
             <button
@@ -167,7 +167,7 @@
 
       <!-- Row 2: Model + Channel chips (collapsed) -->
       <div v-if="!expanded" class="d-flex align-center ga-2 flex-wrap">
-        <v-tooltip v-for="ch in visibleChannels" :key="ch.index" :text="getChannelTooltip(ch)" location="top" :open-delay="150" content-class="ccx-tooltip">
+        <v-tooltip v-for="ch in visibleChannels" :key="ch.index" :text="getChannelTooltip(ch)" location="top" :open-delay="150" content-class="yunqi-tooltip">
           <template #activator="{ props: tip }">
             <v-chip
               v-bind="tip"
@@ -190,7 +190,7 @@
             </v-chip>
           </template>
         </v-tooltip>
-        <v-tooltip v-if="hiddenCount > 0" :text="hiddenChannelsTooltip" location="top" :open-delay="150" content-class="ccx-tooltip">
+        <v-tooltip v-if="hiddenCount > 0" :text="hiddenChannelsTooltip" location="top" :open-delay="150" content-class="yunqi-tooltip">
           <template #activator="{ props: tooltipProps }">
             <v-chip v-bind="tooltipProps" size="x-small" variant="text" @click.stop="$emit('toggleExpand')">+{{ hiddenCount }}</v-chip>
           </template>
@@ -203,7 +203,7 @@
           <span v-if="override?.isPerpetual" class="text-caption">{{ t('cockpit.overrideActivePerpetual') }}</span>
           <span v-else class="text-caption">{{ t('cockpit.overrideActive', { time: remainingTime }) }}</span>
           <v-spacer />
-          <v-tooltip :text="t('cockpit.tooltip.restoreDefault')" location="top" :open-delay="150" content-class="ccx-tooltip">
+          <v-tooltip :text="t('cockpit.tooltip.restoreDefault')" location="top" :open-delay="150" content-class="yunqi-tooltip">
             <template #activator="{ props: tooltipProps }">
               <v-btn v-bind="tooltipProps" size="x-small" variant="text" @click.stop="$emit('removeOverride', conversation.id)">{{ t('cockpit.restoreDefault') }}</v-btn>
             </template>
@@ -241,7 +241,7 @@
               {{ agent.status }}
             </v-chip>
           </div>
-          <v-tooltip v-if="subagents.length > visibleSubagents.length" :text="moreSubagentsTooltip" location="top" :open-delay="150" content-class="ccx-tooltip">
+          <v-tooltip v-if="subagents.length > visibleSubagents.length" :text="moreSubagentsTooltip" location="top" :open-delay="150" content-class="yunqi-tooltip">
             <template #activator="{ props: tooltipProps }">
               <button v-bind="tooltipProps" type="button" class="subagent-more" @click.stop="$emit('toggleExpand')">
                 +{{ subagents.length - visibleSubagents.length }} more
@@ -257,7 +257,7 @@
             <span v-if="hasSubagentOverride" class="text-caption text-warning ml-2">[{{ t('cockpit.subagentOverride') }}]</span>
             <span v-else class="text-caption text-medium-emphasis ml-2">[{{ t('cockpit.subagentFollowMain') }}]</span>
             <v-spacer />
-            <v-tooltip v-if="hasSubagentOverride" :text="t('cockpit.tooltip.clearSubagentOverride')" location="top" :open-delay="150" content-class="ccx-tooltip">
+            <v-tooltip v-if="hasSubagentOverride" :text="t('cockpit.tooltip.clearSubagentOverride')" location="top" :open-delay="150" content-class="yunqi-tooltip">
               <template #activator="{ props: tooltipProps }">
                 <v-btn v-bind="tooltipProps" size="x-small" variant="text" @click.stop="handleClearSubagentOverride">{{ t('cockpit.subagentClearOverride') }}</v-btn>
               </template>
@@ -277,12 +277,12 @@
 
       <!-- Row 3: Raw User ID -->
       <div v-if="conversation.rawUserId" class="raw-user-id mt-2 d-flex align-center">
-        <v-tooltip :text="t('cockpit.copyRawUserId')" location="top" :open-delay="150" content-class="ccx-tooltip">
+        <v-tooltip :text="t('cockpit.copyRawUserId')" location="top" :open-delay="150" content-class="yunqi-tooltip">
           <template #activator="{ props: tooltipProps }">
             <span v-bind="tooltipProps" class="text-caption text-medium-emphasis font-weight-mono raw-user-id-text" @click.stop="copyRawUserId">{{ conversation.rawUserId }}</span>
           </template>
         </v-tooltip>
-        <v-tooltip :text="t('cockpit.copyRawUserId')" location="top" :open-delay="150" content-class="ccx-tooltip">
+        <v-tooltip :text="t('cockpit.copyRawUserId')" location="top" :open-delay="150" content-class="yunqi-tooltip">
           <template #activator="{ props: tooltipProps }">
             <v-btn v-bind="tooltipProps" icon size="x-small" variant="text" class="copy-btn" :aria-label="t('cockpit.copyRawUserId')" @click.stop="copyRawUserId">
               <v-icon size="12">mdi-content-copy</v-icon>
@@ -382,12 +382,12 @@ async function syncMainConversationTurnsWidth() {
 
 const kindCssColor = computed(() => {
   const map: Record<string, string> = {
-    messages: 'var(--ccx-kind-messages)',
-    chat: 'var(--ccx-kind-chat)',
-    responses: 'var(--ccx-kind-responses)',
-    gemini: 'var(--ccx-kind-gemini)',
-    images: 'var(--ccx-kind-images)',
-    vectors: 'var(--ccx-kind-vectors)',
+    messages: 'var(--yunqi-kind-messages)',
+    chat: 'var(--yunqi-kind-chat)',
+    responses: 'var(--yunqi-kind-responses)',
+    gemini: 'var(--yunqi-kind-gemini)',
+    images: 'var(--yunqi-kind-images)',
+    vectors: 'var(--yunqi-kind-vectors)',
   }
   return map[props.conversation.kind] ?? 'rgb(var(--v-theme-on-surface))'
 })
@@ -706,7 +706,7 @@ function shortId(value: string): string {
   border: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
   box-shadow: none;
   background:
-    radial-gradient(circle, var(--ccx-dot-grid-color) 1px, transparent 1px) 0 0 / var(--ccx-dot-grid-size) var(--ccx-dot-grid-size),
+    radial-gradient(circle, var(--yunqi-dot-grid-color) 1px, transparent 1px) 0 0 / var(--yunqi-dot-grid-size) var(--yunqi-dot-grid-size),
     rgb(var(--v-theme-surface));
   border-radius: 0;
 }
@@ -717,13 +717,13 @@ function shortId(value: string): string {
   top: 8px;
   bottom: 8px;
   width: 3px;
-  background: var(--ccx-kind-color);
+  background: var(--yunqi-kind-color);
   border: 0;
   pointer-events: none;
   z-index: 1;
 }
 .conversation-card:hover {
-  border-color: var(--ccx-kind-color);
+  border-color: var(--yunqi-kind-color);
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
 }
 .conversation-card:active {
@@ -740,7 +740,7 @@ function shortId(value: string): string {
   box-shadow: none;
 }
 .v-theme--dark .conversation-card:hover {
-  border-color: var(--ccx-kind-color);
+  border-color: var(--yunqi-kind-color);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.34);
 }
 
@@ -799,7 +799,7 @@ function shortId(value: string): string {
   width: 7px;
   height: 7px;
   border-radius: 999px;
-  background: var(--ccx-kind-color);
+  background: var(--yunqi-kind-color);
 }
 
 .task-status-chip {
@@ -831,15 +831,15 @@ function shortId(value: string): string {
   flex-shrink: 0;
 }
 .status-led--streaming {
-  background: var(--ccx-led-streaming-color);
-  animation: ccx-led-pulse 1.4s ease-in-out infinite;
+  background: var(--yunqi-led-streaming-color);
+  animation: yunqi-led-pulse 1.4s ease-in-out infinite;
 }
 .status-led--active {
-  background: var(--ccx-status-breaker-half-open-dot-bg);
-  box-shadow: 0 0 4px 1px var(--ccx-status-breaker-half-open-dot-glow);
+  background: var(--yunqi-status-breaker-half-open-dot-bg);
+  box-shadow: 0 0 4px 1px var(--yunqi-status-breaker-half-open-dot-glow);
 }
 .status-led--idle {
-  background: var(--ccx-status-disabled-dot-bg);
+  background: var(--yunqi-status-disabled-dot-bg);
 }
 
 /* Kind chip */
@@ -856,12 +856,12 @@ function shortId(value: string): string {
   line-height: 1;
 }
 
-.kind-chip--messages { color: var(--ccx-kind-messages); }
-.kind-chip--chat { color: var(--ccx-kind-chat); }
-.kind-chip--responses { color: var(--ccx-kind-responses); }
-.kind-chip--gemini { color: var(--ccx-kind-gemini); }
-.kind-chip--images { color: var(--ccx-kind-images); }
-.kind-chip--vectors { color: var(--ccx-kind-vectors); }
+.kind-chip--messages { color: var(--yunqi-kind-messages); }
+.kind-chip--chat { color: var(--yunqi-kind-chat); }
+.kind-chip--responses { color: var(--yunqi-kind-responses); }
+.kind-chip--gemini { color: var(--yunqi-kind-gemini); }
+.kind-chip--images { color: var(--yunqi-kind-images); }
+.kind-chip--vectors { color: var(--yunqi-kind-vectors); }
 
 /* Display label (title/userId) */
 .display-label {
@@ -1070,16 +1070,16 @@ function shortId(value: string): string {
 }
 
 .subagent-dot--streaming {
-  background: var(--ccx-led-streaming-color);
-  animation: ccx-led-pulse 1.4s ease-in-out infinite;
+  background: var(--yunqi-led-streaming-color);
+  animation: yunqi-led-pulse 1.4s ease-in-out infinite;
 }
 
 .subagent-dot--active {
-  background: var(--ccx-status-breaker-half-open-dot-bg);
+  background: var(--yunqi-status-breaker-half-open-dot-bg);
 }
 
 .subagent-dot--idle {
-  background: var(--ccx-status-disabled-dot-bg);
+  background: var(--yunqi-status-disabled-dot-bg);
 }
 
 .subagent-row-main {
@@ -1162,8 +1162,8 @@ button.relation-chip {
 
 .relation-chip--parent:hover,
 .relation-chip--children:hover {
-  background: color-mix(in srgb, var(--ccx-kind-color) 14%, transparent);
-  border-color: var(--ccx-kind-color);
+  background: color-mix(in srgb, var(--yunqi-kind-color) 14%, transparent);
+  border-color: var(--yunqi-kind-color);
 }
 
 /* Next label */
