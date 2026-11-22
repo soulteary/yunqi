@@ -133,7 +133,13 @@ func (k ChannelKind) Label() string {
 
 // addUpstreamCommonLocked 是六类 Add*Upstream 方法的通用实现。
 // 调用方必须已持有 cm.mu 写锁。
-func (cm *ConfigManager) addUpstreamCommonLocked(k ChannelKindConfig, upstream UpstreamConfig, placements ...string) error {
+func (cm *ConfigManager) addUpstreamCommonLocked(k ChannelKindConfig, upstream UpstreamConfig, placements ...string) (addErr error) {
+	originalConfig := cm.config.deepCopy()
+	defer func() {
+		if addErr != nil {
+			cm.config = originalConfig
+		}
+	}()
 	if err := ValidateOutboundNetwork(upstream.OutboundNetwork, upstream.ProxyURL); err != nil {
 		return err
 	}

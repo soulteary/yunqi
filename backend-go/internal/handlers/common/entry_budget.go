@@ -2,8 +2,6 @@ package common
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -23,7 +21,6 @@ import (
 	"github.com/soulteary/yunqi/internal/middleware"
 	"github.com/soulteary/yunqi/internal/requestscope"
 	"github.com/soulteary/yunqi/internal/types"
-	"github.com/soulteary/yunqi/internal/utils"
 	"github.com/tidwall/gjson"
 )
 
@@ -151,8 +148,8 @@ func beginEntryBudget(req *http.Request, upstream *config.UpstreamConfig, env *c
 		caps = cm.UpstreamModelCapabilitiesSnapshot()
 	}
 	resolved := config.ResolveUpstreamCapability(model, upstream, caps)
-	pricing := resolved.Capability.Pricing
-	if pricing == nil || pricing.Currency != "" && !strings.EqualFold(pricing.Currency, "USD") && !strings.EqualFold(pricing.Currency, "CNY") {
+	pricing := config.SnapshotModelPricing(resolved.Capability.Pricing)
+	if pricing == nil {
 		return nil, nil, protocol, entrybudget.ErrPricing
 	}
 	output := int64(0)
@@ -178,21 +175,18 @@ func beginEntryBudget(req *http.Request, upstream *config.UpstreamConfig, env *c
 	if protocol != "vectors" && output <= 0 {
 		return nil, nil, protocol, entrybudget.ErrPricing
 	}
-	input := int64(utils.EstimateRequestTokens(body))
-	input += input/4 + 64
-	// Cache state is unknown before execution: reserve the highest supported
-	// input/cache unit scenario, including the complete requested output upper bound.
-	scenarios := [][4]int64{{input, output, 0, 0}, {0, output, input, 0}, {0, output, 0, input}}
-	upper := float64(0)
-	for _, units := range scenarios {
-		cost, complete := metrics.CalculateTokenCostUSDWithPricingAndStatus(pricing, units[0], units[1], units[2], units[3])
-		if !complete {
-			return nil, nil, protocol, entrybudget.ErrPricing
-		}
-		if cost > upper {
-			upper = cost
-		}
+	// A generic messages estimator omits Responses input, Gemini contents and
+	// embeddings input. Reserve one token per final wire byte plus framing: this
+	// deliberately conservative envelope covers every serialized input field,
+	// Unicode and whitespace without claiming an exact provider tokenizer.
+	input := int64(len(body)) + 64
+	// The shared F47 evaluator includes all reachable tiers and the highest
+	// unknown cache TTL/reasoning dimensions, using this same immutable snapshot.
+	upper, complete := metrics.CalculateUsageReservationUSDWithPricing(pricing, &types.Usage{InputTokens: int(input), OutputTokens: int(output)})
+	if !complete {
+		return nil, nil, protocol, entrybudget.ErrPricing
 	}
+
 	amount, err := entrybudget.FromUSD(upper)
 	if err != nil {
 		return nil, nil, protocol, err
@@ -201,11 +195,7 @@ func beginEntryBudget(req *http.Request, upstream *config.UpstreamConfig, env *c
 	if err != nil {
 		return nil, nil, protocol, entrybudget.ErrPricing
 	}
-	sum := sha256.Sum256(snapshot)
-	version := "sha256:" + hex.EncodeToString(sum[:])
-	if explicitVersion := gjson.GetBytes(snapshot, "versionId").String(); explicitVersion != "" {
-		version = explicitVersion
-	}
+	version := config.PricingVersionID(pricing)
 	attempt, err := session.Begin(req.Context(), entrybudget.AttemptQuote{Model: model, ChannelUID: upstream.ChannelUID, PricingVersion: version, Pricing: snapshot, Amount: amount})
 	return attempt, pricing, protocol, err
 }
@@ -368,21 +358,10 @@ func (b *budgetResponseBody) Close() error {
 			_ = b.attempt.Complete(nil, "incomplete_or_missing_provider_usage")
 			return
 		}
-		creation := int64(usage.CacheCreationInputTokens)
-		if creation == 0 {
-			creation = int64(usage.CacheCreation5mInputTokens + usage.CacheCreation1hInputTokens)
-		}
-		// Canonical Gemini output is candidate-only, matching native protocol usage.
-		// The legacy token helper has no reasoning dimension, so add raw thoughts
-		// exactly once here until F47's Usage-aware helper replaces this adapter.
-		output := int64(usage.OutputTokens)
-		if b.protocol == "gemini" {
-			var raw map[string]json.RawMessage
-			_ = json.Unmarshal(usage.Provenance.RawUsage, &raw)
-			thoughts, _ := rawBudgetCounter(raw, "thoughtsTokenCount")
-			output += thoughts
-		}
-		cost, complete := metrics.CalculateTokenCostUSDWithPricingAndStatus(b.pricing, int64(usage.InputTokens), output, creation, int64(usage.CacheReadInputTokens))
+		// Gemini canonical output is candidate-only. F47 reads raw thoughts as an
+		// additional dimension; OpenAI reasoning is a subset, never charged twice.
+		cost, complete := metrics.CalculateUsageCostUSDWithPricingAndStatus(b.pricing, usage)
+
 		if !complete {
 			_ = b.attempt.Complete(nil, "unpriced_provider_usage")
 			return

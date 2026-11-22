@@ -10,7 +10,10 @@ package presetstore
 
 // CurrentSchemaVersion 是本二进制支持的 subscription-preset schema 主版本。
 // 远程 schemaVersion 高于此值时整体弃用远程（老客户端不误解新结构）。
-import "encoding/json"
+import (
+	"encoding/json"
+	"github.com/soulteary/yunqi/internal/pricingtypes"
+)
 
 const CurrentSchemaVersion = 1
 
@@ -99,23 +102,8 @@ type ModelBenchmarkEvidencePreset struct {
 	CostUSD          *float64 `json:"costUsd,omitempty"`
 }
 
-type ModelPricingPreset struct {
-	Unit                string                   `json:"unit,omitempty"`
-	Currency            string                   `json:"currency,omitempty"`
-	InputCacheHitPrice  *float64                 `json:"inputCacheHitPrice,omitempty"`
-	InputCacheMissPrice *float64                 `json:"inputCacheMissPrice,omitempty"`
-	OutputPrice         *float64                 `json:"outputPrice,omitempty"`
-	Tiers               []ModelPricingTierPreset `json:"tiers,omitempty"`
-}
-
-type ModelPricingTierPreset struct {
-	Label               string   `json:"label,omitempty"`
-	InputTokensAbove    int      `json:"inputTokensAbove,omitempty"`
-	InputTokensUpTo     int      `json:"inputTokensUpTo,omitempty"`
-	InputCacheHitPrice  *float64 `json:"inputCacheHitPrice,omitempty"`
-	InputCacheMissPrice *float64 `json:"inputCacheMissPrice,omitempty"`
-	OutputPrice         *float64 `json:"outputPrice,omitempty"`
-}
+type ModelPricingPreset = pricingtypes.Pricing
+type ModelPricingTierPreset = pricingtypes.Tier
 
 type ChannelPresetsPreset struct {
 	SchemaVersion int                        `json:"schemaVersion"`

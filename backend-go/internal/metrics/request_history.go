@@ -27,16 +27,17 @@ type RequestHistoryQuery struct {
 	Cursor        string
 }
 type RequestHistoryEntry struct {
-	UsageProvenance *types.UsageProvenance `json:"usageProvenance"`
-	ID              int64                  `json:"id"`
-	Timestamp       int64                  `json:"timestamp"`
-	APIType         string                 `json:"type"`
-	Model           string                 `json:"model"`
-	ChannelUID      string                 `json:"channelUid"`
-	CorrelationID   string                 `json:"correlationId"`
-	Success         bool                   `json:"success"`
-	InputTokens     int64                  `json:"inputTokens"`
-	OutputTokens    int64                  `json:"outputTokens"`
+	PricingVersionID string                 `json:"pricingVersionId"`
+	UsageProvenance  *types.UsageProvenance `json:"usageProvenance"`
+	ID               int64                  `json:"id"`
+	Timestamp        int64                  `json:"timestamp"`
+	APIType          string                 `json:"type"`
+	Model            string                 `json:"model"`
+	ChannelUID       string                 `json:"channelUid"`
+	CorrelationID    string                 `json:"correlationId"`
+	Success          bool                   `json:"success"`
+	InputTokens      int64                  `json:"inputTokens"`
+	OutputTokens     int64                  `json:"outputTokens"`
 }
 type RequestHistoryPage struct {
 	Records       []RequestHistoryEntry `json:"records"`
@@ -95,7 +96,7 @@ func (s *SQLiteStore) QueryRequestHistory(ctx context.Context, q RequestHistoryQ
 		args = append(args, cur.Timestamp, cur.ID)
 	}
 	args = append(args, q.Limit+1)
-	rows, err := s.db.QueryContext(ctx, `SELECT id,timestamp,api_type,model,channel_uid,correlation_id,success,input_tokens,output_tokens,usage_provenance FROM `+historyTable(q)+` WHERE `+strings.Join(where, " AND ")+` ORDER BY timestamp DESC,id DESC LIMIT ?`, args...)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,timestamp,api_type,model,channel_uid,correlation_id,success,input_tokens,output_tokens,usage_provenance,pricing_version_id FROM `+historyTable(q)+` WHERE `+strings.Join(where, " AND ")+` ORDER BY timestamp DESC,id DESC LIMIT ?`, args...)
 	if err != nil {
 		return page, err
 	}
@@ -103,7 +104,7 @@ func (s *SQLiteStore) QueryRequestHistory(ctx context.Context, q RequestHistoryQ
 	for rows.Next() {
 		var r RequestHistoryEntry
 		var provenance string
-		if err = rows.Scan(&r.ID, &r.Timestamp, &r.APIType, &r.Model, &r.ChannelUID, &r.CorrelationID, &r.Success, &r.InputTokens, &r.OutputTokens, &provenance); err != nil {
+		if err = rows.Scan(&r.ID, &r.Timestamp, &r.APIType, &r.Model, &r.ChannelUID, &r.CorrelationID, &r.Success, &r.InputTokens, &r.OutputTokens, &provenance, &r.PricingVersionID); err != nil {
 			return page, err
 		}
 		r.UsageProvenance = unmarshalUsageProvenance(provenance)

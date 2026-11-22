@@ -78,6 +78,7 @@ type PersistentCircuitState struct {
 
 // PersistentRecord 持久化记录结构
 type PersistentRecord struct {
+	PricingVersionID    string
 	UsageProvenance     *types.UsageProvenance
 	ChannelUID          string       // 渠道稳定标识（新增列，旧行为空）
 	MetricsKey          string       // hash(baseURL + apiKey)

@@ -213,7 +213,14 @@ type OpenAIChoice struct {
 
 // Usage 使用情况统计
 // 完整支持 Claude API 的详细 usage 字段，包括缓存 TTL 细分
+type ImageUsage struct {
+	Count   int
+	Quality string
+	Size    string
+}
+
 type Usage struct {
+	ImageUnits               []ImageUsage     `json:"-"`
 	Provenance               *UsageProvenance `json:"-"`
 	InputTokens              int              `json:"input_tokens,omitempty"`
 	OutputTokens             int              `json:"output_tokens,omitempty"`

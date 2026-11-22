@@ -63,6 +63,11 @@ export interface EmbeddingCapability {
 }
 
 export interface ModelPricing {
+  versionId?: string
+  cacheCreation5mPrice?: number
+  cacheCreation1hPrice?: number
+  reasoningOutputPrice?: number
+  imagePrices?: { quality?: string; size?: string; price: number }[]
   unit?: string
   currency?: string
   inputCacheHitPrice?: number
@@ -72,6 +77,9 @@ export interface ModelPricing {
 }
 
 export interface ModelPricingTier {
+  cacheCreation5mPrice?: number
+  cacheCreation1hPrice?: number
+  reasoningOutputPrice?: number
   label?: string
   inputTokensAbove?: number
   inputTokensUpTo?: number

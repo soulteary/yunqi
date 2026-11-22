@@ -39,7 +39,7 @@ func budgetState(c fiber.Ctx, env *config.EnvConfig, p entrybudget.Policy, audit
 		httpbridge.JSON(c, 503, fiber.Map{"error": "entry_budget_unavailable"})
 		return nil
 	}
-	response := fiber.Map{"costBasis": "list_price_usd", "budgeted": !p.Disabled, "reservationMethod": "estimated_input_plus_output_limit", "absoluteCostGuarantee": false, "policy": publicBudget(p), "periodStart": state.Start, "periodEnd": state.End, "spentUsd": entrybudget.FormatUSD(state.Spent), "reservedUsd": entrybudget.FormatUSD(state.Reserved), "remainingUsd": entrybudget.FormatUSD(p.LimitNanoUSD - state.Spent - state.Reserved)}
+	response := fiber.Map{"costBasis": "list_price_usd", "budgeted": !p.Disabled, "reservationMethod": "serialized_input_byte_bound_plus_output_limit", "absoluteCostGuarantee": false, "policy": publicBudget(p), "periodStart": state.Start, "periodEnd": state.End, "spentUsd": entrybudget.FormatUSD(state.Spent), "reservedUsd": entrybudget.FormatUSD(state.Reserved), "remainingUsd": entrybudget.FormatUSD(p.LimitNanoUSD - state.Spent - state.Reserved)}
 	if audit {
 		requests, err := store.Requests(httpbridge.Request(c).Context(), p.PrincipalID, 100)
 		if err != nil {
