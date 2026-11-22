@@ -958,6 +958,7 @@ echo $ENV  # 必须是 development
 | `YUNQI_OTLP_SAMPLE_RATIO` | 0.1，范围 0–1；0 不导出 span |
 | `YUNQI_OTLP_PROPAGATE_UPSTREAM` | true（仅启用 OTLP 后生效）；是否向供应商传播网关 traceparent |
 | `OTEL_SERVICE_NAME` | yunqi；导出的服务名 |
+| `USAGE_DRAIN_TIMEOUT_MS` | 0（关闭）；客户端断开后限时读取 usage，最大 5000 毫秒 |
 
 出站策略覆盖实际拨号、DNS 结果、重定向和代理连接；云元数据地址始终阻止。私网阻止默认关闭，因此现有本地模型/企业私网渠道不会因升级自动失效。OTLP 也走同一出站策略，若开启私网限制，本地 collector 需要相应例外。
 
@@ -966,3 +967,13 @@ echo $ENV  # 必须是 development
 OTLP 也接受 `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`，或 `OTEL_EXPORTER_OTLP_ENDPOINT` 加 `/v1/traces`；YUNQI_OTLP_ENDPOINT 优先。标准 OTEL_EXPORTER_OTLP_TRACES_HEADERS/OTEL_EXPORTER_OTLP_HEADERS 可提供 collector 认证。客户端使用系统 TLS 信任与网关出站策略，不使用 SDK 自建证书客户端；导出无重定向/重试，超时 2 秒，队列 512、批次 64，关闭最多 5 秒。只导出固定协议/状态/阶段及受限关联 ID，不导出 prompt、模型、URL、正文、凭证、baggage 或传入 tracestate。导出异常不阻塞请求，健康状态可从 Prometheus 查看。
 
 正文日志策略不使用新增环境开关：仍由 `ENV`、`ENABLE_REQUEST_LOGS`、`ENABLE_RESPONSE_LOGS` 提供原有门控，并要求管理员经 `/api/logging/body` 独立显式启用正文；默认关闭。策略、实际 effective 状态、字节上限、轮转保留期与 actor 审计以该 API 为准，不能仅凭日志等级判断是否会记录正文。
+
+断客 usage drain 仅适用于显式输出上限不超过 1024 token 的普通 HTTP 流式请求，最多读取 1 MiB；不用于 WebSocket 控制取消或竞速分支。客户端断开后不再写回客户端，只限时等待供应商计量。原请求 deadline、服务退出、预算或租约取消仍优先终止上游。缺少真实协议终态的 usage 标为不完整，不能因读到 EOF 就当作完整计费；诊断摘要仍保持取消结果，不记请求成功。
+
+预置更新器的 `PRESET_TRUSTED_ED25519_KEYS` 接受 key ID 到 Base64 Ed25519 公钥的 JSON 对象。未配置时可检查未签名来源，但会明确显示未验证；配置可信公钥后拒绝未签名、未知 key 和错误签名，审核时按当前公钥重新验证，不能绕过已撤销 key。来源 digest 绑定下载的索引与分片校验链。
+
+跨节点入口限额由 `PROXY_REDIS_URL` 显式启用，支持 redis/rediss；未设置仍使用本地准入。`PROXY_REDIS_NAMESPACE` 默认 yunqi，同一限额域的节点必须使用相同 namespace、稳定主体 ID 和限额策略；独立网关应使用不同 namespace。`PROXY_REDIS_MAX_RPM` 默认为 0（不额外限制），`PROXY_REDIS_LEASE_SECONDS` 默认 30，允许 5–300 秒。入口并发仍取主体策略或 `PROXY_MAX_CONCURRENCY`，共享租约限制各节点的总和，不按 Key 重试重复消耗逻辑请求 RPM。
+
+Redis 不可用或续约失效时拒绝准入并取消受影响上游，不退回本地放行；活跃 Body（含后台计量读取）结束前保留租约。异常进程退出后等待 Redis 租约过期回收，不立即假定请求结束。
+
+`PRESET_SOURCE_MAX_AGE`、`PRESET_SOURCE_FUTURE_SKEW` 使用 Go duration（如 `168h`、`5m`），默认 0 保持时间门槛未启用。启用时间校验后需要有效发布时间，拒绝过旧或超过允许时钟偏差的来源；审核等待期间也会重新检查。即使未设时间门槛，待审来源仍显示发布时间和检查时间，不能将检查成功等同于来源新鲜。
