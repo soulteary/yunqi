@@ -23,6 +23,7 @@
 | POST | `/v1beta/models/*` | Gemini generateContent / streamGenerateContent |
 | POST | `/v1/images/generations`、`/v1/images/edits`、`/v1/images/variations` | Images |
 | POST | `/v1/embeddings` | Vectors |
+| POST | `/v1/quote` | 调用方离线估价 |
 
 这些入口还支持一个 `/:routePrefix` 前缀，例如 `/team/v1/messages`；健康检查也支持 `/team/health`。前缀是候选渠道隔离条件，不能把同一渠道的无前缀地址当作等价别名。带前缀的代理入口仍须验证代理密钥。
 
@@ -42,3 +43,74 @@
 请求使用 `Content-Type: application/json` 和管理密钥。旧 `DELETE .../keys/:apiKey`、`POST .../keys/:apiKey/top`、`POST .../keys/:apiKey/bottom` 仅为客户端兼容保留。Yunqi 会对规范化路径中的密钥脱敏，但不能控制外部反向代理日志；新客户端应使用请求体接口。
 
 能力测试仅适用于 messages、chat、responses、gemini，不适用于 Images 或 Vectors。健康检查和余额探测的渠道级管理入口覆盖六类协议，细节见[现行规格](../specs/README.md)。
+
+## 协议转换与流式约定
+
+跨协议请求在实际 provider builder 和最终 effort 处理之后检查结构化输出、媒体结构、缓存提示和函数 schema。`X-Yunqi-Conversion` 给出 `steps`、`coverage`、`quality` 和字段级 `diagnostics`，不包含请求值。`partial` 只表示已声明范围内未发现损失；`unknown` 表示不能检查；`lossy` 表示已发现降级。结构化输出约束或媒体结构丢失会在发往供应商前拒绝。原生协议不因此跳过该协议已有的兼容处理。
+
+Chat `response_format`、Responses `text.format`、Claude `output_config.format` 和 Gemini JSON Schema 在可表达范围内互转；最终 effort 改写保留 schema 原始属性顺序。Gemini 可空、联合和引用结构使用 JSON Schema 表达。供应商不能表达的约束不会伪装成等价支持。
+
+工具结果中的图片和内联文件保留为结构化媒体，工具调用 ID 与并行结果配对。Chat 的工具媒体放在连续 tool 结果之后的 user 多模态消息；Gemini 使用 `functionResponse.parts`。不能跨供应商使用的文件 ID 或无法确定 MIME 的远程媒体明确拒绝，不会下载文件或把二进制塞进普通工具文本。Gemini 缺 ID 时按同名未匹配调用顺序生成和配对，找不到调用则拒绝。
+
+托管搜索与客户端函数工具保持区别。跨协议无法表达原生引用定位时保留可读来源、标题和引用文本，并附转换诊断；不暴露供应商 opaque 搜索数据，也不捏造字符位置。不能等价转换的原生托管搜索声明要求使用原生渠道。
+
+Responses 错误终帧区分上游错误和网关合成错误，已交付内容后不重放为另一次成功。Responses WebSocket 的 `response.cancel`/`response.interrupt` 只取消当前轮，连接可以继续下一轮；客户端断开仍触发取消。TTFT 从首个有效内容计时，纯元数据、空 delta 和心跳不算有效内容。
+
+`responsesClaudePrefixCache` 是渠道 JSON 选项，默认关闭，仅用于 Responses→Claude 的稳定历史前缀。存在显式 `cache_control` 时保留原设置，不推断供应商 TTL。OpenAI 原生缓存字段保留显式 false/null 的存在性；跨供应商不支持的提示会报告丢弃。
+
+## 团队身份与调用方策略
+
+四类文本入口都会验证源协议的流式终态；连接 EOF 本身不代表成功。缺少终态、供应商错误或不完整压缩流会保留失败语义，已写出的内容不会被另一请求重放。正常内容及时转发，只有待确认终态尾部使用有界缓冲。
+
+| 入口 | 权限与用途 |
+| --- | --- |
+| `/api/entry-keys`、`/api/entry-keys/:id`、`/api/entry-keys/:id/rotate` | 全局管理员管理调用方 Key；明文只在创建或旋转时返回，持久化保存 hash |
+| `/api/admin-credentials`、`/api/admin-credentials/:id`、`/api/admin-credentials/:id/rotate` | 全局管理员管理控制面凭证、角色和渠道 UID 范围 |
+| `GET /api/access/me`、`GET /api/access/channels` | 有限角色的身份和脱敏渠道视图 |
+| `PUT /api/access/channels/:uid/state` | operator/admin 在授权渠道范围内调整状态 |
+| `/access` | 有限角色门户；凭证只保留在当前页面内存中 |
+| `POST /v1/quote` | 代理认证，离线估价；遵守模型与渠道范围，不调用供应商 |
+
+viewer 只读，operator 可执行有限状态操作，admin 仍受其渠道范围限制；全局管理、凭证导出和全量诊断要求无渠道范围限制的 admin。有限角色不复用会返回原始 Key 的旧管理接口。管理凭证不会自动获得代理调用权限。入口 Key 可限制模型、渠道 UID、有效期、来源 CIDR 和并发；CIDR 使用真实对端地址，伪造 `X-Forwarded-For` 不改变准入。
+
+报价区分已知成本与缺失输入/输出上界或媒体价格的情况，不能将不完整报价当作零费用。实际 usage 会标注 provider/estimated/mixed/unknown 来源并保留有界、最小化的原始计量证据。
+
+可信身份代理默认关闭。全局管理员通过 `GET/PUT /api/identity-proxy` 配置 issuer、真实代理 CIDR、allowedOrigins 与组→角色/渠道范围映射，服务端环境还须配置至少 32 字节的 `IDENTITY_PROXY_SECRET`。代理必须覆盖客户端同名身份头，发送 `X-Yunqi-Identity-Secret/Subject/Groups/Session/Expires`；Expires 是固定会话的 Unix 到期秒，延长会话需换 Session。所有 SSO 管理请求还须 `X-Yunqi-Management-Request: 1`，写请求须带匹配的 Origin。身份头不转发到供应商。
+
+`POST /api/access/session/revoke` 撤销当前 SSO 会话；全局管理员也可使用 `POST /api/identity-proxy/sessions/revoke` 按 sessionFingerprint 撤销。原始 subject/session 不保存或返回，撤销持久化，修改角色映射不会清除撤销记录。SSO 不自动授予数据面权限。
+
+严格会话为可选进程策略，详见[环境变量](environment.md)。首次请求在响应之前原子绑定渠道 UID；绑定不可用时失败，不跨渠道或竞速迁移，同渠道内 Key/URL 重试仍可发生。
+
+## 配置与运行诊断
+
+全局管理员可通过 `POST /api/channels/:uid/request-preview` 使用当前渠道或白名单草稿字段运行真实请求 builder。预览不请求供应商、不刷新 OAuth、不执行 Copilot 会话交换，也不查询历史会话。样例及支持字段的检查范围会显式返回；未覆盖字段不能据此判定为有效。Responses 的历史响应 ID 等依赖在线状态的输入会拒绝，草稿凭证不会出现在预览结果中。
+
+| 方法与路径 | 结果与边界 |
+| --- | --- |
+| `GET /api/metrics/prometheus` | 全局 admin；低基数请求、延迟、并发、failover、限流、流终态与导出健康指标 |
+| `GET /api/reports/request-timeline/:id` | 全局 admin；按服务端 request ID 或 correlation ID 查有界逻辑请求时间线 |
+| `GET /api/reports/requests` | 全局 admin；SQLite 请求记录的筛选与游标分页 |
+| `GET/PUT /api/logging/body` | 全局 admin；独立正文开关、保存版本与 actor 变更审计 |
+| `GET /api/logging/body/export` | 全局 admin；当前文件最多 1 MiB 完整行，二次脱敏，返回截断/范围说明 |
+
+`X-Yunqi-Request-Id` 关联所有 Key、渠道和竞速尝试。时间线只留结构化状态/错误来源/安全 ID，不留 prompt、模型、URL、原始 Key、会话或自由错误。最近 1024 个逻辑请求，每请求最多 128 尝试与 256 事件，超限有丢弃计数，重启清空。HTTP 200 的流内失败另看 terminalOutcome/events。`phaseTiming` 使用请求独占耗时口径，重叠网络/排队/写出阶段不重复相加；未知阶段省略。
+
+请求历史必填 `since`、`until`（Unix 秒），支持 type/model/channelUid/correlationId 和 limit（1–200）。继续页同时使用返回 cursor 与原筛选，游标不允许换筛选；结果使用首屏快照上界，新增记录不挤入后续页。保留期以响应及指标配置为准。
+
+正文日志默认关闭，即使 development 与旧日志开关开启也不会自动输出正文。全局管理员通过正文 API 分别设置 requestBodies/responseBodies，只有策略与 actor 审计原子落盘成功才激活。有效正文输出还需要 development 和对应旧日志开关；maxBytes 默认 4096，可设 256–65536，媒体及结构化个人信息字段省略，非 JSON 只记录长度。下载不包含活动尾行或超长行，不支持任意文件路径。
+
+渠道兼容字段的部分更新中，省略字段表示保留，显式 false/0/空数组会参与更新；null 按具体字段定义清空或拒绝。Web 表单保留未编辑字段。支持版本检查的管理保存使用响应 revision/ETag 与 `If-Match`，冲突时重新读取；不把未成功持久化的状态显示为保存成功。
+
+完整替换上游 Key 会清除旧 Key 故障状态；部分替换保留仍有效 Key 的健康记录。手动暂停不会被换 Key 自动撤销；因没有 Key 自动暂停的渠道可在补充可用 Key 后恢复。
+
+## 价格维度与账单版本
+
+全局管理员通过 `GET/PUT /api/budgets` 管理稳定 principal 的预算，通过 `GET /api/budgets/:principal` 查看周期状态，`GET /api/budgets/:principal/requests/:request` 查询该调用方的逐尝试账本。调用方通过代理认证的 `GET /v1/budget` 仅查看自身状态，不会看到其他身份。金额 API 使用 USD 十进制字符串，`costBasis=list_price_usd` 明确表示模型标价口径，不等于订阅渠道的实际购入成本。
+
+预算可按时区设置日、周、月、终身或滚动窗口，并设置每请求上限。每次实际发送前先预留，重试与竞速各自记账，最后按供应商可验证计量结算。输入预留使用最终序列化字节数加余量，输出需要显式上限或模型能力上限；未知价格、媒体或尚不能定价的托管工具费用会在调用上游前拒绝。完整的供应商零计量可释放预留，断流或不完整计量保守保留预估，不能按零费用处理。
+
+预算账本独立持久化，固定请求开始时的周期与价格版本；过期进程租约按保守规则回收。预留采用保守上界，但不承诺供应商费用的绝对封顶；上游返回超预留用量时如实记录，并阻止后续超预算调用。修改配置不会追溯改写旧账单。
+
+模型价格支持输入长度阶梯、缓存写入 5 分钟/1 小时价、独立推理输出价，以及按 quality/size 匹配的图片单价。token 价格使用每百万 token，图片价格使用每张；显式零价有效，负数和非有限数拒绝。规则最多 128 个阶梯、64 条图片价格，每次计量最多 256 个项目，不执行用户表达式。
+
+请求开始时冻结价格快照，`pricingVersionId` 由内容生成；请求进行中修改配置不会改变其结算，旧历史金额不会按新价格重算。推理 token 按供应商口径区分输出子集与额外产出，缺少推理计量、TTL 或匹配价格时只返回已知下界并标记价格维度不完整，不能把它当完整账单。旧 CNY 价格换算沿用固定系数，并非实时汇率。

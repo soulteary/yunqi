@@ -280,6 +280,8 @@ Priority: `--logdir` > `LOG_DIR` > default `logs`. `--config` does not implicitl
 | `info` | 2 | 信息日志（默认） | 常规操作、状态变化 |
 | `debug` | 3 | 调试日志（最低优先级） | 详细调试信息、敏感数据 |
 
+**正文约束**：`ENV=development`、debug 等级或 `ENABLE_*_LOGS=true` 都不会单独启用正文。请先通过 `GET /api/logging/body` 核对 `effective`；正文策略 API 与变更审计见 [API](api.md)。
+
 **等级控制规则**：设置 `LOG_LEVEL=info` 时，会输出 `error`、`warn`、`info` 级别的日志，但不输出 `debug` 级别。
 
 #### 日志控制机制
@@ -309,20 +311,20 @@ if envCfg.EnableRequestLogs {
 ##### 3. 环境门控（开发专用）
 ```go
 // 代码示例
-if envCfg.EnableRequestLogs && envCfg.IsDevelopment() {
+if envCfg.ShouldLogRequestBodies() {
     log.Printf("📄 原始请求体:\n%s", formattedBody)
 }
 ```
 - **适用场景**：敏感/详细信息（请求体、请求头等）
-- **控制变量**：`ENV=development`
+- **控制条件**：`ENV=development` 与对应日志开关；正文还须已审计的 requestBodies/responseBodies 策略。
 
 #### 日志输出对照表
 
 | 日志内容 | 控制条件 | 等效等级 | 生产环境 | 开发环境 |
 |---------|---------|---------|---------|---------|
-| `📄 原始请求体` | `EnableRequestLogs && IsDevelopment()` | debug | ❌ 不输出 | ✅ 输出 |
+| `📄 原始请求体` | `ShouldLogRequestBodies()`（含正文审计策略） | debug | ❌ 不输出 | 显式启用后输出 |
 | `📋 实际请求头` | `EnableRequestLogs && IsDevelopment()` | debug | ❌ 不输出 | ✅ 输出 |
-| `📦 响应体` | `EnableResponseLogs && IsDevelopment()` | debug | ❌ 不输出 | ✅ 输出 |
+| `📦 响应体` | `ShouldLogResponseBodies()`（含正文审计策略） | debug | ❌ 不输出 | 显式启用后输出 |
 | `📥 收到请求` | `EnableRequestLogs` | info | ⚙️ 可配置 | ✅ 输出 |
 | `⏱️ 响应完成` | `EnableResponseLogs` | info | ⚙️ 可配置 | ✅ 输出 |
 | `🎯 使用上游` | `ShouldLog("info")` | info | ⚙️ 可配置 | ✅ 输出 |
@@ -339,7 +341,7 @@ LOG_LEVEL=debug
 ENABLE_REQUEST_LOGS=true
 ENABLE_RESPONSE_LOGS=true
 ```
-- ✅ 输出所有日志，包括完整请求体、请求头、响应体
+- ✅ 开启详细元数据日志；正文仍须通过审计策略独立启用，并受脱敏和字节上限约束
 - ✅ 适合本地开发调试
 - ⚠️ 可能包含敏感信息，不要在生产环境使用
 
@@ -620,7 +622,7 @@ ENABLE_RESPONSE_LOGS=true
 ENABLE_WEB_UI=true
 ```
 - ⚠️ 适合：故障排查时临时启用
-- ⚠️ 注意：会输出完整响应内容，增加日志量
+- ⚠️ 注意：显式启用正文策略后输出受限、脱敏的响应内容，增加日志量
 - 🔄 建议：问题解决后立即恢复标准配置
 
 #### 4.4 开发环境配置
@@ -724,7 +726,7 @@ ENABLE_RESPONSE_LOGS=true
 #### 故障排查时的安全做法
 ```bash
 # ✅ 推荐：临时开启详细日志，排查完成后恢复
-ENABLE_RESPONSE_LOGS=true  # 临时启用
+ENABLE_RESPONSE_LOGS=true  # 仍须通过正文策略 API 显式启用 responseBodies
 
 # 🔄 排查完成后立即恢复
 ENABLE_RESPONSE_LOGS=false
@@ -824,7 +826,7 @@ curl -H "x-api-key: ${ADMIN_ACCESS_KEY:-$PROXY_ACCESS_KEY}" http://localhost:300
 #### 看不到请求体/响应体
 **症状**：日志中没有详细的请求/响应内容
 
-**原因**：详细内容只在开发环境 (`ENV=development`) 输出
+**原因**：正文默认关闭；需要 development、对应日志开关，以及全局管理员通过 `PUT /api/logging/body` 显式启用的已审计正文策略。
 
 **解决方案**：
 ```env
@@ -871,3 +873,31 @@ echo $ENV  # 必须是 development
 `CIRCUIT_BREAKER_COOLDOWN` is not a supported environment variable. Key-level runtime circuit backoff starts at 30 seconds and increases after failed probes, up to 10 minutes. Overload handling, model-level circuits, 429 cooldowns, and authentication/balance-related Key disabling have independent rules. Raising the failure-rate threshold does not turn off these protections.
 
 For temporary capacity failures on a single channel, inspect the failure class, model and next retry time in the channel logs, then choose the gentle tuning preset or adjust the consecutive-failure threshold as appropriate. There is no global switch that permanently disables every circuit and Key-disabling rule. `REQUEST_TIMEOUT` controls non-streaming upstream request duration; it is not a circuit switch.
+
+## Optional governance and observability policies
+
+These variables are read at startup. Deployment owners arrange when changes take effect; saving configuration JSON does not reload the process environment.
+
+| Variable | Default and purpose |
+| --- | --- |
+| `PROXY_MAX_CONCURRENCY` | 0, unlimited; per authenticated principal across complete HTTP/SSE/WS turns |
+| `PROXY_PRINCIPAL_IDS` | Optional legacy entry-key to stable-principal mapping; managed entry keys already have a stable PrincipalID |
+| `IDENTITY_PROXY_SECRET` | Unset; trusted identity proxy secret, at least 32 bytes, also requiring trusted CIDRs/issuer/group mappings/allowedOrigins |
+| `YUNQI_STRICT_SESSION_AFFINITY` | false; atomically bind explicit sessions by principal, protocol, and main/subagent role to a channel UID |
+| `YUNQI_OUTBOUND_ALLOWED_HOSTS` | Empty preserves host compatibility; comma-separated host/wildcard allowlist |
+| `YUNQI_OUTBOUND_ALLOWED_PORTS` | Empty adds no port restriction; comma-separated port allowlist |
+| `YUNQI_OUTBOUND_BLOCK_PRIVATE` | false; enable to block private/loopback destinations |
+| `YUNQI_OUTBOUND_PRIVATE_CIDRS` | Empty; explicit CIDR exceptions while private blocking is enabled |
+| `YUNQI_OTLP_ENABLED` | false; opt in to OTLP/HTTP protobuf traces |
+| `YUNQI_OTLP_ENDPOINT` | When enabled, defaults to `http://127.0.0.1:4318/v1/traces`; a full traces URL |
+| `YUNQI_OTLP_SAMPLE_RATIO` | 0.1, range 0–1; 0 exports no spans |
+| `YUNQI_OTLP_PROPAGATE_UPSTREAM` | true when OTLP is enabled; propagate the gateway traceparent upstream |
+| `OTEL_SERVICE_NAME` | yunqi; exported service name |
+
+Outbound restrictions apply to actual dials, DNS answers, redirects and proxy connections. Cloud metadata destinations are always blocked. Private blocking is off by default so existing local/private upstreams remain compatible. OTLP follows the same policy; a local collector needs an exception when private blocking is enabled.
+
+Strict sessions require an explicit stable identity, such as Session_id, Conversation_id, X-Claude-Code-Session-Id or an existing explicit body identity; anonymous prompt fingerprints are excluded. Missing identity returns 400; capacity exhaustion returns 503. Each process retains at most 4096 bindings, expiring after 30 idle minutes while active leases prevent expiry. Failure, disabling or deleting a channel never migrates a binding. Restart clears state; multi-node deployments need sticky ingress rather than treating this as a distributed binding. Ordinary affinity remains the default.
+
+OTLP also accepts OTEL_EXPORTER_OTLP_TRACES_ENDPOINT or OTEL_EXPORTER_OTLP_ENDPOINT plus /v1/traces; YUNQI_OTLP_ENDPOINT takes precedence. Standard OTEL_EXPORTER_OTLP_TRACES_HEADERS/OTEL_EXPORTER_OTLP_HEADERS can authenticate the collector. The explicit client uses system TLS trust and gateway outbound policy rather than SDK-created certificate clients. Export has no redirects/retries, a 2-second timeout, queue 512, batch 64 and shutdown limit 5 seconds. Attributes are fixed protocol/status/phases and bounded safe IDs, excluding prompts, models, URLs, bodies, credentials, baggage and inbound tracestate. Export failure does not block requests; Prometheus exposes health.
+
+Body consent adds no environment switch. ENV and ENABLE_REQUEST_LOGS/ENABLE_RESPONSE_LOGS remain necessary gates, and admins must separately opt body directions in through /api/logging/body. Bodies are off by default. That API reports configured/effective state, byte limits, file retention and actor audit; log level alone does not enable bodies.
