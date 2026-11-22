@@ -136,6 +136,7 @@ func getAllChannelsFlat(cfg config.Config) []struct {
 // sanitizeForExport 深拷贝渠道并根据 includeKeys 决定是否清除 APIKeys。
 func sanitizeForExport(ch config.UpstreamConfig, includeKeys bool) config.UpstreamConfig {
 	out := ch
+	out.ModelImport = config.ModelImportPolicyOnly(ch.ModelImport)
 	if !includeKeys {
 		out.APIKeys = nil
 		out.APIKeyConfigs = nil
@@ -337,6 +338,10 @@ func ImportChannels(cfgManager *config.ConfigManager) fiber.Handler {
 		}
 
 		for _, entry := range req.Pack.Channels {
+			if err := config.ValidateNewChannelModelImport(entry.Channel.ModelImport); err != nil {
+				httpbridge.JSON(c, 400, fiber.Map{"error": err.Error()})
+				return nil
+			}
 			if !isValidChannelType(entry.ChannelType) {
 				httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{
 					"error":   "Invalid channelType",

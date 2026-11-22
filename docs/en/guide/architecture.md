@@ -275,3 +275,5 @@ DTO 位于 `services/types/`，原 `api-types.ts` 和 `console-types.ts` 作为�
 The backend uses Fiber v3.7.0 and requires Go 1.26 or later. Gin and its compression middleware dependencies have been removed; routes, authentication middleware and handlers use native Fiber types.
 
 `internal/httpbridge/` connects Fiber routing to the existing `net/http` transport. The server and TLS modules retain HTTP/HTTPS on the same port and graceful shutdown. Request bodies remain streaming, and client cancellation, HTTP/2, SSE flushing and WebSocket upgrades use the original request and response writer. The bridge also preserves JSON validation, concurrent request values, independent racing contexts and static route priority. Configuration and database formats remain unchanged.
+
+See [Paired routing evaluation](routing-evaluation.md) before promoting routing policy changes.

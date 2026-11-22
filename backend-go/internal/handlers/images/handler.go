@@ -392,7 +392,10 @@ func buildOperationRequest(
 
 	requestBody := bodyBytes
 	requestContentType := contentType
-	redirectedModel := model
+	redirectedModel, importErr := upstream.CheckImportedModel(model)
+	if importErr != nil {
+		return nil, importErr
+	}
 
 	if isMultipartContentType(contentType) {
 		originalModel, hasModelField := extractMultipartField(bodyBytes, contentType, "model")

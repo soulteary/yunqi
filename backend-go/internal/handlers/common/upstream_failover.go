@@ -594,6 +594,21 @@ func TryUpstreamWithAllKeys(
 	// 回显头）以"发生了跨模型改写"为触发条件，改写后 model 已等于
 	// executionModel，直接比较会恒假。
 	originalModel := model
+	importedAlias := false
+	if upstream.ModelImportEnabled() {
+		item, ok := upstream.ImportedModel(model)
+		if ok && item.UpstreamID != model {
+			importedAlias = true
+			tryOpts.executionModel = item.UpstreamID
+			tryOpts.endpointPolicy = nil // rebuild binding filters for the actual ID
+			if kind == scheduler.ChannelKindImages || kind == scheduler.ChannelKindGemini {
+				// These builders carry model outside the JSON body (multipart /
+				// URI). They resolve the reviewed ID directly below.
+				model = item.UpstreamID
+				tryOpts.executionModel = ""
+			}
+		}
+	}
 	if tryOpts.executionModel != "" && tryOpts.executionModel != model {
 		rewritten, rewriteErr := sjson.SetBytes(requestBody, "model", tryOpts.executionModel)
 		if rewriteErr != nil {
@@ -835,7 +850,7 @@ func TryUpstreamWithAllKeys(
 			attemptModel := redirectedModel
 			var appliedMappedModel string
 			var resolvedAttemptTarget *autopilot.ResolvedRouteTarget
-			if endpointPolicy != nil {
+			if endpointPolicy != nil && !importedAlias {
 				keyHash := autopilot.KeyHashFromAPIKey(apiKey)
 				euid := autopilot.GenerateEndpointUID(upstream.ChannelUID, currentBaseURL, keyHash)
 
@@ -1040,6 +1055,12 @@ func TryUpstreamWithAllKeys(
 			// 内容启发式兼容项（无上游报错信号）：首次遇到该组合时异步探测一次并记忆，
 			// 不阻塞当前请求，结论对后续请求生效。替代原先要用户手工点诊断按钮的做法。
 			maybeTriggerCompatProbe(upstream, apiKey, currentBaseURL, attemptModel)
+
+			if upstream.ModelImportEnabled() {
+				if _, ok := upstream.ImportedModel(attemptModel); !ok {
+					return false, "", 0, nil, nil, errors.New("resolved model is outside approved import catalog")
+				}
+			}
 
 			// 渠道兼容性自学习（主动侧）：命中记忆时把学习结论注入本次请求所用的上游副本
 			// （LearnedCompatTraits，仅当次请求生效，不落盘）。实际改写由各 provider 在
@@ -1322,6 +1343,7 @@ func TryUpstreamWithAllKeys(
 
 			// TCP 建连开始即计数：将活跃度统计提前到发起上游请求之前；同时关联 proxyKeyMask 用于成本报表持久化
 			costContext := buildRequestCostContext(cfgManager, upstream, selection, actualAttemptModel, consumptionPolicy)
+			costContext.PrincipalID = metrics.PrincipalAttributionID(middleware.GetPrincipalID(c))
 			requestID := metricsManager.RecordRequestConnectedWithCostContext(currentBaseURL, apiKey, metricsServiceType, upstream.ChannelUID, actualAttemptModel, model, proxyKeyMask, costContext)
 			// 用户请求关联 ID 随 pending 记录落 SQLite：聚合侧 COUNT(DISTINCT correlation_id)
 			// 得出真实用户请求数，与上游尝试数对照可见竞速/failover 放大倍数。

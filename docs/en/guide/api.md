@@ -134,3 +134,11 @@ Completed describes HTTP completion; accepted only acknowledges a queued task. N
 History retains at most 1000 entries and 2 MiB in the config document and follows consistent backups. Replicas retain node-local history. Ordinary config snapshots/import candidates cannot overwrite authoritative audit history. Pending external file edits block management audit/writes until normal reload, preventing audit-only writes from swallowing external ACL changes. POST route/request previews also record audit metadata while preserving business-config, scheduling, budget and trace read-only behavior; metadata does not change channel revisions or price-review IDs.
 
 A failed outcome does not imply that every external side effect was undone; use intent, committed events and domain state to establish the actual result.
+
+## Stable caller cost attribution
+
+Global administrators can use `GET /api/reports/cost?groupBy=principal&type=chat&duration=7d`, then keep the returned opaque `principalId` while switching to model, proxy-key (`user`), or upstream-key (`key`) breakdowns. The API default remains `user`; the cost page defaults to principal grouping.
+
+The attribution column contains a domain-separated SHA-256 fingerprint of the authenticated server-side identity, never a client-supplied identity header or raw credential/subject/email. `p_` identities represent configured stable principals and combine rotated keys; `k_` identities remain credential-bound. Short fingerprints are display labels; full opaque IDs are used for filters and CSV. Legacy rows remain `unknown`, even when their old display mask matches a current key. SQLite v12 adds the column and index without inventing historical ownership or changing captured costs.
+
+The cost page retains principal scope during model/key drilldown and CSV export. Request history accepts the same `principalId`, and cursors cannot change scope between pages. History uses the report time range and existing metrics retention, with no request bodies or credentials. Stale asynchronous responses cannot overwrite a newly selected scope. Reports aggregate persisted metrics under the existing pricing-completeness rules; they do not replace the independent budget ledger or promise a single database snapshot across live queries. Proxy credentials do not grant management-report access.

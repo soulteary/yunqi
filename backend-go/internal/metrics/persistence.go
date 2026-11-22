@@ -78,6 +78,8 @@ type PersistentCircuitState struct {
 
 // PersistentRecord 持久化记录结构
 type PersistentRecord struct {
+	PrincipalID string // opaque authenticated caller identity; never inferred from a key mask
+
 	PricingVersionID    string
 	UsageProvenance     *types.UsageProvenance
 	ChannelUID          string       // 渠道稳定标识（新增列，旧行为空）

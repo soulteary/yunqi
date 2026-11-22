@@ -881,6 +881,14 @@ func ResolveAgentModelProfile(requestModel string, global map[string]AgentModelP
 
 // ResolveUpstreamCapability 解析渠道中实际模型的能力。
 func ResolveUpstreamCapability(requestModel string, upstream *UpstreamConfig, global map[string]UpstreamModelCapability) ResolvedUpstreamCapability {
+	if upstream.ModelImportEnabled() {
+		if item, ok := upstream.ImportedModel(requestModel); ok {
+			// A renamed catalog ID does not establish price/capability
+			// equivalence with a similarly named model from another supplier.
+			return resolveUpstreamCapabilityForModels(requestModel, item.UpstreamID, upstream, global, false)
+		}
+	}
+
 	// allowRequestModelFallback=true：未提供动态映射结果时，保留历史行为——渠道/全局能力表
 	// 按 requestModel 的通配符也可命中，兼容"能力表只登记请求侧别名"的既有配置。
 	return resolveUpstreamCapabilityForModels(requestModel, requestModel, upstream, global, true)

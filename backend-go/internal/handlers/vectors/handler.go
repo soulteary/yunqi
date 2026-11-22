@@ -241,7 +241,10 @@ func buildProviderRequest(
 	}
 	upstream.ServiceType = serviceType
 
-	redirectedModel := model
+	redirectedModel, importErr := upstream.CheckImportedModel(model)
+	if importErr != nil {
+		return nil, importErr
+	}
 	requestBody, err := buildEmbeddingsRequestBody(bodyBytes, model, redirectedModel)
 	if err != nil {
 		common.RequestLogf(c, "[Vectors-BuildRequest] base_url=%q key_mask=%s model=%q stage=build_json reason=invalid_json error=%q",

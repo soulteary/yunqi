@@ -570,12 +570,20 @@ func (r *AutoDiscoveryRunner) runDiscovery(ctx context.Context, task *DiscoveryT
 	}
 	if ctx.Err() == nil && cfgManager != nil {
 		// 探测完成后尝试自动写入 SupportedModels（安全守则：仅一致结果且用户未手动配置时写入）
-		r.maybeAutoWriteChannelConfig(task.ChannelUID, channel, endpoints, cfgManager)
-		r.maybeLearnClientFingerprint(task.ChannelUID, channel, endpoints, cfgManager)
-		if err := r.maybeEnableDiscoveredProtocolRoutes(channel, endpoints, cfgManager); err != nil {
+		if err := r.maybeAutoWriteChannelConfig(task.ChannelUID, channel, endpoints, cfgManager); err != nil {
 			status = DiscoveryStatusFailed
-			taskErr = fmt.Sprintf("自动启用已发现协议失败: %v", err)
-			log.Printf("[AutoDiscovery-RouteEnable] 渠道 %s 自动启用协议失败: %v", task.ChannelUID, err)
+			taskErr = "model import review could not be staged; refresh channel configuration and rediscover"
+			log.Printf("[Model-Import] channel=%s review staging failed: %v", task.ChannelUID, err)
+		}
+		if channel.ModelImport == nil {
+			// Governed discovery stages evidence only. Auxiliary config writes
+			// would invalidate this review or silently activate another route.
+			r.maybeLearnClientFingerprint(task.ChannelUID, channel, endpoints, cfgManager)
+			if err := r.maybeEnableDiscoveredProtocolRoutes(channel, endpoints, cfgManager); err != nil {
+				status = DiscoveryStatusFailed
+				taskErr = fmt.Sprintf("自动启用已发现协议失败: %v", err)
+				log.Printf("[AutoDiscovery-RouteEnable] 渠道 %s 自动启用协议失败: %v", task.ChannelUID, err)
+			}
 		}
 	}
 
@@ -1634,16 +1642,21 @@ func (r *AutoDiscoveryRunner) flushStores() error {
 // 安全守则：
 //  1. 仅当所有成功探测的 endpoint 返回完全相同的模型列表（集合相等，顺序无关）时才写入
 //  2. 不覆盖用户已有的手动配置（SupportedModels 非空时不写入）
-func (r *AutoDiscoveryRunner) maybeAutoWriteChannelConfig(channelUID string, channel *config.UpstreamConfig, endpoints []EndpointDiscoveryResult, cfgManager *config.ConfigManager) {
+func (r *AutoDiscoveryRunner) maybeAutoWriteChannelConfig(channelUID string, channel *config.UpstreamConfig, endpoints []EndpointDiscoveryResult, cfgManager *config.ConfigManager) error {
 	// cfgManager 为 nil 时直接返回（runDiscovery 入口已有 guard，此处防御直接调用）
 	if cfgManager == nil {
-		return
+		return nil
+	}
+	if channel != nil && channel.ModelImport != nil {
+		// A saved draft is already an explicit review workflow. Discovery
+		// must not mutate its live whitelist before that review is approved.
+		return stageDiscoveredModels(channelUID, channel, endpoints, cfgManager)
 	}
 	// 自动托管账号的模型可用性属于具体 binding，已写入 KeyEndpointProfile。
 	// 不再回写渠道级 SupportedModels，避免多 Key 权限不一致时丢失可用候选。
 	if channel != nil && channel.AutoManaged {
 		log.Printf("[AutoDiscovery-ConfigSkip] 渠道 %s: 自动托管模型由 endpoint profile 持久化，不写渠道级 SupportedModels", channelUID)
-		return
+		return nil
 	}
 
 	// 收集所有成功探测的 endpoint 的模型列表
@@ -1657,7 +1670,7 @@ func (r *AutoDiscoveryRunner) maybeAutoWriteChannelConfig(channelUID string, cha
 	// 无成功探测结果，不写
 	if len(okEndpoints) == 0 {
 		log.Printf("[AutoDiscovery-ConfigSkip] 渠道 %s: 无可达端点或模型列表为空，跳过自动写入", channelUID)
-		return
+		return nil
 	}
 
 	// 检查一致性：所有成功探测的 endpoint 返回的模型列表集合必须完全相同
@@ -1665,14 +1678,14 @@ func (r *AutoDiscoveryRunner) maybeAutoWriteChannelConfig(channelUID string, cha
 	if consistentModels == nil {
 		log.Printf("[AutoDiscovery-ConfigSkip] 渠道 %s: 端点模型列表不一致（%d 个可达端点），跳过自动写入",
 			channelUID, len(okEndpoints))
-		return
+		return nil
 	}
 
 	// 检查用户已有配置：SupportedModels 非空时不覆盖
 	if len(channel.SupportedModels) > 0 {
 		log.Printf("[AutoDiscovery-ConfigSkip] 渠道 %s: 用户已配置 SupportedModels（%d 项），不覆盖",
 			channelUID, len(channel.SupportedModels))
-		return
+		return nil
 	}
 
 	// 通过 ConfigManager 更新 SupportedModels
@@ -1681,7 +1694,7 @@ func (r *AutoDiscoveryRunner) maybeAutoWriteChannelConfig(channelUID string, cha
 	index, kind := findChannelIndexAndKind(cfg, channelUID)
 	if index < 0 || kind == "" {
 		log.Printf("[AutoDiscovery-ConfigSkip] 渠道 %s: 在当前配置中未找到对应渠道，跳过写入", channelUID)
-		return
+		return nil
 	}
 
 	// 排序后写入，确保结果稳定可读
@@ -1694,7 +1707,7 @@ func (r *AutoDiscoveryRunner) maybeAutoWriteChannelConfig(channelUID string, cha
 	_, err := updateChannelByKind(cfgManager, kind, index, update)
 	if err != nil {
 		log.Printf("[AutoDiscovery-ConfigWrite] 渠道 %s: 写入 SupportedModels 失败: %v", channelUID, err)
-		return
+		return nil
 	}
 
 	log.Printf("[AutoDiscovery-ConfigWrite] 渠道 %s: 已自动写入 SupportedModels（%d 项模型）",
@@ -1713,6 +1726,7 @@ func (r *AutoDiscoveryRunner) maybeAutoWriteChannelConfig(channelUID string, cha
 		ev.EventUID = GenerateChangeEventUID(channelUID, ev.EventType, now)
 		r.hub.Publish(ev)
 	}
+	return nil
 }
 
 // maybeLearnClientFingerprint 学习客户端伪装标记：任一端点裸请求被上游客户端指纹校验

@@ -1,3 +1,4 @@
+import type { ModelImportPolicy, ModelImportReview, ModelImportView } from '../types/model-import'
 import type { RequestPreviewInput, RequestPreviewResult } from '../types/request-preview'
 import type { ApiClient } from './client'
 import type {
@@ -9,8 +10,61 @@ import type {
 
 export function createChannelManagementApi(client: ApiClient) {
   return {
+    async removeModelImport(
+      uid: string,
+      protocol: string,
+      revision: string,
+      allowUnrestricted: boolean
+    ): Promise<ModelImportView> {
+      return client.request(
+        `/channels/${encodeURIComponent(uid)}/model-import?protocol=${encodeURIComponent(protocol)}`,
+        { method: 'DELETE', headers: { 'If-Match': revision }, body: JSON.stringify({ allowUnrestricted }) }
+      )
+    },
+    async getModelImport(uid: string, protocol: string): Promise<ModelImportView> {
+      return client.request(
+        `/channels/${encodeURIComponent(uid)}/model-import?protocol=${encodeURIComponent(protocol)}`
+      )
+    },
+    async setModelImportPolicy(
+      uid: string,
+      protocol: string,
+      policy: ModelImportPolicy,
+      revision: string
+    ): Promise<ModelImportView> {
+      return client.request(
+        `/channels/${encodeURIComponent(uid)}/model-import/policy?protocol=${encodeURIComponent(protocol)}`,
+        { method: 'PUT', headers: { 'If-Match': revision }, body: JSON.stringify(policy) }
+      )
+    },
+    async previewModelImport(
+      uid: string,
+      protocol: string,
+      ids: string[],
+      revision: string
+    ): Promise<ModelImportReview> {
+      return client.request(
+        `/channels/${encodeURIComponent(uid)}/model-import/preview?protocol=${encodeURIComponent(protocol)}`,
+        { method: 'POST', headers: { 'If-Match': revision }, body: JSON.stringify({ models: ids.map(id => ({ id })) }) }
+      )
+    },
+    async approveModelImport(
+      uid: string,
+      protocol: string,
+      reviewId: string,
+      allowEmpty: boolean,
+      allowRemovals: boolean
+    ): Promise<ModelImportView> {
+      return client.request(
+        `/channels/${encodeURIComponent(uid)}/model-import/approve?protocol=${encodeURIComponent(protocol)}`,
+        { method: 'POST', body: JSON.stringify({ reviewId, allowEmpty, allowRemovals }) }
+      )
+    },
     async previewChannelRequest(uid: string, input: RequestPreviewInput): Promise<RequestPreviewResult> {
-      return client.request(`/channels/${encodeURIComponent(uid)}/request-preview`, { method: 'POST', body: JSON.stringify(input) })
+      return client.request(`/channels/${encodeURIComponent(uid)}/request-preview`, {
+        method: 'POST',
+        body: JSON.stringify(input)
+      })
     },
     /** 获取统一渠道视图（渠道→key→endpoint→模型 + 共享能力） */
     async getChannelsV2(): Promise<{
@@ -46,12 +100,17 @@ export function createChannelManagementApi(client: ApiClient) {
     },
 
     /** 更新渠道（按 ChannelUID 寻址） */
-    async updateChannelV2(uid: string, updates: Record<string, unknown>, expectedRevision?: string): Promise<{ revision: string; persisted: boolean; changed: boolean; changedFields?: string[] }> {
-      const result: { revision: string; persisted: boolean; changed: boolean; changedFields?: string[] } = await client.request(`/channels/${uid}`, {
-        method: 'PUT',
-        ...(expectedRevision ? { headers: { 'If-Match': expectedRevision } } : {}),
-        body: JSON.stringify(updates)
-      })
+    async updateChannelV2(
+      uid: string,
+      updates: Record<string, unknown>,
+      expectedRevision?: string
+    ): Promise<{ revision: string; persisted: boolean; changed: boolean; changedFields?: string[] }> {
+      const result: { revision: string; persisted: boolean; changed: boolean; changedFields?: string[] } =
+        await client.request(`/channels/${uid}`, {
+          method: 'PUT',
+          ...(expectedRevision ? { headers: { 'If-Match': expectedRevision } } : {}),
+          body: JSON.stringify(updates)
+        })
       if (!result?.persisted || !result.revision) throw new Error('服务端未确认配置已持久化')
       return result
     },

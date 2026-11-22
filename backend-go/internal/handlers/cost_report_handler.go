@@ -17,8 +17,16 @@ type CostReportDeps struct {
 	MetricsManagers map[string]*metrics.MetricsManager
 }
 
+// Optional scoped queries keep non-SQL persistence implementations compatible.
+type principalCostStore interface {
+	QueryCostReportInRange(string, time.Time, time.Time, string, string) ([]metrics.CostReportRow, error)
+	QueryModelCostBreakdownInRange(string, time.Time, time.Time, string, string, string) ([]metrics.ModelCostBreakdownRow, error)
+}
+
 // costReportRow 成本报表响应行
 type costReportRow struct {
+	GroupLabel string `json:"groupLabel,omitempty"`
+
 	GroupKey                  string   `json:"groupKey"`
 	TotalRequests             int64    `json:"totalRequests"`
 	SuccessCount              int64    `json:"successCount"`
@@ -46,16 +54,21 @@ type costReportRow struct {
 }
 
 // GetCostReport 返回按维度聚合的成本报表。
-// GET /api/reports/cost?groupBy=user|model|key&duration=7d&type=messages
+// GET /api/reports/cost?groupBy=principal|user|model|key&duration=7d&type=messages
 //
-// groupBy 默认 "user"（按 proxyKeyMask）；duration 默认 7d；type 默认 messages。
+// groupBy 默认 "user"（保留旧代理 Key 掩码分组）；principal 使用持久化不透明主体 ID。duration 默认 7d；type 默认 messages。
 // ListCostUSD 为官方定价，EffectiveCostUSD 为应用 EffectiveCostMultiplier 后的实际成本。
 // 当 multiplier 未配置时两者相同。
 func GetCostReport(deps *CostReportDeps) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		groupBy := httpbridge.Query(c, "groupBy", "user")
-		if groupBy != "user" && groupBy != "model" && groupBy != "key" {
+		if groupBy != "user" && groupBy != "model" && groupBy != "key" && groupBy != "principal" {
 			groupBy = "user"
+		}
+		principalID := httpbridge.Query(c, "principalId", "")
+		if principalID != "" && !metrics.ValidPrincipalAttributionID(principalID) {
+			httpbridge.JSON(c, 400, fiber.Map{"error": "invalid_principal_filter"})
+			return nil
 		}
 		apiType := httpbridge.Query(c, "type", "messages")
 		mgr, ok := deps.MetricsManagers[apiType]
@@ -69,8 +82,20 @@ func GetCostReport(deps *CostReportDeps) fiber.Handler {
 			return nil
 		}
 		duration := parseCostReportDuration(httpbridge.Query(c, "duration", "7d"))
-		since := time.Now().Add(-duration)
-		rows, err := store.QueryCostReport(apiType, since, groupBy)
+		until := time.Now()
+		since := until.Add(-duration)
+		scoped, hasScoped := store.(principalCostStore)
+		if (principalID != "" || groupBy == "principal") && !hasScoped {
+			httpbridge.JSON(c, 400, fiber.Map{"error": "principal_attribution_unavailable"})
+			return nil
+		}
+		var rows []metrics.CostReportRow
+		var err error
+		if hasScoped {
+			rows, err = scoped.QueryCostReportInRange(apiType, since, until, groupBy, principalID)
+		} else {
+			rows, err = store.QueryCostReport(apiType, since, groupBy)
+		}
 		if err != nil {
 			log.Printf("[CostReport-Query] 查询失败: %v", err)
 			httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": "查询成本报表失败"})
@@ -95,10 +120,19 @@ func GetCostReport(deps *CostReportDeps) fiber.Handler {
 				CompressedTokensAfter:     row.CompressedTokensAfter,
 				CompressionFallbackCount:  row.CompressionFallbackCount,
 			}
+			if groupBy == "principal" {
+				cr.GroupLabel = metrics.PrincipalAttributionLabel(row.GroupKey)
+			}
 			if row.OriginalTokensSaved > 0 {
 				cr.CompressionSavingsPct = float64(row.OriginalTokensSaved-row.CompressedTokensAfter) / float64(row.OriginalTokensSaved) * 100.0
 			}
-			modelBreakdowns, breakdownErr := store.QueryModelCostBreakdown(apiType, since, groupBy, row.GroupKey)
+			var modelBreakdowns []metrics.ModelCostBreakdownRow
+			var breakdownErr error
+			if hasScoped {
+				modelBreakdowns, breakdownErr = scoped.QueryModelCostBreakdownInRange(apiType, since, until, groupBy, row.GroupKey, principalID)
+			} else {
+				modelBreakdowns, breakdownErr = store.QueryModelCostBreakdown(apiType, since, groupBy, row.GroupKey)
+			}
 			if breakdownErr != nil {
 				log.Printf("[CostReport-Pricing] 查询模型明细失败 group=%s: %v", row.GroupKey, breakdownErr)
 				cr.PricingComplete = false
@@ -112,7 +146,9 @@ func GetCostReport(deps *CostReportDeps) fiber.Handler {
 					}
 					if !complete {
 						cr.PricingComplete = false
-						unpriced[breakdown.Model] = struct{}{}
+						if breakdown.Model != "" {
+							unpriced[breakdown.Model] = struct{}{}
+						}
 					}
 				}
 				// 旧记录没有固化 list_cost_usd；仅从当时的 token/model 明细补官方标价，
@@ -125,8 +161,12 @@ func GetCostReport(deps *CostReportDeps) fiber.Handler {
 			}
 			result = append(result, cr)
 		}
-		httpbridge.JSON(c, http.StatusOK, fiber.Map{"groupBy": groupBy, "apiType": apiType,
-			"duration": httpbridge.Query(c, "duration", "7d"), "rows": result})
+		response := fiber.Map{"groupBy": groupBy, "apiType": apiType, "duration": httpbridge.Query(c, "duration", "7d"), "principalId": principalID, "principalLabel": metrics.PrincipalAttributionLabel(principalID), "rows": result}
+		if hasScoped {
+			response["since"] = since.Unix()
+			response["until"] = until.Unix()
+		}
+		httpbridge.JSON(c, http.StatusOK, response)
 		return nil
 	}
 }

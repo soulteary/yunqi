@@ -21,6 +21,7 @@ import (
 	"github.com/soulteary/yunqi/internal/providers"
 	"github.com/soulteary/yunqi/internal/redaction"
 	"github.com/soulteary/yunqi/internal/session"
+	"github.com/tidwall/sjson"
 	"time"
 )
 
@@ -119,6 +120,19 @@ func Build(up config.UpstreamConfig, input Input) (Result, error) {
 	}
 	if up.ServiceType == "copilot" {
 		return result, errors.New("offline preview cannot resolve Copilot OAuth endpoints; no credentials were refreshed or sent")
+	}
+	if up.ModelImportEnabled() {
+		actual, importErr := up.CheckImportedModel(input.Model)
+		if importErr != nil {
+			return result, importErr
+		}
+		input.Model = actual
+		if input.Protocol != "gemini" {
+			input.Body, err = sjson.SetBytes(input.Body, "model", actual)
+			if err != nil {
+				return result, err
+			}
+		}
 	}
 	runtime := config.RuntimeUpstreamForAutoManagedProvider(&up)
 	key := "preview-no-key"

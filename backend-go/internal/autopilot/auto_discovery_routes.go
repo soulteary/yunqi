@@ -227,6 +227,7 @@ func discoveredProtocolUpstream(source *config.UpstreamConfig, protocol, baseNam
 		now = *cloned.AutoManagedAt
 	}
 	seed := config.UpstreamConfig{
+		ModelImport:                 config.ModelImportPolicyOnly(cloned.ModelImport),
 		ServiceType:                 cloned.ServiceType,
 		BaseURL:                     cloned.BaseURL,
 		BaseURLs:                    cloned.BaseURLs,
