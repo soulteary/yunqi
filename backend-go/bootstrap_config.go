@@ -171,6 +171,12 @@ func initializeCredentialRedaction(env *config.EnvConfig) func() {
 	if secret := os.Getenv("IDENTITY_PROXY_SECRET"); secret != "" {
 		keys = append(keys, secret)
 	}
+	keys = append(keys, env.BudgetRedisURL)
+	if parsed, err := url.Parse(env.BudgetRedisURL); err == nil && parsed.User != nil {
+		if password, ok := parsed.User.Password(); ok {
+			keys = append(keys, password)
+		}
+	}
 	keys = append(keys, env.IdentityProxyRevocationRedisURL)
 	if parsed, err := url.Parse(env.IdentityProxyRevocationRedisURL); err == nil && parsed.User != nil {
 		if password, ok := parsed.User.Password(); ok {
