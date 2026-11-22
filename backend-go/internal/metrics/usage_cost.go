@@ -60,9 +60,23 @@ func CalculateUsageCostUSDWithPricingAndStatus(pricing *config.ModelPricing, usa
 		charge(remaining, effective.InputCacheMissPrice)
 	}
 	reasoning, mode, meterKnown := reasoningMeter(usage)
-	if !meterKnown && (mode != "" || effective.ReasoningOutputPrice != nil && output > 0) {
-		known = false
+	if mode == "subset" && reasoning > output {
+		meterKnown = false
 	}
+	if !meterKnown {
+		reasoning = 0
+		if effective.ReasoningOutputPrice != nil && output > 0 {
+			known = false
+			if (mode == "subset" || mode == "") && effective.OutputPrice != nil {
+				minimum := math.Min(*effective.OutputPrice, *effective.ReasoningOutputPrice)
+				charge(output, &minimum)
+			} else if mode == "additional" {
+				charge(output, effective.OutputPrice)
+			}
+			output = 0
+		}
+	}
+
 	if mode == "subset" {
 		if reasoning > output {
 			return cost * currency, false
@@ -219,12 +233,23 @@ func imagePrice(p *config.ModelPricing, quality, size string) (*float64, bool) {
 	return price, price != nil && !ambiguous
 }
 func reasoningMeter(u *types.Usage) (int64, string, bool) {
+	mode := ""
 	if u.Provenance == nil {
+		return 0, mode, false
+	}
+	switch strings.ToLower(u.Provenance.Protocol) {
+	case "gemini":
+		mode = "additional"
+	case "openai", "chat", "responses":
+		mode = "subset"
+	case "messages", "claude":
+		return 0, "", true
+	default:
 		return 0, "", false
 	}
 	var raw map[string]json.RawMessage
 	if json.Unmarshal(u.Provenance.RawUsage, &raw) != nil {
-		return 0, "", false
+		return 0, mode, false
 	}
 	read := func(data json.RawMessage) (int64, bool) {
 		var n int64
@@ -233,29 +258,23 @@ func reasoningMeter(u *types.Usage) (int64, string, bool) {
 		}
 		return n, true
 	}
-	switch strings.ToLower(u.Provenance.Protocol) {
-	case "gemini":
+	if mode == "additional" {
 		if value, ok := raw["thoughtsTokenCount"]; ok {
 			n, valid := read(value)
-			return n, "additional", valid
+			return n, mode, valid
 		}
-		return 0, "additional", true
-	case "openai", "chat", "responses":
-		for _, key := range []string{"output_tokens_details", "completion_tokens_details"} {
-			var details map[string]json.RawMessage
-			if json.Unmarshal(raw[key], &details) == nil {
-				if value, ok := details["reasoning_tokens"]; ok {
-					n, valid := read(value)
-					return n, "subset", valid
-				}
+		return 0, mode, false
+	}
+	for _, key := range []string{"output_tokens_details", "completion_tokens_details"} {
+		var details map[string]json.RawMessage
+		if json.Unmarshal(raw[key], &details) == nil {
+			if value, ok := details["reasoning_tokens"]; ok {
+				n, valid := read(value)
+				return n, mode, valid
 			}
 		}
-		return 0, "subset", true
-	case "messages", "claude":
-		return 0, "", true
-	default:
-		return 0, "", false
 	}
+	return 0, mode, false
 }
 
 func validUsageMeters(u *types.Usage) bool {

@@ -19,8 +19,8 @@ func TestTypedUsageCostReasoningDoesNotDoubleCountOpenAI(t *testing.T) {
 			t.Fatalf("%s cost=%v known=%v want=%v", tc.protocol, cost, known, tc.want)
 		}
 	}
-	if _, known := CalculateUsageCostUSDWithPricingAndStatus(pricing, &types.Usage{OutputTokens: 1}); known {
-		t.Fatal("unknown reasoning basis treated as complete")
+	if cost, known := CalculateUsageCostUSDWithPricingAndStatus(pricing, &types.Usage{OutputTokens: 1000000}); known || cost != 2 {
+		t.Fatalf("unknown reasoning basis must return a lower bound: cost=%v known=%v", cost, known)
 	}
 }
 func TestTypedUsageCostCacheTTLAndInputTier(t *testing.T) {
@@ -69,5 +69,32 @@ func TestTypedReservationBoundsEveryCacheTTLAndTier(t *testing.T) {
 	}
 	if _, known := CalculateUsageReservationUSDWithPricing(&config.ModelPricing{InputCacheHitPrice: floatPtr(0)}, &types.Usage{InputTokens: 1}); known {
 		t.Fatal("unknown cache miss price accepted as free")
+	}
+}
+
+func TestTypedReasoningMeterMissingIsNotExplicitZero(t *testing.T) {
+	for _, protocol := range []string{"chat", "responses", "gemini"} {
+		explicit := `{"output_tokens_details":{"reasoning_tokens":0}}`
+		if protocol == "gemini" {
+			explicit = `{"thoughtsTokenCount":0}`
+		}
+		for _, raw := range []string{`{}`, `{"thoughtsTokenCount":"0","output_tokens_details":{"reasoning_tokens":"0"}}`, `not-json`, explicit} {
+			pricing := &config.ModelPricing{OutputPrice: floatPtr(4), ReasoningOutputPrice: floatPtr(2)}
+			usage := &types.Usage{OutputTokens: 1000000, Provenance: &types.UsageProvenance{Protocol: protocol, RawUsage: json.RawMessage(raw)}}
+			cost, known := CalculateUsageCostUSDWithPricingAndStatus(pricing, usage)
+			wantKnown := raw == explicit
+			want := 4.0
+			if !wantKnown && protocol != "gemini" {
+				want = 2
+			}
+			if known != wantKnown || cost != want {
+				t.Fatalf("%s raw=%s cost=%v known=%v want=%v/%v", protocol, raw, cost, known, want, wantKnown)
+			}
+			pricing.ReasoningOutputPrice = nil
+			cost, known = CalculateUsageCostUSDWithPricingAndStatus(pricing, usage)
+			if !known || cost != 4 {
+				t.Fatalf("ordinary pricing compatibility changed: %s raw=%s cost=%v known=%v", protocol, raw, cost, known)
+			}
+		}
 	}
 }
