@@ -369,3 +369,138 @@ func TestRedisWebSocketPerTurnAdmissionControlRPMAndBudgetLifecycle(t *testing.T
 		t.Fatalf("WS controls/denied turns created budget entries %+v %v", records, err)
 	}
 }
+
+func TestRedisUsageDrainRetainsBudgetAndLeaseUntilFinalUsageOrLeaseLoss(t *testing.T) {
+	for _, loseLease := range []bool{false, true} {
+		name := "final-usage"
+		if loseLease {
+			name = "lease-loss"
+		}
+		t.Run(name, func(t *testing.T) {
+			redisURL, stopRedis := newIsolatedRedisEndpoint(t)
+			db := filepath.Join(t.TempDir(), "drain-budget.db")
+			var calls atomic.Int64
+			started := make(chan struct{})
+			prematureCancel := make(chan struct{})
+			final := make(chan struct{})
+			finish := sync.OnceFunc(func() { close(final) })
+			provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if calls.Add(1) > 1 {
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = io.WriteString(w, redisAdmissionReply)
+					return
+				}
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\ndata: {\"choices\":[{\"delta\":{\"content\":\" world\"}}]}\n\n")
+				w.(http.Flusher).Flush()
+				close(started)
+				select {
+				case <-r.Context().Done():
+					close(prematureCancel)
+					return
+				case <-final:
+				}
+				_, _ = io.WriteString(w, "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":3}}\n\ndata: [DONE]\n\n")
+			}))
+			defer provider.Close()
+			defer finish()
+			first := redisAdmissionNode(t, redisURL, "drain-"+name, db, "route-proxy", 1, 0)
+			second := redisAdmissionNode(t, redisURL, "drain-"+name, db, "route-proxy", 1, 0)
+			for _, node := range []*application{first, second} {
+				node.envCfg.UsageDrainTimeoutMs = 5000
+				node.envCfg.ServiceContext = context.Background()
+				if err := node.cfgManager.AddChatUpstream(redisAdmissionUpstream(provider.URL, "openai")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			handler := httpbridge.Handler(first.newRouter())
+			other := httpbridge.Handler(second.newRouter())
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			request := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(strings.Replace(redisAdmissionBody, `"max_tokens":10`, `"max_tokens":10,"stream":true`, 1))).WithContext(ctx)
+			request.Header.Set("x-api-key", "route-proxy")
+			request.Header.Set("Content-Type", "application/json")
+			done := make(chan *httptest.ResponseRecorder, 1)
+			go func() { w := httptest.NewRecorder(); handler.ServeHTTP(w, request); done <- w }()
+			completed := false
+			defer func() {
+				cancel()
+				finish()
+				if !completed {
+					select {
+					case <-done:
+					case <-time.After(6 * time.Second):
+						t.Error("drain worker survived test cleanup")
+					}
+				}
+			}()
+			select {
+			case <-started:
+			case <-time.After(4 * time.Second):
+				t.Fatal("drain provider did not start")
+			}
+			cancel()
+			select {
+			case <-prematureCancel:
+				t.Fatal("client cancellation bypassed bounded drain")
+			case <-time.After(40 * time.Millisecond):
+			}
+			if response := callRedisAdmission(other, "route-proxy", redisAdmissionBody); response.Code != 429 {
+				t.Fatalf("drain freed shared slot early: %d %s", response.Code, response.Body.String())
+			}
+			store, _ := first.envCfg.BudgetManager.Store()
+			policy := entrybudget.Policy{PrincipalID: "shared-team", Period: "lifetime"}
+			state, err := store.Snapshot(context.Background(), policy, time.Now())
+			if err != nil || state.Reserved <= 0 || state.Spent != 0 {
+				t.Fatalf("drain settled budget before actual completion %+v %v", state, err)
+			}
+			if loseLease {
+				stopRedis()
+				select {
+				case <-prematureCancel:
+				case <-time.After(4 * time.Second):
+					t.Fatal("Redis lease loss did not preempt detached drain")
+				}
+			} else {
+				finish()
+			}
+			select {
+			case <-done:
+				completed = true
+			case <-time.After(4 * time.Second):
+				t.Fatal("drain did not finish")
+			}
+			state, err = store.Snapshot(context.Background(), policy, time.Now())
+			if err != nil || state.Reserved != 0 {
+				t.Fatalf("drain leaked budget hold %+v %v", state, err)
+			}
+			records, err := store.Requests(context.Background(), "shared-team", 100)
+			if err != nil || len(records) != 1 {
+				t.Fatalf("drain double settled %+v %v", records, err)
+			}
+			attempts, err := store.Attempts(context.Background(), records[0].ID)
+			if err != nil || len(attempts) != 1 {
+				t.Fatalf("drain attempt audit %+v %v", attempts, err)
+			}
+			if loseLease {
+				if state.Spent <= 10000 || attempts[0].UsageSource != "unknown" {
+					t.Fatalf("lost lease pretended exact/free usage %+v %+v", state, attempts)
+				}
+			} else if state.Spent != 10000 || attempts[0].UsageSource != "provider" {
+				t.Fatalf("final drain usage not authoritative %+v %+v", state, attempts)
+			}
+			if loseLease {
+				first.envCfg.ProxyRedisURL = ""
+				handler = httpbridge.Handler(first.newRouter())
+			} else {
+				handler = other
+			}
+			if response := callRedisAdmission(handler, "route-proxy", redisAdmissionBody); response.Code != 200 {
+				t.Fatalf("drain/lease loss damaged healthy provider key %d %s", response.Code, response.Body.String())
+			}
+			if calls.Load() != 2 {
+				t.Fatalf("drain caused extra supplier attempts %d", calls.Load())
+			}
+		})
+	}
+}
