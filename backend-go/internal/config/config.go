@@ -21,6 +21,7 @@ import (
 
 // UpstreamConfig 上游配置
 type UpstreamConfig struct {
+	ModelImport *ModelImportState `json:"modelImport,omitempty"`
 	// ResponsesClaudePrefixCache opts into one automatic multi-turn prefix breakpoint.
 	// Disabled by default; only Claude wire, and cache writes may incur provider charges.
 	ResponsesClaudePrefixCache bool `json:"responsesClaudePrefixCache,omitempty"`

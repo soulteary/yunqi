@@ -108,6 +108,14 @@ func authorizeManagementRoute(c fiber.Ctx) bool {
 		return AuthorizeAdminAction(c, "channels.list", "")
 	}
 	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) >= 4 && parts[0] == "api" && parts[1] == "channels" && parts[2] != "" && parts[3] == "model-import" {
+		if len(parts) == 4 && method == http.MethodGet {
+			return AuthorizeAdminAction(c, "channels.read", parts[2])
+		}
+		if len(parts) == 5 && ((parts[4] == "policy" && method == http.MethodPut) || ((parts[4] == "preview" || parts[4] == "approve") && method == http.MethodPost)) {
+			return AuthorizeAdminAction(c, "channels.model-import", parts[2])
+		}
+	}
 	if len(parts) == 5 && parts[0] == "api" && parts[1] == "access" && parts[2] == "channels" && parts[3] != "" && parts[4] == "state" && method == http.MethodPut {
 		return AuthorizeAdminAction(c, "channels.state", parts[3])
 	}

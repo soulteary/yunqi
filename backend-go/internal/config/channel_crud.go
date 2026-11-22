@@ -140,6 +140,10 @@ func (cm *ConfigManager) addUpstreamCommonLocked(k ChannelKindConfig, upstream U
 			cm.config = originalConfig
 		}
 	}()
+	if err := ValidateNewChannelModelImport(upstream.ModelImport); err != nil {
+		return err
+	}
+	upstream.ModelImport = ModelImportPolicyOnly(upstream.ModelImport)
 	if err := ValidateOutboundNetwork(upstream.OutboundNetwork, upstream.ProxyURL); err != nil {
 		return err
 	}
