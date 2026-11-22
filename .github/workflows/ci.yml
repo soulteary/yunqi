@@ -47,7 +47,7 @@ jobs:
           echo "YUNQI_TEST_REDIS_SERVER=$redis_root/bin/redis-server" >> "$GITHUB_ENV"
       - name: Verify isolated Redis integration
         working-directory: backend-go
-        run: go test -v -p 2 -run '^(TestRedis|TestSharedIdentity)' ./internal/entrylease ./internal/redisconn .
+        run: go test -v -p 2 -run '^(TestRedis|TestSharedIdentity|TestSharedBudget)' ./internal/entrybudget ./internal/entrylease ./internal/redisconn .
       - name: Verify backend
         working-directory: backend-go
         run: |

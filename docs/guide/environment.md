@@ -976,7 +976,7 @@ OTLP 也接受 `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`，或 `OTEL_EXPORTER_OTLP_EN
 
 Redis 不可用或续约失效时拒绝准入并取消受影响上游，不退回本地放行；活跃 Body（含后台计量读取）结束前保留租约。异常进程退出后等待 Redis 租约过期回收，不立即假定请求结束。
 
-Redis 的入口准入功能只共享入口并发/RPM，不复制配置或 SQLite 预算账本。严格会话默认仍为进程内绑定；显式启用下述共享路由模式后才跨节点绑定。独立预算数据库分别计算余额，不能视为统一团队预算；多副本部署需为同一预算主体保持单一账本入口。Redis 应保留在途租约状态，不能依赖清空或驱逐 key 回收额度；Redis 租约不能撤销供应商已开始的调用。
+Redis 的入口准入功能只共享入口并发/RPM，不复制配置或 SQLite 预算账本。严格会话默认仍为进程内绑定，显式启用下述共享路由模式后才跨节点绑定；多副本统一预算需另外启用下述共享预算账本。Redis 应保留在途租约状态，不能依赖清空或驱逐 key 回收额度；Redis 租约不能撤销供应商已开始的调用。
 
 共享 SSO 撤销使用独立的 `IDENTITY_PROXY_REVOCATION_REDIS_URL` 与 `IDENTITY_PROXY_REVOCATION_REDIS_NAMESPACE`，并需在身份代理配置中显式选择 `revocationMode=shared`。该 URL 遵循全局出站限制，凭证不参与管理 JSON 展示；配置 URL 本身不会把默认 local 模式自动改为 shared。各节点应先配置可用后端，再统一启用共享模式。
 
@@ -995,3 +995,25 @@ YUNQI_CONFIRM_EMPTY_ROUTING_REALM=yes go run ./cmd/routing-state-init
 该命令从 `PROXY_REDIS_URL`、`PROXY_REDIS_NAMESPACE` 读取目标，仅初始化空路由域，输出随机 `PROXY_REDIS_ROUTING_EPOCH`。将这个 epoch 作为稳定配置提供给所有节点；普通启动不会创建或修复 Redis 状态。切勿对正在处理请求的服务执行初始化，也不要清空 Redis 来释放容量。启动、准入、绑定及续租均验证 epoch，标记丢失/变化时拒绝新请求并取消受影响的在途调用。恢复必须同时恢复原 epoch 与完整路由数据，不能只重建标记。
 
 共享状态要求专用、可靠持久化且禁止驱逐的 Redis；单独删除限额或会话 key 无法仅靠 epoch 标记检测。外部 Redis 不包含在本地配置备份中。跨节点严格会话仍需启用 `YUNQI_STRICT_SESSION_AFFINITY=true`：首个请求在供应商调用前原子绑定渠道 UID；失败不会迁移绑定，活动上游 Body 持续续租并保活会话，即使流长于空闲 TTL。共享状态续租失败会取消实际调用，包括后台 usage drain；异常退出后的容量等租约过期回收。节点之间不共享 Responses 完整历史缓存；需要服务端历史续接的客户端还需稳定节点入口。
+
+
+### 跨节点预算账本
+
+`BUDGET_REDIS_URL` 显式启用 Redis 共享预算；未设置时继续使用 `entry-budget.db`。`BUDGET_REDIS_NAMESPACE` 默认 `yunqi`，`BUDGET_REDIS_EPOCH` 必填，格式为 1–64 位字母、数字、冒号、下划线或短横线。同一预算域必须使用相同的 namespace、epoch、稳定 principal ID、时区及预算策略。入口租约 Redis 与预算 Redis 可以分开部署；二者互不替代。
+
+部署前，先对**全新且为空的预算命名空间**显式执行初始化工具，再启动节点：
+
+```bash
+# 在 backend-go 目录；连接密码通过受保护的环境注入，勿放进命令参数或日志。
+export BUDGET_REDIS_URL=redis://127.0.0.1:6379/0
+export BUDGET_REDIS_NAMESPACE=team_gateway
+export BUDGET_REDIS_EPOCH=replace_with_a_stable_random_epoch
+# 仅首次初始化新账本；运行节点不会自动初始化、修复或更换 epoch。
+go run ./cmd/budget-ledger-init
+```
+
+每个主体的检查、预留、逐尝试结算和过期回收使用 WATCH/MULTI 原子提交。金额使用 Go int64，不经过 Lua 浮点数；预算周期与租约使用 Redis 服务端时间，避免节点时钟差异。重试和竞速分别预留，保留各尝试的价格快照、计量来源与计量证据。未知计量和异常退出按原预留保守结算，不能把进程崩溃当作免费调用。后端不可用、CAS 重试耗尽、epoch 不匹配或账本状态缺失时拒绝预算请求并终止受影响的调用，不回退到 SQLite。
+
+已结算请求和逐尝试账单原子移入独立不可变归档，主账本仅保留累计周期金额和在途请求。每主体最多 10000 个在途请求、每请求最多 1000 个尝试，在途账本编码最多 16 MiB；达到限制暂时拒绝新请求，在途结算后可继续接收，不会删除历史账单或重置已花费额度。滚动窗口保留最近 30 天的按秒整数计费索引，超出窗口仅清理辅助索引，归档账单保留。初始化新 Redis 账本**不会导入既有 SQLite 历史**；检测到非空本地 `entry-budget.db` 时，启动会拒绝切换共享模式。应先完成经核对的迁移，或在明确的新预算域/新周期启用；后一种情况须显式设置 `BUDGET_REDIS_NEW_DOMAIN_ACK` 为新 epoch，确认不延续旧域余额。该确认不是历史导入，不能用于在同一周期绕过已花费额度。旧本地账本不会被工具修改或删除。
+
+预算 Redis 必须提供持久化、备份及 noeviction，已确认写入不能在故障切换后丢失。epoch、注册表、请求索引和主体账本必须一致恢复。运行时会拒绝缺失的 epoch/索引/已登记主体账本；仅靠 epoch 无法发现任意单个已确认写入丢失。不要通过重建 epoch 或删除 key 恢复可用性，不得与可随时清空的缓存共用淘汰策略。网关本地目录备份不包含外部 Redis 账本。

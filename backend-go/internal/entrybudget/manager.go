@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/redis/go-redis/v9"
 	"github.com/soulteary/yunqi/internal/requestscope"
 )
 
@@ -31,6 +32,24 @@ type Manager struct {
 
 func NewManager(path string) *Manager {
 	return &Manager{path: path, sessions: make(map[string]*Session), now: time.Now, cleanupDone: make(chan struct{})}
+}
+
+// NewRedisManager uses an explicitly initialized, epoch-bound shared ledger.
+// A failed backend never falls back to the local SQLite ledger.
+func NewRedisManager(client *redis.Client, namespace, epoch string) (*Manager, error) {
+	store, err := OpenRedis(client, namespace, epoch)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := store.shared.ready(ctx); err != nil {
+		_ = store.Close()
+		return nil, ErrUnavailable
+	}
+	m := NewManager("")
+	m.store = store
+	return m, nil
 }
 func (m *Manager) Store() (*Store, error) {
 	m.mu.Lock()
