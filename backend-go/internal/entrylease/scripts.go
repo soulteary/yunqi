@@ -24,7 +24,8 @@ if rpm>0 and redis.call('ZCARD',KEYS[2])>=rpm then
  return {2,math.max(1,tonumber(first[2])+60000-now)}
 end
 redis.call('ZADD',KEYS[1],now+ttl,id)
-redis.call('PEXPIRE',KEYS[1],ttl+1000)
+local latest=redis.call('ZREVRANGE',KEYS[1],0,0,'WITHSCORES')
+redis.call('PEXPIREAT',KEYS[1],tonumber(latest[2])+1000)
 if rpm>0 then
  redis.call('ZADD',KEYS[2],now,id)
  redis.call('PEXPIRE',KEYS[2],60000+ttl)
@@ -37,7 +38,8 @@ local now=tonumber(clock[1])*1000+math.floor(tonumber(clock[2])/1000)
 redis.call('ZREMRANGEBYSCORE',KEYS[1],'-inf',now)
 if not redis.call('ZSCORE',KEYS[1],ARGV[1]) then return 0 end
 redis.call('ZADD',KEYS[1],'XX',now+tonumber(ARGV[2]),ARGV[1])
-redis.call('PEXPIRE',KEYS[1],tonumber(ARGV[2])+1000)
+local latest=redis.call('ZREVRANGE',KEYS[1],0,0,'WITHSCORES')
+redis.call('PEXPIREAT',KEYS[1],tonumber(latest[2])+1000)
 return 1
 `)
 var releaseScript = redis.NewScript(`return redis.call('ZREM',KEYS[1],ARGV[1])`)

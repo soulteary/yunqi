@@ -29,7 +29,7 @@ func isolatedRedis(t *testing.T) func() *redis.Client {
 			t.Skip("Redis executable unavailable; set YUNQI_TEST_REDIS_SERVER for isolated integration test")
 		}
 	}
-	dir, dirErr := os.MkdirTemp("/private/tmp", "yunqi-redis-")
+	dir, dirErr := os.MkdirTemp("/tmp", "yqr-")
 	if dirErr != nil {
 		t.Fatal(dirErr)
 	}
@@ -227,5 +227,102 @@ func TestRedisConfigurationErrorsNeverEchoSecrets(t *testing.T) {
 		if _, err := New(value, "yunqi", 30*time.Second); err == nil || strings.Contains(err.Error(), "secret") {
 			t.Fatalf("unsafe configuration error %v", err)
 		}
+	}
+}
+
+func TestRedisMixedLeaseTTLCannotExpireAnotherNodesLongLease(t *testing.T) {
+	newClient := isolatedRedis(t)
+	client := newClient()
+	defer client.Close()
+	manager := newManager(client, "mixed", time.Second)
+	keys := manager.keys("team")
+	ctx := context.Background()
+	for _, lease := range []struct {
+		id  string
+		ttl int
+	}{{"long-node", 30000}, {"short-node", 5000}} {
+		if _, err := acquireScript.Run(ctx, client, keys, lease.id, lease.ttl, 2, 0).Result(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	assertLongAlive := func(stage string) {
+		t.Helper()
+		ttl, err := client.PTTL(ctx, keys[0]).Result()
+		if err != nil || ttl < 29*time.Second {
+			t.Fatalf("%s shortened long node lease: %v %v", stage, ttl, err)
+		}
+	}
+	assertLongAlive("short acquire")
+	if _, err := renewScript.Run(ctx, client, keys[:1], "short-node", 5000).Result(); err != nil {
+		t.Fatal(err)
+	}
+	assertLongAlive("short renewal")
+	if _, err := releaseScript.Run(ctx, client, keys[:1], "short-node").Result(); err != nil {
+		t.Fatal(err)
+	}
+	assertLongAlive("short release")
+	if got := client.ZCard(ctx, keys[0]).Val(); got != 1 {
+		t.Fatalf("long node lost from lease set: %d", got)
+	}
+}
+
+type delayedAcquireReply struct {
+	sha   string
+	delay time.Duration
+}
+
+func (h *delayedAcquireReply) DialHook(next redis.DialHook) redis.DialHook { return next }
+func (h *delayedAcquireReply) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
+	return next
+}
+func (h *delayedAcquireReply) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
+	return func(ctx context.Context, cmd redis.Cmder) error {
+		err := next(ctx, cmd)
+		if err == nil && cmd.Name() == "evalsha" && len(cmd.Args()) > 1 && cmd.Args()[1] == h.sha {
+			time.Sleep(h.delay)
+		}
+		return err
+	}
+}
+func TestRedisLocalWatchdogStartsBeforeSlowAcquireReply(t *testing.T) {
+	newClient := isolatedRedis(t)
+	client := newClient()
+	ctx := context.Background()
+	if err := acquireScript.Load(ctx, client).Err(); err != nil {
+		t.Fatal(err)
+	}
+	client.AddHook(&delayedAcquireReply{sha: acquireScript.Hash(), delay: 1200 * time.Millisecond})
+	manager := newManager(client, "watchdog", 1500*time.Millisecond)
+	defer manager.Close()
+	started := time.Now()
+	lease, _, err := manager.Acquire(ctx, "team", 1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bound, binding, err := requestscope.Bind(context.WithoutCancel(WithLease(ctx, lease)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader, writer := io.Pipe()
+	defer writer.Close()
+	body := requestscope.WrapBody(bound, reader, binding)
+	defer body.Close()
+	lease.ParentDone()
+	// Renewal is scheduled 500ms after the delayed reply (t=1700ms). The
+	// conservative watchdog must cancel around t=1500ms instead of oversubscribing.
+	wait := time.Until(started.Add(1620 * time.Millisecond))
+	if wait < 0 {
+		t.Fatal("test scheduler delayed past watchdog assertion")
+	}
+	select {
+	case <-bound.Done():
+	case <-time.After(wait):
+		t.Fatal("slow acquire reply extended local lease validity")
+	}
+	if !errors.Is(requestscope.Cause(bound), ErrLeaseLost) {
+		t.Fatalf("watchdog cause %v", requestscope.Cause(bound))
+	}
+	if lease.refreshDeadline(time.Now().Add(time.Minute)) {
+		t.Fatal("late acknowledgement resurrected cancelled lease")
 	}
 }

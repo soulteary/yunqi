@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/soulteary/yunqi/internal/entrybudget"
-	"github.com/soulteary/yunqi/internal/entrylease"
 	"os"
 	"strconv"
 	"strings"
@@ -17,7 +16,7 @@ type EnvConfig struct {
 	ProxyRedisNamespace       string
 	ProxyRedisLeaseSeconds    int
 	ProxyRedisMaxRPM          int
-	ProxyRedisAdmission       *entrylease.Manager  `json:"-"`
+	ProxyRedisAdmission       SharedProxyAdmission `json:"-"`
 	BudgetManager             *entrybudget.Manager `json:"-"`
 	StrictSessionAffinity     bool
 	IdentityProxySecret       string                               `json:"-"`

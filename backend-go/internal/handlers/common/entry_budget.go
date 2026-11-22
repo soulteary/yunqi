@@ -16,6 +16,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/entrybudget"
+	"github.com/soulteary/yunqi/internal/entrylease"
 	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/middleware"
@@ -385,7 +386,7 @@ func budgetConnectTrace(connected *atomic.Bool) *httptrace.ClientTrace {
 	return &httptrace.ClientTrace{GotConn: func(httptrace.GotConnInfo) { connected.Store(true) }}
 }
 func isEntryBudgetError(err error) bool {
-	return errors.Is(err, entrybudget.ErrQuota) || errors.Is(err, entrybudget.ErrPricing) || errors.Is(err, entrybudget.ErrUnavailable) || errors.Is(err, entrybudget.ErrClosed) || errors.Is(err, entrybudget.ErrLeaseLost) || errors.Is(err, entrybudget.ErrRequestTimeout) || errors.Is(err, entrybudget.ErrShutdown)
+	return errors.Is(err, entrylease.ErrUnavailable) || errors.Is(err, entrylease.ErrLeaseLost) || errors.Is(err, entrylease.ErrConcurrency) || errors.Is(err, entrylease.ErrRPM) || errors.Is(err, entrybudget.ErrQuota) || errors.Is(err, entrybudget.ErrPricing) || errors.Is(err, entrybudget.ErrUnavailable) || errors.Is(err, entrybudget.ErrClosed) || errors.Is(err, entrybudget.ErrLeaseLost) || errors.Is(err, entrybudget.ErrRequestTimeout) || errors.Is(err, entrybudget.ErrShutdown)
 }
 
 // HandleEntryBudgetError renders only local budget rejections, before any upstream
@@ -393,6 +394,15 @@ func isEntryBudgetError(err error) bool {
 func EntryBudgetFailure(err error) (int, string, bool) {
 	if !isEntryBudgetError(err) {
 		return 0, "", false
+	}
+	if errors.Is(err, entrylease.ErrConcurrency) {
+		return 429, "proxy_concurrency_exceeded", true
+	}
+	if errors.Is(err, entrylease.ErrRPM) {
+		return 429, "proxy_rpm_exceeded", true
+	}
+	if errors.Is(err, entrylease.ErrUnavailable) || errors.Is(err, entrylease.ErrLeaseLost) {
+		return 503, "proxy_shared_admission_unavailable", true
 	}
 	status, code := 503, "entry_budget_unavailable"
 	if errors.Is(err, entrybudget.ErrQuota) {
@@ -411,20 +421,19 @@ func HandleEntryBudgetError(c fiber.Ctx, err error) bool {
 	if httpbridge.Writer(c).Written() {
 		return true
 	}
-	httpbridge.JSON(c, status, fiber.Map{"error": fiber.Map{"type": code, "message": "Request could not reserve its entry budget"}})
+	httpbridge.JSON(c, status, fiber.Map{"error": fiber.Map{"type": code, "message": "Request admission resources are unavailable"}})
 	return true
 }
 
-func budgetScopeCause(ctx context.Context) error {
-	if session := entrybudget.FromContext(ctx); session != nil {
-		cause := session.Cause()
-		if cause != nil && !errors.Is(cause, requestscope.ErrClosed) {
-			return cause
-		}
-	}
-	return nil
-}
+func budgetScopeCause(ctx context.Context) error { return requestscope.Cause(ctx) }
+
 func budgetBindError(req *http.Request, err error) error {
+	if cause := requestscope.Cause(req.Context()); cause != nil {
+		return cause
+	}
+	if entrylease.FromContext(req.Context()) != nil {
+		return entrylease.ErrLeaseLost
+	}
 	if entrybudget.FromContext(req.Context()) != nil {
 		return entrybudget.ErrClosed
 	}

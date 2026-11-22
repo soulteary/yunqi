@@ -166,3 +166,15 @@ func WrapBody(ctx context.Context, inner io.ReadCloser, binding *Binding) io.Rea
 	wrapped.stopMu.Unlock()
 	return wrapped
 }
+
+// Cause reports a failed resource lifetime even through context.WithoutCancel.
+// Normal completion is deliberately excluded from failure classification.
+func Cause(ctx context.Context) error {
+	sources, _ := ctx.Value(key{}).([]*Source)
+	for _, source := range sources {
+		if cause := context.Cause(source.ctx); cause != nil && !errors.Is(cause, ErrClosed) {
+			return cause
+		}
+	}
+	return nil
+}

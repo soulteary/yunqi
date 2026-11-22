@@ -5,17 +5,16 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
-	"crypto/tls"
 	"encoding/hex"
 	"errors"
 	"log"
-	"net/url"
 	"regexp"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"github.com/soulteary/yunqi/internal/redisconn"
 	"github.com/soulteary/yunqi/internal/requestscope"
 )
 
@@ -36,32 +35,21 @@ type Manager struct {
 }
 
 func New(redisURL, namespace string, ttl time.Duration) (*Manager, error) {
-	parsed, err := url.Parse(redisURL)
-	if err != nil || parsed == nil || (parsed.Scheme != "redis" && parsed.Scheme != "rediss") {
-		return nil, ErrUnavailable
-	}
-	options, err := redis.ParseURL(redisURL)
-	if err != nil {
-		return nil, ErrUnavailable
-	}
+
 	if namespace == "" {
 		namespace = "yunqi"
 	}
 	if !namespacePattern.MatchString(namespace) || ttl < 5*time.Second || ttl > 5*time.Minute {
 		return nil, ErrUnavailable
 	}
-	options.DialTimeout = 2 * time.Second
-	options.ReadTimeout = 2 * time.Second
-	options.WriteTimeout = 2 * time.Second
-	options.ContextTimeoutEnabled = true
-	options.MaxRetries = -1
-	options.PoolSize = 16
-	options.DisableIdentity = true
-	if options.TLSConfig != nil {
-		options.TLSConfig.MinVersion = tls.VersionTLS12
+	client, err := redisconn.New(redisURL)
+	if err != nil {
+		return nil, ErrUnavailable
 	}
-	return newManager(redis.NewClient(options), namespace, ttl), nil
+	return newManager(client, namespace, ttl), nil
+
 }
+
 func newManager(client *redis.Client, namespace string, ttl time.Duration) *Manager {
 	return &Manager{client: client, namespace: namespace, ttl: ttl, leases: make(map[string]*Lease)}
 }
@@ -95,6 +83,7 @@ func (m *Manager) Acquire(ctx context.Context, principal string, concurrent, rpm
 	if closed {
 		return nil, 0, ErrUnavailable
 	}
+	started := time.Now()
 	call, cancel := context.WithTimeout(ctx, 2*time.Second)
 	result, err := acquireScript.Run(call, m.client, keys, id, m.ttl.Milliseconds(), concurrent, rpm).Int64Slice()
 	cancel()
@@ -122,19 +111,25 @@ func (m *Manager) Acquire(ctx context.Context, principal string, concurrent, rpm
 	}
 	m.leases[id] = lease
 	m.mu.Unlock()
+	if !lease.refreshDeadline(started.Add(m.ttl)) {
+		return nil, 0, ErrUnavailable
+	}
 	go lease.renew()
 	return lease, 0, nil
 }
 
 type leaseKey struct{}
 type Lease struct {
-	id      string
-	keys    []string
-	manager *Manager
-	source  *requestscope.Source
-	once    sync.Once
-	stop    chan struct{}
-	done    chan struct{}
+	id              string
+	keys            []string
+	manager         *Manager
+	source          *requestscope.Source
+	once            sync.Once
+	stop            chan struct{}
+	done            chan struct{}
+	watchMu         sync.Mutex
+	watchGeneration uint64
+	watchdog        *time.Timer
 }
 
 func WithLease(ctx context.Context, l *Lease) context.Context {
@@ -156,6 +151,7 @@ func (l *Lease) renew() {
 		case <-l.source.Context().Done():
 			return
 		case <-ticker.C:
+			started := time.Now()
 			call, cancel := context.WithTimeout(context.Background(), min(2*time.Second, l.manager.ttl/3))
 			result, err := renewScript.Run(call, l.manager.client, l.keys[:1], l.id, l.manager.ttl.Milliseconds()).Int64()
 			cancel()
@@ -164,11 +160,20 @@ func (l *Lease) renew() {
 				l.source.Cancel(ErrLeaseLost)
 				return
 			}
+			if !l.refreshDeadline(started.Add(l.manager.ttl)) {
+				return
+			}
 		}
 	}
 }
 func (l *Lease) release() {
 	l.once.Do(func() {
+		l.watchMu.Lock()
+		l.watchGeneration++
+		if l.watchdog != nil {
+			l.watchdog.Stop()
+		}
+		l.watchMu.Unlock()
 		close(l.stop)
 		call, cancel := context.WithTimeout(context.Background(), min(time.Second, l.manager.ttl/3))
 		_, err := releaseScript.Run(call, l.manager.client, l.keys[:1], l.id).Result()
@@ -197,7 +202,10 @@ func (m *Manager) Close() error {
 	// All actual upstreams are cancelled concurrently before a bounded wait. A
 	// lost Redis connection leaves at most ttl until server-side lease recovery.
 	for _, lease := range leases {
-		go lease.source.Cancel(ErrLeaseLost)
+		lease.source.Signal(ErrLeaseLost)
+	}
+	for _, lease := range leases {
+		go lease.source.ParentDone()
 	}
 	deadline := time.NewTimer(2 * time.Second)
 	defer deadline.Stop()
@@ -210,4 +218,49 @@ func (m *Manager) Close() error {
 		}
 	}
 	return m.client.Close()
+}
+
+// Use the RPC start, not reply time: server execution cannot precede that
+// instant, making this local monotonic deadline conservative under slow replies.
+// A late renewal acknowledgement can never resurrect already cancelled work.
+func (l *Lease) refreshDeadline(deadline time.Time) bool {
+	l.watchMu.Lock()
+	l.watchGeneration++
+	generation := l.watchGeneration
+	if l.watchdog != nil {
+		l.watchdog.Stop()
+	}
+	if l.source.Context().Err() != nil {
+		l.watchMu.Unlock()
+		return false
+	}
+	duration := time.Until(deadline)
+	if duration <= 0 {
+		l.source.Signal(ErrLeaseLost)
+		l.watchMu.Unlock()
+		l.source.ParentDone()
+		return false
+	}
+	l.watchdog = time.AfterFunc(duration, func() {
+		l.watchMu.Lock()
+		expired := l.watchGeneration == generation && l.source.Context().Err() == nil
+		if expired {
+			l.source.Signal(ErrLeaseLost)
+		}
+		l.watchMu.Unlock()
+		if expired {
+			l.manager.warn()
+			l.source.ParentDone()
+		}
+	})
+	l.watchMu.Unlock()
+	return true
+}
+
+func (m *Manager) AcquireContext(ctx context.Context, principal string, concurrent, rpm int) (context.Context, func(), time.Duration, error) {
+	lease, retry, err := m.Acquire(ctx, principal, concurrent, rpm)
+	if err != nil {
+		return ctx, nil, retry, err
+	}
+	return WithLease(ctx, lease), lease.ParentDone, 0, nil
 }

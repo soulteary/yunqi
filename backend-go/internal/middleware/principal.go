@@ -80,12 +80,12 @@ func ProxyAdmissionMiddleware(env *config.EnvConfig) fiber.Handler {
 			if env.ProxyRedisAdmission == nil {
 				return rejectSharedAdmission(c, entrylease.ErrUnavailable, 0)
 			}
-			lease, retry, err := env.ProxyRedisAdmission.Acquire(httpbridge.Request(c).Context(), id, limit, env.ProxyRedisMaxRPM)
+			leaseContext, release, retry, err := env.ProxyRedisAdmission.AcquireContext(httpbridge.Request(c).Context(), id, limit, env.ProxyRedisMaxRPM)
 			if err != nil {
 				return rejectSharedAdmission(c, err, retry)
 			}
-			httpbridge.SetRequest(c, httpbridge.Request(c).WithContext(entrylease.WithLease(httpbridge.Request(c).Context(), lease)))
-			defer lease.ParentDone()
+			httpbridge.SetRequest(c, httpbridge.Request(c).WithContext(leaseContext))
+			defer release()
 		}
 
 		return c.Next()
