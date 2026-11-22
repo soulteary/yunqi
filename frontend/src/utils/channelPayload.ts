@@ -20,6 +20,7 @@ export interface ModelCapabilityRow {
   inputCacheHitPrice: string | number | null
   inputCacheMissPrice: string | number | null
   outputPrice: string | number | null
+  typedPricing?: Pick<NonNullable<UpstreamModelCapability['pricing']>, 'cacheCreation5mPrice' | 'cacheCreation1hPrice' | 'reasoningOutputPrice' | 'imagePrices'>
   pricingTiers?: NonNullable<UpstreamModelCapability['pricing']>['tiers']
   defaultOutputTokens?: number
   recommendedOutputTokens?: number
@@ -130,7 +131,7 @@ function hasPricingValue(row: ModelCapabilityRow): boolean {
     String(row.inputCacheHitPrice ?? '').trim() ||
     String(row.inputCacheMissPrice ?? '').trim() ||
     String(row.outputPrice ?? '').trim() ||
-    row.pricingTiers?.length
+    row.pricingTiers?.length || Object.values(row.typedPricing || {}).some(value => value !== undefined && (typeof value === 'number' || value.length > 0))
   )
 }
 
@@ -142,6 +143,7 @@ function createPricingFromRow(row: ModelCapabilityRow): UpstreamModelCapability[
   if (inputCacheHitPrice === false || inputCacheMissPrice === false || outputPrice === false) return false
   const currency = row.pricingCurrency.trim() || 'USD'
   const pricing: NonNullable<UpstreamModelCapability['pricing']> = {
+    ...typedPricingFields(row.typedPricing),
     unit: `per_1m_tokens_${currency.toLowerCase()}`,
     currency,
   }
@@ -206,11 +208,23 @@ export function parseModelCapabilitiesText(text?: string): Record<string, Upstre
         if (typeof pricing.currency !== 'string') return null
         normalizedPricing.currency = pricing.currency
       }
-      for (const key of ['inputCacheHitPrice', 'inputCacheMissPrice', 'outputPrice'] as const) {
+      for (const key of ['inputCacheHitPrice', 'inputCacheMissPrice', 'outputPrice', 'cacheCreation5mPrice', 'cacheCreation1hPrice', 'reasoningOutputPrice'] as const) {
         if (pricing[key] !== undefined) {
           if (typeof pricing[key] !== 'number' || !Number.isFinite(pricing[key]) || pricing[key] < 0) return null
           normalizedPricing[key] = pricing[key]
         }
+      }
+      if (pricing.imagePrices !== undefined) {
+        if (!Array.isArray(pricing.imagePrices) || pricing.imagePrices.length > 64) return null
+        const rules: NonNullable<NonNullable<UpstreamModelCapability['pricing']>['imagePrices']> = []
+        for (const rule of pricing.imagePrices) {
+          if (!rule || typeof rule !== 'object' || Array.isArray(rule)) return null
+          const value = rule as Record<string, unknown>
+          if (typeof value.price !== 'number' || !Number.isFinite(value.price) || value.price < 0) return null
+          if (value.quality !== undefined && typeof value.quality !== 'string' || value.size !== undefined && typeof value.size !== 'string') return null
+          rules.push({ price: value.price, ...(value.quality !== undefined ? { quality: value.quality as string } : {}), ...(value.size !== undefined ? { size: value.size as string } : {}) })
+        }
+        normalizedPricing.imagePrices = rules
       }
       if (pricing.tiers !== undefined) {
         if (!Array.isArray(pricing.tiers)) return null
@@ -229,7 +243,7 @@ export function parseModelCapabilitiesText(text?: string): Record<string, Upstre
               normalizedTier[key] = tierRecord[key]
             }
           }
-          for (const key of ['inputCacheHitPrice', 'inputCacheMissPrice', 'outputPrice'] as const) {
+          for (const key of ['inputCacheHitPrice', 'inputCacheMissPrice', 'outputPrice', 'cacheCreation5mPrice', 'cacheCreation1hPrice', 'reasoningOutputPrice'] as const) {
             if (tierRecord[key] !== undefined) {
               if (typeof tierRecord[key] !== 'number' || !Number.isFinite(tierRecord[key]) || tierRecord[key] < 0) return null
               normalizedTier[key] = tierRecord[key]
@@ -306,6 +320,7 @@ export function createModelCapabilityRow(
     inputCacheMissPrice: capability?.pricing?.inputCacheMissPrice ?? null,
     outputPrice: capability?.pricing?.outputPrice ?? null,
     pricingTiers: capability?.pricing?.tiers,
+    typedPricing: typedPricingFields(capability?.pricing),
     defaultOutputTokens: capability?.defaultOutputTokens,
     recommendedOutputTokens: capability?.recommendedOutputTokens,
     displayName: capability?.displayName || '',
@@ -327,6 +342,7 @@ export function capabilityRowDefaultsFromBuiltin(capability: UpstreamModelCapabi
     inputCacheMissPrice: capability.pricing?.inputCacheMissPrice ?? null,
     outputPrice: capability.pricing?.outputPrice ?? null,
     pricingTiers: capability.pricing?.tiers,
+    typedPricing: typedPricingFields(capability.pricing),
     defaultOutputTokens: capability.defaultOutputTokens,
     recommendedOutputTokens: capability.recommendedOutputTokens,
     displayName: capability.displayName || '',
@@ -665,4 +681,9 @@ export function buildChannelPayload(
   channelData.rateLimitAutoFromHeaders = !!form.rateLimitAutoFromHeaders
 
   return channelData
+}
+
+function typedPricingFields(pricing?: UpstreamModelCapability['pricing']): ModelCapabilityRow['typedPricing'] {
+ if (!pricing) return undefined
+ return { cacheCreation5mPrice: pricing.cacheCreation5mPrice, cacheCreation1hPrice: pricing.cacheCreation1hPrice, reasoningOutputPrice: pricing.reasoningOutputPrice, imagePrices: pricing.imagePrices?.map(rule => ({ ...rule })) }
 }

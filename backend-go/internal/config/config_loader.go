@@ -94,6 +94,10 @@ func (cm *ConfigManager) loadConfig() error {
 		autopilotDecodeFallback = true
 		log.Printf("[Config-Migration] 警告: autopilot 配置无法解析，已回退到默认值: %v", err)
 	}
+	if err := normalizeConfigPricing(&loaded); err != nil {
+		cm.mu.Unlock()
+		return fmt.Errorf("invalid model pricing: %w", err)
+	}
 	// 记录显式 autoManaged=false 的渠道，避免 ensureAutoManagedKind 把手动渠道误升级为 generic。
 	markExplicitAutoManagedFalse(data, &loaded)
 	// Phase B.2：保存加载前快照用于事件 diff。
@@ -1460,6 +1464,9 @@ func (cm *ConfigManager) validateChannelKeys() bool {
 
 // saveConfigLocked 保存配置（已加锁）
 func (cm *ConfigManager) saveConfigLocked(config Config) error {
+	if err := normalizeConfigPricing(&config); err != nil {
+		return fmt.Errorf("invalid model pricing: %w", err)
+	}
 	// 备份当前配置
 	cm.backupConfig()
 

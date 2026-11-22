@@ -367,6 +367,17 @@ func initSchema(db *sql.DB) error {
 			}
 		}
 	}
+	var pricingVersion int
+	if err := db.QueryRow("PRAGMA user_version").Scan(&pricingVersion); err != nil {
+		return err
+	}
+	if pricingVersion < 11 {
+		for _, query := range []string{"ALTER TABLE request_records ADD COLUMN pricing_version_id TEXT NOT NULL DEFAULT ''", "PRAGMA user_version = 11"} {
+			if _, err := db.Exec(query); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+				return fmt.Errorf("pricing version migration: %w", err)
+			}
+		}
+	}
 	// Filter-specific keyset indexes do not reserve a schema version.
 	for _, column := range []string{"model,", "channel_uid,", "correlation_id,"} {
 		name := strings.ReplaceAll(column, ",", "")
@@ -805,8 +816,8 @@ func (s *SQLiteStore) batchInsertRecords(records []PersistentRecord) error {
 		 channel_uid, route_model, key_uid, subscription_uid, exchange_snapshot_version,
 		 list_cost_usd, effective_cost_usd, effective_cost_available, effective_cost_reason, consumption_policy,
 			 compressed, original_tokens, compressed_tokens, compression_savings_percent, compression_technique, compression_fallback_reason,
-			 correlation_id, usage_provenance)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 correlation_id, usage_provenance, pricing_version_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return err
@@ -826,7 +837,7 @@ func (s *SQLiteStore) batchInsertRecords(records []PersistentRecord) error {
 			r.ChannelUID, r.RouteModel, r.KeyUID, r.SubscriptionUID, r.ExchangeSnapshotVersion,
 			r.ListCostUSD, r.EffectiveCostUSD, effectiveAvailable, r.EffectiveCostReason, r.ConsumptionPolicy,
 			r.Compressed, r.OriginalTokens, r.CompressedTokens, r.CompressionSavingsPct, r.CompressionTechnique, r.CompressionFallbackReason,
-			r.CorrelationID, marshalUsageProvenance(r.UsageProvenance),
+			r.CorrelationID, marshalUsageProvenance(r.UsageProvenance), r.PricingVersionID,
 		)
 		if err != nil {
 			return err
@@ -843,7 +854,7 @@ func (s *SQLiteStore) LoadRecords(since time.Time, apiType string) ([]Persistent
 		       key_uid, subscription_uid, exchange_snapshot_version, list_cost_usd, effective_cost_usd,
 		       effective_cost_available, effective_cost_reason, consumption_policy,
 		       compressed, original_tokens, compressed_tokens, compression_savings_percent, compression_technique, compression_fallback_reason,
-		       correlation_id, usage_provenance
+		       correlation_id, usage_provenance, pricing_version_id
 		FROM request_records
 		WHERE timestamp >= ? AND api_type = ?
 		ORDER BY timestamp ASC
@@ -869,7 +880,7 @@ func (s *SQLiteStore) LoadRecords(since time.Time, apiType string) ([]Persistent
 			&r.ChannelUID, &r.RouteModel, &keyUID, &subscriptionUID, &version, &listCost, &effectiveCost,
 			&effectiveAvailable, &effectiveReason, &consumptionPolicy,
 			&r.Compressed, &r.OriginalTokens, &r.CompressedTokens, &r.CompressionSavingsPct, &r.CompressionTechnique, &r.CompressionFallbackReason,
-			&r.CorrelationID, &provenance,
+			&r.CorrelationID, &provenance, &r.PricingVersionID,
 		)
 		if err != nil {
 			return nil, err
