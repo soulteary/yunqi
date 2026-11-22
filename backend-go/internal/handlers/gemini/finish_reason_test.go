@@ -43,6 +43,7 @@ func TestGeminiAbnormalFinishReasonFailsPreflight(t *testing.T) {
 
 func TestGeminiNonStreamRejectsThoughtOnlyAndMalformedFinish(t *testing.T) {
 	for _, raw := range []string{
+		`{"promptFeedback":{"blockReason":"BLOCK_REASON_UNSPECIFIED"}}`,
 		`{"candidates":[{"content":{"parts":[{"text":"thinking","thought":true}]},"finishReason":"STOP"}]}`,
 		`{"candidates":[{"content":{"parts":[{"text":"partial"}]},"finishReason":"MALFORMED_RESPONSE"}]}`,
 	} {
@@ -65,6 +66,7 @@ func TestGeminiNativeRefusalsAndMediaAreDeliverable(t *testing.T) {
 		`{"candidates":[{"finishReason":"SAFETY"}]}`,
 		`{"candidates":[{"finishReason":"IMAGE_SAFETY"}]}`,
 		`{"promptFeedback":{"blockReason":"SAFETY"}}`,
+		`{"promptFeedback":{"blockReason":"OTHER"}}`,
 		`{"candidates":[{"content":{"parts":[{"inlineData":{"mimeType":"image/png","data":"aW1hZ2U="}}]},"finishReason":"STOP"}]}`,
 		`{"candidates":[{"content":{"parts":[{"fileData":{"mimeType":"image/png","fileUri":"gs://bucket/image.png"}}]},"finishReason":"STOP"}]}`,
 	} {
@@ -131,5 +133,17 @@ func TestGeminiUnspecifiedFinishDoesNotFailPreflight(t *testing.T) {
 	resp := &http.Response{Body: io.NopCloser(strings.NewReader(raw))}
 	if _, _, _, err := preflightGeminiStream(resp, "gemini", common.StreamPreflightTimeouts{}); err != nil {
 		t.Fatalf("placeholder retried: %v", err)
+	}
+}
+
+func TestGeminiPlaceholderPromptFeedbackIsNotDeliverable(t *testing.T) {
+	raw := `{"promptFeedback":{"blockReason":"BLOCK_REASON_UNSPECIFIED"}}`
+	if hasGeminiSemanticContent(raw) {
+		t.Fatal("unused default became refusal")
+	}
+	resp := &http.Response{Body: io.NopCloser(strings.NewReader("data: " + raw + "\n\n"))}
+	_, _, _, err := preflightGeminiStream(resp, "gemini", common.StreamPreflightTimeouts{})
+	if !errors.Is(err, common.ErrEmptyStreamResponse) {
+		t.Fatalf("placeholder EOF accepted: %v", err)
 	}
 }

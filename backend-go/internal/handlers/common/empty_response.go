@@ -236,7 +236,7 @@ func IsGeminiResponseEmpty(resp *types.GeminiResponse) bool {
 	if resp == nil {
 		return true
 	}
-	if resp.PromptFeedback != nil && strings.TrimSpace(resp.PromptFeedback.BlockReason) != "" {
+	if resp.PromptFeedback != nil && types.GeminiPromptBlocked(resp.PromptFeedback.BlockReason) {
 		return false
 	}
 	if len(resp.Candidates) == 0 {

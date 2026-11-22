@@ -185,3 +185,19 @@ func (w *racingBranchWriter) CloseNotify() <-chan bool {
 func (w *racingBranchWriter) Pusher() http.Pusher {
 	return w.real.Pusher()
 }
+
+// findRacingBranchWriter preserves commit/discard behavior through transparent
+// streaming wrappers such as protocol terminal validation.
+func findRacingBranchWriter(writer http.ResponseWriter) (*racingBranchWriter, bool) {
+	for depth := 0; depth < 8 && writer != nil; depth++ {
+		if branch, ok := writer.(*racingBranchWriter); ok {
+			return branch, true
+		}
+		unwrap, ok := writer.(interface{ Unwrap() http.ResponseWriter })
+		if !ok {
+			return nil, false
+		}
+		writer = unwrap.Unwrap()
+	}
+	return nil, false
+}
