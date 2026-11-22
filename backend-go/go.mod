@@ -15,6 +15,7 @@ require (
 	github.com/redis/go-redis/v9 v9.23.0
 	github.com/soulteary/cache-kit/v2 v2.1.2
 	github.com/soulteary/cli-kit v1.9.4
+	github.com/soulteary/logger-kit/v3 v3.0.6
 	github.com/stretchr/testify v1.12.1
 	github.com/tidwall/gjson v1.19.0
 	github.com/tidwall/sjson v1.2.5
@@ -52,6 +53,7 @@ require (
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/philhofer/fwd v1.2.1 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
+	github.com/rs/zerolog v1.35.1 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.0 // indirect
 	github.com/tinylib/msgp v1.6.5 // indirect
