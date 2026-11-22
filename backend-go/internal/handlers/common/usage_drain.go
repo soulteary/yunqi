@@ -191,18 +191,11 @@ func (b *usageDrainBody) Read(p []byte) (int, error) {
 		if err := b.lifetime.client.Err(); err != nil {
 			return 0, err
 		}
-		n := copy(p, chunk.body)
-		b.remainder = chunk.body[n:]
-		if len(b.remainder) > 0 {
-			return n, nil
-		}
-		return n, chunk.err
+		return b.consume(chunk, p)
 	case <-b.done:
 		select {
 		case chunk := <-b.chunks:
-			n := copy(p, chunk.body)
-			b.remainder = chunk.body[n:]
-			return n, chunk.err
+			return b.consume(chunk, p)
 		default:
 			if b.pumpErr != nil {
 				return 0, b.pumpErr
@@ -211,6 +204,15 @@ func (b *usageDrainBody) Read(p []byte) (int, error) {
 		}
 	}
 }
+func (b *usageDrainBody) consume(chunk usageDrainChunk, p []byte) (int, error) {
+	n := copy(p, chunk.body)
+	b.remainder = chunk.body[n:]
+	if len(b.remainder) > 0 {
+		return n, nil
+	}
+	return n, chunk.err
+}
+
 func (b *usageDrainBody) Close() error {
 	if b.lifetime.client.Err() == nil {
 		b.lifetime.close()

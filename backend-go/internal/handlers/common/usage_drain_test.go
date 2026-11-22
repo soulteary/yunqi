@@ -298,3 +298,27 @@ func TestUsageDrainFinalUsageWithoutNewlinePreservesZero(t *testing.T) {
 		t.Fatalf("final no-newline usage lost: %#v provenance=%#v", usage, usage.Provenance)
 	}
 }
+
+func TestUsageDrainFinishedPumpWithEOFChunkAndSmallReads(t *testing.T) {
+	for iteration := 0; iteration < 64; iteration++ {
+		body := &usageDrainBody{lifetime: &usageDrainLifetime{client: context.Background()}, chunks: make(chan usageDrainChunk, 1), done: make(chan struct{}), pumpErr: io.EOF}
+		expected := strings.Repeat("a", 4097)
+		body.chunks <- usageDrainChunk{body: []byte(expected), err: io.EOF}
+		close(body.done)
+		var actual strings.Builder
+		single := make([]byte, 1)
+		for {
+			n, err := body.Read(single)
+			actual.Write(single[:n])
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		if actual.String() != expected {
+			t.Fatalf("finished pump truncated small Read: got=%d want=%d", actual.Len(), len(expected))
+		}
+	}
+}
