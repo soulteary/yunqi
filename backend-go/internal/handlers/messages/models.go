@@ -723,6 +723,11 @@ func normalizeModelEntry(model ModelEntry, upstream *config.UpstreamConfig, glob
 	if model.MaxOutputTokens == 0 && resolved.Capability.MaxOutputTokens > 0 {
 		model.MaxOutputTokens = resolved.Capability.MaxOutputTokens
 	}
+	if tier := normalizeAnthropicFamilyTier(resolved.Capability.AnthropicFamilyTier); tier != "" {
+		model.AnthropicFamilyTier = tier
+	} else {
+		model.AnthropicFamilyTier = normalizeAnthropicFamilyTier(model.AnthropicFamilyTier)
+	}
 	if model.AnthropicFamilyTier == "" {
 		model.AnthropicFamilyTier = anthropicFamilyTierForModel(model.ID, resolved.ActualModel, resolved.Capability.DisplayName)
 	}
@@ -819,6 +824,15 @@ func markAnthropicFamilyDefaults(models []ModelEntry) {
 		}
 		models[i].IsFamilyDefault = true
 		seen[tier] = true
+	}
+}
+
+func normalizeAnthropicFamilyTier(tier string) string {
+	switch tier = strings.ToLower(strings.TrimSpace(tier)); tier {
+	case "sonnet", "opus", "haiku", "fable", "mythos":
+		return tier
+	default:
+		return ""
 	}
 }
 

@@ -96,10 +96,39 @@ caddy run
 
 Claude Desktop 提供两种方式填充模型选择器：
 
-- **Model discovery（自动发现，默认开启）**：自动请求 `{Gateway base URL}/v1/models` 拉取模型列表。Yunqi 已实现该端点，无需额外配置。但自动发现主要识别 Claude 系模型 ID，若渠道以非 Claude 模型名提供服务（如 `glm-4.7`、`deepseek-v4` 等），可能不会出现在选择器中。
+- **Model discovery（自动发现，默认开启）**：自动请求 `{Gateway base URL}/v1/models` 拉取模型列表。Yunqi 已实现该端点。Claude Desktop 会过滤非 Claude 风格的模型 ID；只有名称符合客户端规则，或网关返回有效的 `anthropic_family_tier` 时，才会进入自动发现结果。
 - **Model list（手动列表）**：点击 **Add model** 逐个添加模型 ID，会覆盖自动发现的结果，**第一项为默认模型**。
 
-建议：上游是 Claude 官方或渠道已做 Claude 模型名映射时，保留自动发现即可；使用非 Claude 模型名时，关闭 Model discovery 并用 Model list 显式列出，第一个填你最常用的模型。
+非 Claude 模型可以继续使用手动列表。如果需要保留实际模型 ID 并启用自动发现，可在 Messages 渠道现有的 `modelCapabilities` 条目中显式设置 `anthropicFamilyTier`：
+
+```json
+{
+  "modelCapabilities": {
+    "deepseek-v4-pro": {
+      "anthropicFamilyTier": "sonnet",
+      "contextWindowTokens": 1048576
+    },
+    "deepseek-flash": {
+      "anthropicFamilyTier": "haiku",
+      "contextWindowTokens": 1048576
+    }
+  }
+}
+```
+
+这是渠道配置片段，需合并进现有条目，保留原来的输出上限、推理模式、价格和其他能力字段；不要直接替换整个配置文件。示例窗口来自模型能力声明，实际值应以渠道可承载的输入窗口为准。配置入口是持久化配置 JSON；本项没有新增控制台表单控件。
+
+`sonnet`、`opus`、`haiku`、`fable`、`mythos` 是客户端认可的 tier。这里的映射只指定 Desktop 的兼容槽位，不改变模型 ID、上游路由、供应商身份或协议验证状态，也不表示 DeepSeek 具备 Claude 的所有能力。Yunqi 不会默认给 DeepSeek 分配 tier；同一 tier 下按列表顺序选择一个默认项。仍需单独验证 Messages 推理和工具调用。
+
+模型发现响应使用 `anthropic_family_tier`、`is_family_default`、`supports_1m` 和 `max_input_tokens`；原有驼峰字段继续保留。配置 JSON 中的 `anthropicFamilyTier` 与 HTTP 响应中的下划线字段属于不同接口。可用以下请求检查当前运行实例：
+
+```bash
+curl "$YUNQI_BASE_URL/v1/models?limit=1000" \
+  -H "Authorization: Bearer $PROXY_ACCESS_KEY" \
+  -H "anthropic-version: 2023-06-01"
+```
+
+参考：[Anthropic 网关文档](https://claude.com/docs/third-party/claude-desktop/gateway)、[模型配置](https://claude.com/docs/third-party/claude-desktop/models)。客户端过滤规则和字段名同时在 Claude Desktop 6.28899.6 中核对；不同版本的界面和能力可能不同。
 
 ## 五、多配置管理
 
@@ -126,7 +155,7 @@ Gateway API key 与 Yunqi 的 `PROXY_ACCESS_KEY` 不一致。检查 Yunqi 启动
 
 ### 能连通但模型选择器为空
 
-自动发现只认 Claude 系模型 ID。确认 Messages 渠道的模型白名单/映射里包含可用模型；若模型名非 Claude 系，改用 **Model list** 手动添加（见上文第四节）。
+先检查 `/v1/models` 的 `data` 是否包含模型。若列表包含 DeepSeek 等非 Claude 模型，但 Desktop 报 `Gateway returned no usable models`，检查响应是否带有效的 `anthropic_family_tier`。仅有 HTTP 200、`display_name` 或 `supports1m` 不能通过客户端筛选。可使用第四节的显式 tier 映射，或在 **Model list** 手动添加实际模型 ID。
 
 ### 能否直接填 `http://localhost:3000`
 
