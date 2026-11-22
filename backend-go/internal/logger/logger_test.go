@@ -3,13 +3,15 @@ package logger
 import (
 	"bytes"
 	"encoding/json"
-	"github.com/soulteary/yunqi/internal/redaction"
 	"io"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/soulteary/yunqi/internal/redaction"
 )
 
 func resetLoggersForTest() {
@@ -209,6 +211,9 @@ func TestApplicationWriterProducesOneStructuredRecord(t *testing.T) {
 	}
 	if record["message"] != strings.TrimSuffix(message, "\n") || record["time"] == nil {
 		t.Fatalf("unexpected record: %#v", record)
+	}
+	if _, err := time.Parse(time.RFC3339Nano, record["time"].(string)); err != nil {
+		t.Fatalf("invalid timestamp: %v", err)
 	}
 	if _, ok := record["level"]; ok {
 		t.Fatalf("legacy messages must not infer severity: %#v", record)

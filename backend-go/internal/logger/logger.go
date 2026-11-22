@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	kitlogger "github.com/soulteary/logger-kit/v3"
 	"github.com/soulteary/yunqi/internal/redaction"
@@ -154,5 +155,6 @@ func newApplicationWriter(output io.Writer) io.Writer {
 	cfg := kitlogger.DefaultConfig()
 	cfg.Output = redaction.Writer(output)
 	cfg.Level = kitlogger.NoLevel
+	cfg.TimeFormat = time.RFC3339Nano
 	return redaction.Writer(kitlogger.New(cfg).Zerolog())
 }
