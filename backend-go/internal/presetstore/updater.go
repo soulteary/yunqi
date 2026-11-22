@@ -2,6 +2,7 @@ package presetstore
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -22,6 +23,7 @@ import (
 const (
 	defaultUpdaterInterval = 30 * time.Minute
 	defaultShardSizeLimit  = 2 << 20
+	defaultIndexSizeLimit  = 1 << 20
 	defaultHTTPTimeout     = 10 * time.Second
 )
 
@@ -29,7 +31,12 @@ var requiredRemoteShardKinds = []string{"subscriptionPreset", "modelRegistry", "
 
 // UpdaterConfig 控制远程预置更新器行为。
 type UpdaterConfig struct {
-	Enabled bool
+	SourceMaxAge                time.Duration
+	SourceFutureSkew            time.Duration
+	TrustedSigningKeys          map[string]ed25519.PublicKey
+	SigningConfigError          string
+	PriceChangeThresholdPercent float64
+	Enabled                     bool
 
 	IndexURL string
 	Interval time.Duration
@@ -42,6 +49,8 @@ type UpdaterConfig struct {
 }
 
 type PresetIndex struct {
+	SigningKeyID  string             `json:"signingKeyId,omitempty"`
+	Signature     string             `json:"signature,omitempty"`
 	SchemaVersion int                `json:"schemaVersion"`
 	DataVersion   string             `json:"dataVersion"`
 	PublishedAt   time.Time          `json:"publishedAt"`
@@ -73,8 +82,10 @@ type redirectPolicy struct {
 }
 
 type PresetUpdater struct {
-	store  *PresetStore
-	config UpdaterConfig
+	priceMu    sync.RWMutex
+	priceState priceReviewDisk
+	store      *PresetStore
+	config     UpdaterConfig
 
 	client *http.Client
 
@@ -97,6 +108,14 @@ type PresetUpdater struct {
 func NewPresetUpdater(store *PresetStore, cfg UpdaterConfig) *PresetUpdater {
 	if store == nil {
 		store = NewPresetStore(nil)
+	}
+	keys := map[string]ed25519.PublicKey{}
+	for id, key := range cfg.TrustedSigningKeys {
+		keys[id] = append(ed25519.PublicKey(nil), key...)
+	}
+	cfg.TrustedSigningKeys = keys
+	if cfg.SourceMaxAge < 0 || cfg.SourceFutureSkew < 0 {
+		cfg.SigningConfigError = "invalid preset source freshness durations"
 	}
 	if cfg.Interval <= 0 {
 		cfg.Interval = defaultUpdaterInterval
@@ -125,13 +144,47 @@ func (u *PresetUpdater) LoadCacheAtStartup() error {
 	if strings.TrimSpace(u.config.CacheDir) == "" {
 		return fmt.Errorf("[PresetUpdater-Cache] cacheDir 未配置")
 	}
+	if err := u.loadPriceDisk(); err != nil {
+		return err
+	}
 	bundle, err := LoadCache(u.config.CacheDir)
+	state := u.priceDiskSnapshot()
+	approved := u.approvedPriceBundle()
+	automatic := err == nil && u.validAutomaticCache(bundle, state)
+	explicit := err == nil && approved != nil && bundleHash(bundle) == bundleHash(approved)
+	if approved != nil && !automatic && !explicit {
+		bundle = approved
+		err = nil
+		explicit = true
+	}
 	if err != nil {
 		u.setCacheValid(false)
 		return err
 	}
+	if !automatic && !explicit {
+		currentVersion, versionErr := pricingVersion(u.store.Get())
+		if versionErr != nil {
+			return versionErr
+		}
+		cachedVersion, versionErr := pricingVersion(bundle)
+		if versionErr != nil {
+			return versionErr
+		}
+		if cachedVersion != currentVersion {
+			data, _ := json.Marshal(bundle)
+			index := &PresetIndex{SchemaVersion: bundle.SchemaVersion, DataVersion: bundle.DataVersion}
+			if _, err := u.stagePriceReview(bundle, index, data, false, "legacy_cache"); err != nil {
+				return err
+			}
+			u.setCacheValid(true)
+			return nil
+		}
+		if len(u.config.TrustedSigningKeys) > 0 {
+			return fmt.Errorf("[PresetUpdater-Cache] configured signing keys require a verified cache receipt")
+		}
+	}
 	currentVersion := u.store.DataVersion()
-	if compareDataVersion(bundle.DataVersion, currentVersion) <= 0 {
+	if compareDataVersion(bundle.DataVersion, currentVersion) <= 0 && !explicit && !automatic {
 		log.Printf("[PresetUpdater-Cache] 跳过非新版本缓存: current=%q cached=%q", currentVersion, bundle.DataVersion)
 		u.mu.Lock()
 		u.source = "embedded"
@@ -242,7 +295,7 @@ func (u *PresetUpdater) CheckOnce(ctx context.Context) error {
 		return err
 	}
 
-	indexBytes, err := u.fetchBytes(ctx, indexURL.String(), 0)
+	indexBytes, err := u.fetchBytes(ctx, indexURL.String(), defaultIndexSizeLimit)
 	if err != nil {
 		err = fmt.Errorf("[PresetUpdater-Check] 拉取 index 失败: %w", err)
 		u.finishCheck(startedAt, err, false)
@@ -261,6 +314,19 @@ func (u *PresetUpdater) CheckOnce(ctx context.Context) error {
 		return err
 	}
 
+	verified, err := u.verifyIndexSignature(&index)
+	if err == nil {
+		err = u.validateSourceFreshness(&index, time.Now())
+	}
+	if err != nil {
+		u.finishCheck(startedAt, err, false)
+		return err
+	}
+	blocked := u.priceDiskSnapshot().RollbackBlockedThrough
+	if blocked != "" && compareDataVersion(index.DataVersion, blocked) <= 0 {
+		u.finishCheck(startedAt, nil, false)
+		return nil
+	}
 	currentVersion := u.store.DataVersion()
 	if compareDataVersion(index.DataVersion, currentVersion) <= 0 {
 		log.Printf("[PresetUpdater-Check] 跳过非新版本 index: current=%q incoming=%q", currentVersion, index.DataVersion)
@@ -286,6 +352,15 @@ func (u *PresetUpdater) CheckOnce(ctx context.Context) error {
 		return nil
 	}
 
+	pending, err := u.stagePriceReview(bundle, &index, indexBytes, verified)
+	if err != nil {
+		u.finishCheck(startedAt, err, false)
+		return err
+	}
+	if pending {
+		u.finishCheck(startedAt, nil, false)
+		return nil
+	}
 	if strings.TrimSpace(u.config.CacheDir) != "" {
 		if err := SaveCache(u.config.CacheDir, bundle); err != nil {
 			err = fmt.Errorf("[PresetUpdater-Cache] 写缓存失败: %w", err)
@@ -294,6 +369,10 @@ func (u *PresetUpdater) CheckOnce(ctx context.Context) error {
 		}
 	}
 
+	if err := u.recordAutomaticSource(bundle, &index, indexBytes, verified); err != nil {
+		u.finishCheck(startedAt, err, false)
+		return err
+	}
 	u.store.Swap(bundle)
 	u.finishCheck(startedAt, nil, true)
 	log.Printf("[PresetUpdater-Check] 预置更新成功: version=%q", bundle.DataVersion)
@@ -318,7 +397,7 @@ func (u *PresetUpdater) loop(ctx context.Context, ready chan<- struct{}, done ch
 
 	close(ready)
 	if err := u.CheckOnce(ctx); err != nil {
-		log.Printf("[PresetUpdater-Start] 首次检查失败: %v", err)
+		log.Printf("[PresetUpdater-Start] source_check_failed")
 	}
 
 	ticker := time.NewTicker(u.config.Interval)
@@ -334,7 +413,7 @@ func (u *PresetUpdater) loop(ctx context.Context, ready chan<- struct{}, done ch
 			u.nextCheckAt = &next
 			u.mu.Unlock()
 			if err := u.CheckOnce(ctx); err != nil {
-				log.Printf("[PresetUpdater-Loop] 周期检查失败: %v", err)
+				log.Printf("[PresetUpdater-Loop] source_check_failed")
 			}
 		}
 	}
@@ -526,7 +605,7 @@ func (u *PresetUpdater) finishCheck(at time.Time, err error, updated bool) {
 	next := at.Add(u.config.Interval)
 	u.nextCheckAt = &next
 	if err != nil {
-		u.lastError = err.Error()
+		u.lastError = "source_check_failed"
 		return
 	}
 	u.lastError = ""

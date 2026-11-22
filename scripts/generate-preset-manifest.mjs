@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { signPresetIndex } from './preset-signing.mjs'
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -43,9 +44,10 @@ const CHANNEL_PRESET_SOURCES = {
 
 export const presetArtifactPaths = buildPresetArtifactPaths()
 
-export function renderPresetManifest({ rootDir = root, metadata } = {}) {
+export function renderPresetManifest({ rootDir = root, metadata, signing } = {}) {
   const renderedShards = SHARDS.map(shard => renderShard(shard, rootDir))
-  const indexContent = formatJson(buildIndex(renderedShards, rootDir, metadata))
+  const index = buildIndex(renderedShards, rootDir, metadata)
+  const indexContent = formatJson(signing ? signPresetIndex(index, signing) : index)
   const artifacts = []
   for (const output of ['docs/public/presets', 'backend-go/internal/presetstore/embedded']) {
     for (const [fileName, content] of [
@@ -76,18 +78,18 @@ function publicationMetadata(rootDir) {
   return { dataVersion: index.dataVersion, publishedAt: index.publishedAt }
 }
 
-export function renderSharedArtifacts(rootDir = root) {
+export function renderSharedArtifacts(rootDir = root, signing) {
   const schemaPath = join(rootDir, 'shared/capability-probe-schema.json')
   validateSchemaVersion(readJsonFile(schemaPath), 'shared/capability-probe-schema.json')
   return [
-    ...renderPresetManifest({ rootDir, metadata: publicationMetadata(rootDir) }),
+    ...renderPresetManifest({ rootDir, metadata: publicationMetadata(rootDir), signing }),
     ...renderChannelPresets(rootDir),
     { path: join(rootDir, 'backend-go/internal/handlers/embedded/capability-probe-schema.json'), content: ensureTrailingNewline(readFileSync(schemaPath, 'utf8')) },
   ]
 }
 
-export function synchronizeSharedArtifacts({ rootDir = root, check = false } = {}) {
-  const artifacts = renderSharedArtifacts(rootDir)
+export function synchronizeSharedArtifacts({ rootDir = root, check = false, signing } = {}) {
+  const artifacts = renderSharedArtifacts(rootDir, signing)
   if (!check) {
     writeArtifacts(artifacts)
     return []
@@ -293,11 +295,12 @@ function relativeToRoot(path) {
 const invokedPath = process.argv[1] ? realpathSync(process.argv[1]) : ''
 if (invokedPath === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2)
-  if (args.some(arg => arg !== '--check') || args.length > 1) {
-    console.error('Usage: node scripts/generate-preset-manifest.mjs [--check]')
+  if (args.some(arg => !['--check', '--sign'].includes(arg)) || new Set(args).size !== args.length) {
+    console.error('Usage: node scripts/generate-preset-manifest.mjs [--check] [--sign]')
     process.exitCode = 1
   } else {
-    const differences = synchronizeSharedArtifacts({ check: args.includes('--check') })
+    const signing = args.includes('--sign') ? { keyId: process.env.PRESET_INDEX_SIGNING_KEY_ID, privateKey: process.env.PRESET_INDEX_SIGNING_PRIVATE_KEY } : undefined
+    const differences = synchronizeSharedArtifacts({ check: args.includes('--check'), signing })
     if (differences.length) {
       console.error(`Generated shared artifacts are stale or missing:\n${differences.map(path => `  ${path}`).join('\n')}\nRun node scripts/generate-preset-manifest.mjs to regenerate.`)
       process.exitCode = 1
