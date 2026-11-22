@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -391,6 +392,9 @@ func TestRedisUsageDrainRetainsBudgetAndLeaseUntilFinalUsageOrLeaseLoss(t *testi
 					return
 				}
 				w.Header().Set("Content-Type", "text/event-stream")
+				if !loseLease {
+					w.Header().Set("Content-Type", "application/json")
+				} // Mislabelled SSE still has authoritative billing usage.
 				_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\ndata: {\"choices\":[{\"delta\":{\"content\":\" world\"}}]}\n\n")
 				w.(http.Flusher).Flush()
 				close(started)
@@ -502,5 +506,39 @@ func TestRedisUsageDrainRetainsBudgetAndLeaseUntilFinalUsageOrLeaseLoss(t *testi
 				t.Fatalf("drain caused extra supplier attempts %d", calls.Load())
 			}
 		})
+	}
+}
+
+func TestRedisOutboundPolicyTighteningBlocksExistingPooledAdmissionClient(t *testing.T) {
+	redisURL, _ := newIsolatedRedisEndpoint(t)
+	var calls atomic.Int64
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, redisAdmissionReply)
+	}))
+	defer provider.Close()
+	node := redisAdmissionNode(t, redisURL, "pooled-policy", "", "route-proxy", 1, 0)
+	if err := node.cfgManager.AddChatUpstream(redisAdmissionUpstream(provider.URL, "openai")); err != nil {
+		t.Fatal(err)
+	}
+	handler := httpbridge.Handler(node.newRouter())
+	if response := callRedisAdmission(handler, "route-proxy", redisAdmissionBody); response.Code != 200 {
+		t.Fatalf("initial admission %d %s", response.Code, response.Body.String())
+	}
+	_, providerPort, err := net.SplitHostPort(provider.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Keep the actual supplier allowed, but disallow Redis's different port.
+	// A cached Redis connection must not bypass newly enforced global policy.
+	t.Setenv("YUNQI_OUTBOUND_ALLOWED_PORTS", providerPort)
+	response := callRedisAdmission(handler, "route-proxy", redisAdmissionBody)
+	if response.Code != 503 || !strings.Contains(response.Body.String(), "proxy_shared_admission_unavailable") || calls.Load() != 1 {
+		t.Fatalf("pooled Redis bypassed policy: %d calls=%d %s", response.Code, calls.Load(), response.Body.String())
+	}
+	t.Setenv("YUNQI_OUTBOUND_ALLOWED_PORTS", "")
+	if response := callRedisAdmission(handler, "route-proxy", redisAdmissionBody); response.Code != 200 {
+		t.Fatalf("local policy damaged provider key %d %s", response.Code, response.Body.String())
 	}
 }

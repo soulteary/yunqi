@@ -1924,7 +1924,7 @@ func TryUpstreamWithAllKeys(
 			// Capture decoded provider usage even when post-cancel drain is disabled.
 			// The helper clears encoding metadata, so handler decompression stays idempotent.
 			compressionSetupErr := prepareDecodedUsageResponse(resp)
-			capture := &usageCapture{ReadCloser: resp.Body, stream: strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream")}
+			capture := &usageCapture{ReadCloser: resp.Body, stream: isStream || strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream")}
 			resp.Body = capture
 			var drainBody *usageDrainBody
 			if drainLifetime != nil && compressionSetupErr == nil {

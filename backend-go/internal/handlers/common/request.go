@@ -365,7 +365,7 @@ func SendRequestWithLifecycleTrace(req *http.Request, upstream *config.UpstreamC
 		}
 	}
 	if attempt != nil {
-		capture := &usageCapture{ReadCloser: resp.Body, stream: strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream"), raw: make(map[string]json.RawMessage)}
+		capture := &usageCapture{ReadCloser: resp.Body, stream: isStream || strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream"), raw: make(map[string]json.RawMessage)}
 		resp.Body = &budgetResponseBody{capture: capture, attempt: attempt, pricing: pricing, protocol: protocol, status: resp.StatusCode}
 	}
 	resp.Body = requestscope.WrapBody(req.Context(), resp.Body, binding)
