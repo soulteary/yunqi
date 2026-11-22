@@ -24,6 +24,30 @@ jobs:
           bun run build
       - name: Embed frontend
         run: bash scripts/embed-frontend.sh
+      - name: Cache isolated Redis test binary
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/yunqi-test-redis/bin
+          key: redis-test-${{ runner.os }}-${{ runner.arch }}-8.10.2-b9ffee22-libc-v1
+      - name: Prepare isolated Redis test server
+        env:
+          REDIS_VERSION: 8.10.2
+          REDIS_SHA256: b9ffee226b5eecdba98a679260dad764b2a4ebd90dce4ad5ac9e9f3eef9c02b3
+        run: |
+          redis_root="$RUNNER_TEMP/yunqi-test-redis"
+          mkdir -p "$redis_root/bin"
+          if [ ! -x "$redis_root/bin/redis-server" ]; then
+            curl --fail --location --proto '=https' "https://download.redis.io/releases/redis-$REDIS_VERSION.tar.gz" -o "$redis_root/redis.tar.gz"
+            echo "$REDIS_SHA256  $redis_root/redis.tar.gz" | sha256sum --check --status
+            tar -xzf "$redis_root/redis.tar.gz" -C "$redis_root"
+            make -C "$redis_root/redis-$REDIS_VERSION/src" -j2 redis-server MALLOC=libc BUILD_TLS=no
+            cp "$redis_root/redis-$REDIS_VERSION/src/redis-server" "$redis_root/bin/redis-server"
+          fi
+          "$redis_root/bin/redis-server" --version
+          echo "YUNQI_TEST_REDIS_SERVER=$redis_root/bin/redis-server" >> "$GITHUB_ENV"
+      - name: Verify isolated Redis integration
+        working-directory: backend-go
+        run: go test -v -p 2 -run '^(TestRedis|TestSharedIdentity)' ./internal/entrylease ./internal/redisconn .
       - name: Verify backend
         working-directory: backend-go
         run: |

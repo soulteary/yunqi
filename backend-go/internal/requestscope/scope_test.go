@@ -65,3 +65,24 @@ func TestSourceLossCancelsDetachedContextAndClosesBody(t *testing.T) {
 	}
 	_ = wrapped.Close()
 }
+
+func TestCauseSurvivesWithoutCancelAndSkipsNormalCompletion(t *testing.T) {
+	normal := New(nil)
+	failed := New(nil)
+	parent, cancel := context.WithCancel(context.Background())
+	cancel()
+	ctx := context.WithoutCancel(WithSource(WithSource(parent, normal), failed))
+	if Cause(ctx) != nil {
+		t.Fatal("client cancellation became resource failure")
+	}
+	normal.ParentDone()
+	if Cause(ctx) != nil {
+		t.Fatal("normal source completion became resource failure")
+	}
+	sentinel := errors.New("resource lost")
+	failed.Signal(sentinel)
+	if !errors.Is(Cause(ctx), sentinel) {
+		t.Fatalf("lost resource cause %v", Cause(ctx))
+	}
+	failed.ParentDone()
+}

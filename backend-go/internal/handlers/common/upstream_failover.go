@@ -1366,7 +1366,7 @@ func TryUpstreamWithAllKeys(
 						metricsManager.RecordRequestFinalizeIgnored(currentBaseURL, apiKey, metricsServiceType, requestID)
 					})
 					channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, metricsServiceType, executionKind)
-					CompleteLog(channelLogStore, metricsKey, logRequestID, 0, false, "entry budget rejected", isRetryAttempt)
+					CompleteLog(channelLogStore, metricsKey, logRequestID, 0, false, "entry admission rejected", isRetryAttempt)
 					return false, "", 0, nil, nil, err
 				}
 				// 竞速败出：被赢家取消（SendRequest 阶段），不计失败不 failover。
@@ -1924,7 +1924,7 @@ func TryUpstreamWithAllKeys(
 			// Capture decoded provider usage even when post-cancel drain is disabled.
 			// The helper clears encoding metadata, so handler decompression stays idempotent.
 			compressionSetupErr := prepareDecodedUsageResponse(resp)
-			capture := &usageCapture{ReadCloser: resp.Body, stream: strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream")}
+			capture := &usageCapture{ReadCloser: resp.Body, stream: isStream || strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream")}
 			resp.Body = capture
 			var drainBody *usageDrainBody
 			if drainLifetime != nil && compressionSetupErr == nil {
@@ -2024,18 +2024,18 @@ func TryUpstreamWithAllKeys(
 					// Handled=false：外层竞速编排据闸门赢家返回实际服务分支的结果。
 					return false, "", 0, nil, usage, err
 				}
+				if isStream && streamingUserID != "" {
+					channelScheduler.UpdateConversationStatus(kind, streamingUserID, "active")
+				}
 				if cause := budgetScopeCause(httpbridge.Request(c).Context()); cause != nil {
 					measureRequestFinalize(c, func() {
 						metricsManager.RecordRequestFinalizeIgnored(currentBaseURL, apiKey, metricsServiceType, requestID)
 					})
 					channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, metricsServiceType, executionKind)
 					channelLogStore.Update(metricsKey, logRequestID, func(log *metrics.ChannelLog) { log.ErrorSource = "gateway" })
-					CompleteLog(channelLogStore, metricsKey, logRequestID, 0, false, "entry budget resource expired", isRetryAttempt)
+					CompleteLog(channelLogStore, metricsKey, logRequestID, 0, false, "entry admission resource expired", isRetryAttempt)
 					HandleEntryBudgetError(c, cause)
 					return true, "", 0, nil, usage, cause
-				}
-				if isStream && streamingUserID != "" {
-					channelScheduler.UpdateConversationStatus(kind, streamingUserID, "active")
 				}
 				lastError = err
 				// 区分客户端错误和渠道故障；errors.As 匹配 rejected，防止未来
