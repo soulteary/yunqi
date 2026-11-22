@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"math/rand/v2"
 	"regexp"
 	"sort"
 	"strconv"
@@ -109,9 +110,14 @@ func InitializeRedis(ctx context.Context, client *redis.Client, namespace, epoch
 	}, r.prefix+"epoch", r.prefix+"registry", r.prefix+"requests")
 }
 func (r *redisLedger) mutate(ctx context.Context, principal string, id string, create bool, fn func(*sharedState, time.Time) error) error {
-	call, cancel := context.WithTimeout(ctx, 3*time.Second)
+	// Match the existing reservation/settlement RPC budget while respecting a
+	// shorter parent deadline. Contenders must also validate read-only failures.
+	call, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	ctx = call
+	if err := ctx.Err(); err != nil {
+		return ErrUnavailable
+	}
 	digest := principalDigest(principal)
 	if principal == "" {
 		var err error
@@ -122,7 +128,30 @@ func (r *redisLedger) mutate(ctx context.Context, principal string, id string, c
 	}
 	key := r.prefix + "p:" + digest
 	for retry := 0; retry < 32; retry++ {
-		err := r.client.Watch(ctx, func(tx *redis.Tx) error {
+		err := r.client.Watch(ctx, func(tx *redis.Tx) (result error) {
+			commitAttempted := false
+			defer func() {
+				if result == nil || commitAttempted {
+					return
+				}
+				if err := ctx.Err(); err != nil {
+					result = err
+					return
+				}
+				// WATCH does not make the preceding GET/HGET reads a snapshot. Even a
+				// validation/business error may come from mixed generations (e.g. a
+				// missing principal read before another node atomically registers it).
+				// A read-only EXEC validates the watched keys before rejecting. Empty
+				// pipelines skip EXEC in go-redis, so explicitly queue PING, never a write.
+				_, checkErr := tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error { pipe.Ping(ctx); return nil })
+				if checkErr != nil {
+					result = checkErr
+				}
+			}()
+
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			epoch, err := tx.Get(ctx, r.prefix+"epoch").Result()
 			if err != nil || epoch != r.epoch {
 				return ErrUnavailable
@@ -240,6 +269,9 @@ func (r *redisLedger) mutate(ctx context.Context, principal string, id string, c
 			if err != nil {
 				return ErrUnavailable
 			}
+			if err = ctx.Err(); err != nil {
+				return err
+			}
 			if err = state.recover(now); err != nil {
 				return err
 			}
@@ -298,7 +330,14 @@ func (r *redisLedger) mutate(ctx context.Context, principal string, id string, c
 			if err != nil || len(encoded) > sharedLedgerMaxBytes {
 				return ErrUnavailable
 			}
+			if err = ctx.Err(); err != nil {
+				return err
+			}
+			commitAttempted = true
 			_, err = tx.TxPipelined(ctx, func(p redis.Pipeliner) error {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
 				p.Set(ctx, key, encoded, 0)
 				for archiveKey, archive := range archives {
 					p.Set(ctx, archiveKey, archive, 0)
@@ -326,7 +365,7 @@ func (r *redisLedger) mutate(ctx context.Context, principal string, id string, c
 				if newIndex {
 					p.HSet(ctx, r.prefix+"requests", id, digest)
 				}
-				return nil
+				return ctx.Err()
 			})
 			return err
 		}, key, key+":history", key+":rolling", key+":rolling-index", r.prefix+"epoch", r.prefix+"registry", r.prefix+"requests")
@@ -339,7 +378,7 @@ func (r *redisLedger) mutate(ctx context.Context, principal string, id string, c
 		select {
 		case <-ctx.Done():
 			return ErrUnavailable
-		case <-time.After(time.Duration(retry+1) * time.Millisecond):
+		case <-time.After(time.Duration(1+rand.IntN(retry+1)) * time.Millisecond):
 		}
 	}
 	return ErrUnavailable
