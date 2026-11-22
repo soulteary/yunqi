@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	kitlogger "github.com/soulteary/logger-kit/v3"
 	"github.com/soulteary/yunqi/internal/redaction"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
@@ -87,13 +88,13 @@ func Setup(cfg *Config) error {
 		// 控制台通道根据 Console 开关
 		if cfg.Console {
 			consoleLog = log.New(redaction.Writer(os.Stdout), "", flags)
-			log.SetOutput(redaction.Writer(os.Stdout))
+			log.SetOutput(newApplicationWriter(os.Stdout))
 		} else {
 			consoleLog = log.New(io.Discard, "", flags)
 			log.SetOutput(io.Discard)
 		}
 
-		log.SetFlags(flags)
+		log.SetFlags(0)
 		log.Printf("[Logger-Init] 日志文件已禁用，仅输出到控制台")
 		return nil
 	}
@@ -117,9 +118,9 @@ func Setup(cfg *Config) error {
 
 	// log.Printf 写入 stdout + 文件（普通日志，如初始化、调度信息等）
 	if cfg.Console {
-		log.SetOutput(redaction.Writer(io.MultiWriter(os.Stdout, lumberLogger)))
+		log.SetOutput(newApplicationWriter(io.MultiWriter(os.Stdout, lumberLogger)))
 	} else {
-		log.SetOutput(redaction.Writer(lumberLogger))
+		log.SetOutput(newApplicationWriter(lumberLogger))
 	}
 	// rawFileLog 始终仅写文件（原始 JSON），用于双通道输出
 	rawFileLog = log.New(redaction.Writer(lumberLogger), "", flags)
@@ -132,7 +133,7 @@ func Setup(cfg *Config) error {
 		consoleLog = rawFileLog
 	}
 
-	log.SetFlags(flags)
+	log.SetFlags(0)
 
 	log.Printf("[Logger-Init] 日志系统已初始化")
 	log.Printf("[Logger-Init] 日志文件: %s", logPath)
@@ -145,4 +146,13 @@ func Setup(cfg *Config) error {
 func IsLogDisabled(logDir string) bool {
 	lower := strings.ToLower(strings.TrimSpace(logDir))
 	return lower == "none" || lower == "null"
+}
+
+// newApplicationWriter keeps legacy messages unclassified and uses the kit's
+// standard-log adapter. Redaction runs before JSON encoding and at the sink.
+func newApplicationWriter(output io.Writer) io.Writer {
+	cfg := kitlogger.DefaultConfig()
+	cfg.Output = redaction.Writer(output)
+	cfg.Level = kitlogger.NoLevel
+	return redaction.Writer(kitlogger.New(cfg).Zerolog())
 }

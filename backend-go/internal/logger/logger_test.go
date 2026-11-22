@@ -1,6 +1,8 @@
 package logger
 
 import (
+	"bytes"
+	"encoding/json"
 	"github.com/soulteary/yunqi/internal/redaction"
 	"io"
 	"log"
@@ -188,5 +190,110 @@ func TestEveryFileLogChannelRedactsCredentials(t *testing.T) {
 	}
 	if strings.Contains(string(data), secret) || strings.Count(string(data), redaction.Mask) != 3 {
 		t.Fatalf("unsafe log file: %s", data)
+	}
+}
+
+func TestApplicationWriterProducesOneStructuredRecord(t *testing.T) {
+	var output bytes.Buffer
+	writer := newApplicationWriter(&output)
+	message := "warning: first line\nsecond line\n"
+	if n, err := writer.Write([]byte(message)); err != nil || n != len(message) {
+		t.Fatalf("Write() = %d, %v", n, err)
+	}
+	if bytes.Count(output.Bytes(), []byte("\n")) != 1 {
+		t.Fatalf("expected one JSON record: %s", output.Bytes())
+	}
+	var record map[string]any
+	if err := json.Unmarshal(output.Bytes(), &record); err != nil {
+		t.Fatalf("invalid structured record: %v", err)
+	}
+	if record["message"] != strings.TrimSuffix(message, "\n") || record["time"] == nil {
+		t.Fatalf("unexpected record: %#v", record)
+	}
+	if _, ok := record["level"]; ok {
+		t.Fatalf("legacy messages must not infer severity: %#v", record)
+	}
+}
+
+func TestApplicationWriterUsesCurrentRedactionRules(t *testing.T) {
+	var output bytes.Buffer
+	writer := newApplicationWriter(&output)
+	const secret = "opaque\"credential\\value"
+	redaction.Configure([]string{secret})
+	t.Cleanup(func() { redaction.Configure(nil) })
+	_, _ = writer.Write([]byte(secret + "\n"))
+	var record map[string]any
+	if err := json.Unmarshal(output.Bytes(), &record); err != nil {
+		t.Fatal(err)
+	}
+	if record["message"] != redaction.Mask {
+		t.Fatalf("secret was not redacted before JSON encoding: %#v", record)
+	}
+}
+
+func TestSetupPreservesRawFileFormatAndStandardLogCapture(t *testing.T) {
+	dir := t.TempDir()
+	if err := Setup(&Config{LogDir: dir, LogFile: "channels.log", Console: false}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(resetLoggersForTest)
+	log.Print("application-record")
+	RawFileLog().Print(`{"raw-marker":true}`)
+	data, err := os.ReadFile(filepath.Join(dir, "channels.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(data), "application-record") != 1 || strings.Count(string(data), "raw-marker") != 1 {
+		t.Fatalf("duplicate or missing records: %s", data)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		if strings.Contains(line, "raw-marker") && !strings.HasSuffix(line, `{"raw-marker":true}`) {
+			t.Fatalf("raw record was JSON encoded again: %s", line)
+		}
+	}
+	var capture bytes.Buffer
+	log.SetOutput(&capture)
+	log.Print("captured-record")
+	if capture.String() != "captured-record\n" {
+		t.Fatalf("standard log capture was bypassed: %s", capture.Bytes())
+	}
+}
+
+func TestSetupKeepsFileAndConsoleChannelsSeparate(t *testing.T) {
+	original := os.Stdout
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = writer
+	t.Cleanup(func() {
+		os.Stdout = original
+		_ = reader.Close()
+		_ = writer.Close()
+		resetLoggersForTest()
+	})
+	dir := t.TempDir()
+	if err := Setup(&Config{LogDir: dir, LogFile: "channels.log", Console: true}); err != nil {
+		t.Fatal(err)
+	}
+	log.Print("shared-application-marker")
+	RawFileLog().Print(`{"file-only-marker":true}`)
+	ConsoleLog().Print("console-only-marker")
+	_ = writer.Close()
+	console, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.ReadFile(filepath.Join(dir, "channels.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for destination, data := range map[string][]byte{"file": file, "console": console} {
+		if strings.Count(string(data), "shared-application-marker") != 1 {
+			t.Fatalf("application log duplicated or absent in %s: %s", destination, data)
+		}
+	}
+	if strings.Contains(string(file), "console-only-marker") || strings.Contains(string(console), "file-only-marker") {
+		t.Fatalf("log channels crossed: file=%s console=%s", file, console)
 	}
 }
