@@ -69,6 +69,7 @@
                 @update:base-urls-text="baseUrlsText = $event"
                 @menu-update="onMenuUpdate"
               />
+              <RequestPreview v-if="isEditing && props.channel?.channelUid && ['messages', 'chat', 'responses', 'gemini'].includes(props.channelType)" :channel-uid="props.channel.channelUid" :channel-type="props.channelType" :draft="form" />
               <ProtocolModelLimits v-model="protocolModelLimits" :disabled="submitting" />
               <ProtocolModelAvailability :routes="protocolModelRoutes" :loading="managedModelsLoading" @refreshed="handleProtocolModelsRefreshed" />
             </section>
@@ -473,6 +474,7 @@
 
 <script setup lang="ts">
 import OutboundNetworkSettings from './OutboundNetworkSettings.vue'
+import RequestPreview from './RequestPreview.vue'
 
 import { computed, ref, watch } from 'vue'
 

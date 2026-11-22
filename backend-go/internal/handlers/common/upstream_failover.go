@@ -1352,6 +1352,16 @@ func TryUpstreamWithAllKeys(
 			}
 			if err != nil {
 				lastError = err
+				if isEntryBudgetError(err) {
+					channelLogStore.Update(metricsKey, logRequestID, func(log *metrics.ChannelLog) { log.ErrorSource = "gateway" })
+					telemetry.Event(httpbridge.Request(c).Context(), "limiter", "rejected")
+					measureRequestFinalize(c, func() {
+						metricsManager.RecordRequestFinalizeIgnored(currentBaseURL, apiKey, metricsServiceType, requestID)
+					})
+					channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, metricsServiceType, executionKind)
+					CompleteLog(channelLogStore, metricsKey, logRequestID, 0, false, "entry budget rejected", isRetryAttempt)
+					return false, "", 0, nil, nil, err
+				}
 				// 竞速败出：被赢家取消（SendRequest 阶段），不计失败不 failover。
 				if isRacingSuperseded(c, err) {
 					measureRequestFinalize(c, func() {
@@ -1905,7 +1915,11 @@ func TryUpstreamWithAllKeys(
 			writeEchoMappingHeaders(c, cfgManager, appliedMappedModel, actualAttemptModel, model)
 			capture := &usageCapture{ReadCloser: resp.Body, stream: strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream")}
 			resp.Body = capture
-			usage, err = handleSuccess(c, resp, upstreamCopy, apiKey, attemptBody)
+			if isStream {
+				usage, err = withStreamTerminalGuard(c, resp, providers.ActualServiceType(c, upstreamCopy.ServiceType), apiType, func() (*types.Usage, error) { return handleSuccess(c, resp, upstreamCopy, apiKey, attemptBody) })
+			} else {
+				usage, err = handleSuccess(c, resp, upstreamCopy, apiKey, attemptBody)
+			}
 			if err != nil {
 				channelLogStore.Update(metricsKey, logRequestID, func(log *metrics.ChannelLog) { log.ErrorSource = diagnosticStreamErrorSource(err) })
 			}
@@ -1971,6 +1985,16 @@ func TryUpstreamWithAllKeys(
 					RequestLogf(c, "[Racing] 分支败出（%s key=%s），由更快分支接管响应", apiType, utils.MaskAPIKey(apiKey))
 					// Handled=false：外层竞速编排据闸门赢家返回实际服务分支的结果。
 					return false, "", 0, nil, usage, err
+				}
+				if cause := budgetScopeCause(httpbridge.Request(c).Context()); cause != nil {
+					measureRequestFinalize(c, func() {
+						metricsManager.RecordRequestFinalizeIgnored(currentBaseURL, apiKey, metricsServiceType, requestID)
+					})
+					channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, metricsServiceType, executionKind)
+					channelLogStore.Update(metricsKey, logRequestID, func(log *metrics.ChannelLog) { log.ErrorSource = "gateway" })
+					CompleteLog(channelLogStore, metricsKey, logRequestID, 0, false, "entry budget resource expired", isRetryAttempt)
+					HandleEntryBudgetError(c, cause)
+					return true, "", 0, nil, usage, cause
 				}
 				if isStream && streamingUserID != "" {
 					channelScheduler.UpdateConversationStatus(kind, streamingUserID, "active")

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // GeminiFinishReasonFailed distinguishes generation failures from normal
@@ -53,4 +54,10 @@ func ValidateGeminiFinishReasons(data []byte) error {
 // GeminiFinishReasonTerminal excludes the standard placeholder/default enum.
 func GeminiFinishReasonTerminal(reason string) bool {
 	return reason != "" && reason != "FINISH_REASON_UNSPECIFIED"
+}
+
+// GeminiPromptBlocked excludes the unused enum default from actual refusals.
+func GeminiPromptBlocked(reason string) bool {
+	reason = strings.TrimSpace(reason)
+	return reason != "" && reason != "BLOCK_REASON_UNSPECIFIED"
 }

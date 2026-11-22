@@ -3,6 +3,7 @@ package presetstore
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/soulteary/yunqi/internal/pricingtypes"
 	"math"
 	"net/url"
 	"regexp"
@@ -122,6 +123,9 @@ func validateModelRegistryPreset(preset *ModelRegistryPreset) error {
 			return fmt.Errorf("[presetstore] modelRegistry.upstreamCapabilities[%d].%w", idx, err)
 		}
 		if capability.Pricing != nil {
+			if err := pricingtypes.Validate(capability.Pricing); err != nil {
+				return fmt.Errorf("[presetstore] invalid model pricing: %w", err)
+			}
 			if err := validatePricePointer("inputCacheHitPrice", capability.Pricing.InputCacheHitPrice); err != nil {
 				return fmt.Errorf("[presetstore] modelRegistry.upstreamCapabilities[%d].pricing.%w", idx, err)
 			}

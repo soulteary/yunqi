@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 
 	"github.com/joho/godotenv"
 	"github.com/soulteary/yunqi/internal/autopilot"
 	"github.com/soulteary/yunqi/internal/balanceprobe"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/conversation"
+	"github.com/soulteary/yunqi/internal/entrybudget"
 	"github.com/soulteary/yunqi/internal/errutil"
 	"github.com/soulteary/yunqi/internal/eventbus"
 	"github.com/soulteary/yunqi/internal/handlers"
@@ -104,6 +106,8 @@ func runService(cliOpts cliOptions) {
 
 	// Candidate keys must be observed before initial parsing/validation can log.
 	initializeCredentialRedaction(envCfg)
+	envCfg.BudgetManager = entrybudget.NewManager(filepath.Join(filepath.Dir(paths.ConfigPath), "entry-budget.db"))
+	defer envCfg.BudgetManager.Close()
 	cfgManager, err := config.NewConfigManager(paths.ConfigPath, paths.BackupDir)
 	if err != nil {
 		log.Fatalf("初始化配置管理器失败: %v", err)

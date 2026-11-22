@@ -29,6 +29,7 @@ func RegisterRoutes(apiGroup fiber.Router, cfgManager *config.ConfigManager, cha
 	h := &Handler{cm: cfgManager, scheduler: channelScheduler}
 	apiGroup.Get("/channels", h.List)
 	apiGroup.Get("/channels/:uid", h.Get)
+	apiGroup.Post("/channels/:uid/request-preview", h.RequestPreview)
 	apiGroup.Post("/channels", h.Create)
 	apiGroup.Put("/channels/:uid", h.Update)
 	apiGroup.Delete("/channels/:uid", h.Delete)

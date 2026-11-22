@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/soulteary/yunqi/internal/entrybudget"
 	"github.com/soulteary/yunqi/internal/eventbus"
+	"github.com/soulteary/yunqi/internal/pricingtypes"
 	"github.com/soulteary/yunqi/internal/statelog"
 	"github.com/soulteary/yunqi/internal/utils"
 )
@@ -663,24 +665,11 @@ type EmbeddingCapability struct {
 }
 
 // ModelPricing 描述模型公开计费信息，单位与币种由 unit/currency 标明。
-type ModelPricing struct {
-	Unit                string             `json:"unit,omitempty"`
-	Currency            string             `json:"currency,omitempty"`
-	InputCacheHitPrice  *float64           `json:"inputCacheHitPrice,omitempty"`
-	InputCacheMissPrice *float64           `json:"inputCacheMissPrice,omitempty"`
-	OutputPrice         *float64           `json:"outputPrice,omitempty"`
-	Tiers               []ModelPricingTier `json:"tiers,omitempty"`
-}
+type ModelPricing = pricingtypes.Pricing
 
-// ModelPricingTier 描述按输入 token 规模区分的模型阶梯计费。
-type ModelPricingTier struct {
-	Label               string   `json:"label,omitempty"`
-	InputTokensAbove    int      `json:"inputTokensAbove,omitempty"`
-	InputTokensUpTo     int      `json:"inputTokensUpTo,omitempty"`
-	InputCacheHitPrice  *float64 `json:"inputCacheHitPrice,omitempty"`
-	InputCacheMissPrice *float64 `json:"inputCacheMissPrice,omitempty"`
-	OutputPrice         *float64 `json:"outputPrice,omitempty"`
-}
+// ModelPricingTier retains the existing input length tier semantics.
+type ModelPricingTier = pricingtypes.Tier
+type ImagePriceRule = pricingtypes.ImagePriceRule
 
 // ContextRoutingConfig 控制上下文路由过滤。
 type ContextRoutingConfig struct {
@@ -1411,6 +1400,7 @@ type CircuitBreakerConfig struct {
 }
 
 type Config struct {
+	PrincipalBudgets []entrybudget.Policy   `json:"principalBudgets,omitempty"`
 	BodyLogging      BodyLoggingSettings    `json:"bodyLogging,omitzero"`
 	BodyLogAudit     []BodyLogAuditEvent    `json:"bodyLogAudit,omitempty"`
 	IdentityProxy    *IdentityProxyConfig   `json:"identityProxy,omitempty"`
@@ -1541,6 +1531,7 @@ func (cm *ConfigManager) GetConfig() Config {
 
 	// 深拷贝整个 Config 结构体
 	cloned := cm.config
+	cloned.PrincipalBudgets = append([]entrybudget.Policy(nil), cm.config.PrincipalBudgets...)
 	if cm.config.IdentityProxy != nil {
 		value := cloneIdentityProxy(*cm.config.IdentityProxy)
 		cloned.IdentityProxy = &value

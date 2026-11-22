@@ -407,6 +407,9 @@ func tryLocalCompactWithKey(
 	// 发送请求
 	resp, err := common.SendRequest(req, upstream, envCfg, stream, "Responses")
 	if err != nil {
+		if budgetErr := compactBudgetError(err); budgetErr != nil {
+			return false, budgetErr
+		}
 		return false, &compactError{status: 502, body: []byte(`{"error":"本地 compact 上游请求失败"}`), shouldFailover: true, err: err}
 	}
 	defer errutil.IgnoreDeferred(resp.Body.Close)

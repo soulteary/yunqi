@@ -585,12 +585,49 @@ func handleSuccess(c fiber.Ctx, resp *http.Response, envCfg *config.EnvConfig, s
 	if respMap == nil {
 		return nil, nil
 	}
+	usage := &types.Usage{}
 	if u, ok := respMap["usage"].(map[string]interface{}); ok {
-		inputTokens, _ := u["input_tokens"].(float64)
-		outputTokens, _ := u["output_tokens"].(float64)
-		return &types.Usage{InputTokens: int(inputTokens), OutputTokens: int(outputTokens)}, nil
+		input, _ := u["input_tokens"].(float64)
+		output, _ := u["output_tokens"].(float64)
+		usage.InputTokens = int(input)
+		usage.OutputTokens = int(output)
+		types.CaptureUsageSource(usage, "images", bodyBytes)
 	}
-	return nil, nil
+	imageCount := 0
+	if data, ok := respMap["data"].([]interface{}); ok {
+		for _, item := range data {
+			if image, ok := item.(map[string]interface{}); ok {
+				url, _ := image["url"].(string)
+				b64, _ := image["b64_json"].(string)
+				if url != "" || b64 != "" {
+					imageCount++
+				}
+			}
+		}
+	}
+	if imageCount > 0 {
+		quality, size := "", ""
+		if isMultipartContentType(requestContentType) {
+			quality, _ = extractMultipartField(requestBody, requestContentType, "quality")
+			size, _ = extractMultipartField(requestBody, requestContentType, "size")
+		} else {
+			var attrs struct {
+				Quality string `json:"quality"`
+				Size    string `json:"size"`
+			}
+			_ = json.Unmarshal(requestBody, &attrs)
+			quality, size = attrs.Quality, attrs.Size
+		}
+		usage.ImageUnits = []types.ImageUsage{{Count: imageCount, Quality: quality, Size: size}}
+	}
+	if usage.Provenance == nil && imageCount > 0 {
+		raw, _ := json.Marshal(map[string]int{"image_count": imageCount})
+		usage.Provenance = &types.UsageProvenance{UsageSource: "provider", Protocol: "images", RawUsage: raw}
+	}
+	if usage.Provenance == nil && usage.InputTokens == 0 && usage.OutputTokens == 0 && imageCount == 0 {
+		return nil, nil
+	}
+	return usage, nil
 }
 
 func shouldConvertImageURLToB64JSON(upstream *config.UpstreamConfig, requestBody []byte, contentType string) bool {
@@ -845,6 +882,9 @@ func imagesErrorResponse(c fiber.Ctx, statusCode int, message, errorType, code s
 }
 
 func handleAllChannelsFailed(c fiber.Ctx, failoverErr *common.FailoverError, lastError error) {
+	if common.HandleEntryBudgetError(c, lastError) {
+		return
+	}
 	if failoverErr != nil {
 		httpbridge.Data(c, failoverErr.Status, "application/json", failoverErr.Body)
 		return
@@ -857,6 +897,9 @@ func handleAllChannelsFailed(c fiber.Ctx, failoverErr *common.FailoverError, las
 }
 
 func handleAllKeysFailed(c fiber.Ctx, failoverErr *common.FailoverError, lastError error) {
+	if common.HandleEntryBudgetError(c, lastError) {
+		return
+	}
 	if failoverErr != nil {
 		httpbridge.Data(c, failoverErr.Status, "application/json", failoverErr.Body)
 		return

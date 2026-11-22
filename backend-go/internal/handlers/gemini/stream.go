@@ -381,7 +381,7 @@ func hasGeminiSemanticContent(jsonData string) bool {
 	}
 	// Explicit native refusals are terminal, visible outcomes, not empty streams.
 	if feedback, ok := event["promptFeedback"].(map[string]interface{}); ok {
-		if reason, ok := feedback["blockReason"].(string); ok && strings.TrimSpace(reason) != "" {
+		if reason, ok := feedback["blockReason"].(string); ok && types.GeminiPromptBlocked(reason) {
 			return true
 		}
 	}

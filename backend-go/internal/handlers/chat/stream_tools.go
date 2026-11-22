@@ -779,6 +779,9 @@ func chatErrorResponse(c fiber.Ctx, statusCode int, message string, code string)
 
 // handleAllChannelsFailed 处理所有渠道失败的情况
 func handleAllChannelsFailed(c fiber.Ctx, failoverErr *common.FailoverError, lastError error) {
+	if common.HandleEntryBudgetError(c, lastError) {
+		return
+	}
 	if failoverErr == nil && httpclient.IsEgressError(lastError) {
 		chatErrorResponse(c, 503, "Configured network egress is unavailable", "network_egress_unavailable")
 		return
@@ -798,6 +801,9 @@ func handleAllChannelsFailed(c fiber.Ctx, failoverErr *common.FailoverError, las
 
 // handleAllKeysFailed 处理所有 Key 失败的情况
 func handleAllKeysFailed(c fiber.Ctx, failoverErr *common.FailoverError, lastError error) {
+	if common.HandleEntryBudgetError(c, lastError) {
+		return
+	}
 	if failoverErr == nil && httpclient.IsEgressError(lastError) {
 		chatErrorResponse(c, 503, "Configured network egress is unavailable", "network_egress_unavailable")
 		return

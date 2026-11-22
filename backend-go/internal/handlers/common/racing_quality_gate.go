@@ -114,7 +114,7 @@ func RacingClaimClientCommitForStream(c fiber.Ctx, bufferedOutput string) bool {
 		return true
 	}
 	if bufferedOutput != "" && DetectPseudoToolCallMarker(bufferedOutput) && streamRequestHasTools(c) {
-		if bw, ok := httpbridge.Writer(c).(*racingBranchWriter); ok {
+		if bw, ok := findRacingBranchWriter(httpbridge.Writer(c)); ok {
 			bw.Discard()
 		}
 		RequestLogf(c, "[Racing-QualityGate] 分支首包命中伪工具调用标记（tool_choice=auto 下模型把工具调用写成文本），让出提交权")
