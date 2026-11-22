@@ -1413,6 +1413,8 @@ type CircuitBreakerConfig struct {
 
 type Config struct {
 	PrincipalBudgets []entrybudget.Policy   `json:"principalBudgets,omitempty"`
+	BodyLogging      BodyLoggingSettings    `json:"bodyLogging,omitzero"`
+	BodyLogAudit     []BodyLogAuditEvent    `json:"bodyLogAudit,omitempty"`
 	IdentityProxy    *IdentityProxyConfig   `json:"identityProxy,omitempty"`
 	AdminCredentials []AdminCredential      `json:"adminCredentials,omitempty"`
 	EntryKeys        []EntryKey             `json:"entryKeys,omitempty"`
@@ -1550,6 +1552,7 @@ func (cm *ConfigManager) GetConfig() Config {
 	for i, key := range cm.config.AdminCredentials {
 		cloned.AdminCredentials[i] = cloneAdminCredential(key)
 	}
+	cloned.BodyLogAudit = append([]BodyLogAuditEvent(nil), cm.config.BodyLogAudit...)
 	cloned.EntryKeys = make([]EntryKey, len(cm.config.EntryKeys))
 	for i, key := range cm.config.EntryKeys {
 		cloned.EntryKeys[i] = cloneEntryKey(key)

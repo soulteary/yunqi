@@ -1,3 +1,4 @@
+import type { RequestPreviewInput, RequestPreviewResult } from '../types/request-preview'
 import type { ApiClient } from './client'
 import type {
   CreateLogicalChannelRequest,
@@ -8,6 +9,9 @@ import type {
 
 export function createChannelManagementApi(client: ApiClient) {
   return {
+    async previewChannelRequest(uid: string, input: RequestPreviewInput): Promise<RequestPreviewResult> {
+      return client.request(`/channels/${encodeURIComponent(uid)}/request-preview`, { method: 'POST', body: JSON.stringify(input) })
+    },
     /** 获取统一渠道视图（渠道→key→endpoint→模型 + 共享能力） */
     async getChannelsV2(): Promise<{
       schemaVersion: number

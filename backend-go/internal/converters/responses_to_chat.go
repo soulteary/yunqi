@@ -134,6 +134,12 @@ func ConvertResponsesToOpenAIChatRequest(modelName string, inputRawJSON []byte, 
 		}
 	}
 
+	var messages []map[string]interface{}
+	if json.Unmarshal([]byte(gjson.Get(out, "messages").Raw), &messages) == nil {
+		messages = mergeAdjacentChatToolCalls(messages)
+		raw, _ := json.Marshal(expandChatToolOutputMedia(messages))
+		out, _ = sjson.SetRaw(out, "messages", string(raw))
+	}
 	return []byte(out)
 }
 
@@ -333,7 +339,11 @@ func convertFunctionCallOutputItem(item gjson.Result, out string) string {
 	}
 
 	if output := item.Get("output"); output.Exists() {
-		toolMessage, _ = sjson.Set(toolMessage, "content", output.String())
+		if output.IsArray() {
+			toolMessage, _ = sjson.SetRaw(toolMessage, "content", output.Raw)
+		} else {
+			toolMessage, _ = sjson.Set(toolMessage, "content", output.String())
+		}
 	}
 
 	out, _ = sjson.SetRaw(out, "messages.-1", toolMessage)
@@ -723,6 +733,9 @@ func convertChatAssistantMessageToResponsesItems(msg gjson.Result) []string {
 // convertChatToolMessageToResponsesItem 将 Chat tool 消息转换为 Responses function_call_output item
 func convertChatToolMessageToResponsesItem(msg gjson.Result) string {
 	callID := msg.Get("tool_call_id").String()
+	if content := msg.Get("content"); content.IsArray() {
+		return fmt.Sprintf(`{"type":"function_call_output","call_id":%s,"output":%s}`, jsonString(callID), chatToolContentToResponses(content))
+	}
 	output := msg.Get("content").String()
 
 	return fmt.Sprintf(`{"type":"function_call_output","call_id":%s,"output":%s}`,
@@ -878,6 +891,22 @@ func copyOpenAICacheFields(root gjson.Result, out string) string {
 		if value.Exists() || value.Raw == "null" {
 			out, _ = sjson.SetRaw(out, key, value.Raw)
 		}
+	}
+	return out
+}
+
+func mergeAdjacentChatToolCalls(messages []map[string]interface{}) []map[string]interface{} {
+	out := make([]map[string]interface{}, 0, len(messages))
+	for _, message := range messages {
+		calls, ok := message["tool_calls"].([]interface{})
+		if ok && len(out) > 0 && message["role"] == "assistant" && message["content"] == nil {
+			last := out[len(out)-1]
+			if previous, ok := last["tool_calls"].([]interface{}); ok && last["role"] == "assistant" && last["content"] == nil {
+				last["tool_calls"] = append(previous, calls...)
+				continue
+			}
+		}
+		out = append(out, message)
 	}
 	return out
 }

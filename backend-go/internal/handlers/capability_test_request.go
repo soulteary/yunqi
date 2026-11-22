@@ -466,7 +466,7 @@ func sendAndCheckStream(ctx context.Context, channel *config.UpstreamConfig, req
 		common.LogUpstreamResponseBody(nil, responseLogBuffer.Bytes(), envCfg, apiType)
 	}
 	bodyReader := io.Reader(resp.Body)
-	if envCfg.EnableResponseLogs && envCfg.IsDevelopment() {
+	if envCfg.ShouldLogResponseBodies() {
 		bodyReader = io.TeeReader(resp.Body, responseLogBuffer)
 	}
 	eventChan, errChan, err := provider.HandleStreamResponse(io.NopCloser(bodyReader))

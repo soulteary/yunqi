@@ -261,12 +261,16 @@ func responsesItemToClaudeMessage(item types.ResponsesItem) (*types.ClaudeMessag
 		if callID == "" {
 			callID = item.Name
 		}
+		convertedOutput, err := ConvertToolOutputToClaude(output)
+		if err != nil {
+			return nil, err
+		}
 		return &types.ClaudeMessage{
 			Role: "user",
 			Content: []types.ClaudeContent{{
 				Type:      "tool_result",
 				ToolUseID: callID,
-				Content:   output,
+				Content:   convertedOutput,
 			}},
 		}, nil
 
@@ -292,12 +296,16 @@ func responsesItemToClaudeMessage(item types.ResponsesItem) (*types.ClaudeMessag
 			return nil, err
 		}
 
+		convertedOutput, err := ConvertToolOutputToClaude(output)
+		if err != nil {
+			return nil, err
+		}
 		return &types.ClaudeMessage{
 			Role: "user",
 			Content: []types.ClaudeContent{{
 				Type:      "tool_result",
 				ToolUseID: callID,
-				Content:   output,
+				Content:   convertedOutput,
 			}},
 		}, nil
 
@@ -442,7 +450,7 @@ func ResponsesToOpenAIChatMessages(sess *session.Session, newInput interface{}, 
 
 	messages = appendResponsesItemsToOpenAIMessages(messages, newItems)
 
-	return normalizeOpenAIToolCallMessages(messages), nil
+	return expandChatToolOutputMedia(normalizeOpenAIToolCallMessages(messages)), nil
 }
 
 func normalizeOpenAIToolCallMessages(messages []map[string]interface{}) []map[string]interface{} {
@@ -877,6 +885,9 @@ func responsesItemToOpenAIMessage(item types.ResponsesItem) map[string]interface
 			return nil
 		}
 
+		if parts, ok := output.([]interface{}); ok {
+			return map[string]interface{}{"role": "tool", "tool_call_id": callID, "content": parts}
+		}
 		contentStr := ""
 		switch output := output.(type) {
 		case string:

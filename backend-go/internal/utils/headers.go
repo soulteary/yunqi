@@ -20,6 +20,14 @@ import (
 // 内容指纹（DerivePromptPrefixID）是匿名请求的最后回退：同一会话各轮的 system 与首条
 // user 消息不变，指纹即稳定会话 ID，使亲和与会话跟踪对无标识客户端同样生效。
 func ExtractUnifiedSessionID(c fiber.Ctx, bodyBytes []byte) string {
+	return extractUnifiedSessionID(c, bodyBytes, true)
+}
+
+// ExtractExplicitSessionID excludes anonymous prompt-content fingerprints.
+func ExtractExplicitSessionID(c fiber.Ctx, bodyBytes []byte) string {
+	return extractUnifiedSessionID(c, bodyBytes, false)
+}
+func extractUnifiedSessionID(c fiber.Ctx, bodyBytes []byte, allowPromptFallback bool) string {
 	if c != nil {
 		if convID := httpbridge.GetHeader(c, "Conversation_id"); convID != "" {
 			return convID
@@ -69,6 +77,9 @@ func ExtractUnifiedSessionID(c fiber.Ctx, bodyBytes []byte) string {
 
 	// 最终回退：匿名请求用对话内容指纹（system + 首条 user 消息）做会话标识，
 	// 让 Trace 亲和对无任何显式标识的客户端也能生效。指纹以 "pp:" 前缀命名空间隔离。
+	if !allowPromptFallback {
+		return ""
+	}
 	if prefixID := DerivePromptPrefixID(req); prefixID != "" {
 		return prefixID
 	}

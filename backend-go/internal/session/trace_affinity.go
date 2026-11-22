@@ -23,6 +23,7 @@ type TraceAffinity struct {
 // TraceAffinityManager 管理 trace 与渠道的亲和性
 type TraceAffinityManager struct {
 	mu       sync.RWMutex
+	strict   map[string]*strictBinding
 	affinity map[string]*TraceAffinity // key: user_id
 	ttl      time.Duration
 	stopCh   chan struct{} // 用于停止清理 goroutine
@@ -216,7 +217,7 @@ func (m *TraceAffinityManager) RemoveByRoute(route routingref.RouteRef) {
 func (m *TraceAffinityManager) Cleanup() int {
 	m.mu.Lock()
 	now := time.Now()
-	cleaned := 0
+	cleaned := m.cleanupStrictLocked(now)
 	for userID, affinity := range m.affinity {
 		if now.Sub(affinity.LastUsedAt) > m.ttl {
 			delete(m.affinity, userID)

@@ -520,7 +520,10 @@ func (p *ResponsesProvider) buildResponsesRequestFromClaude(c fiber.Ctx, bodyByt
 					})
 				case "tool_result":
 					flushMessage()
-					resultText := extractClaudeToolResult(block["content"])
+					resultText, mediaErr := claudeToolOutputForResponses(block["content"])
+					if mediaErr != nil {
+						return nil, mediaErr
+					}
 					input = append(input, map[string]interface{}{
 						"type":    "function_call_output",
 						"call_id": block["tool_use_id"],
@@ -2119,4 +2122,70 @@ func copilotHasUnsupportedMedia(body []byte, path, wire string) bool {
 		}
 	}
 	return false
+}
+
+// Claude tool media must stay structured in Responses input; plain text and
+// search attribution retain their existing representation.
+func claudeToolOutputForResponses(content interface{}) (interface{}, error) {
+	blocks, ok := content.([]interface{})
+	if !ok {
+		return extractClaudeToolResult(content), nil
+	}
+	hasMedia := false
+	for _, value := range blocks {
+		if b, ok := value.(map[string]interface{}); ok && (b["type"] == "image" || b["type"] == "document") {
+			hasMedia = true
+		}
+	}
+	if !hasMedia {
+		return extractClaudeToolResult(content), nil
+	}
+	var out []interface{}
+	for _, value := range blocks {
+		b, ok := value.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if b["type"] != "image" && b["type"] != "document" {
+			if text := extractClaudeToolResult([]interface{}{b}); text != "" {
+				out = append(out, map[string]interface{}{"type": "input_text", "text": text})
+			}
+			continue
+		}
+		source, ok := b["source"].(map[string]interface{})
+		if !ok {
+			return nil, fmt.Errorf("Claude tool media requires a portable source")
+		}
+		var address string
+		switch source["type"] {
+		case "base64":
+			mime, _ := source["media_type"].(string)
+			data, _ := source["data"].(string)
+			if mime == "" || data == "" {
+				return nil, fmt.Errorf("Claude tool inline media requires MIME and data")
+			}
+			address = "data:" + mime + ";base64," + data
+		case "url":
+			address, _ = source["url"].(string)
+		default:
+			return nil, fmt.Errorf("Claude tool media source is not portable")
+		}
+		if address == "" {
+			return nil, fmt.Errorf("Claude tool media source is empty")
+		}
+		if b["type"] == "image" {
+			out = append(out, map[string]interface{}{"type": "input_image", "image_url": address})
+		} else {
+			key := "file_url"
+			if source["type"] == "base64" {
+				key = "file_data"
+			}
+			file := map[string]interface{}{"type": "input_file", key: address}
+			if title, ok := b["title"].(string); ok {
+				file["filename"] = title
+			}
+			out = append(out, file)
+		}
+	}
+	return out, nil
 }

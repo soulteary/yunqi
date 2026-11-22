@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"strings"
+
+	"github.com/soulteary/yunqi/internal/redaction"
 )
 
 // MarshalJSONNoEscape 序列化 JSON 并禁用 HTML 字符转义
@@ -751,21 +753,14 @@ func FormatJSONBytesForLog(jsonData []byte, maxTextLength int) string {
 
 // MaskSensitiveHeaders 脱敏敏感请求头
 func MaskSensitiveHeaders(headers map[string]string) map[string]string {
-	sensitiveKeys := map[string]bool{
-		"authorization":  true,
-		"x-api-key":      true,
-		"x-goog-api-key": true,
-	}
-
 	masked := make(map[string]string, len(headers))
 	for key, value := range headers {
 		lowerKey := strings.ToLower(key)
-		if sensitiveKeys[lowerKey] {
+		if redaction.SensitiveHeader(key) {
 			if lowerKey == "authorization" && strings.HasPrefix(value, "Bearer ") {
-				token := value[7:]
-				masked[key] = "Bearer " + MaskAPIKey(token)
+				masked[key] = "Bearer " + redaction.Mask
 			} else {
-				masked[key] = MaskAPIKey(value)
+				masked[key] = redaction.Mask
 			}
 		} else {
 			masked[key] = value

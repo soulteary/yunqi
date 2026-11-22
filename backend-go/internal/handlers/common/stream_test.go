@@ -1541,6 +1541,10 @@ func TestProcessStreamEvent_FlushesOverlappingToolUseBlocksSequentially(t *testi
 }
 
 func TestProcessStreamEvent_LogsBufferedToolUseEvents(t *testing.T) {
+	cm := bodyLoggingTestManager(t)
+	if _, err := cm.UpdateBodyLogging("test:raw-tool-log", "", config.BodyLoggingSettings{ResponseBodies: true}); err != nil {
+		t.Fatal(err)
+	}
 
 	rec := httptest.NewRecorder()
 	c, _ := httpbridge.TestContext(rec)

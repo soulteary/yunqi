@@ -645,6 +645,10 @@ func TestExecuteModelTest_TruncatesLargeFailureBody(t *testing.T) {
 		t.Fatalf("create config manager failed: %v", err)
 	}
 	defer errutil.IgnoreDeferred(cfgManager.Close)
+	if _, err := cfgManager.UpdateBodyLogging("test:failure-detail", "", config.BodyLoggingSettings{ResponseBodies: true}); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = cfgManager.UpdateBodyLogging("test:cleanup", "", config.BodyLoggingSettings{}) }()
 
 	cfg := cfgManager.GetConfig()
 	result := executeModelTest(context.Background(), &cfg.Upstream[0], "messages", "claude-test", 5*time.Second, job.JobID, cfgManager, 0, "messages", "test-key", store, false)

@@ -1650,5 +1650,29 @@
   "network.mode.proxy": "使用代理",
   "network.mode.direct_first": "直连优先",
   "network.applied": "是",
-  "network.notApplied": "否"
+  "network.notApplied": "否",
+  "requestPreview": {
+    "title": "透传与请求改写预览",
+    "scope": "保存前使用当前兼容选项和示例正文构建请求，不会发起上游调用。地址和 Key 使用已保存渠道的第一个配置。",
+    "protocol": "客户端协议",
+    "model": "模型（Gemini 路径模型）",
+    "sample": "示例请求 JSON",
+    "build": "生成脱敏预览",
+    "sampleBoundary": "无变化仅说明该选项对当前示例未产生可见影响，不代表其他请求会被绕过。默认值也可能有协议内置行为。",
+    "runtimeBoundary": "此预览不执行调度、自动模型/推理档位选择、已学习兼容规则、历史会话或网络传输；实际请求可能因此进一步改变。Copilot OAuth 无离线预览。",
+    "bodyOmitted": "出于脱敏容量或正文大小限制，正文已省略。",
+    "mode": {
+      "conversion": "协议转换",
+      "native_with_compatibility": "原生透传并应用兼容改写"
+    },
+    "effect": {
+      "applied_to_sample": "已应用：移除此配置后示例请求会改变",
+      "no_effect_for_sample": "当前示例未观察到变化",
+      "default_or_unset": "未设置或使用默认值",
+      "overridden_by_managed_policy": "已被托管渠道运行策略覆盖"
+    },
+    "blocked": "实际转换保护会拒绝此请求，请先处理下方诊断。",
+    "conversionQuality": "已覆盖范围内的转换质量",
+    "coverage": "检测覆盖范围（不代表所有字段）"
+  }
 }

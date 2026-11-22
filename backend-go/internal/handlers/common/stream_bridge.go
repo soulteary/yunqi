@@ -123,7 +123,7 @@ func ReadUpstreamNonStreamBody(c fiber.Ctx, resp *http.Response, upstreamType st
 		synErr = fmt.Errorf("%w: %s", ErrStreamBridgeUnsupported, upstreamType)
 	}
 	if synErr != nil {
-		RequestLogf(c, "[StreamBridge] 上游 %s 流式响应合成失败: %v, body前100字节=%q", upstreamType, synErr, previewBridgePrefix(bodyBytes, 100))
+		RequestLogf(c, "[StreamBridge] 上游 %s 流式响应合成失败: %v, body前100字节=%q", upstreamType, synErr, ResponseBodyTextForLog(previewBridgePrefix(bodyBytes, 100)))
 		return nil, synErr
 	}
 	RequestLogf(c, "[StreamBridge] 上游 %s 流式响应已合成回非流式响应体（%d -> %d bytes）", upstreamType, len(bodyBytes), len(synthesized))
