@@ -112,7 +112,9 @@ func cloneKimiConsoleCredential(source *KimiConsoleCredential) *KimiConsoleCrede
 }
 
 // BindManagedAccountKimiConsole 为 Kimi 托管凭证保存 Web 会话令牌和套餐快照。
-func (cm *ConfigManager) BindManagedAccountKimiConsole(accountUID, credentialUID string, console KimiConsoleCredential) error {
+func (cm *ConfigManager) BindManagedAccountKimiConsoleAudited(auditContext ManagementAuditContext, accountUID, credentialUID string, console KimiConsoleCredential) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 	for i := range cm.config.ManagedAccounts {
@@ -132,14 +134,16 @@ func (cm *ConfigManager) BindManagedAccountKimiConsole(accountUID, credentialUID
 				return fmt.Errorf("kimi 控制台令牌不能为空")
 			}
 			account.Credentials[j].KimiConsole = cloneKimiConsoleCredential(&console)
-			return cm.saveConfigLocked(cm.config)
+			return cm.saveConfigLockedAudited(auditContext, cm.config)
 		}
 		return fmt.Errorf("凭证 %s 不存在", credentialUID)
 	}
 	return fmt.Errorf("账号 %s 不存在", accountUID)
 }
 
-func (cm *ConfigManager) ClearManagedAccountKimiConsole(accountUID, credentialUID string) error {
+func (cm *ConfigManager) ClearManagedAccountKimiConsoleAudited(auditContext ManagementAuditContext, accountUID, credentialUID string) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 	for i := range cm.config.ManagedAccounts {
@@ -153,7 +157,7 @@ func (cm *ConfigManager) ClearManagedAccountKimiConsole(accountUID, credentialUI
 		for j := range account.Credentials {
 			if account.Credentials[j].CredentialUID == credentialUID {
 				account.Credentials[j].KimiConsole = nil
-				return cm.saveConfigLocked(cm.config)
+				return cm.saveConfigLockedAudited(auditContext, cm.config)
 			}
 		}
 		return fmt.Errorf("凭证 %s 不存在", credentialUID)
@@ -162,7 +166,9 @@ func (cm *ConfigManager) ClearManagedAccountKimiConsole(accountUID, credentialUI
 }
 
 // BindManagedAccountMiMoConsole 绑定 MiMo 控制台 Cookie，并可原子采用 Cookie 所属的 Token Plan Key。
-func (cm *ConfigManager) BindManagedAccountMiMoConsole(accountUID, credentialUID, replacementKey string, console MiMoConsoleCredential) error {
+func (cm *ConfigManager) BindManagedAccountMiMoConsoleAudited(auditContext ManagementAuditContext, accountUID, credentialUID, replacementKey string, console MiMoConsoleCredential) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 	var credential *ManagedAccountCredential
@@ -237,10 +243,12 @@ func (cm *ConfigManager) BindManagedAccountMiMoConsole(accountUID, credentialUID
 	}
 	console.Cookie = strings.TrimSpace(console.Cookie)
 	credential.MiMoConsole = &console
-	return cm.saveConfigLocked(cm.config)
+	return cm.saveConfigLockedAudited(auditContext, cm.config)
 }
 
-func (cm *ConfigManager) ClearManagedAccountMiMoConsole(accountUID, credentialUID string) error {
+func (cm *ConfigManager) ClearManagedAccountMiMoConsoleAudited(auditContext ManagementAuditContext, accountUID, credentialUID string) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 	for i := range cm.config.ManagedAccounts {
@@ -251,7 +259,7 @@ func (cm *ConfigManager) ClearManagedAccountMiMoConsole(accountUID, credentialUI
 		for j := range account.Credentials {
 			if account.Credentials[j].CredentialUID == credentialUID {
 				account.Credentials[j].MiMoConsole = nil
-				return cm.saveConfigLocked(cm.config)
+				return cm.saveConfigLockedAudited(auditContext, cm.config)
 			}
 		}
 		return fmt.Errorf("凭证 %s 不存在", credentialUID)
@@ -261,7 +269,9 @@ func (cm *ConfigManager) ClearManagedAccountMiMoConsole(accountUID, credentialUI
 
 // BindManagedAccountCompshareConsole 为优云智算托管凭证保存控制台 Cookie 和套餐快照，
 // 并将套餐并发上限同步到该凭证在全部协议渠道中的 Key 级限速配置。
-func (cm *ConfigManager) BindManagedAccountCompshareConsole(accountUID, credentialUID string, console CompshareConsoleCredential) error {
+func (cm *ConfigManager) BindManagedAccountCompshareConsoleAudited(auditContext ManagementAuditContext, accountUID, credentialUID string, console CompshareConsoleCredential) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 	for i := range cm.config.ManagedAccounts {
@@ -287,7 +297,7 @@ func (cm *ConfigManager) BindManagedAccountCompshareConsole(accountUID, credenti
 			}
 			console.Cookie = strings.TrimSpace(console.Cookie)
 			account.Credentials[j].CompshareConsole = &console
-			return cm.saveConfigLocked(cm.config)
+			return cm.saveConfigLockedAudited(auditContext, cm.config)
 		}
 		return fmt.Errorf("凭证 %s 不存在", credentialUID)
 	}
@@ -334,7 +344,9 @@ func (cm *ConfigManager) applyManagedCredentialMaxConcurrentLocked(accountUID, c
 	return updated
 }
 
-func (cm *ConfigManager) ClearManagedAccountCompshareConsole(accountUID, credentialUID string) error {
+func (cm *ConfigManager) ClearManagedAccountCompshareConsoleAudited(auditContext ManagementAuditContext, accountUID, credentialUID string) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 	for i := range cm.config.ManagedAccounts {
@@ -348,7 +360,7 @@ func (cm *ConfigManager) ClearManagedAccountCompshareConsole(accountUID, credent
 		for j := range account.Credentials {
 			if account.Credentials[j].CredentialUID == credentialUID {
 				account.Credentials[j].CompshareConsole = nil
-				return cm.saveConfigLocked(cm.config)
+				return cm.saveConfigLockedAudited(auditContext, cm.config)
 			}
 		}
 		return fmt.Errorf("凭证 %s 不存在", credentialUID)
@@ -366,7 +378,9 @@ func accountContainsString(values []string, target string) bool {
 }
 
 // SetManagedAccountVolcengineAccessKey 为一个推理 Key 绑定火山云签名凭证。
-func (cm *ConfigManager) SetManagedAccountVolcengineAccessKey(accountUID, credentialUID, accessKeyID, secretAccessKey string) error {
+func (cm *ConfigManager) SetManagedAccountVolcengineAccessKeyAudited(auditContext ManagementAuditContext, accountUID, credentialUID, accessKeyID, secretAccessKey string) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 	accessKeyID = strings.TrimSpace(accessKeyID)
@@ -386,7 +400,7 @@ func (cm *ConfigManager) SetManagedAccountVolcengineAccessKey(accountUID, creden
 			account.Credentials[j].VolcengineAccessKey = &VolcengineAccessKeyPair{
 				AccessKeyID: accessKeyID, SecretAccessKey: secretAccessKey,
 			}
-			return cm.saveConfigLocked(cm.config)
+			return cm.saveConfigLockedAudited(auditContext, cm.config)
 		}
 		return fmt.Errorf("凭证 %s 不存在", credentialUID)
 	}
@@ -394,7 +408,9 @@ func (cm *ConfigManager) SetManagedAccountVolcengineAccessKey(accountUID, creden
 }
 
 // ClearManagedAccountVolcengineAccessKey 删除推理 Key 绑定的火山云签名凭证。
-func (cm *ConfigManager) ClearManagedAccountVolcengineAccessKey(accountUID, credentialUID string) error {
+func (cm *ConfigManager) ClearManagedAccountVolcengineAccessKeyAudited(auditContext ManagementAuditContext, accountUID, credentialUID string) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 	for i := range cm.config.ManagedAccounts {
@@ -407,7 +423,7 @@ func (cm *ConfigManager) ClearManagedAccountVolcengineAccessKey(accountUID, cred
 				continue
 			}
 			account.Credentials[j].VolcengineAccessKey = nil
-			return cm.saveConfigLocked(cm.config)
+			return cm.saveConfigLockedAudited(auditContext, cm.config)
 		}
 		return fmt.Errorf("凭证 %s 不存在", credentialUID)
 	}
@@ -433,7 +449,9 @@ func (cm *ConfigManager) FindCredentialByAPIKey(apiKey string) (accountUID, cred
 }
 
 // SetManagedAccountVolcenginePlan 保存由火山管控面自动识别出的套餐信息。
-func (cm *ConfigManager) SetManagedAccountVolcenginePlan(accountUID, credentialUID, plan, tier, status string) error {
+func (cm *ConfigManager) SetManagedAccountVolcenginePlanAudited(auditContext ManagementAuditContext, accountUID, credentialUID, plan, tier, status string) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 	for i := range cm.config.ManagedAccounts {
@@ -449,7 +467,7 @@ func (cm *ConfigManager) SetManagedAccountVolcenginePlan(accountUID, credentialU
 			credential.VolcengineAccessKey.Plan = strings.TrimSpace(plan)
 			credential.VolcengineAccessKey.PlanTier = strings.TrimSpace(tier)
 			credential.VolcengineAccessKey.PlanStatus = strings.TrimSpace(status)
-			return cm.saveConfigLocked(cm.config)
+			return cm.saveConfigLockedAudited(auditContext, cm.config)
 		}
 		return fmt.Errorf("凭证 %s 不存在或未绑定火山 Access Key", credentialUID)
 	}
@@ -485,7 +503,9 @@ func (cm *ConfigManager) ResolveVolcenginePlanUsage(accountUID, credentialUID st
 // SetManagedAccountVolcenginePlanBuckets 保存多套餐桶快照（personal/team 独立记录）。
 // 主桶字段（Plan/PlanTier/PlanStatus/Usage）不在此处修改，由调用方经
 // SetManagedAccountVolcenginePlan / SetManagedAccountVolcenginePlanUsage 单独维护。
-func (cm *ConfigManager) SetManagedAccountVolcenginePlanBuckets(accountUID, credentialUID string, buckets []VolcenginePlanBucket) error {
+func (cm *ConfigManager) SetManagedAccountVolcenginePlanBucketsAudited(auditContext ManagementAuditContext, accountUID, credentialUID string, buckets []VolcenginePlanBucket) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 	for i := range cm.config.ManagedAccounts {
@@ -499,7 +519,7 @@ func (cm *ConfigManager) SetManagedAccountVolcenginePlanBuckets(accountUID, cred
 				continue
 			}
 			credential.VolcengineAccessKey.Plans = buckets
-			return cm.saveConfigLocked(cm.config)
+			return cm.saveConfigLockedAudited(auditContext, cm.config)
 		}
 		return fmt.Errorf("凭证 %s 不存在或未绑定火山 Access Key", credentialUID)
 	}
@@ -507,7 +527,9 @@ func (cm *ConfigManager) SetManagedAccountVolcenginePlanBuckets(accountUID, cred
 }
 
 // SetManagedAccountVolcenginePlanUsage 保存火山管控面查询到的套餐用量快照。
-func (cm *ConfigManager) SetManagedAccountVolcenginePlanUsage(accountUID, credentialUID string, usage *VolcenginePlanUsage) error {
+func (cm *ConfigManager) SetManagedAccountVolcenginePlanUsageAudited(auditContext ManagementAuditContext, accountUID, credentialUID string, usage *VolcenginePlanUsage) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 	for i := range cm.config.ManagedAccounts {
@@ -521,7 +543,7 @@ func (cm *ConfigManager) SetManagedAccountVolcenginePlanUsage(accountUID, creden
 				continue
 			}
 			credential.VolcengineAccessKey.Usage = usage
-			return cm.saveConfigLocked(cm.config)
+			return cm.saveConfigLockedAudited(auditContext, cm.config)
 		}
 		return fmt.Errorf("凭证 %s 不存在或未绑定火山 Access Key", credentialUID)
 	}
@@ -837,12 +859,16 @@ func (cm *ConfigManager) mergeManagedProviderAccounts() bool {
 }
 
 // UpdateAccountChannels 原子更新账号下所有协议渠道的 Key -> BaseURL 绑定。
-func (cm *ConfigManager) UpdateAccountChannels(accountUID string, updates []AccountChannelUpdate) error {
-	return cm.ApplyAccountChannelChanges(accountUID, updates, nil)
+func (cm *ConfigManager) UpdateAccountChannelsAudited(auditContext ManagementAuditContext, accountUID string, updates []AccountChannelUpdate) error {
+	auditContext = auditContext.normalized()
+
+	return cm.ApplyAccountChannelChangesAudited(auditContext, accountUID, updates, nil)
 }
 
 // ApplyAccountChannelChanges 在一次配置写入中更新现有渠道并新增缺失协议渠道。
-func (cm *ConfigManager) ApplyAccountChannelChanges(accountUID string, updates []AccountChannelUpdate, additions []AccountChannelAddition) error {
+func (cm *ConfigManager) ApplyAccountChannelChangesAudited(auditContext ManagementAuditContext, accountUID string, updates []AccountChannelUpdate, additions []AccountChannelAddition) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -861,7 +887,7 @@ func (cm *ConfigManager) ApplyAccountChannelChanges(accountUID string, updates [
 		}
 		break
 	}
-	return cm.saveConfigLocked(next)
+	return cm.saveConfigLockedAudited(auditContext, next)
 }
 
 // firstAccountChannelLocked 返回账号下第一张物理卡（六数组顺序），锁内使用。
@@ -1113,7 +1139,9 @@ func configHasChannelUID(cfg *Config, channelUID string) bool {
 
 // DeleteAccountChannels 原子删除账号下全部自动托管协议渠道，返回被删除与跳过的 channelUid。
 // 非自动托管渠道不删除，仅解除账号关联（清空 AccountUID），避免误删用户手工渠道。
-func (cm *ConfigManager) DeleteAccountChannels(accountUID string) (removed []string, skipped []string, err error) {
+func (cm *ConfigManager) DeleteAccountChannelsAudited(auditContext ManagementAuditContext, accountUID string) (removed []string, skipped []string, err error) {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -1151,14 +1179,16 @@ func (cm *ConfigManager) DeleteAccountChannels(accountUID string) (removed []str
 		}
 	}
 	cm.config.ManagedAccounts = accounts
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		return nil, nil, err
 	}
 	return removed, skipped, nil
 }
 
 // RenameManagedAccount 原子重命名账号及其全部协议渠道。
-func (cm *ConfigManager) RenameManagedAccount(accountUID, baseName string) error {
+func (cm *ConfigManager) RenameManagedAccountAudited(auditContext ManagementAuditContext, accountUID, baseName string) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 	baseName = strings.TrimSpace(baseName)
@@ -1205,7 +1235,7 @@ func (cm *ConfigManager) RenameManagedAccount(accountUID, baseName string) error
 			cm.config.ManagedAccounts[i].Name = baseName
 		}
 	}
-	return cm.saveConfigLocked(cm.config)
+	return cm.saveConfigLockedAudited(auditContext, cm.config)
 }
 
 func accountChannelSuffix(kind string) string {
@@ -1620,4 +1650,79 @@ func kindToAPIType(kind string) string {
 	default:
 		return "Messages"
 	}
+}
+
+// ApplyAccountChannelChanges preserves the system/background call contract. HTTP callers use ApplyAccountChannelChangesAudited.
+func (cm *ConfigManager) ApplyAccountChannelChanges(accountUID string, updates []AccountChannelUpdate, additions []AccountChannelAddition) error {
+	return cm.ApplyAccountChannelChangesAudited(ManagementAuditContext{}, accountUID, updates, additions)
+}
+
+// BindManagedAccountCompshareConsole preserves the system/background call contract. HTTP callers use BindManagedAccountCompshareConsoleAudited.
+func (cm *ConfigManager) BindManagedAccountCompshareConsole(accountUID, credentialUID string, console CompshareConsoleCredential) error {
+	return cm.BindManagedAccountCompshareConsoleAudited(ManagementAuditContext{}, accountUID, credentialUID, console)
+}
+
+// BindManagedAccountKimiConsole preserves the system/background call contract. HTTP callers use BindManagedAccountKimiConsoleAudited.
+func (cm *ConfigManager) BindManagedAccountKimiConsole(accountUID, credentialUID string, console KimiConsoleCredential) error {
+	return cm.BindManagedAccountKimiConsoleAudited(ManagementAuditContext{}, accountUID, credentialUID, console)
+}
+
+// BindManagedAccountMiMoConsole preserves the system/background call contract. HTTP callers use BindManagedAccountMiMoConsoleAudited.
+func (cm *ConfigManager) BindManagedAccountMiMoConsole(accountUID, credentialUID, replacementKey string, console MiMoConsoleCredential) error {
+	return cm.BindManagedAccountMiMoConsoleAudited(ManagementAuditContext{}, accountUID, credentialUID, replacementKey, console)
+}
+
+// ClearManagedAccountCompshareConsole preserves the system/background call contract. HTTP callers use ClearManagedAccountCompshareConsoleAudited.
+func (cm *ConfigManager) ClearManagedAccountCompshareConsole(accountUID, credentialUID string) error {
+	return cm.ClearManagedAccountCompshareConsoleAudited(ManagementAuditContext{}, accountUID, credentialUID)
+}
+
+// ClearManagedAccountKimiConsole preserves the system/background call contract. HTTP callers use ClearManagedAccountKimiConsoleAudited.
+func (cm *ConfigManager) ClearManagedAccountKimiConsole(accountUID, credentialUID string) error {
+	return cm.ClearManagedAccountKimiConsoleAudited(ManagementAuditContext{}, accountUID, credentialUID)
+}
+
+// ClearManagedAccountMiMoConsole preserves the system/background call contract. HTTP callers use ClearManagedAccountMiMoConsoleAudited.
+func (cm *ConfigManager) ClearManagedAccountMiMoConsole(accountUID, credentialUID string) error {
+	return cm.ClearManagedAccountMiMoConsoleAudited(ManagementAuditContext{}, accountUID, credentialUID)
+}
+
+// ClearManagedAccountVolcengineAccessKey preserves the system/background call contract. HTTP callers use ClearManagedAccountVolcengineAccessKeyAudited.
+func (cm *ConfigManager) ClearManagedAccountVolcengineAccessKey(accountUID, credentialUID string) error {
+	return cm.ClearManagedAccountVolcengineAccessKeyAudited(ManagementAuditContext{}, accountUID, credentialUID)
+}
+
+// DeleteAccountChannels preserves the system/background call contract. HTTP callers use DeleteAccountChannelsAudited.
+func (cm *ConfigManager) DeleteAccountChannels(accountUID string) (removed []string, skipped []string, err error) {
+	return cm.DeleteAccountChannelsAudited(ManagementAuditContext{}, accountUID)
+}
+
+// RenameManagedAccount preserves the system/background call contract. HTTP callers use RenameManagedAccountAudited.
+func (cm *ConfigManager) RenameManagedAccount(accountUID, baseName string) error {
+	return cm.RenameManagedAccountAudited(ManagementAuditContext{}, accountUID, baseName)
+}
+
+// SetManagedAccountVolcengineAccessKey preserves the system/background call contract. HTTP callers use SetManagedAccountVolcengineAccessKeyAudited.
+func (cm *ConfigManager) SetManagedAccountVolcengineAccessKey(accountUID, credentialUID, accessKeyID, secretAccessKey string) error {
+	return cm.SetManagedAccountVolcengineAccessKeyAudited(ManagementAuditContext{}, accountUID, credentialUID, accessKeyID, secretAccessKey)
+}
+
+// SetManagedAccountVolcenginePlan preserves the system/background call contract. HTTP callers use SetManagedAccountVolcenginePlanAudited.
+func (cm *ConfigManager) SetManagedAccountVolcenginePlan(accountUID, credentialUID, plan, tier, status string) error {
+	return cm.SetManagedAccountVolcenginePlanAudited(ManagementAuditContext{}, accountUID, credentialUID, plan, tier, status)
+}
+
+// SetManagedAccountVolcenginePlanBuckets preserves the system/background call contract. HTTP callers use SetManagedAccountVolcenginePlanBucketsAudited.
+func (cm *ConfigManager) SetManagedAccountVolcenginePlanBuckets(accountUID, credentialUID string, buckets []VolcenginePlanBucket) error {
+	return cm.SetManagedAccountVolcenginePlanBucketsAudited(ManagementAuditContext{}, accountUID, credentialUID, buckets)
+}
+
+// SetManagedAccountVolcenginePlanUsage preserves the system/background call contract. HTTP callers use SetManagedAccountVolcenginePlanUsageAudited.
+func (cm *ConfigManager) SetManagedAccountVolcenginePlanUsage(accountUID, credentialUID string, usage *VolcenginePlanUsage) error {
+	return cm.SetManagedAccountVolcenginePlanUsageAudited(ManagementAuditContext{}, accountUID, credentialUID, usage)
+}
+
+// UpdateAccountChannels preserves the system/background call contract. HTTP callers use UpdateAccountChannelsAudited.
+func (cm *ConfigManager) UpdateAccountChannels(accountUID string, updates []AccountChannelUpdate) error {
+	return cm.UpdateAccountChannelsAudited(ManagementAuditContext{}, accountUID, updates)
 }

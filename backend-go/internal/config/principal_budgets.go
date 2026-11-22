@@ -28,7 +28,9 @@ func (cm *ConfigManager) FindPrincipalBudget(principal string) (entrybudget.Poli
 	}
 	return entrybudget.Policy{}, false
 }
-func (cm *ConfigManager) PutPrincipalBudget(p entrybudget.Policy) error {
+func (cm *ConfigManager) PutPrincipalBudgetAudited(auditContext ManagementAuditContext, p entrybudget.Policy) error {
+	auditContext = auditContext.normalized()
+
 	p, err := p.Normalize()
 	if err != nil {
 		return err
@@ -50,10 +52,15 @@ func (cm *ConfigManager) PutPrincipalBudget(p entrybudget.Policy) error {
 		}
 		next.PrincipalBudgets = append(next.PrincipalBudgets, p)
 	}
-	if err := cm.saveConfigLocked(next); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, next); err != nil {
 		cm.mu.Unlock()
 		return err
 	}
 	cm.fireConfigChangeCallbacks()
 	return nil
+}
+
+// PutPrincipalBudget preserves the system/background call contract. HTTP callers use PutPrincipalBudgetAudited.
+func (cm *ConfigManager) PutPrincipalBudget(p entrybudget.Policy) error {
+	return cm.PutPrincipalBudgetAudited(ManagementAuditContext{}, p)
 }

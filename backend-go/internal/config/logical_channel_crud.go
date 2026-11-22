@@ -56,7 +56,9 @@ type CreateLogicalChannelProtocol struct {
 
 // CreateLogicalChannel 在事务内创建一个逻辑渠道及一组物理渠道。
 // 内部使用 sync.Mutex (cm.mu) 保证原子性，失败时回滚已创建的物理渠道。
-func (cm *ConfigManager) CreateLogicalChannel(in CreateLogicalChannelInput) (*LogicalChannel, error) {
+func (cm *ConfigManager) CreateLogicalChannelAudited(auditContext ManagementAuditContext, in CreateLogicalChannelInput) (*LogicalChannel, error) {
+	auditContext = auditContext.normalized()
+
 	if strings.TrimSpace(in.Name) == "" {
 		return nil, fmt.Errorf("name 不能为空")
 	}
@@ -134,7 +136,7 @@ func (cm *ConfigManager) CreateLogicalChannel(in CreateLogicalChannelInput) (*Lo
 
 	// 更新内存 + 落盘
 	cm.config.LogicalChannels = append(cm.config.LogicalChannels, *logical)
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		// 落盘失败也回滚
 		cm.rollbackCreatedChannelsLocked(createdChannels)
 		// 从 logical 列表中移除刚才追加的（删除切片最后一个元素）
@@ -334,7 +336,9 @@ type UpdateLogicalChannelProtocol struct {
 
 // UpdateLogicalChannel 事务内更新逻辑渠道（含 protocols 的增删改）。
 // 失败时回滚所有改动。
-func (cm *ConfigManager) UpdateLogicalChannel(in UpdateLogicalChannelInput) (*LogicalChannel, error) {
+func (cm *ConfigManager) UpdateLogicalChannelAudited(auditContext ManagementAuditContext, in UpdateLogicalChannelInput) (*LogicalChannel, error) {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -502,7 +506,7 @@ func (cm *ConfigManager) UpdateLogicalChannel(in UpdateLogicalChannelInput) (*Lo
 	}
 
 	logical.UpdatedAt = time.Now().UTC()
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		cm.restoreAllUpstreamSlicesLocked(backupSlices)
 		cm.config.ManagedAccounts = backupManaged
 		cm.config.LogicalChannels[idx] = backupLogical
@@ -514,7 +518,9 @@ func (cm *ConfigManager) UpdateLogicalChannel(in UpdateLogicalChannelInput) (*Lo
 
 // DeleteLogicalChannel 事务内删除逻辑渠道及全部下属物理渠道。
 // 成功后返回已删除的物理渠道列表（用于上层清理 metrics/log）。
-func (cm *ConfigManager) DeleteLogicalChannel(uid string) ([]UpstreamConfig, error) {
+func (cm *ConfigManager) DeleteLogicalChannelAudited(auditContext ManagementAuditContext, uid string) ([]UpstreamConfig, error) {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -534,7 +540,7 @@ func (cm *ConfigManager) DeleteLogicalChannel(uid string) ([]UpstreamConfig, err
 	}
 	// 删除 logical
 	cm.config.LogicalChannels = append(cm.config.LogicalChannels[:idx], cm.config.LogicalChannels[idx+1:]...)
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		return nil, err
 	}
 	log.Printf("[Config-LogicalChannel] 已删除逻辑渠道: uid=%s name=%s 物理渠道=%d", uid, logical.Name, len(removed))
@@ -949,4 +955,19 @@ func applyLogicalOutboundNetwork(cfg *Config, uid string, network *OutboundNetwo
 			}
 		}
 	}
+}
+
+// CreateLogicalChannel preserves the system/background call contract. HTTP callers use CreateLogicalChannelAudited.
+func (cm *ConfigManager) CreateLogicalChannel(in CreateLogicalChannelInput) (*LogicalChannel, error) {
+	return cm.CreateLogicalChannelAudited(ManagementAuditContext{}, in)
+}
+
+// DeleteLogicalChannel preserves the system/background call contract. HTTP callers use DeleteLogicalChannelAudited.
+func (cm *ConfigManager) DeleteLogicalChannel(uid string) ([]UpstreamConfig, error) {
+	return cm.DeleteLogicalChannelAudited(ManagementAuditContext{}, uid)
+}
+
+// UpdateLogicalChannel preserves the system/background call contract. HTTP callers use UpdateLogicalChannelAudited.
+func (cm *ConfigManager) UpdateLogicalChannel(in UpdateLogicalChannelInput) (*LogicalChannel, error) {
+	return cm.UpdateLogicalChannelAudited(ManagementAuditContext{}, in)
 }

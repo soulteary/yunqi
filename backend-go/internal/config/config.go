@@ -1400,6 +1400,8 @@ type CircuitBreakerConfig struct {
 }
 
 type Config struct {
+	ManagementAudit *ManagementAuditState `json:"managementAudit,omitempty"`
+
 	PrincipalBudgets []entrybudget.Policy   `json:"principalBudgets,omitempty"`
 	BodyLogging      BodyLoggingSettings    `json:"bodyLogging,omitzero"`
 	BodyLogAudit     []BodyLogAuditEvent    `json:"bodyLogAudit,omitempty"`
@@ -1494,6 +1496,10 @@ type FailedKey struct {
 
 // ConfigManager 配置管理器
 type ConfigManager struct {
+	auditCommitted          *Config
+	auditPublishedDocument  []byte
+	auditDiskBusinessDigest string
+
 	mu                    sync.RWMutex
 	config                Config
 	configFile            string
@@ -1531,6 +1537,9 @@ func (cm *ConfigManager) GetConfig() Config {
 
 	// 深拷贝整个 Config 结构体
 	cloned := cm.config
+	// History is available only through the explicit global-admin audit API.
+	// Excluding it keeps hot-path configuration snapshots independent of retention size.
+	cloned.ManagementAudit = nil
 	cloned.PrincipalBudgets = append([]entrybudget.Policy(nil), cm.config.PrincipalBudgets...)
 	if cm.config.IdentityProxy != nil {
 		value := cloneIdentityProxy(*cm.config.IdentityProxy)
@@ -1998,7 +2007,9 @@ func NormalizeChannelHistoricalImageTurnLimit(limit int) int {
 }
 
 // SetOverrideTTLMinutes 设置驾驶舱 override 默认有效期（分钟）
-func (cm *ConfigManager) SetOverrideTTLMinutes(minutes int) error {
+func (cm *ConfigManager) SetOverrideTTLMinutesAudited(auditContext ManagementAuditContext, minutes int) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 
 	// 标准化为界面提供的固定选项，不合适的值使用默认 30 分钟
@@ -2014,7 +2025,7 @@ func (cm *ConfigManager) SetOverrideTTLMinutes(minutes int) error {
 
 	cm.config.OverrideTTLMinutes = normalized
 
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		cm.mu.Unlock()
 		return err
 	}
@@ -2177,13 +2188,17 @@ func containsPlainKey(u *UpstreamConfig, apiKey string) bool {
 // BlacklistKey 将指定 Key 从活跃列表移到拉黑列表（持久化）
 // apiType: Messages/Responses/Gemini/Chat，用于定位 upstream slice
 // channelIndex: 渠道在 upstream slice 中的索引
-func (cm *ConfigManager) BlacklistKey(apiType string, channelIndex int, apiKey string, reason string, message string) error {
-	return cm.BlacklistKeyWithRecoverAt(apiType, channelIndex, apiKey, reason, message, "")
+func (cm *ConfigManager) BlacklistKeyAudited(auditContext ManagementAuditContext, apiType string, channelIndex int, apiKey string, reason string, message string) error {
+	auditContext = auditContext.normalized()
+
+	return cm.BlacklistKeyWithRecoverAtAudited(auditContext, apiType, channelIndex, apiKey, reason, message, "")
 }
 
 // BlacklistKeyWithRecoverAt 将指定 Key 禁用到上游明确给出的恢复时间。
 // recoverAt 必须为未来的 RFC3339 时间；为空、无效或已过期时沿用原因级默认策略。
-func (cm *ConfigManager) BlacklistKeyWithRecoverAt(apiType string, channelIndex int, apiKey string, reason string, message string, recoverAt string) error {
+func (cm *ConfigManager) BlacklistKeyWithRecoverAtAudited(auditContext ManagementAuditContext, apiType string, channelIndex int, apiKey string, reason string, message string, recoverAt string) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -2206,7 +2221,7 @@ func (cm *ConfigManager) BlacklistKeyWithRecoverAt(apiType string, channelIndex 
 		}
 	}
 
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		return err
 	}
 	payload := map[string]any{}
@@ -2233,7 +2248,9 @@ func (cm *ConfigManager) GetCircuitBreakerConfig() CircuitBreakerConfig {
 }
 
 // SetCircuitBreakerConfig 更新熔断器运行时配置（partial update，nil 字段不覆盖）
-func (cm *ConfigManager) SetCircuitBreakerConfig(update CircuitBreakerConfig) error {
+func (cm *ConfigManager) SetCircuitBreakerConfigAudited(auditContext ManagementAuditContext, update CircuitBreakerConfig) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 
 	if cm.config.CircuitBreaker == nil {
@@ -2303,7 +2320,7 @@ func (cm *ConfigManager) SetCircuitBreakerConfig(update CircuitBreakerConfig) er
 		cb.StreamToolCallIdleTimeoutMs = &v
 	}
 
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		cm.mu.Unlock()
 		return err
 	}
@@ -2458,7 +2475,9 @@ func (cm *ConfigManager) fireConfigChangeCallbacks() {
 }
 
 // RestoreKey 将指定 Key 从拉黑列表恢复到活跃列表（持久化）
-func (cm *ConfigManager) RestoreKey(apiType string, channelIndex int, apiKey string) error {
+func (cm *ConfigManager) RestoreKeyAudited(auditContext ManagementAuditContext, apiType string, channelIndex int, apiKey string) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -2500,7 +2519,7 @@ func (cm *ConfigManager) RestoreKey(apiType string, channelIndex int, apiKey str
 	log.Printf("[%s-Blacklist] Key %s 已恢复 (渠道: %s)", apiType, utils.MaskAPIKey(apiKey), upstream.Name)
 	statelog.LogStateTransition(apiType+"-Blacklist", "key", utils.MaskAPIKey(apiKey), "disabled", "active", "manual_restore", "channel="+upstream.Name)
 
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		return err
 	}
 	cm.publishKeyEvent(eventbus.TypeKeyRestored, upstream.ChannelUID, apiType, apiKey, "manual_restore", "", nil)
@@ -2510,7 +2529,9 @@ func (cm *ConfigManager) RestoreKey(apiType string, channelIndex int, apiKey str
 // SuspendKey 手动暂停指定 API Key（设置 Enabled=false，不移出 APIKeys 列表）
 // apiType: Messages/Responses/Gemini/Chat/Images/Vectors
 // channelIndex: 渠道在 upstream slice 中的索引
-func (cm *ConfigManager) SuspendKey(apiType string, channelIndex int, apiKey string) error {
+func (cm *ConfigManager) SuspendKeyAudited(auditContext ManagementAuditContext, apiType string, channelIndex int, apiKey string) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -2538,7 +2559,7 @@ func (cm *ConfigManager) SuspendKey(apiType string, channelIndex int, apiKey str
 	log.Printf("[%s-Suspend] Key %s 已手动暂停 (渠道: %s)", apiType, utils.MaskAPIKey(apiKey), upstream.Name)
 	statelog.LogStateTransition(apiType+"-Suspend", "key", utils.MaskAPIKey(apiKey), "active", "suspended", "manual_suspend", "channel="+upstream.Name)
 
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		return err
 	}
 	cm.publishKeyEvent(eventbus.TypeKeyBlacklisted, upstream.ChannelUID, apiType, apiKey, "manual_suspend", "", nil)
@@ -2548,7 +2569,9 @@ func (cm *ConfigManager) SuspendKey(apiType string, channelIndex int, apiKey str
 // ResumeKey 手动恢复指定 API Key（移除 Enabled 限制，恢复为活跃状态）
 // apiType: Messages/Responses/Gemini/Chat/Images/Vectors
 // channelIndex: 渠道在 upstream slice 中的索引
-func (cm *ConfigManager) ResumeKey(apiType string, channelIndex int, apiKey string) error {
+func (cm *ConfigManager) ResumeKeyAudited(auditContext ManagementAuditContext, apiType string, channelIndex int, apiKey string) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -2585,7 +2608,7 @@ func (cm *ConfigManager) ResumeKey(apiType string, channelIndex int, apiKey stri
 	log.Printf("[%s-Suspend] Key %s 已手动恢复 (渠道: %s)", apiType, utils.MaskAPIKey(apiKey), upstream.Name)
 	statelog.LogStateTransition(apiType+"-Suspend", "key", utils.MaskAPIKey(apiKey), "suspended", "active", "manual_resume", "channel="+upstream.Name)
 
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		return err
 	}
 	cm.publishKeyEvent(eventbus.TypeKeyRestored, upstream.ChannelUID, apiType, apiKey, "manual_resume", "", nil)
@@ -2594,7 +2617,9 @@ func (cm *ConfigManager) ResumeKey(apiType string, channelIndex int, apiKey stri
 
 // RestoreAllKeys 恢复指定渠道所有不可用的 Key（被拉黑或手动暂停，持久化）。
 // 返回实际恢复的唯一 Key 数量。
-func (cm *ConfigManager) RestoreAllKeys(apiType string, channelIndex int) (int, error) {
+func (cm *ConfigManager) RestoreAllKeysAudited(auditContext ManagementAuditContext, apiType string, channelIndex int) (int, error) {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -2669,11 +2694,13 @@ func (cm *ConfigManager) RestoreAllKeys(apiType string, channelIndex int) (int, 
 		log.Printf("[%s-Suspend] 渠道 [%d] %s 的 %d 个手动暂停 Key 已全部恢复", apiType, channelIndex, upstream.Name, resumedCount)
 	}
 
-	return len(restoredKeys), cm.saveConfigLocked(cm.config)
+	return len(restoredKeys), cm.saveConfigLockedAudited(auditContext, cm.config)
 }
 
 // RestoreDisabledKeys 恢复指定渠道中命中的被拉黑 Key，并返回实际恢复的 key 列表。
-func (cm *ConfigManager) RestoreDisabledKeys(apiType string, channelIndex int, keys []string) ([]string, error) {
+func (cm *ConfigManager) RestoreDisabledKeysAudited(auditContext ManagementAuditContext, apiType string, channelIndex int, keys []string) ([]string, error) {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -2729,7 +2756,7 @@ func (cm *ConfigManager) RestoreDisabledKeys(apiType string, channelIndex int, k
 		upstream.APIKeyConfigs = restoreAPIKeyConfig(upstream.APIKeyConfigs, key, cfg)
 	}
 	log.Printf("[%s-Blacklist] 渠道 [%d] %s 自动恢复了 %d 个 Key", apiType, channelIndex, upstream.Name, len(restored))
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		return nil, err
 	}
 	return restored, nil
@@ -2739,7 +2766,9 @@ func (cm *ConfigManager) RestoreDisabledKeys(apiType string, channelIndex int, k
 // 仅限制该 Key 对该模型的路由，不影响该 Key 的其他模型，也不从 APIKeys 中移除。
 // recoverAt 为上游明确给出的恢复时间（RFC3339）；为空、无效或已过期时沿用 1 小时兜底，
 // 与 applyKeyBlacklistLocked 的 Key 级拉黑语义保持一致。
-func (cm *ConfigManager) DisableKeyModel(apiType string, channelIndex int, apiKey, model, reason, message, recoverAt string) error {
+func (cm *ConfigManager) DisableKeyModelAudited(auditContext ManagementAuditContext, apiType string, channelIndex int, apiKey, model, reason, message, recoverAt string) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -2778,7 +2807,7 @@ func (cm *ConfigManager) DisableKeyModel(apiType string, channelIndex int, apiKe
 			dm.RecoverAt = recoverAt
 			log.Printf("[%s-KeyModel] 刷新 (Key %s, 模型 %s) 限制 (原因: %s, 渠道: %s)",
 				apiType, utils.MaskAPIKey(apiKey), model, reason, upstream.Name)
-			return cm.saveConfigLocked(cm.config)
+			return cm.saveConfigLockedAudited(auditContext, cm.config)
 		}
 	}
 
@@ -2794,7 +2823,7 @@ func (cm *ConfigManager) DisableKeyModel(apiType string, channelIndex int, apiKe
 		apiType, utils.MaskAPIKey(apiKey), model, reason, upstream.Name, recoverAt)
 	statelog.LogStateTransition(apiType+"-KeyModel", "key_model", utils.MaskAPIKey(apiKey)+"|"+model, "active", "disabled", reason, "channel="+upstream.Name)
 
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		return err
 	}
 	cm.publishKeyEvent(eventbus.TypeKeyModelDisabled, upstream.ChannelUID, apiType, apiKey, reason, message, map[string]any{"model": model, "recoverAt": recoverAt})
@@ -2875,7 +2904,9 @@ func (cm *ConfigManager) ShouldEscalateBalanceKeyBlacklist(apiType string, chann
 }
 
 // RestoreKeyModel 手动移除指定渠道下 (apiKey, model) 组合的限制（持久化）。
-func (cm *ConfigManager) RestoreKeyModel(apiType string, channelIndex int, apiKey, model string) error {
+func (cm *ConfigManager) RestoreKeyModelAudited(auditContext ManagementAuditContext, apiType string, channelIndex int, apiKey, model string) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -2902,7 +2933,7 @@ func (cm *ConfigManager) RestoreKeyModel(apiType string, channelIndex int, apiKe
 	log.Printf("[%s-KeyModel] (Key %s, 模型 %s) 限制已移除 (渠道: %s)", apiType, utils.MaskAPIKey(apiKey), model, upstream.Name)
 	statelog.LogStateTransition(apiType+"-KeyModel", "key_model", utils.MaskAPIKey(apiKey)+"|"+model, "disabled", "active", "manual_restore", "channel="+upstream.Name)
 
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		return err
 	}
 	cm.publishKeyEvent(eventbus.TypeKeyModelRestored, upstream.ChannelUID, apiType, apiKey, "manual_restore", "", map[string]any{"model": model})
@@ -2911,7 +2942,9 @@ func (cm *ConfigManager) RestoreKeyModel(apiType string, channelIndex int, apiKe
 
 // DisableGroupModel 永久禁用目标 Key 当前所属配额组的模型。
 // 空配额组不会与其他空组 Key 合并，而是退化为单 Key 限制。
-func (cm *ConfigManager) DisableGroupModel(apiType string, channelIndex int, apiKey, model string) (string, int, error) {
+func (cm *ConfigManager) DisableGroupModelAudited(auditContext ManagementAuditContext, apiType string, channelIndex int, apiKey, model string) (string, int, error) {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -2950,7 +2983,7 @@ func (cm *ConfigManager) DisableGroupModel(apiType string, channelIndex int, api
 		entry.Key = apiKey
 	}
 	upstream.DisabledGroupModels = append(upstream.DisabledGroupModels, entry)
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		upstream.DisabledGroupModels = previous
 		return "", 0, err
 	}
@@ -2961,7 +2994,9 @@ func (cm *ConfigManager) DisableGroupModel(apiType string, channelIndex int, api
 
 // RestoreGroupModel 永久移除人工分组模型限制。quotaGroup 非空时可直接按组恢复，
 // 即使该组当前暂时没有成员；空组记录仍使用 apiKey 精确定位。
-func (cm *ConfigManager) RestoreGroupModel(apiType string, channelIndex int, apiKey, quotaGroup, model string) (string, int, error) {
+func (cm *ConfigManager) RestoreGroupModelAudited(auditContext ManagementAuditContext, apiType string, channelIndex int, apiKey, quotaGroup, model string) (string, int, error) {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -2998,7 +3033,7 @@ func (cm *ConfigManager) RestoreGroupModel(apiType string, channelIndex int, api
 		return quotaGroup, affectedKeyCount, nil
 	}
 	upstream.DisabledGroupModels = next
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		upstream.DisabledGroupModels = previous
 		return "", 0, err
 	}
@@ -3058,7 +3093,9 @@ func displayQuotaGroup(quotaGroup, apiKey string) string {
 
 // RestoreExpiredKeyModels 清理指定渠道下所有 RecoverAt 已到期的 (Key,模型) 限制条目。
 // 返回被恢复的组合描述（"maskedKey|model"），供定时恢复调度器汇总日志。
-func (cm *ConfigManager) RestoreExpiredKeyModels(apiType string, channelIndex int, now time.Time) ([]string, error) {
+func (cm *ConfigManager) RestoreExpiredKeyModelsAudited(auditContext ManagementAuditContext, apiType string, channelIndex int, now time.Time) ([]string, error) {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -3092,7 +3129,7 @@ func (cm *ConfigManager) RestoreExpiredKeyModels(apiType string, channelIndex in
 
 	upstream.DisabledKeyModels = newList
 	log.Printf("[%s-KeyModel] 渠道 [%d] %s 自动恢复了 %d 个 (Key,模型) 限制", apiType, channelIndex, upstream.Name, len(restored))
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		return nil, err
 	}
 	return restored, nil
@@ -3116,4 +3153,74 @@ func (cm *ConfigManager) getUpstreamSliceLocked(apiType string) *[]UpstreamConfi
 	default:
 		return nil
 	}
+}
+
+// BlacklistKey preserves the system/background call contract. HTTP callers use BlacklistKeyAudited.
+func (cm *ConfigManager) BlacklistKey(apiType string, channelIndex int, apiKey string, reason string, message string) error {
+	return cm.BlacklistKeyAudited(ManagementAuditContext{}, apiType, channelIndex, apiKey, reason, message)
+}
+
+// BlacklistKeyWithRecoverAt preserves the system/background call contract. HTTP callers use BlacklistKeyWithRecoverAtAudited.
+func (cm *ConfigManager) BlacklistKeyWithRecoverAt(apiType string, channelIndex int, apiKey string, reason string, message string, recoverAt string) error {
+	return cm.BlacklistKeyWithRecoverAtAudited(ManagementAuditContext{}, apiType, channelIndex, apiKey, reason, message, recoverAt)
+}
+
+// DisableGroupModel preserves the system/background call contract. HTTP callers use DisableGroupModelAudited.
+func (cm *ConfigManager) DisableGroupModel(apiType string, channelIndex int, apiKey, model string) (string, int, error) {
+	return cm.DisableGroupModelAudited(ManagementAuditContext{}, apiType, channelIndex, apiKey, model)
+}
+
+// DisableKeyModel preserves the system/background call contract. HTTP callers use DisableKeyModelAudited.
+func (cm *ConfigManager) DisableKeyModel(apiType string, channelIndex int, apiKey, model, reason, message, recoverAt string) error {
+	return cm.DisableKeyModelAudited(ManagementAuditContext{}, apiType, channelIndex, apiKey, model, reason, message, recoverAt)
+}
+
+// RestoreAllKeys preserves the system/background call contract. HTTP callers use RestoreAllKeysAudited.
+func (cm *ConfigManager) RestoreAllKeys(apiType string, channelIndex int) (int, error) {
+	return cm.RestoreAllKeysAudited(ManagementAuditContext{}, apiType, channelIndex)
+}
+
+// RestoreDisabledKeys preserves the system/background call contract. HTTP callers use RestoreDisabledKeysAudited.
+func (cm *ConfigManager) RestoreDisabledKeys(apiType string, channelIndex int, keys []string) ([]string, error) {
+	return cm.RestoreDisabledKeysAudited(ManagementAuditContext{}, apiType, channelIndex, keys)
+}
+
+// RestoreExpiredKeyModels preserves the system/background call contract. HTTP callers use RestoreExpiredKeyModelsAudited.
+func (cm *ConfigManager) RestoreExpiredKeyModels(apiType string, channelIndex int, now time.Time) ([]string, error) {
+	return cm.RestoreExpiredKeyModelsAudited(ManagementAuditContext{}, apiType, channelIndex, now)
+}
+
+// RestoreGroupModel preserves the system/background call contract. HTTP callers use RestoreGroupModelAudited.
+func (cm *ConfigManager) RestoreGroupModel(apiType string, channelIndex int, apiKey, quotaGroup, model string) (string, int, error) {
+	return cm.RestoreGroupModelAudited(ManagementAuditContext{}, apiType, channelIndex, apiKey, quotaGroup, model)
+}
+
+// RestoreKey preserves the system/background call contract. HTTP callers use RestoreKeyAudited.
+func (cm *ConfigManager) RestoreKey(apiType string, channelIndex int, apiKey string) error {
+	return cm.RestoreKeyAudited(ManagementAuditContext{}, apiType, channelIndex, apiKey)
+}
+
+// RestoreKeyModel preserves the system/background call contract. HTTP callers use RestoreKeyModelAudited.
+func (cm *ConfigManager) RestoreKeyModel(apiType string, channelIndex int, apiKey, model string) error {
+	return cm.RestoreKeyModelAudited(ManagementAuditContext{}, apiType, channelIndex, apiKey, model)
+}
+
+// ResumeKey preserves the system/background call contract. HTTP callers use ResumeKeyAudited.
+func (cm *ConfigManager) ResumeKey(apiType string, channelIndex int, apiKey string) error {
+	return cm.ResumeKeyAudited(ManagementAuditContext{}, apiType, channelIndex, apiKey)
+}
+
+// SetCircuitBreakerConfig preserves the system/background call contract. HTTP callers use SetCircuitBreakerConfigAudited.
+func (cm *ConfigManager) SetCircuitBreakerConfig(update CircuitBreakerConfig) error {
+	return cm.SetCircuitBreakerConfigAudited(ManagementAuditContext{}, update)
+}
+
+// SetOverrideTTLMinutes preserves the system/background call contract. HTTP callers use SetOverrideTTLMinutesAudited.
+func (cm *ConfigManager) SetOverrideTTLMinutes(minutes int) error {
+	return cm.SetOverrideTTLMinutesAudited(ManagementAuditContext{}, minutes)
+}
+
+// SuspendKey preserves the system/background call contract. HTTP callers use SuspendKeyAudited.
+func (cm *ConfigManager) SuspendKey(apiType string, channelIndex int, apiKey string) error {
+	return cm.SuspendKeyAudited(ManagementAuditContext{}, apiType, channelIndex, apiKey)
 }

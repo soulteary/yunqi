@@ -71,18 +71,24 @@ func (cm *ConfigManager) GetCurrentVectorsUpstreamWithIndex() (*UpstreamConfig, 
 
 // AddVectorsUpstream 添加 Vectors 上游
 // placements 可选传 "front"（故障转移序列首位），缺省为追加到序列末尾（见 assignChannelPriority）
-func (cm *ConfigManager) AddVectorsUpstream(upstream UpstreamConfig, placements ...string) error {
-	return cm.addUpstreamCommon(ChannelKindRegistry[ChannelKindVectors], upstream, placements...)
+func (cm *ConfigManager) AddVectorsUpstreamAudited(auditContext ManagementAuditContext, upstream UpstreamConfig, placements ...string) error {
+	auditContext = auditContext.normalized()
+
+	return cm.addUpstreamCommonAudited(auditContext, ChannelKindRegistry[ChannelKindVectors], upstream, placements...)
 }
 
 // UpdateVectorsUpstream 更新 Vectors 上游
 // 返回值：shouldResetMetrics 表示是否需要重置渠道指标（熔断状态）
-func (cm *ConfigManager) UpdateVectorsUpstream(index int, updates UpstreamUpdate) (shouldResetMetrics bool, err error) {
-	return cm.updateUpstreamCommon(ChannelKindRegistry[ChannelKindVectors], index, updates)
+func (cm *ConfigManager) UpdateVectorsUpstreamAudited(auditContext ManagementAuditContext, index int, updates UpstreamUpdate) (shouldResetMetrics bool, err error) {
+	auditContext = auditContext.normalized()
+
+	return cm.updateUpstreamCommonAudited(auditContext, ChannelKindRegistry[ChannelKindVectors], index, updates)
 }
 
 // RemoveVectorsUpstream 删除 Vectors 上游
-func (cm *ConfigManager) RemoveVectorsUpstream(index int) (*UpstreamConfig, error) {
+func (cm *ConfigManager) RemoveVectorsUpstreamAudited(auditContext ManagementAuditContext, index int) (*UpstreamConfig, error) {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -95,7 +101,7 @@ func (cm *ConfigManager) RemoveVectorsUpstream(index int) (*UpstreamConfig, erro
 
 	cm.clearFailedKeysForUpstream(&removed, "Vectors")
 
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		return nil, err
 	}
 
@@ -104,7 +110,9 @@ func (cm *ConfigManager) RemoveVectorsUpstream(index int) (*UpstreamConfig, erro
 }
 
 // AddVectorsAPIKey 添加 Vectors 上游的 API 密钥
-func (cm *ConfigManager) AddVectorsAPIKey(index int, apiKey string) error {
+func (cm *ConfigManager) AddVectorsAPIKeyAudited(auditContext ManagementAuditContext, index int, apiKey string) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -139,7 +147,7 @@ func (cm *ConfigManager) AddVectorsAPIKey(index int, apiKey string) error {
 	}
 	cm.config.VectorsUpstream[index].HistoricalAPIKeys = newHistoricalKeys
 
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		return err
 	}
 
@@ -148,7 +156,9 @@ func (cm *ConfigManager) AddVectorsAPIKey(index int, apiKey string) error {
 }
 
 // RemoveVectorsAPIKey 删除 Vectors 上游的 API 密钥
-func (cm *ConfigManager) RemoveVectorsAPIKey(index int, apiKey string) error {
+func (cm *ConfigManager) RemoveVectorsAPIKeyAudited(auditContext ManagementAuditContext, index int, apiKey string) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -187,7 +197,7 @@ func (cm *ConfigManager) RemoveVectorsAPIKey(index int, apiKey string) error {
 		log.Printf("[Vectors-Key] 上游 [%d] %s: Key %s 已移入历史列表", index, cm.config.VectorsUpstream[index].Name, utils.MaskAPIKey(apiKey))
 	}
 
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		return err
 	}
 
@@ -201,7 +211,9 @@ func (cm *ConfigManager) GetNextVectorsAPIKey(upstream *UpstreamConfig, failedKe
 }
 
 // MoveVectorsAPIKeyToTop 将指定 Vectors 渠道的 API 密钥移到最前面
-func (cm *ConfigManager) MoveVectorsAPIKeyToTop(upstreamIndex int, apiKey string) error {
+func (cm *ConfigManager) MoveVectorsAPIKeyToTopAudited(auditContext ManagementAuditContext, upstreamIndex int, apiKey string) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -223,11 +235,13 @@ func (cm *ConfigManager) MoveVectorsAPIKeyToTop(upstreamIndex int, apiKey string
 	}
 
 	upstream.APIKeys = append([]string{apiKey}, append(upstream.APIKeys[:index], upstream.APIKeys[index+1:]...)...)
-	return cm.saveConfigLocked(cm.config)
+	return cm.saveConfigLockedAudited(auditContext, cm.config)
 }
 
 // MoveVectorsAPIKeyToBottom 将指定 Vectors 渠道的 API 密钥移到最后面
-func (cm *ConfigManager) MoveVectorsAPIKeyToBottom(upstreamIndex int, apiKey string) error {
+func (cm *ConfigManager) MoveVectorsAPIKeyToBottomAudited(auditContext ManagementAuditContext, upstreamIndex int, apiKey string) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -250,13 +264,15 @@ func (cm *ConfigManager) MoveVectorsAPIKeyToBottom(upstreamIndex int, apiKey str
 
 	upstream.APIKeys = append(upstream.APIKeys[:index], upstream.APIKeys[index+1:]...)
 	upstream.APIKeys = append(upstream.APIKeys, apiKey)
-	return cm.saveConfigLocked(cm.config)
+	return cm.saveConfigLockedAudited(auditContext, cm.config)
 }
 
 // ReorderVectorsUpstreams 重新排序 Vectors 渠道优先级
 // order 是渠道索引数组，按新的优先级顺序排列（只更新传入的渠道，支持部分排序）
 // priorities 可选：与 order 平行的显式优先级值，缺省按位次 1..N
-func (cm *ConfigManager) ReorderVectorsUpstreams(order []int, priorities ...[]int) error {
+func (cm *ConfigManager) ReorderVectorsUpstreamsAudited(auditContext ManagementAuditContext, order []int, priorities ...[]int) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -283,7 +299,7 @@ func (cm *ConfigManager) ReorderVectorsUpstreams(order []int, priorities ...[]in
 		cm.config.VectorsUpstream[idx].Priority = values[i]
 	}
 
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		return err
 	}
 
@@ -292,7 +308,9 @@ func (cm *ConfigManager) ReorderVectorsUpstreams(order []int, priorities ...[]in
 }
 
 // SetVectorsChannelStatus 设置 Vectors 渠道状态
-func (cm *ConfigManager) SetVectorsChannelStatus(index int, status string) error {
+func (cm *ConfigManager) SetVectorsChannelStatusAudited(auditContext ManagementAuditContext, index int, status string) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -311,7 +329,7 @@ func (cm *ConfigManager) SetVectorsChannelStatus(index int, status string) error
 		log.Printf("[Config-Status] 已清除 Vectors 渠道 [%d] %s 的促销期", index, cm.config.VectorsUpstream[index].Name)
 	}
 
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		return err
 	}
 
@@ -320,7 +338,9 @@ func (cm *ConfigManager) SetVectorsChannelStatus(index int, status string) error
 }
 
 // SetVectorsChannelPromotion 设置 Vectors 渠道促销期
-func (cm *ConfigManager) SetVectorsChannelPromotion(index int, duration time.Duration) error {
+func (cm *ConfigManager) SetVectorsChannelPromotionAudited(auditContext ManagementAuditContext, index int, duration time.Duration) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -342,7 +362,7 @@ func (cm *ConfigManager) SetVectorsChannelPromotion(index int, duration time.Dur
 		log.Printf("[Config-Promotion] 已设置 Vectors 渠道 [%d] %s 进入促销期，截止: %s", index, cm.config.VectorsUpstream[index].Name, promotionEnd.Format(time.RFC3339))
 	}
 
-	return cm.saveConfigLocked(cm.config)
+	return cm.saveConfigLockedAudited(auditContext, cm.config)
 }
 
 // GetPromotedVectorsChannel 获取当前处于促销期的 Vectors 渠道索引
@@ -356,4 +376,54 @@ func (cm *ConfigManager) GetPromotedVectorsChannel() (int, bool) {
 		}
 	}
 	return -1, false
+}
+
+// AddVectorsAPIKey preserves the system/background call contract. HTTP callers use AddVectorsAPIKeyAudited.
+func (cm *ConfigManager) AddVectorsAPIKey(index int, apiKey string) error {
+	return cm.AddVectorsAPIKeyAudited(ManagementAuditContext{}, index, apiKey)
+}
+
+// AddVectorsUpstream preserves the system/background call contract. HTTP callers use AddVectorsUpstreamAudited.
+func (cm *ConfigManager) AddVectorsUpstream(upstream UpstreamConfig, placements ...string) error {
+	return cm.AddVectorsUpstreamAudited(ManagementAuditContext{}, upstream, placements...)
+}
+
+// MoveVectorsAPIKeyToBottom preserves the system/background call contract. HTTP callers use MoveVectorsAPIKeyToBottomAudited.
+func (cm *ConfigManager) MoveVectorsAPIKeyToBottom(upstreamIndex int, apiKey string) error {
+	return cm.MoveVectorsAPIKeyToBottomAudited(ManagementAuditContext{}, upstreamIndex, apiKey)
+}
+
+// MoveVectorsAPIKeyToTop preserves the system/background call contract. HTTP callers use MoveVectorsAPIKeyToTopAudited.
+func (cm *ConfigManager) MoveVectorsAPIKeyToTop(upstreamIndex int, apiKey string) error {
+	return cm.MoveVectorsAPIKeyToTopAudited(ManagementAuditContext{}, upstreamIndex, apiKey)
+}
+
+// RemoveVectorsAPIKey preserves the system/background call contract. HTTP callers use RemoveVectorsAPIKeyAudited.
+func (cm *ConfigManager) RemoveVectorsAPIKey(index int, apiKey string) error {
+	return cm.RemoveVectorsAPIKeyAudited(ManagementAuditContext{}, index, apiKey)
+}
+
+// RemoveVectorsUpstream preserves the system/background call contract. HTTP callers use RemoveVectorsUpstreamAudited.
+func (cm *ConfigManager) RemoveVectorsUpstream(index int) (*UpstreamConfig, error) {
+	return cm.RemoveVectorsUpstreamAudited(ManagementAuditContext{}, index)
+}
+
+// ReorderVectorsUpstreams preserves the system/background call contract. HTTP callers use ReorderVectorsUpstreamsAudited.
+func (cm *ConfigManager) ReorderVectorsUpstreams(order []int, priorities ...[]int) error {
+	return cm.ReorderVectorsUpstreamsAudited(ManagementAuditContext{}, order, priorities...)
+}
+
+// SetVectorsChannelPromotion preserves the system/background call contract. HTTP callers use SetVectorsChannelPromotionAudited.
+func (cm *ConfigManager) SetVectorsChannelPromotion(index int, duration time.Duration) error {
+	return cm.SetVectorsChannelPromotionAudited(ManagementAuditContext{}, index, duration)
+}
+
+// SetVectorsChannelStatus preserves the system/background call contract. HTTP callers use SetVectorsChannelStatusAudited.
+func (cm *ConfigManager) SetVectorsChannelStatus(index int, status string) error {
+	return cm.SetVectorsChannelStatusAudited(ManagementAuditContext{}, index, status)
+}
+
+// UpdateVectorsUpstream preserves the system/background call contract. HTTP callers use UpdateVectorsUpstreamAudited.
+func (cm *ConfigManager) UpdateVectorsUpstream(index int, updates UpstreamUpdate) (shouldResetMetrics bool, err error) {
+	return cm.UpdateVectorsUpstreamAudited(ManagementAuditContext{}, index, updates)
 }

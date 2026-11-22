@@ -20,11 +20,12 @@ type BodyLoggingSettings struct {
 	MaxBytes       int  `json:"maxBytes"`
 }
 type BodyLogAuditEvent struct {
-	ID      string              `json:"id"`
-	At      time.Time           `json:"at"`
-	ActorID string              `json:"actorId"`
-	Before  BodyLoggingSettings `json:"before"`
-	After   BodyLoggingSettings `json:"after"`
+	OperationID string              `json:"operationId,omitempty"`
+	ID          string              `json:"id"`
+	At          time.Time           `json:"at"`
+	ActorID     string              `json:"actorId"`
+	Before      BodyLoggingSettings `json:"before"`
+	After       BodyLoggingSettings `json:"after"`
 }
 type BodyLoggingState struct {
 	Configured BodyLoggingSettings `json:"configured"`
@@ -77,12 +78,16 @@ func (cm *ConfigManager) GetBodyLoggingState() BodyLoggingState {
 
 // UpdateBodyLogging commits settings and the actor audit in one config write.
 // Runtime activation happens only after that durable commit succeeds.
-func (cm *ConfigManager) UpdateBodyLogging(actor, expectedRevision string, settings BodyLoggingSettings) (BodyLoggingState, error) {
+func (cm *ConfigManager) UpdateBodyLoggingAudited(auditContext ManagementAuditContext, actor, expectedRevision string, settings BodyLoggingSettings) (BodyLoggingState, error) {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
-	return cm.updateBodyLoggingLocked(actor, expectedRevision, settings)
+	return cm.updateBodyLoggingLockedAudited(auditContext, actor, expectedRevision, settings)
 }
-func (cm *ConfigManager) updateBodyLoggingLocked(actor, expectedRevision string, settings BodyLoggingSettings) (BodyLoggingState, error) {
+func (cm *ConfigManager) updateBodyLoggingLockedAudited(auditContext ManagementAuditContext, actor, expectedRevision string, settings BodyLoggingSettings) (BodyLoggingState, error) {
+	auditContext = auditContext.normalized()
+
 	settings = normalizedBodyLogging(settings)
 	if strings.TrimSpace(actor) == "" {
 		return cm.bodyLoggingStateLocked(), errors.New("body logging changes require an audit actor")
@@ -99,13 +104,13 @@ func (cm *ConfigManager) updateBodyLoggingLocked(actor, expectedRevision string,
 	}
 	original := cm.config.deepCopy()
 	now := time.Now().UTC()
-	event := BodyLogAuditEvent{ID: fmt.Sprintf("body_%d", now.UnixNano()), At: now, ActorID: actor, Before: before, After: settings}
+	event := BodyLogAuditEvent{OperationID: auditContext.OperationID, ID: fmt.Sprintf("body_%d", now.UnixNano()), At: now, ActorID: actor, Before: before, After: settings}
 	cm.config.BodyLogging = settings
 	cm.config.BodyLogAudit = append(append([]BodyLogAuditEvent(nil), cm.config.BodyLogAudit...), event)
 	if len(cm.config.BodyLogAudit) > MaxBodyLogAuditEntries {
 		cm.config.BodyLogAudit = cm.config.BodyLogAudit[len(cm.config.BodyLogAudit)-MaxBodyLogAuditEntries:]
 	}
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		cm.config = original
 		return cm.bodyLoggingStateLocked(), err
 	}
@@ -116,8 +121,25 @@ func (cm *ConfigManager) updateBodyLoggingLocked(actor, expectedRevision string,
 
 // Startup and file reloads must use the same audited activation path. A failed
 // audit write leaves runtime content logging disabled or at its prior setting.
-func (cm *ConfigManager) ActivateBodyLogging(actor string) (BodyLoggingState, error) {
+func (cm *ConfigManager) ActivateBodyLoggingAudited(auditContext ManagementAuditContext, actor string) (BodyLoggingState, error) {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
-	return cm.updateBodyLoggingLocked(actor, "", cm.config.BodyLogging)
+	return cm.updateBodyLoggingLockedAudited(auditContext, actor, "", cm.config.BodyLogging)
+}
+
+// ActivateBodyLogging preserves the system/background call contract. HTTP callers use ActivateBodyLoggingAudited.
+func (cm *ConfigManager) ActivateBodyLogging(actor string) (BodyLoggingState, error) {
+	return cm.ActivateBodyLoggingAudited(ManagementAuditContext{}, actor)
+}
+
+// UpdateBodyLogging preserves the system/background call contract. HTTP callers use UpdateBodyLoggingAudited.
+func (cm *ConfigManager) UpdateBodyLogging(actor, expectedRevision string, settings BodyLoggingSettings) (BodyLoggingState, error) {
+	return cm.UpdateBodyLoggingAudited(ManagementAuditContext{}, actor, expectedRevision, settings)
+}
+
+// updateBodyLoggingLocked preserves the system/background call contract. HTTP callers use updateBodyLoggingLockedAudited.
+func (cm *ConfigManager) updateBodyLoggingLocked(actor, expectedRevision string, settings BodyLoggingSettings) (BodyLoggingState, error) {
+	return cm.updateBodyLoggingLockedAudited(ManagementAuditContext{}, actor, expectedRevision, settings)
 }
