@@ -3,6 +3,8 @@ import type { Channel } from './channels'
 import type { ChannelAuthHeader } from './common'
 
 export interface UpstreamModelCapability {
+  /** Explicit Claude Desktop compatibility slot; does not change provider identity. */
+  anthropicFamilyTier?: string
   contextWindowTokens?: number
   maxOutputTokens?: number
   defaultOutputTokens?: number

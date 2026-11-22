@@ -96,10 +96,39 @@ After applying, the model picker in Claude Desktop shows the models served by th
 
 Claude Desktop can populate the model picker in two ways:
 
-- **Model discovery (automatic, on by default)**: requests `{Gateway base URL}/v1/models`. Yunqi implements this endpoint, so it works out of the box. However, discovery mainly recognizes Claude-style model IDs; if your channels serve models under non-Claude names (such as `glm-4.7` or `deepseek-v4`), they may not appear in the picker.
+- **Model discovery (automatic, on by default)**: requests `{Gateway base URL}/v1/models`. Yunqi implements this endpoint. Desktop filters model IDs that do not match its Claude naming rules unless the gateway supplies a valid `anthropic_family_tier`.
 - **Model list (manual)**: click **Add model** to list model IDs one by one. This overrides discovery, and the **first entry is the default model**.
 
-Recommendation: keep discovery on when the upstream is Anthropic Claude or your channel maps to Claude model names; otherwise disable Model discovery and list models explicitly, putting your most-used model first.
+For non-Claude models, a manual list remains sufficient. To retain their actual IDs in automatic discovery, explicitly add `anthropicFamilyTier` to the existing `modelCapabilities` entries on the Messages channel:
+
+```json
+{
+  "modelCapabilities": {
+    "deepseek-v4-pro": {
+      "anthropicFamilyTier": "sonnet",
+      "contextWindowTokens": 1048576
+    },
+    "deepseek-flash": {
+      "anthropicFamilyTier": "haiku",
+      "contextWindowTokens": 1048576
+    }
+  }
+}
+```
+
+Merge this channel configuration fragment into the existing entries, retaining output limits, reasoning settings, pricing, and other capability fields. Do not replace the full configuration file. The example window is a declared model capability; use the input window the channel can actually serve. This setting uses the persisted configuration JSON; no new console form control is provided.
+
+Supported tiers are `sonnet`, `opus`, `haiku`, `fable`, and `mythos`. This is a Desktop compatibility slot, not a change in model identity, routing, provider, or verified protocol support. It does not establish equivalence with Claude. Yunqi does not assign DeepSeek a tier automatically. The first model in each tier is marked as its default. Verify Messages inference and tool use separately.
+
+The HTTP response includes `anthropic_family_tier`, `is_family_default`, `supports_1m`, and `max_input_tokens`, retaining the existing camelCase fields. The configuration key `anthropicFamilyTier` and the HTTP discovery fields belong to different interfaces. Check the running instance with:
+
+```bash
+curl "$YUNQI_BASE_URL/v1/models?limit=1000" \
+  -H "Authorization: Bearer $PROXY_ACCESS_KEY" \
+  -H "anthropic-version: 2023-06-01"
+```
+
+References: [Anthropic gateway documentation](https://claude.com/docs/third-party/claude-desktop/gateway), [model configuration](https://claude.com/docs/third-party/claude-desktop/models). The discovery filter and field names were also checked against Desktop 6.28899.6; behavior and controls may vary by version.
 
 ## 5. Managing multiple configurations
 
@@ -126,7 +155,7 @@ The Gateway API key does not match the Yunqi `PROXY_ACCESS_KEY`. Check the Yunqi
 
 ### Connected but the model picker is empty
 
-Discovery only recognizes Claude-style model IDs. Make sure the Messages channel allowlist/mapping includes usable models; if the model names are not Claude-style, switch to a manual **Model list** (see section 4 above).
+Check whether `/v1/models` contains the expected IDs. If DeepSeek or another non-Claude model is present but Desktop reports `Gateway returned no usable models`, check for a valid `anthropic_family_tier` in the response. HTTP 200, a display name, or `supports1m` alone does not pass Desktop's filter. Configure an explicit tier or use the manual list described in section 4.
 
 ### Can I just enter `http://localhost:3000`?
 

@@ -572,7 +572,9 @@ type AgentModelProfile struct {
 
 // UpstreamModelCapability 描述实际发送给上游的模型能力。
 type UpstreamModelCapability struct {
-	ContextWindowTokens int `json:"contextWindowTokens,omitempty"` // CCX 路由使用的可承载输入窗口；若来源是总上下文窗口，应在能力数据层预先扣除输出预留
+	// AnthropicFamilyTier is an explicit Desktop compatibility slot, not provider identity.
+	AnthropicFamilyTier string `json:"anthropicFamilyTier,omitempty"`
+	ContextWindowTokens int    `json:"contextWindowTokens,omitempty"` // CCX 路由使用的可承载输入窗口；若来源是总上下文窗口，应在能力数据层预先扣除输出预留
 	// ContextWindowTiers 是该模型已知的能力分段阶梯（升序、去重），承载"同一模型在野外
 	// 同时存在多档窗口且随时间上移"的事实：如 GPT-5.6 的 [272K, 372K, 1.05M]（272K/372K
 	// 是 Codex 目录窗口，1.05M 是原生 API 窗口）。contextWindowTokens 是路由默认信任的

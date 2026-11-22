@@ -11,6 +11,7 @@ const DEFAULT_COPILOT_BASE_URL = 'https://api.githubcopilot.com'
 export interface ModelCapabilityRow {
   id: number
   model: string
+  anthropicFamilyTier?: string
   contextWindowTokens: string | number | null
   maxOutputTokens: string | number | null
   thinkingMode: string
@@ -310,6 +311,7 @@ export function createModelCapabilityRow(
   return {
     id,
     model,
+    anthropicFamilyTier: capability?.anthropicFamilyTier || '',
     contextWindowTokens: capability?.contextWindowTokens || null,
     maxOutputTokens: capability?.maxOutputTokens || null,
     thinkingMode: capability?.thinkingMode || '',
@@ -361,6 +363,7 @@ export function modelCapabilityRowsToRecord(rows: ModelCapabilityRow[] = []): Re
   for (const row of rows) {
     const model = row.model.trim()
     const hasAnyValue =
+      row.anthropicFamilyTier?.trim() ||
       String(row.contextWindowTokens ?? '').trim() ||
       String(row.maxOutputTokens ?? '').trim() ||
       row.thinkingMode.trim() ||
@@ -374,6 +377,11 @@ export function modelCapabilityRowsToRecord(rows: ModelCapabilityRow[] = []): Re
     const contextWindowTokens = Number(row.contextWindowTokens)
     const maxOutputTokens = Number(row.maxOutputTokens)
     const capability: UpstreamModelCapability = {}
+    const tier = row.anthropicFamilyTier?.trim().toLowerCase()
+    if (tier) {
+      if (!['sonnet', 'opus', 'haiku', 'fable', 'mythos'].includes(tier)) return null
+      capability.anthropicFamilyTier = tier
+    }
 
     if (String(row.contextWindowTokens ?? '').trim()) {
       if (!Number.isInteger(contextWindowTokens) || contextWindowTokens < 0) return null
