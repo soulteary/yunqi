@@ -95,6 +95,14 @@ func sharedTestStores(t *testing.T) (*Store, *Store, func() *redis.Client) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { one.Close(); two.Close() })
+	// Production NewRedisManager validates this namespace before accepting
+	// concurrent requests. Warm transport identically without creating a principal.
+	if err := one.shared.ready(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := two.shared.ready(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	return one, two, clients
 }
 func sharedPolicy() Policy {
@@ -105,10 +113,24 @@ func sharedQuote(id string, amount int64) AttemptQuote {
 	return AttemptQuote{ID: id, Model: "model", ChannelUID: "channel", PricingVersion: "captured-v1", Pricing: json.RawMessage(`{"input":0.01}`), Amount: amount}
 }
 func TestRedisBudgetTwoNodesReserveOneTeamAtomically(t *testing.T) {
+	testRedisBudgetReservationRace(t, false)
+}
+func TestRedisBudgetInitializedNodesReserveOneTeamAtomically(t *testing.T) {
+	testRedisBudgetReservationRace(t, true)
+}
+func testRedisBudgetReservationRace(t *testing.T, initialized bool) {
+	t.Helper()
 	one, two, _ := sharedTestStores(t)
 	stores := []*Store{one, two}
 	p := sharedPolicy()
 	ctx := context.Background()
+	if initialized {
+		if _, err := one.Snapshot(ctx, p, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	} else if count, err := one.shared.client.Exists(ctx, one.shared.prefix+"p:"+principalDigest(p.PrincipalID)).Result(); err != nil || count != 0 {
+		t.Fatalf("first-principal fixture already initialized: %d %v", count, err)
+	}
 	var accepted atomic.Int64
 	var wg sync.WaitGroup
 	for i := 0; i < 20; i++ {
