@@ -871,6 +871,9 @@ func (cm *ConfigManager) ApplyAccountChannelChangesAudited(auditContext Manageme
 
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
+	return cm.applyAccountChannelChangesLocked(accountUID, updates, additions)
+}
+func (cm *ConfigManager) applyAccountChannelChangesLocked(accountUID string, updates []AccountChannelUpdate, additions []AccountChannelAddition) error {
 
 	next := cm.config.deepCopy()
 	if err := applyAccountChannelChanges(&next, accountUID, updates, additions); err != nil {

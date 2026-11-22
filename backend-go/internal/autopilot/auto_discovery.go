@@ -642,11 +642,17 @@ func (r *AutoDiscoveryRunner) runDiscoveryLegacy(ctx context.Context, task *Disc
 	r.writeProfiles(task.ChannelUID, channel, endpoints, cfgManager)
 
 	if cfgManager != nil {
-		r.maybeAutoWriteChannelConfig(task.ChannelUID, channel, endpoints, cfgManager)
-		if err := r.maybeEnableDiscoveredProtocolRoutes(channel, endpoints, cfgManager); err != nil {
+		if err := r.maybeAutoWriteChannelConfig(task.ChannelUID, channel, endpoints, cfgManager); err != nil {
 			status = DiscoveryStatusFailed
-			taskErr = fmt.Sprintf("自动启用已发现协议失败: %v", err)
-			log.Printf("[AutoDiscovery-RouteEnable] 渠道 %s 自动启用协议失败: %v", task.ChannelUID, err)
+			taskErr = "model import review could not be staged; refresh channel configuration and rediscover"
+			log.Printf("[Model-Import] channel=%s legacy review staging failed: %v", task.ChannelUID, err)
+		}
+		if channel.ModelImport == nil {
+			if err := r.maybeEnableDiscoveredProtocolRoutes(channel, endpoints, cfgManager); err != nil {
+				status = DiscoveryStatusFailed
+				taskErr = fmt.Sprintf("自动启用已发现协议失败: %v", err)
+				log.Printf("[AutoDiscovery-RouteEnable] 渠道 %s 自动启用协议失败: %v", task.ChannelUID, err)
+			}
 		}
 	}
 
@@ -1704,10 +1710,10 @@ func (r *AutoDiscoveryRunner) maybeAutoWriteChannelConfig(channelUID string, cha
 		SupportedModels: sorted,
 	}
 
-	_, err := updateChannelByKind(cfgManager, kind, index, update)
+	err := cfgManager.UpdateDiscoveryChannel(channel, channelUID, update)
 	if err != nil {
 		log.Printf("[AutoDiscovery-ConfigWrite] 渠道 %s: 写入 SupportedModels 失败: %v", channelUID, err)
-		return nil
+		return err
 	}
 
 	log.Printf("[AutoDiscovery-ConfigWrite] 渠道 %s: 已自动写入 SupportedModels（%d 项模型）",
@@ -1754,7 +1760,7 @@ func (r *AutoDiscoveryRunner) maybeLearnClientFingerprint(channelUID string, cha
 		return
 	}
 	flag := true
-	if _, err := updateChannelByKind(cfgManager, kind, index, config.UpstreamUpdate{LearnedClientFingerprint: &flag}); err != nil {
+	if err := cfgManager.UpdateDiscoveryChannel(channel, channelUID, config.UpstreamUpdate{LearnedClientFingerprint: &flag}); err != nil {
 		log.Printf("[AutoDiscovery-ConfigWrite] 渠道 %s: 学习客户端伪装标记失败: %v", channelUID, err)
 		return
 	}

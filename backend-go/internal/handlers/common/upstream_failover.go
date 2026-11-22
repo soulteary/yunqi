@@ -597,8 +597,13 @@ func TryUpstreamWithAllKeys(
 	importedAlias := false
 	if upstream.ModelImportEnabled() {
 		item, ok := upstream.ImportedModel(model)
-		if ok && item.UpstreamID != model {
+		if ok {
+			// A reviewed exact identity must not enter family mapping. An
+			// explicit overflow selection already chose a different window;
+			// retain that target and validate it at the final execution gate.
 			importedAlias = true
+		}
+		if ok && item.UpstreamID != model && (!tryOpts.overflowRedirect || tryOpts.executionModel == "") {
 			tryOpts.executionModel = item.UpstreamID
 			tryOpts.endpointPolicy = nil // rebuild binding filters for the actual ID
 			if kind == scheduler.ChannelKindImages || kind == scheduler.ChannelKindGemini {

@@ -80,7 +80,7 @@ func (r *AutoDiscoveryRunner) maybeEnableDiscoveredProtocolRoutes(
 			upstream := discoveredProtocolUpstream(routeSeed, protocol, baseName, totalRoutes > 1)
 			additions = append(additions, config.AccountChannelAddition{Kind: protocol, Upstream: upstream})
 		}
-		if err := cfgManager.ApplyAccountChannelChanges(source.AccountUID, updates, additions); err != nil {
+		if err := cfgManager.ApplyDiscoveryAccountChannelChanges(source, source.AccountUID, updates, additions); err != nil {
 			return fmt.Errorf("补建协议渠道失败: %w", err)
 		}
 
@@ -111,7 +111,7 @@ func (r *AutoDiscoveryRunner) maybeEnableDiscoveredProtocolRoutes(
 		}
 	}
 
-	r.reconcileUnsupportedProtocolRoutes(source.AccountUID, discovered, probedProtocolKinds(endpoints), cfgManager)
+	r.reconcileUnsupportedProtocolRoutes(source.AccountUID, discovered, probedProtocolKinds(endpoints), cfgManager, source)
 	return nil
 }
 
@@ -133,6 +133,7 @@ func (r *AutoDiscoveryRunner) reconcileUnsupportedProtocolRoutes(
 	discovered map[string]bool,
 	probed map[string]bool,
 	cfgManager *config.ConfigManager,
+	sources ...*config.UpstreamConfig,
 ) {
 	for _, channel := range cfgManager.GetAccountChannels(accountUID) {
 		if !channel.Upstream.AutoManaged || channel.Upstream.ProviderID != "" {
@@ -152,14 +153,14 @@ func (r *AutoDiscoveryRunner) reconcileUnsupportedProtocolRoutes(
 		}
 		switch {
 		case !discovered[channel.Kind] && channel.Upstream.Status == "active":
-			if err := setChannelStatusByKind(cfgManager, kind, index, "disabled"); err != nil {
+			if err := setDiscoveryChannelStatus(cfgManager, kind, index, "disabled", channel.Upstream.ChannelUID, sources...); err != nil {
 				log.Printf("[AutoDiscovery-RouteDisable] 渠道 %s 置为备用池失败: %v", channel.Upstream.ChannelUID, err)
 				continue
 			}
 			log.Printf("[AutoDiscovery-RouteDisable] %s 协议无可用模型，已置为备用池: account=%s uid=%s",
 				channel.Kind, accountUID, channel.Upstream.ChannelUID)
 		case discovered[channel.Kind] && channel.Upstream.Status == "disabled":
-			if err := setChannelStatusByKind(cfgManager, kind, index, "active"); err != nil {
+			if err := setDiscoveryChannelStatus(cfgManager, kind, index, "active", channel.Upstream.ChannelUID, sources...); err != nil {
 				log.Printf("[AutoDiscovery-RouteRestore] 渠道 %s 恢复启用失败: %v", channel.Upstream.ChannelUID, err)
 				continue
 			}
@@ -283,4 +284,11 @@ func endpointResultsForProtocol(endpoints []EndpointDiscoveryResult, protocol st
 		results = append(results, result)
 	}
 	return results
+}
+
+func setDiscoveryChannelStatus(cm *config.ConfigManager, kind string, index int, status, uid string, sources ...*config.UpstreamConfig) error {
+	if len(sources) > 0 {
+		return cm.UpdateDiscoveryChannel(sources[0], uid, config.UpstreamUpdate{Status: &status})
+	}
+	return setChannelStatusByKind(cm, kind, index, status)
 }

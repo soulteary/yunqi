@@ -2,9 +2,11 @@ package common
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/gofiber/fiber/v3"
@@ -331,5 +333,39 @@ func TestModelImportRejectsUnapprovedFinalExecution(t *testing.T) {
 	case <-received:
 		t.Fatal("unapproved actual model reached provider")
 	default:
+	}
+}
+
+func TestModelImportPreservesExplicitOverflowExecution(t *testing.T) {
+	for _, approved := range []bool{true, false} {
+		t.Run(fmt.Sprint(approved), func(t *testing.T) {
+			var calls atomic.Int64
+			var sent string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				var body struct {
+					Model string `json:"model"`
+				}
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				sent = body.Model
+				_, _ = w.Write([]byte(`{"ok":true}`))
+			}))
+			defer server.Close()
+			h := newCrossModelHarness(t, server.URL)
+			defer h.cleanup()
+			models := []config.ImportedModel{{ID: "gpt-5.6-sol", UpstreamID: "provider/small"}}
+			if approved {
+				models = append(models, config.ImportedModel{ID: "large", UpstreamID: "gpt-5.6-openai"})
+			}
+			h.upstream.ModelImport = &config.ModelImportState{Policy: config.ModelImportPolicy{Enabled: true}, Approved: models}
+			handled, _, err, _ := h.run(t, []byte(`{"model":"gpt-5.6-sol","input":"hello"}`), WithSelectionTrace(&scheduler.SelectionResult{OverflowRedirect: true}))
+			if approved {
+				if !handled || err != nil || sent != "gpt-5.6-openai" {
+					t.Fatalf("approved overflow overwritten by original alias: handled=%v model=%s err=%v", handled, sent, err)
+				}
+			} else if handled || calls.Load() != 0 || err == nil {
+				t.Fatalf("unapproved overflow reached supplier: handled=%v calls=%d err=%v", handled, calls.Load(), err)
+			}
+		})
 	}
 }
