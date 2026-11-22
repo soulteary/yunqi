@@ -298,3 +298,29 @@ func TestTerminalParserRejectsOversizedUnterminatedFrames(t *testing.T) {
 		t.Fatal("oversized frame produced success or retained bytes")
 	}
 }
+
+func TestTerminalParserAcceptsLargeReadOfSmallFrames(t *testing.T) {
+	raw := strings.Repeat(terminalGuardPrefixes["chat"], 100000) + terminalGuardEnds["chat"]
+	source := &upstreamTerminalBody{ReadCloser: io.NopCloser(strings.NewReader(raw)), protocol: "chat"}
+	buffer := make([]byte, len(raw)+1)
+	if n, err := source.Read(buffer); err != nil || n != len(raw) {
+		t.Fatalf("valid large read rejected: n=%d err=%v", n, err)
+	}
+	if terminal, failed := source.state(); !terminal || failed {
+		t.Fatalf("terminal=%v failed=%v", terminal, failed)
+	}
+	if len(source.remainder) > terminalParserBufferLimit || len(source.lastPayload) > terminalParserBufferLimit {
+		t.Fatal("parser retained unbounded input")
+	}
+}
+
+func TestTerminalParserRecognizesEventAfterData(t *testing.T) {
+	raw := "data: {\"message\":\"rejected\"}\nevent: error\n\n"
+	source := &upstreamTerminalBody{ReadCloser: io.NopCloser(strings.NewReader(raw)), protocol: "responses"}
+	if _, err := io.ReadAll(source); err != nil {
+		t.Fatal(err)
+	}
+	if terminal, failed := source.state(); !terminal || !failed {
+		t.Fatalf("post-data error lost: terminal=%v failed=%v", terminal, failed)
+	}
+}

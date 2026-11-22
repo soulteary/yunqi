@@ -21,33 +21,51 @@ const terminalParserBufferLimit = 4 << 20
 
 type upstreamTerminalBody struct {
 	io.ReadCloser
-	mu        sync.Mutex
-	protocol  string
-	remainder string
-	data      []string
-	event     string
-	terminal  bool
-	failed    bool
-	dataBytes int
-	parseErr  error
+	mu          sync.Mutex
+	protocol    string
+	remainder   string
+	data        []string
+	event       string
+	terminal    bool
+	failed      bool
+	dataBytes   int
+	parseErr    error
+	lastPayload string
 }
 
 func (r *upstreamTerminalBody) Read(p []byte) (int, error) {
 	n, err := r.ReadCloser.Read(p)
 	r.mu.Lock()
-	r.remainder += string(p[:n])
-	if len(r.remainder) > terminalParserBufferLimit {
-		r.parseErr = fmt.Errorf("%w: upstream_frame_limit", ErrStreamUnexpectedEOF)
+	for offset := 0; offset < n && r.parseErr == nil; {
+		end := offset + (32 << 10)
+		if end > n {
+			end = n
+		}
+		r.remainder += string(p[offset:end])
+		offset = end
+		for {
+			index := strings.IndexByte(r.remainder, '\n')
+			if index < 0 {
+				break
+			}
+			if index > terminalParserBufferLimit {
+				r.parseErr = fmt.Errorf("%w: upstream_frame_limit", ErrStreamUnexpectedEOF)
+				break
+			}
+			r.line(r.remainder[:index])
+			r.remainder = r.remainder[index+1:]
+			if r.parseErr != nil {
+				break
+			}
+		}
+		if len(r.remainder) > terminalParserBufferLimit {
+			r.parseErr = fmt.Errorf("%w: upstream_frame_limit", ErrStreamUnexpectedEOF)
+		}
+	}
+	if r.parseErr != nil {
 		r.remainder = ""
 	}
-	for {
-		index := strings.IndexByte(r.remainder, '\n')
-		if index < 0 {
-			break
-		}
-		r.line(r.remainder[:index])
-		r.remainder = r.remainder[index+1:]
-	}
+
 	if err != nil {
 		if r.remainder != "" {
 			r.line(r.remainder)
@@ -69,11 +87,15 @@ func (r *upstreamTerminalBody) line(line string) {
 	line = strings.TrimSuffix(line, "\r")
 	if line == "" {
 		payload := strings.Join(r.data, "\n")
+		if len(r.data) == 0 {
+			payload = r.lastPayload
+		}
 		terminal, failed := streamFrameTerminal(payload, r.event, r.protocol, true)
 		r.terminal = r.terminal || terminal
 		r.failed = r.failed || failed
 		r.data = nil
 		r.dataBytes = 0
+		r.lastPayload = ""
 		r.event = ""
 		return
 	}
@@ -87,7 +109,7 @@ func (r *upstreamTerminalBody) line(line string) {
 			terminal, failed := streamFrameTerminal(payload, r.event, r.protocol, true)
 			r.terminal = r.terminal || terminal
 			r.failed = r.failed || failed
-			r.event = ""
+			r.lastPayload = payload
 			return
 		}
 		r.dataBytes += len(line) + 1
