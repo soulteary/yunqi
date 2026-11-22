@@ -55,6 +55,8 @@ type ModelsResponse struct {
 
 // ModelEntry 单个模型条目
 type ModelEntry struct {
+	desktopTierConfigured bool
+
 	SupportedEndpointTypes []string                       `json:"supported_endpoint_types,omitempty"`
 	EndpointMetadata       []config.ModelEndpointMetadata `json:"endpoint_metadata,omitempty"`
 	ID                     string                         `json:"id"`
@@ -725,6 +727,7 @@ func normalizeModelEntry(model ModelEntry, upstream *config.UpstreamConfig, glob
 	}
 	if upstream != nil {
 		if tier, configured := upstream.ClaudeDesktopModelTiers[model.ID]; configured {
+			model.desktopTierConfigured = true
 			model.AnthropicFamilyTier = normalizeAnthropicFamilyTier(tier)
 			if model.AnthropicFamilyTier == "" {
 				model.IsFamilyDefault = false
@@ -799,10 +802,20 @@ func mergeModelEntryMetadata(existing, incoming ModelEntry) ModelEntry {
 	if existing.MaxOutputTokens == 0 {
 		existing.MaxOutputTokens = incoming.MaxOutputTokens
 	}
-	if existing.AnthropicFamilyTier == "" {
-		existing.AnthropicFamilyTier = incoming.AnthropicFamilyTier
+	// An explicit mapping or clear must survive merging the same model from
+	// another protocol that only supplies inherited provider/registry metadata.
+	if !existing.desktopTierConfigured {
+		if incoming.desktopTierConfigured {
+			existing.AnthropicFamilyTier = incoming.AnthropicFamilyTier
+			existing.desktopTierConfigured = true
+		} else if existing.AnthropicFamilyTier == "" {
+			existing.AnthropicFamilyTier = incoming.AnthropicFamilyTier
+		}
 	}
 	existing.IsFamilyDefault = existing.IsFamilyDefault || incoming.IsFamilyDefault
+	if existing.desktopTierConfigured && existing.AnthropicFamilyTier == "" {
+		existing.IsFamilyDefault = false
+	}
 	return existing
 }
 

@@ -250,3 +250,21 @@ func TestDesktopTierChangeInvalidatesDiscoveryCache(t *testing.T) {
 		t.Fatalf("cache retained cleared tier: %q", got)
 	}
 }
+
+func TestDesktopTierOverrideSurvivesProtocolMerge(t *testing.T) {
+	for _, tier := range []string{"sonnet", ""} {
+		t.Run("tier="+tier, func(t *testing.T) {
+			explicit := normalizeModelEntry(ModelEntry{ID: "deepseek-v4-pro"}, &config.UpstreamConfig{ClaudeDesktopModelTiers: map[string]string{"deepseek-v4-pro": tier}}, nil)
+			inherited := normalizeModelEntry(ModelEntry{ID: "deepseek-v4-pro", AnthropicFamilyTier: "opus", IsFamilyDefault: true}, nil, nil)
+			for _, entries := range [][]ModelEntry{mergeModels([]ModelEntry{explicit}, []ModelEntry{inherited}), mergeModels([]ModelEntry{inherited}, []ModelEntry{explicit})} {
+				result := buildModelsResponse(entries)
+				if len(result.Data) != 1 || result.Data[0].AnthropicFamilyTier != tier {
+					t.Fatalf("protocol merge replaced explicit setting: %+v", result.Data)
+				}
+				if tier == "" && result.Data[0].IsFamilyDefault {
+					t.Fatal("cleared tier retained a default flag")
+				}
+			}
+		})
+	}
+}
