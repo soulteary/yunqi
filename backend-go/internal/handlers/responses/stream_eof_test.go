@@ -1,11 +1,14 @@
 package responses
 
 import (
+	"bytes"
+	"compress/gzip"
 	"errors"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/handlers/common"
 	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/types"
+	"github.com/soulteary/yunqi/internal/utils"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -104,5 +107,24 @@ func TestConvertedStreamEOFDoesNotComplete(t *testing.T) {
 				t.Fatalf("wrong terminal %s", w.Body.String())
 			}
 		})
+	}
+}
+
+func TestResponsesEOFHandlerAcceptsCentralDecompressedGzip(t *testing.T) {
+	raw := `data: {"type":"response.created","response":{"id":"r"}}` + "\n\n" + `data: {"type":"response.output_text.delta","delta":"hello"}` + "\n\n" + `data: {"type":"response.completed","response":{"id":"r","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1}}}` + "\n\n"
+	var compressed bytes.Buffer
+	zip := gzip.NewWriter(&compressed)
+	_, _ = io.WriteString(zip, raw)
+	_ = zip.Close()
+	resp := &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"text/event-stream"}, "Content-Encoding": []string{"gzip"}}, Body: io.NopCloser(bytes.NewReader(compressed.Bytes()))}
+	if err := utils.DecompressResponseBodyIfNeeded(resp); err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	c, _ := httpbridge.TestContext(w)
+	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/responses", nil))
+	_, err := handleStreamSuccess(c, resp, "responses", &config.EnvConfig{}, nil, time.Now(), &types.ResponsesRequest{Model: "m"}, []byte(`{"model":"m","input":"hi"}`), common.StreamPreflightTimeouts{})
+	if err != nil || !strings.Contains(w.Body.String(), "response.completed") || !strings.Contains(w.Body.String(), "hello") {
+		t.Fatalf("double decompression: %v body=%s", err, w.Body.String())
 	}
 }
