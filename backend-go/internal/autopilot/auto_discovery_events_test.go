@@ -20,7 +20,7 @@ func TestMaybeAutoWriteChannelConfig_PublishesAutoMappingAppliedOnWrite(t *testi
 	defer unsubscribe()
 
 	runner := &AutoDiscoveryRunner{tasks: make(map[string]*DiscoveryTask), hub: hub}
-	channel := &config.UpstreamConfig{ChannelUID: channelUID}
+	channel := legacyDiscoverySource(t, cfgManager)
 	endpoints := []EndpointDiscoveryResult{
 		{KeyMask: "sk-****a", BaseURL: "https://a.example.com", ProtocolOk: true, Models: []string{"gpt-4o"}, ModelsCount: 1},
 	}
@@ -53,7 +53,7 @@ func TestMaybeAutoWriteChannelConfig_NoEventWhenSkipped(t *testing.T) {
 	defer unsubscribe()
 
 	runner := &AutoDiscoveryRunner{tasks: make(map[string]*DiscoveryTask), hub: hub}
-	channel := &config.UpstreamConfig{ChannelUID: channelUID, SupportedModels: []string{"existing-model"}}
+	channel := legacyDiscoverySource(t, cfgManager)
 	endpoints := []EndpointDiscoveryResult{
 		{KeyMask: "sk-****a", BaseURL: "https://a.example.com", ProtocolOk: true, Models: []string{"gpt-4o"}, ModelsCount: 1},
 	}
@@ -73,7 +73,7 @@ func TestMaybeAutoWriteChannelConfig_NilHub_NoPanic(t *testing.T) {
 	cfgManager := setupTestConfigManagerForDiscovery(t, channelUID, nil)
 
 	runner := NewAutoDiscoveryRunner(nil, nil) // hub=nil
-	channel := &config.UpstreamConfig{ChannelUID: channelUID}
+	channel := legacyDiscoverySource(t, cfgManager)
 	endpoints := []EndpointDiscoveryResult{
 		{KeyMask: "sk-****a", BaseURL: "https://a.example.com", ProtocolOk: true, Models: []string{"gpt-4o"}, ModelsCount: 1},
 	}

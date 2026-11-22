@@ -6,6 +6,7 @@ DELETE /api/accounts/:accountUid/credentials/:credentialUid/mimo-console-cookie
 DELETE /api/accounts/:accountUid/credentials/:credentialUid/volcengine-access-key
 DELETE /api/channels/:uid
 DELETE /api/channels/:uid/keys/:keyHash
+DELETE /api/channels/:uid/model-import
 DELETE /api/chat/channels/:id
 DELETE /api/chat/channels/:id/capability-test/:jobId
 DELETE /api/chat/channels/:id/keys/:apiKey
@@ -55,6 +56,7 @@ GET /api/budgets/:principal
 GET /api/budgets/:principal/requests/:request
 GET /api/channels
 GET /api/channels/:uid
+GET /api/channels/:uid/model-import
 GET /api/channels/export
 GET /api/channels/provider-templates
 GET /api/channels/templates
@@ -232,6 +234,8 @@ POST /api/channel-discovery
 POST /api/channel-discovery-fast
 POST /api/channels
 POST /api/channels/:uid/keys
+POST /api/channels/:uid/model-import/approve
+POST /api/channels/:uid/model-import/preview
 POST /api/channels/:uid/request-preview
 POST /api/channels/export
 POST /api/channels/import
@@ -431,6 +435,7 @@ PUT /api/admin-credentials/:id
 PUT /api/autopilot/cost/exchange-rates
 PUT /api/budgets
 PUT /api/channels/:uid
+PUT /api/channels/:uid/model-import/policy
 PUT /api/chat/channels/:id
 PUT /api/console/codex-auto-review
 PUT /api/conversations/settings

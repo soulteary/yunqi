@@ -109,6 +109,20 @@ func CallerQuoteHandler(cm *config.ConfigManager, sch *scheduler.ChannelSchedule
 		if result.ExecutionModel != "" {
 			actualModel = result.ExecutionModel
 		}
+		if result.Upstream.ModelImportEnabled() {
+			// Mirror the live execution boundary: a reviewed exact alias takes
+			// precedence over family/task mappings, which must resolve into
+			// the approved provider inventory themselves.
+			if imported, ok := result.Upstream.ImportedModel(model); ok {
+				actualModel = imported.UpstreamID
+			}
+			actual, importErr := result.Upstream.CheckImportedModel(actualModel)
+			if importErr != nil {
+				httpbridge.JSON(c, 503, fiber.Map{"error": "no_eligible_route"})
+				return nil
+			}
+			actualModel = actual
+		}
 		if !middleware.AuthorizeProxyRoute(c, nil, actualModel, result.Upstream.ChannelUID) {
 			return nil
 		}
