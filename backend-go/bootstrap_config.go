@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/url"
@@ -170,6 +171,12 @@ func initializeCredentialRedaction(env *config.EnvConfig) func() {
 	if secret := os.Getenv("IDENTITY_PROXY_SECRET"); secret != "" {
 		keys = append(keys, secret)
 	}
+	keys = append(keys, env.IdentityProxyRevocationRedisURL)
+	if parsed, err := url.Parse(env.IdentityProxyRevocationRedisURL); err == nil && parsed.User != nil {
+		if password, ok := parsed.User.Password(); ok {
+			keys = append(keys, password)
+		}
+	}
 	return redaction.Enable(keys)
 }
 
@@ -183,4 +190,24 @@ func (a *application) configureBodyLogging() {
 		log.Printf("[BodyLog-Policy] 正文日志策略未启用，审计/保存失败: %v", err)
 	}
 	a.cfgManager.RegisterOnConfigChange(func(_ config.Config) { apply() })
+}
+
+func initializeIdentityRevocationSync(env *config.EnvConfig, cm *config.ConfigManager) {
+	apply := func() {
+		cfg := cm.IdentityProxySnapshot()
+		if cfg.EffectiveRevocationMode() != "shared" || env.IdentityProxyRevocations == nil {
+			return
+		}
+		call, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_, err := env.IdentityProxyRevocations.Prepare(call, cfg.RevocationEpoch, false)
+		if err == nil {
+			err = env.IdentityProxyRevocations.Sync(call, cfg.RevokedSessions)
+		}
+		if err != nil {
+			log.Print("[Identity-Revocation] shared revocation sync unavailable; shared authentication remains fail closed")
+		}
+	}
+	apply()
+	cm.RegisterOnConfigChange(func(config.Config) { apply() })
 }

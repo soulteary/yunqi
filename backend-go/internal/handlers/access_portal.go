@@ -29,7 +29,7 @@ func AccessPortal(env *config.EnvConfig) fiber.Handler {
 		enabled := "false"
 		if env.IdentityProxyConfigLookup != nil && len(env.IdentityProxySecret) >= 32 {
 			cfg := env.IdentityProxyConfigLookup()
-			if cfg.Enabled && cfg.Issuer != "" && len(cfg.TrustedCIDRs) > 0 && len(cfg.GroupMappings) > 0 && len(cfg.AllowedOrigins) > 0 {
+			if (cfg.EffectiveRevocationMode() == "local" || cfg.EffectiveRevocationMode() == "shared" && env.IdentityProxyRevocations != nil) && cfg.Enabled && cfg.Issuer != "" && len(cfg.TrustedCIDRs) > 0 && len(cfg.GroupMappings) > 0 && len(cfg.AllowedOrigins) > 0 {
 				enabled = "true"
 			}
 		}

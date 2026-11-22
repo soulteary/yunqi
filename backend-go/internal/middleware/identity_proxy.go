@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"crypto/subtle"
 	"net/http"
 	"sort"
@@ -172,7 +173,39 @@ func authenticateTrustedIdentity(c fiber.Ctx, env *config.EnvConfig) bool {
 			channelUIDs = append(channelUIDs, uid)
 		}
 	}
+	revocationMode := cfg.EffectiveRevocationMode()
+	switch revocationMode {
+	case "local":
+	case "shared":
+		if env.IdentityProxyRevocations == nil || cfg.RevocationEpoch == "" {
+			return rejectSharedIdentity(c)
+		}
+		call, cancel := context.WithTimeout(httpbridge.Request(c).Context(), 2*time.Second)
+		_, syncErr := env.IdentityProxyRevocations.Prepare(call, cfg.RevocationEpoch, false)
+		if syncErr == nil {
+			syncErr = env.IdentityProxyRevocations.Sync(call, cfg.RevokedSessions)
+		}
+		revoked, checkErr := false, error(nil)
+		if syncErr == nil {
+			revoked, checkErr = env.IdentityProxyRevocations.IsRevoked(call, fingerprint)
+		}
+		cancel()
+		if syncErr != nil || checkErr != nil {
+			return rejectSharedIdentity(c)
+		}
+		if revoked {
+			return false
+		}
+	default:
+		return rejectSharedIdentity(c)
+	}
 	sort.Strings(channelUIDs)
-	SetAdminPrincipal(c, AdminPrincipal{ID: "sso:" + config.EntryKeyHash(cfg.Issuer+"\x00"+subject), Role: chosenRole, ChannelUIDs: channelUIDs, Source: "identity_proxy", SessionFingerprint: fingerprint, SessionExpiresAt: expires})
+	SetAdminPrincipal(c, AdminPrincipal{ID: "sso:" + config.EntryKeyHash(cfg.Issuer+"\x00"+subject), Role: chosenRole, ChannelUIDs: channelUIDs, Source: "identity_proxy", RevocationScope: revocationMode, SessionFingerprint: fingerprint, SessionExpiresAt: expires})
 	return true
+}
+
+func rejectSharedIdentity(c fiber.Ctx) bool {
+	httpbridge.JSON(c, 503, fiber.Map{"error": "identity_proxy_revocation_unavailable"})
+	httpbridge.Abort(c)
+	return false
 }

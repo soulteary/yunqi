@@ -64,6 +64,9 @@ func WebAuthMiddleware(envCfg *config.EnvConfig, cfgManager *config.ConfigManage
 				authenticated = authenticateTrustedIdentity(c, envCfg)
 			}
 			StripIdentityProxyHeaders(c)
+			if httpbridge.IsAborted(c) {
+				return nil
+			}
 			if !authenticated {
 				// 认证失败 - 记录详细日志
 				reason := "密钥无效"
