@@ -365,7 +365,9 @@ func SendRequestWithLifecycleTrace(req *http.Request, upstream *config.UpstreamC
 		}
 	}
 	if attempt != nil {
-		capture := &usageCapture{ReadCloser: resp.Body, stream: strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream"), raw: make(map[string]json.RawMessage)}
+		// MIME cannot downgrade a streaming request. Keep the stricter SSE
+		// mode for existing non-stream clients bridged to an SSE upstream.
+		capture := &usageCapture{ReadCloser: resp.Body, stream: isStream || strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream"), raw: make(map[string]json.RawMessage)}
 		resp.Body = &budgetResponseBody{capture: capture, attempt: attempt, pricing: pricing, protocol: protocol, status: resp.StatusCode}
 	}
 	resp.Body = requestscope.WrapBody(req.Context(), resp.Body, binding)
