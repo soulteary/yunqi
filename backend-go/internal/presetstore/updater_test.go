@@ -2,6 +2,8 @@ package presetstore
 
 import (
 	"context"
+	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -26,7 +28,11 @@ func TestPresetUpdaterCheckOnceUpdatesStoreAndCache(t *testing.T) {
 	server := newPresetTestServer(t, bundle, presetTestServerOptions{})
 	defer server.Close()
 
-	store := NewPresetStore(nil)
+	// Generic metadata updates use the same pricing baseline; changed prices
+	// are explicitly staged/approved by price_review_test.go.
+	initial := cloneBundle(bundle)
+	initial.DataVersion = "0"
+	store := NewPresetStore(initial)
 	updater := NewPresetUpdater(store, UpdaterConfig{
 		Enabled:                 true,
 		IndexURL:                server.URL + "/index.json",
@@ -273,7 +279,11 @@ func TestPresetUpdaterCheckOnceSerializesConcurrentRuns(t *testing.T) {
 	server := newPresetTestServer(t, bundle, presetTestServerOptions{waitOnShardPath: "/subscription.json", release: release})
 	defer server.Close()
 
-	store := NewPresetStore(nil)
+	// Generic metadata updates use the same pricing baseline; changed prices
+	// are explicitly staged/approved by price_review_test.go.
+	initial := cloneBundle(bundle)
+	initial.DataVersion = "0"
+	store := NewPresetStore(initial)
 	updater := NewPresetUpdater(store, UpdaterConfig{
 		Enabled:                 true,
 		IndexURL:                server.URL + "/index.json",
@@ -399,6 +409,8 @@ func TestStatusHandlerNilUpdater(t *testing.T) {
 }
 
 type presetTestServerOptions struct {
+	signingKey      ed25519.PrivateKey
+	tamperSignature bool
 	tamperHash      bool
 	higherSchema    bool
 	omitKinds       map[string]bool
@@ -447,6 +459,14 @@ func newPresetTestServer(t *testing.T, bundle *PresetBundle, opts presetTestServ
 	}
 	if opts.higherSchema {
 		index.SchemaVersion = CurrentSchemaVersion + 1
+	}
+	if len(opts.signingKey) > 0 {
+		index.SigningKeyID = "test-release"
+		payload := mustJSON(t, index)
+		index.Signature = base64.StdEncoding.EncodeToString(ed25519.Sign(opts.signingKey, payload))
+		if opts.tamperSignature {
+			index.DataVersion += "-tampered"
+		}
 	}
 	indexBytes := mustJSON(t, index)
 

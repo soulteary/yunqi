@@ -138,6 +138,7 @@ GET /api/messages/ping/:id
 GET /api/metrics/prometheus
 GET /api/network/interfaces
 GET /api/presets
+GET /api/presets/prices
 GET /api/presets/status
 GET /api/quota/channels
 GET /api/racing/config
@@ -338,6 +339,9 @@ POST /api/messages/channels/auto-add
 POST /api/messages/channels/reorder
 POST /api/messages/channels/scheduler/diagnose
 POST /api/network/diagnose
+POST /api/presets/prices/approve
+POST /api/presets/prices/check
+POST /api/presets/prices/rollback
 POST /api/responses/channels
 POST /api/responses/channels/:id/auto-discover
 POST /api/responses/channels/:id/balance/check

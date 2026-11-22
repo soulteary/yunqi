@@ -27,7 +27,25 @@ import (
 func (a *application) startPresetUpdater() {
 	// 远程预置更新：启动时先尝试恢复已校验磁盘缓存，再由后台 worker 异步检查文档站。
 	// 网络/缓存失败不阻断服务，始终保留编译期 embedded fallback。
+	keys, keyErr := presetstore.ParseTrustedPricingKeys(os.Getenv("PRESET_TRUSTED_ED25519_KEYS"))
+	signingError := ""
+	if keyErr != nil {
+		signingError = keyErr.Error()
+		log.Printf("[PresetUpdater-Signing] 公钥配置无效，拒绝远程更新: %v", keyErr)
+	}
+	maxAge, futureSkew := time.Duration(0), time.Duration(0)
+	for name, target := range map[string]*time.Duration{"PRESET_SOURCE_MAX_AGE": &maxAge, "PRESET_SOURCE_FUTURE_SKEW": &futureSkew} {
+		if value := os.Getenv(name); value != "" {
+			parsed, err := time.ParseDuration(value)
+			if err != nil || parsed < 0 {
+				signingError = "invalid preset source freshness duration"
+			} else {
+				*target = parsed
+			}
+		}
+	}
 	a.presetUpdater = presetstore.NewPresetUpdater(presetstore.Default(), presetstore.UpdaterConfig{
+		TrustedSigningKeys: keys, SigningConfigError: signingError, SourceMaxAge: maxAge, SourceFutureSkew: futureSkew,
 		Enabled:  a.envCfg.PresetUpdateEnabled,
 		IndexURL: a.envCfg.PresetUpdateURL,
 		Interval: time.Duration(a.envCfg.PresetUpdateIntervalMinutes) * time.Minute,
