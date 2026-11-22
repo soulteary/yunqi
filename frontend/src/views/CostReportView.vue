@@ -26,6 +26,8 @@
       </div>
     </div>
 
+    <PriceReviewPanel />
+
     <!-- Filter bar -->
     <v-card class="mb-4" variant="outlined">
       <v-card-text class="d-flex align-center ga-4 flex-wrap">
@@ -226,6 +228,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import PriceReviewPanel from '@/components/PriceReviewPanel.vue'
 import { api } from '@/services/api'
 import type { CostReportRow } from '@/services/api-types'
 import { useI18n } from '@/i18n'
