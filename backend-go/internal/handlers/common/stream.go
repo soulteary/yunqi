@@ -27,6 +27,9 @@ var ErrEmptyStreamResponse = errors.New("upstream returned empty stream response
 
 // ErrStreamFirstContentTimeout 上游返回 HTTP 200 后，在指定时间内没有首个有效内容
 // Header 未发送，可安全 failover 到下一个 Key/BaseURL/渠道
+// ErrStreamUnexpectedEOF indicates transport EOF before a protocol terminal event.
+var ErrStreamUnexpectedEOF = errors.New("stream ended without a terminal event")
+
 var ErrStreamFirstContentTimeout = errors.New("stream first content timeout")
 
 // ErrStreamStalled 上游返回首个有效内容后，在指定时间内没有后续活动（断流）

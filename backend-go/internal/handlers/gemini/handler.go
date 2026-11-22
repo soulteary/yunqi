@@ -729,6 +729,9 @@ func handleSuccess(
 
 // handleAllChannelsFailed 处理所有渠道失败的情况
 func handleAllChannelsFailed(c fiber.Ctx, failoverErr *common.FailoverError, lastError error) {
+	if common.HandleEntryBudgetError(c, lastError) {
+		return
+	}
 	if failoverErr != nil {
 		httpbridge.Data(c, failoverErr.Status, "application/json", failoverErr.Body)
 		return
@@ -749,6 +752,9 @@ func handleAllChannelsFailed(c fiber.Ctx, failoverErr *common.FailoverError, las
 
 // handleAllKeysFailed 处理所有 Key 失败的情况
 func handleAllKeysFailed(c fiber.Ctx, failoverErr *common.FailoverError, lastError error) {
+	if common.HandleEntryBudgetError(c, lastError) {
+		return
+	}
 	if failoverErr != nil {
 		httpbridge.Data(c, failoverErr.Status, "application/json", failoverErr.Body)
 		return

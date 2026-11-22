@@ -261,3 +261,12 @@ func TestIsGeminiResponseEmpty(t *testing.T) {
 		})
 	}
 }
+
+func TestGeminiPlaceholderPromptFeedbackIsEmpty(t *testing.T) {
+	for _, reason := range []string{"", "BLOCK_REASON_UNSPECIFIED", "SAFETY", "OTHER"} {
+		empty := IsGeminiResponseEmpty(&types.GeminiResponse{PromptFeedback: &types.GeminiPromptFeedback{BlockReason: reason}})
+		if empty != (reason == "" || reason == "BLOCK_REASON_UNSPECIFIED") {
+			t.Fatalf("reason=%s empty=%v", reason, empty)
+		}
+	}
+}

@@ -21,6 +21,7 @@ type usageCapture struct {
 	validJSON   bool
 	finalOutput *int
 	truncated   bool
+	terminals   map[string]bool
 	raw         map[string]json.RawMessage
 }
 
@@ -39,6 +40,8 @@ func (r *usageCapture) Read(p []byte) (int, error) {
 					r.overflow = false
 				} else if !r.overflow {
 					if len(r.pending) >= 256<<10 {
+						r.truncated = true
+						r.raw = nil
 						r.pending = nil
 						r.overflow = true
 					} else {
@@ -61,6 +64,10 @@ func (r *usageCapture) Read(p []byte) (int, error) {
 func (r *usageCapture) captureLine(line []byte) {
 	line = bytes.TrimSpace(line)
 	if bytes.HasPrefix(line, []byte("data:")) {
+		if bytes.Equal(bytes.TrimSpace(line[5:]), []byte("[DONE]")) {
+			r.markTerminal("chat")
+			return
+		}
 		r.captureJSON(bytes.TrimSpace(line[5:]))
 	}
 }
@@ -76,6 +83,7 @@ func (r *usageCapture) captureJSON(body []byte) {
 	r.validJSON = true
 	var eventType string
 	_ = json.Unmarshal(envelope["type"], &eventType)
+	r.captureTerminal(envelope)
 	if eventType == "response.completed" {
 		var response struct {
 			Usage map[string]json.RawMessage `json:"usage"`
@@ -101,6 +109,7 @@ func (r *usageCapture) captureJSON(body []byte) {
 		}
 		return
 	}
+
 	raw = types.SanitizeRawUsage(raw)
 	var usage map[string]json.RawMessage
 	if len(raw) == 0 || len(raw) > 64<<10 || json.Unmarshal(raw, &usage) != nil {
@@ -239,4 +248,41 @@ func containsUsageField(values map[string]json.RawMessage, key string) bool {
 		}
 	}
 	return false
+}
+
+func (r *usageCapture) markTerminal(protocol string) {
+	if r.terminals == nil {
+		r.terminals = make(map[string]bool)
+	}
+	r.terminals[protocol] = true
+}
+func (r *usageCapture) captureTerminal(envelope map[string]json.RawMessage) {
+	var event string
+	_ = json.Unmarshal(envelope["type"], &event)
+	switch event {
+	case "response.completed", "response.incomplete", "response.failed":
+		r.markTerminal("responses")
+	case "message_stop":
+		r.markTerminal("messages")
+	}
+	var choices []struct {
+		FinishReason string `json:"finish_reason"`
+	}
+	if json.Unmarshal(envelope["choices"], &choices) == nil {
+		for _, choice := range choices {
+			if choice.FinishReason != "" {
+				r.markTerminal("chat")
+			}
+		}
+	}
+	var candidates []struct {
+		FinishReason string `json:"finishReason"`
+	}
+	if json.Unmarshal(envelope["candidates"], &candidates) == nil {
+		for _, candidate := range candidates {
+			if types.GeminiFinishReasonTerminal(candidate.FinishReason) {
+				r.markTerminal("gemini")
+			}
+		}
+	}
 }

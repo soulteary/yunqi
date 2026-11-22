@@ -20,6 +20,9 @@ func (a *application) serve(r *fiber.App) {
 	addr := listenAddressForEnv(a.envCfg)
 	endpoint := endpointForEnv(a.envCfg)
 
+	serviceContext, cancelService := context.WithCancel(context.Background())
+	defer cancelService()
+	a.envCfg.ServiceContext = serviceContext
 	drain := newRequestDrain()
 	// 创建 HTTP 服务器
 	srv := &http.Server{
@@ -106,6 +109,7 @@ func (a *application) serve(r *fiber.App) {
 
 		log.Println("[Server-Shutdown] 收到关闭信号，正在优雅关闭服务器...")
 
+		cancelService()
 		drain.begin()
 		// 创建超时上下文
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
