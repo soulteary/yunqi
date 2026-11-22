@@ -1774,5 +1774,11 @@
   "costReport.historyFailure": "Gagal",
   "costReport.historyError": "Riwayat permintaan gagal dimuat.",
   "costReport.csv.principalId": "ID atribusi prinsipal",
-  "costReport.csv.principalLabel": "Label prinsipal"
+  "costReport.csv.principalLabel": "Label prinsipal",
+  "channelEditor.desktopModels.title": "Pemetaan model Claude Desktop",
+  "channelEditor.desktopModels.hint": "Pilih tier Desktop untuk setiap model. ID model, perutean, dan kemampuan tetap sama. Tanpa tier menghapus tier yang diwarisi.",
+  "channelEditor.desktopModels.none": "Tanpa tier",
+  "channelEditor.desktopModels.modelId": "Tambahkan ID model",
+  "channelEditor.desktopModels.add": "Tambah",
+  "channelEditor.desktopModels.inheritedRules": "Aturan yang diwarisi: {rules}. Aturan hanya dapat dibaca; sesuaikan model tertentu di bawah."
 }
