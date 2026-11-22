@@ -265,7 +265,7 @@ func SendRequest(req *http.Request, upstream *config.UpstreamConfig, envCfg *con
 func SendRequestWithLifecycleTrace(req *http.Request, upstream *config.UpstreamConfig, envCfg *config.EnvConfig, isStream bool, apiType string, lifecycleTrace *RequestLifecycleTrace) (*http.Response, error) {
 	bound, binding, bindErr := requestscope.Bind(req.Context())
 	if bindErr != nil {
-		return nil, bindErr
+		return nil, budgetBindError(req, bindErr)
 	}
 	req = req.WithContext(bound)
 	attempt, pricing, protocol, budgetErr := beginEntryBudget(req, upstream, envCfg)

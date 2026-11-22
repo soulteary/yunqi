@@ -26,6 +26,10 @@ func TestPrincipalBudgetRealProxyPreflightAndSettlement(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		_, _ = io.Copy(io.Discard, r.Body)
+		if mode.Load() == 4 {
+			<-r.Context().Done()
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		if mode.Load() == 1 {
 			w.WriteHeader(400)
@@ -86,8 +90,13 @@ func TestPrincipalBudgetRealProxyPreflightAndSettlement(t *testing.T) {
 	if w := invoke("PUT", "/api/budgets", "route-admin", `{"principalId":"budget-team","limitUsd":1,"requestCapUsd":"1"}`); w.Code != 400 {
 		t.Fatalf("coerced numeric money %d", w.Code)
 	}
-	if w := invoke("POST", "/v1/chat/completions", "route-proxy", body); w.Code != 200 {
-		t.Fatalf("proxy %d %s", w.Code, w.Body.String())
+	success := invoke("POST", "/v1/chat/completions", "route-proxy", body)
+	if success.Code != 200 {
+		t.Fatalf("proxy %d %s", success.Code, success.Body.String())
+	}
+	diagnosticID := success.Header().Get("X-Yunqi-Request-Id")
+	if diagnosticID == "" {
+		t.Fatal("missing server diagnostic ID")
 	}
 	store, err := a.envCfg.BudgetManager.Store()
 	if err != nil {
@@ -146,7 +155,7 @@ func TestPrincipalBudgetRealProxyPreflightAndSettlement(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(attempts) != 1 || attempts[0].PricingVersion == "" || !json.Valid(attempts[0].Pricing) {
+			if len(attempts) != 1 || attempts[0].PricingVersion == "" || !json.Valid(attempts[0].Pricing) || attempts[0].UsageSource != "provider" || !json.Valid(attempts[0].BillingUsage) || record.ID != diagnosticID {
 				t.Fatalf("missing immutable price audit %+v", attempts)
 			}
 			provider++
@@ -155,4 +164,19 @@ func TestPrincipalBudgetRealProxyPreflightAndSettlement(t *testing.T) {
 	if provider != 1 {
 		t.Fatalf("non-idempotent settlement %d", provider)
 	}
+	// A gateway-owned duration lease cancels actual supplier work, retains an
+	// explicit conservative charge, and never damages provider key health.
+	policy.MaxRequestSeconds = 1
+	if err := a.cfgManager.PutPrincipalBudget(policy); err != nil {
+		t.Fatal(err)
+	}
+	mode.Store(4)
+	if w := invoke("POST", "/v1/chat/completions", "route-proxy", body); w.Code != 503 {
+		t.Fatalf("duration lease %d %s", w.Code, w.Body.String())
+	}
+	mode.Store(0)
+	if w := invoke("POST", "/v1/chat/completions", "route-proxy", body); w.Code != 200 {
+		t.Fatalf("budget timeout damaged healthy key %d %s", w.Code, w.Body.String())
+	}
+
 }

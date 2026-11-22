@@ -2,6 +2,7 @@ package entrybudget
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"sync"
@@ -193,12 +194,16 @@ func (s *Session) Begin(ctx context.Context, q AttemptQuote) (*Attempt, error) {
 	return &Attempt{session: s, Quote: q}, nil
 }
 func (a *Attempt) Complete(charge *int64, reason string) error {
+	return a.CompleteAccounting(charge, reason, "unknown", nil)
+}
+func (a *Attempt) CompleteAccounting(charge *int64, reason, source string, usage json.RawMessage) error {
+
 	if a == nil {
 		return nil
 	}
 	a.once.Do(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		a.err = a.session.store.Complete(ctx, a.session.ID, a.Quote.ID, charge, reason)
+		a.err = a.session.store.CompleteAccounting(ctx, a.session.ID, a.Quote.ID, charge, reason, source, usage)
 		cancel()
 		if a.err != nil {
 			a.session.scope.Cancel(ErrUnavailable)

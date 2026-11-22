@@ -39,7 +39,7 @@ func Open(path string) (*Store, error) {
 		`CREATE TABLE IF NOT EXISTS budget_requests(id TEXT PRIMARY KEY,principal TEXT NOT NULL,period TEXT NOT NULL,period_start INTEGER NOT NULL,period_end INTEGER NOT NULL,policy TEXT NOT NULL,created_at INTEGER NOT NULL,lease_until INTEGER NOT NULL,status TEXT NOT NULL DEFAULT 'pending',held INTEGER NOT NULL DEFAULT 0 CHECK(held>=0),charged INTEGER NOT NULL DEFAULT 0 CHECK(charged>=0),reason TEXT NOT NULL DEFAULT '',settled_at INTEGER NOT NULL DEFAULT 0)`,
 		`CREATE INDEX IF NOT EXISTS budget_requests_window ON budget_requests(principal,period,status,settled_at)`,
 		`CREATE INDEX IF NOT EXISTS budget_requests_expiry ON budget_requests(status,lease_until)`,
-		`CREATE TABLE IF NOT EXISTS budget_attempts(id TEXT PRIMARY KEY,request_id TEXT NOT NULL REFERENCES budget_requests(id),model TEXT NOT NULL,channel_uid TEXT NOT NULL,pricing_version TEXT NOT NULL,pricing TEXT NOT NULL,quote INTEGER NOT NULL CHECK(quote>=0),held INTEGER NOT NULL CHECK(held>=0),charged INTEGER NOT NULL DEFAULT 0 CHECK(charged>=0),status TEXT NOT NULL DEFAULT 'pending',reason TEXT NOT NULL DEFAULT '')`,
+		`CREATE TABLE IF NOT EXISTS budget_attempts(id TEXT PRIMARY KEY,request_id TEXT NOT NULL REFERENCES budget_requests(id),model TEXT NOT NULL,channel_uid TEXT NOT NULL,pricing_version TEXT NOT NULL,pricing TEXT NOT NULL,quote INTEGER NOT NULL CHECK(quote>=0),held INTEGER NOT NULL CHECK(held>=0),charged INTEGER NOT NULL DEFAULT 0 CHECK(charged>=0),status TEXT NOT NULL DEFAULT 'pending',reason TEXT NOT NULL DEFAULT '',usage_source TEXT NOT NULL DEFAULT 'unknown',billing_usage TEXT NOT NULL DEFAULT '{}')`,
 		`CREATE INDEX IF NOT EXISTS budget_attempts_request ON budget_attempts(request_id)`,
 	} {
 		if _, err := db.Exec(query); err != nil {
@@ -191,6 +191,19 @@ func (s *Store) Reserve(ctx context.Context, p Policy, requestID string, q Attem
 // Complete replaces an upper-bound hold with a known charge. A nil charge is
 // conservative: retain that attempt's hold, without pretending it is measured.
 func (s *Store) Complete(ctx context.Context, requestID, attemptID string, charge *int64, reason string) error {
+	return s.CompleteAccounting(ctx, requestID, attemptID, charge, reason, "unknown", nil)
+}
+func (s *Store) CompleteAccounting(ctx context.Context, requestID, attemptID string, charge *int64, reason, source string, usage json.RawMessage) error {
+	if source != "provider" && source != "unknown" {
+		return ErrPricing
+	}
+	if len(usage) == 0 {
+		usage = json.RawMessage(`{}`)
+	}
+	if len(usage) > 128<<10 || !json.Valid(usage) {
+		return ErrPricing
+	}
+
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -241,7 +254,7 @@ func (s *Store) Complete(ctx context.Context, requestID, attemptID string, charg
 	if _, err = tx.ExecContext(ctx, `UPDATE budget_requests SET held=held+? WHERE id=?`, delta, requestID); err != nil {
 		return err
 	}
-	if _, err = tx.ExecContext(ctx, `UPDATE budget_attempts SET held=?,charged=?,status=?,reason=? WHERE id=?`, charged, charged, status, reason, attemptID); err != nil {
+	if _, err = tx.ExecContext(ctx, `UPDATE budget_attempts SET held=?,charged=?,status=?,reason=?,usage_source=?,billing_usage=? WHERE id=?`, charged, charged, status, reason, source, string(usage), attemptID); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -354,6 +367,8 @@ type RequestRecord struct {
 	Reason         string `json:"reason,omitempty"`
 }
 type AttemptRecord struct {
+	UsageSource    string          `json:"usageSource"`
+	BillingUsage   json.RawMessage `json:"billingUsage"`
 	ID             string          `json:"attemptId"`
 	RequestID      string          `json:"requestId"`
 	Model          string          `json:"model"`
@@ -386,7 +401,7 @@ func (s *Store) Requests(ctx context.Context, principal string, limit int) ([]Re
 	return records, rows.Err()
 }
 func (s *Store) Attempts(ctx context.Context, id string) ([]AttemptRecord, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,request_id,model,channel_uid,pricing_version,pricing,quote,charged,status,reason FROM budget_attempts WHERE request_id=? ORDER BY id LIMIT 1000`, id)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,request_id,model,channel_uid,pricing_version,pricing,quote,charged,status,reason,usage_source,billing_usage FROM budget_attempts WHERE request_id=? ORDER BY id LIMIT 1000`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -394,10 +409,11 @@ func (s *Store) Attempts(ctx context.Context, id string) ([]AttemptRecord, error
 	out := make([]AttemptRecord, 0)
 	for rows.Next() {
 		var r AttemptRecord
-		var pricing string
-		if err := rows.Scan(&r.ID, &r.RequestID, &r.Model, &r.ChannelUID, &r.PricingVersion, &pricing, &r.QuotedNanoUSD, &r.ChargedNanoUSD, &r.Status, &r.Reason); err != nil {
+		var pricing, usage string
+		if err := rows.Scan(&r.ID, &r.RequestID, &r.Model, &r.ChannelUID, &r.PricingVersion, &pricing, &r.QuotedNanoUSD, &r.ChargedNanoUSD, &r.Status, &r.Reason, &r.UsageSource, &usage); err != nil {
 			return nil, err
 		}
+		r.BillingUsage = json.RawMessage(usage)
 		r.Pricing = json.RawMessage(pricing)
 		out = append(out, r)
 	}

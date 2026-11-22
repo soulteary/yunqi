@@ -1,6 +1,7 @@
 package common
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -20,6 +21,7 @@ import (
 	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/middleware"
+	"github.com/soulteary/yunqi/internal/requestscope"
 	"github.com/soulteary/yunqi/internal/types"
 	"github.com/soulteary/yunqi/internal/utils"
 	"github.com/tidwall/gjson"
@@ -321,7 +323,12 @@ func (b *budgetResponseBody) Close() error {
 			_ = b.attempt.Complete(nil, "invalid_provider_usage_cost")
 			return
 		}
-		_ = b.attempt.Complete(&amount, "provider_usage")
+		accounting, _ := json.Marshal(struct {
+			Protocol string          `json:"protocol"`
+			Usage    *types.Usage    `json:"usage"`
+			RawUsage json.RawMessage `json:"rawUsage"`
+		}{b.protocol, usage, usage.Provenance.RawUsage})
+		_ = b.attempt.CompleteAccounting(&amount, "provider_usage", "provider", accounting)
 	})
 	return b.err
 }
@@ -330,7 +337,7 @@ func budgetConnectTrace(connected *atomic.Bool) *httptrace.ClientTrace {
 	return &httptrace.ClientTrace{GotConn: func(httptrace.GotConnInfo) { connected.Store(true) }}
 }
 func isEntryBudgetError(err error) bool {
-	return errors.Is(err, entrybudget.ErrQuota) || errors.Is(err, entrybudget.ErrPricing) || errors.Is(err, entrybudget.ErrUnavailable) || errors.Is(err, entrybudget.ErrClosed) || errors.Is(err, entrybudget.ErrLeaseLost)
+	return errors.Is(err, entrybudget.ErrQuota) || errors.Is(err, entrybudget.ErrPricing) || errors.Is(err, entrybudget.ErrUnavailable) || errors.Is(err, entrybudget.ErrClosed) || errors.Is(err, entrybudget.ErrLeaseLost) || errors.Is(err, entrybudget.ErrRequestTimeout) || errors.Is(err, entrybudget.ErrShutdown)
 }
 
 // HandleEntryBudgetError renders only local budget rejections, before any upstream
@@ -353,6 +360,25 @@ func HandleEntryBudgetError(c fiber.Ctx, err error) bool {
 	if !ok {
 		return false
 	}
+	if httpbridge.Writer(c).Written() {
+		return true
+	}
 	httpbridge.JSON(c, status, fiber.Map{"error": fiber.Map{"type": code, "message": "Request could not reserve its entry budget"}})
 	return true
+}
+
+func budgetScopeCause(ctx context.Context) error {
+	if session := entrybudget.FromContext(ctx); session != nil {
+		cause := session.Cause()
+		if cause != nil && !errors.Is(cause, requestscope.ErrClosed) {
+			return cause
+		}
+	}
+	return nil
+}
+func budgetBindError(req *http.Request, err error) error {
+	if entrybudget.FromContext(req.Context()) != nil {
+		return entrybudget.ErrClosed
+	}
+	return err
 }

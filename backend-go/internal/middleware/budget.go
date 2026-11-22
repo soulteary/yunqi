@@ -11,6 +11,7 @@ import (
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/entrybudget"
 	"github.com/soulteary/yunqi/internal/httpbridge"
+	"github.com/soulteary/yunqi/internal/telemetry"
 )
 
 type budgetConfigKey struct{}
@@ -42,12 +43,15 @@ func ProxyBudgetMiddleware(env *config.EnvConfig, cm *config.ConfigManager) fibe
 			httpbridge.Abort(c)
 			return nil
 		}
-		var nonce [16]byte
-		if _, err := rand.Read(nonce[:]); err != nil {
-			return err
+		id := telemetry.DiagnosticRequestID(httpbridge.Request(c).Context())
+		if id == "" {
+			var nonce [16]byte
+			if _, err := rand.Read(nonce[:]); err != nil {
+				return err
+			}
+			id = "req_" + hex.EncodeToString(nonce[:])
 		}
-		id := "req_" + hex.EncodeToString(nonce[:])
-		// Reuse telemetry.DiagnosticRequestID once the diagnostics interface lands.
+
 		session, err := env.BudgetManager.Start(httpbridge.Request(c).Context(), p, id)
 		if err != nil {
 			httpbridge.JSON(c, 503, fiber.Map{"error": "entry_budget_unavailable"})
