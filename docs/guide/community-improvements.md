@@ -9,7 +9,7 @@
 | 批次 | 原有问题或缺口 | 本轮改善 | 范围与项目 PR |
 | --- | --- | --- | --- |
 | 01 状态恢复 | 配置备份不包含完整账本、SQLite WAL 和价格安全状态 | 双目录排他锁、完整本地状态冷备、逐文件校验、数据库完整性验证、新目录恢复 | [#99](https://github.com/soulteary/yunqi/pull/99) 已合并；外部 Redis/IdP 仍须协调快照，不会自动重载部署 |
-| 02 共享预算 | 各节点独立 SQLite 无法约束团队总预算 | Redis 原子预留/结算、精确整数金额、逐尝试价格与 usage、不变账单归档、已有本地余额切换保护 | [#102](https://github.com/soulteary/yunqi/pull/102) 已合并；并发建账的后续一致性修复正在验证；默认仍为本地账本 |
+| 02 共享预算 | 各节点独立 SQLite 无法约束团队总预算 | Redis 原子预留/结算、精确整数金额、逐尝试价格与 usage、不变账单归档、已有本地余额切换保护 | [#102](https://github.com/soulteary/yunqi/pull/102) 已合并；后续一致性修复 [#104](https://github.com/soulteary/yunqi/pull/104) 验证中；默认仍为本地账本 |
 | 03 原生身份 | OIDC 登录和 MFA/Passkey 全部依赖外置代理 | Yunqi 原生 AuthCode + PKCE、服务端会话、AMR/ACR 强度校验、角色范围和共享撤销 | [#100](https://github.com/soulteary/yunqi/pull/100) 验证中；MFA/Passkey 仍由 IdP 执行，可信代理继续可用 |
 | 04 共享路由 | 渠道限额与严格会话绑定各节点独立 | 共享显式渠道 RPM/并发、发送前原子会话绑定、活跃 Body 续租、状态丢失拒绝放行 | [#101](https://github.com/soulteary/yunqi/pull/101) 已合并；Key/Quota 与发现值保留本地保护，不复制 Responses 完整历史 |
 | 05 路由评估 | 缺少固定样本下的质量、成本和延迟对照 | 独立质量标签与实际成本、分层门槛、P95、平均重试、持久化证据与内容摘要重放 | [#103](https://github.com/soulteary/yunqi/pull/103) 验证中；只进入人工复审，不自动改变在线策略 |
@@ -27,7 +27,7 @@
 | 配置和状态目录别名造成重复锁 | 同一物理目录被本进程加锁两次，启动误报繁忙 | 解析真实目录后排序去重；验证第二实例拒绝及锁释放恢复 | 01 / #99 |
 | 已结算历史达到主账本容量后永久拒绝 | 长期请求积累使共享预算不可继续使用 | 原子归档结算请求，保留周期金额及滚动窗口索引；10,001 条历史回归 | 02 / #102 |
 | 离线初始化阻塞扫描 Redis 全库 | 对同一 Redis 的其他命名空间造成不必要阻塞 | 使用增量 SCAN，保留孤立账本拒绝和 epoch 验证 | 02 / #102 |
-| WATCH 分步读取被并发写入打断 | 首次建账时把暂时不一致误判为账本损坏 | 已确定性复现首次并发建账与并发退款两种混合读取，后续修复验证中；这是 Yunqi 本轮实现问题，不据此推断上游存在同一缺陷 | 02 |
+| WATCH 分步读取被并发写入打断 | 首次建账时把暂时不一致误判为账本损坏 | 已确定性复现首次并发建账与并发退款两种混合读取，修复已提交 [#104](https://github.com/soulteary/yunqi/pull/104)，等待完整 CI；这是 Yunqi 本轮实现问题，不据此推断上游存在同一缺陷 | 02 |
 | 旧共享会话沿用较低认证强度 | 收紧 MFA/Passkey 策略后仍可能接受旧会话 | 认证策略摘要和撤销 epoch 绑定流程、会话与 realm；策略收紧回归 | 03 / #100 |
 | 匿名待完成 OIDC 流程无限增加 | 共享 Redis 会话状态缺少容量边界 | 每 realm 4,096 个、消费释放、过期恢复；满载在访问 IdP 前拒绝 | 03 / #100 |
 | 临时缩短会话期限导致撤销提前失效 | 退出后再次放宽策略可能复活原 Cookie | 撤销保留原存储有效期，当前策略只作局部有效期判断；local/shared 时间推进回归 | 03 / #100 |
@@ -46,6 +46,7 @@
 | --- | --- | --- | --- |
 | 01 | [23dc804](https://github.com/soulteary/yunqi/commit/23dc804ac8694a8494932c16f21471e417b29b49)：冷备与隔离恢复；[7a6977c](https://github.com/soulteary/yunqi/commit/7a6977c655da3588ec0fd384e3e04973651cac74)：相对路径与锁别名 | [#99 commits](https://github.com/soulteary/yunqi/pull/99/commits) | WAL、split paths、损坏、穿越、活动目录拒绝通过；[完整 Verify](https://github.com/soulteary/yunqi/actions/runs/44992303383) 通过 |
 | 02 | [74899dc](https://github.com/soulteary/yunqi/commit/74899dcc528b6d94f3c1a036c4a8185cefec29a9)：共享账本；[c854f17](https://github.com/soulteary/yunqi/commit/c854f17c8f3f632dad48edaa195c152432041518)：增量初始化扫描 | [#102 commits](https://github.com/soulteary/yunqi/pull/102/commits) | 真实 Redis 双节点预算、逐尝试结算、大整数、归档与状态丢失通过；[完整 Verify](https://github.com/soulteary/yunqi/actions/runs/44993310368) 通过；后续并发修复单独记录 |
+| 02 补充 | [697d4b9](https://github.com/soulteary/yunqi/commit/697d4b934d023e068f4066fc005aa71bffeb4c59)：WATCH 读取一致性、提交前取消及有界抖动 | [#104 commits](https://github.com/soulteary/yunqi/pull/104/commits) | 首次/已初始化主体各 20 并发、各 20 轮；两种确定性竞态、父取消/短 deadline、独立结算通过；等待完整 CI |
 | 03 | [5885e2e](https://github.com/soulteary/yunqi/commit/5885e2e00e41b5b00275afb97af142c37bc31485)：原生 OIDC；[10adfe3](https://github.com/soulteary/yunqi/commit/10adfe30b217a75e7ebbbff16e989f48e5579ee1)：匿名流程容量；[2edd44f](https://github.com/soulteary/yunqi/commit/2edd44f14c2ff1f132901862f1ab970f786ba421)：撤销生命周期 | [#100 commits](https://github.com/soulteary/yunqi/pull/100/commits) | fake TLS IdP、跨节点会话、重放、策略收紧、退出与容量回归通过；等待最新整合 CI |
 | 04 | [ef3c3be](https://github.com/soulteary/yunqi/commit/ef3c3be96c1ea680457a7d3e303ebcdfa2fae478)：共享路由；[9decc76](https://github.com/soulteary/yunqi/commit/9decc760e2667e3b06e32ae66eba0ff12454af5b)：RPM 单一所有权 | [#101 commits](https://github.com/soulteary/yunqi/pull/101/commits) | 真实 Redis 独立节点、首次原子绑定、断连/续租、状态丢失及容量恢复通过；[完整 Verify](https://github.com/soulteary/yunqi/actions/runs/44994509959) 通过 |
 | 05 | [eaa01b2](https://github.com/soulteary/yunqi/commit/eaa01b2695a95831acdef9b2cb2821b325096266)：固定样本评估；[56a658a](https://github.com/soulteary/yunqi/pull/103/commits)：路由契约清单 | [#103 commits](https://github.com/soulteary/yunqi/pull/103/commits) | 分层、未知计量、重放、权限、持久化和 HTTP 保存导出通过；整合 CI 暴露的预算并发问题单独修复 |
@@ -59,6 +60,7 @@
 | [new-api PR #5791](https://github.com/QuantumNous/new-api/pull/5791)、[PR #3345](https://github.com/QuantumNous/new-api/pull/3345) | API Key 周期配额、日/月限额和即时阻断 | 使用稳定 principal 预算、逐尝试预留结算与共享后端，Key 轮换不作为重置余额的方法 |
 | [new-api issue #1730](https://github.com/QuantumNous/new-api/issues/1730)、[PR #6583](https://github.com/QuantumNous/new-api/pull/6583) | 渠道速率与并发准入 | 入口与渠道分别管理共享限额，保留本地 Key/Quota 自身保护；拒绝不得消耗未实际发送的本地窗口 |
 | [new-api PR #8124](https://github.com/QuantumNous/new-api/pull/8124)、[issue #8123](https://github.com/QuantumNous/new-api/issues/8123) | Redis 限流 key 过期边界 | 租约可到期回收，但持久预算 epoch/索引不能作为普通缓存自动过期或静默重建 |
+| [new-api issue #2841](https://github.com/QuantumNous/new-api/issues/2841) | 多步 Redis 读取与更新的高并发原子性 | WATCH 的读取并非快照；Yunqi 在拒绝前校验监测键一致性，冲突重试，不盲目重放已尝试的金融写事务 |
 | [new-api PR #8350](https://github.com/QuantumNous/new-api/pull/8350)、[PR #6264](https://github.com/QuantumNous/new-api/pull/6264)、[issue #3240](https://github.com/QuantumNous/new-api/issues/3240) | 发送前保留严格会话亲和、并发路由及加密内容的资源绑定 | 以稳定渠道 UID 跨节点原子绑定；失败不迁移，不把完整 Responses 历史同步当作已完成 |
 | [new-api PR #6620](https://github.com/QuantumNous/new-api/pull/6620) | 可配置 OAuth PKCE | 原生 OIDC 固定使用 PKCE S256，并独立校验 state、nonce、签名和认证强度 |
 | [new-api PR #7028](https://github.com/QuantumNous/new-api/pull/7028)、[issue #6972](https://github.com/QuantumNous/new-api/issues/6972) | 会话数量达到上限后无法登录，改为淘汰最旧活跃会话 | 服务端会话淘汰与签发限额分离，另加匿名流程容量、共享撤销及策略变更隔离 |
