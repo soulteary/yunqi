@@ -12,3 +12,9 @@ type SharedProxyAdmission interface {
 	AcquireContext(context.Context, string, int, int) (context.Context, func(), time.Duration, error)
 	Close() error
 }
+
+// SharedRoutingAdmission applies configured channel capacity across nodes.
+type SharedRoutingAdmission interface {
+	AcquireWindowContext(context.Context, string, int, int, time.Duration) (context.Context, func(), time.Duration, error)
+	Close() error
+}

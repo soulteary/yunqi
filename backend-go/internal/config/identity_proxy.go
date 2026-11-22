@@ -21,7 +21,8 @@ type IdentitySessionRevocation struct {
 }
 
 // IdentityProxyConfig authorizes assertions only from configured peer networks
-// plus an environment-held shared secret. OAuth stays external.
+// plus an environment-held shared secret. Group/revocation policy is also used
+// by native OIDC without enabling trusted-proxy assertions.
 type IdentityProxyConfig struct {
 	RevocationEpoch   string                      `json:"revocationEpoch,omitempty"`
 	RevocationMode    string                      `json:"revocationMode,omitempty"`

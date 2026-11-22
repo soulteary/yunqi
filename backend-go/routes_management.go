@@ -14,6 +14,7 @@ import (
 )
 
 func (a *application) registerSystemRoutes(r *fiber.App) {
+	handlers.RegisterNativeOIDCRoutes(r, a.envCfg)
 	r.Get("/access", handlers.AccessPortal(a.envCfg))
 
 	// 健康检查端点（固定路径 /health，与 Dockerfile HEALTHCHECK 保持一致）

@@ -14,6 +14,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/httpbridge"
+	"github.com/soulteary/yunqi/internal/utils"
 )
 
 const (
@@ -40,6 +41,7 @@ func validIdentityText(value string, limit int) bool {
 // StripIdentityProxyHeaders keeps trusted assertions and their shared secret
 // inside the management authentication boundary, never an upstream request.
 func StripIdentityProxyHeaders(c fiber.Ctx) {
+	utils.StripNativeIdentityCookies(httpbridge.Request(c).Header)
 	for name := range httpbridge.Request(c).Header {
 		if strings.HasPrefix(strings.ToLower(name), "x-yunqi-identity-") || strings.EqualFold(name, IdentityManagementHeader) {
 			delete(httpbridge.Request(c).Header, name)
@@ -131,47 +133,9 @@ func authenticateTrustedIdentity(c fiber.Ctx, env *config.EnvConfig) bool {
 			present[group] = true
 		}
 	}
-	rank := func(role string) int {
-		switch role {
-		case "viewer":
-			return 1
-		case "operator":
-			return 2
-		case "admin":
-			return 3
-		}
-		return 0
-	}
-	chosenRole := ""
-	chosenRank := 0
-	allResources := false
-	scopes := make(map[string]bool)
-	for _, mapping := range cfg.GroupMappings {
-		currentRank := rank(mapping.Role)
-		if !present[mapping.Group] || currentRank == 0 || currentRank < chosenRank {
-			continue
-		}
-		if currentRank > chosenRank {
-			chosenRole = mapping.Role
-			chosenRank = currentRank
-			scopes = make(map[string]bool)
-			allResources = false
-		}
-		if len(mapping.ChannelUIDs) == 0 {
-			allResources = true
-		}
-		for _, uid := range mapping.ChannelUIDs {
-			scopes[uid] = true
-		}
-	}
-	if chosenRank == 0 || len(scopes) > 256 {
+	chosenRole, channelUIDs, ok := identityGroupPermissions(cfg.GroupMappings, present)
+	if !ok {
 		return false
-	}
-	var channelUIDs []string
-	if !allResources {
-		for uid := range scopes {
-			channelUIDs = append(channelUIDs, uid)
-		}
 	}
 	revocationMode := cfg.EffectiveRevocationMode()
 	switch revocationMode {
@@ -208,4 +172,52 @@ func rejectSharedIdentity(c fiber.Ctx) bool {
 	httpbridge.JSON(c, 503, fiber.Map{"error": "identity_proxy_revocation_unavailable"})
 	httpbridge.Abort(c)
 	return false
+}
+
+func identityGroupPermissions(mappings []config.IdentityGroupMapping, present map[string]bool) (string, []string, bool) {
+	rank := func(role string) int {
+		switch role {
+		case "viewer":
+			return 1
+		case "operator":
+			return 2
+		case "admin":
+			return 3
+		}
+		return 0
+	}
+	chosenRole := ""
+	chosenRank := 0
+	allResources := false
+	scopes := make(map[string]bool)
+	for _, mapping := range mappings {
+		currentRank := rank(mapping.Role)
+		if !present[mapping.Group] || currentRank == 0 || currentRank < chosenRank {
+			continue
+		}
+		if currentRank > chosenRank {
+			chosenRole = mapping.Role
+			chosenRank = currentRank
+			scopes = make(map[string]bool)
+			allResources = false
+		}
+		if len(mapping.ChannelUIDs) == 0 {
+			allResources = true
+		}
+		for _, uid := range mapping.ChannelUIDs {
+			scopes[uid] = true
+		}
+	}
+	if chosenRank == 0 || len(scopes) > 256 {
+		return "", nil, false
+	}
+	var channelUIDs []string
+	if !allResources {
+		for uid := range scopes {
+			channelUIDs = append(channelUIDs, uid)
+		}
+	}
+
+	sort.Strings(channelUIDs)
+	return chosenRole, channelUIDs, true
 }

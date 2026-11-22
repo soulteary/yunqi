@@ -392,6 +392,9 @@ func isEntryBudgetError(err error) bool {
 // HandleEntryBudgetError renders only local budget rejections, before any upstream
 // response is selected. Racing branches report errors to their common coordinator.
 func EntryBudgetFailure(err error) (int, string, bool) {
+	if status, code, ok := sharedChannelFailure(err); ok {
+		return status, code, true
+	}
 	if !isEntryBudgetError(err) {
 		return 0, "", false
 	}
@@ -421,6 +424,7 @@ func HandleEntryBudgetError(c fiber.Ctx, err error) bool {
 	if httpbridge.Writer(c).Written() {
 		return true
 	}
+	sharedChannelRetryHeader(c, err)
 	httpbridge.JSON(c, status, fiber.Map{"error": fiber.Map{"type": code, "message": "Request admission resources are unavailable"}})
 	return true
 }

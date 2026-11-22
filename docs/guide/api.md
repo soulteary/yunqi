@@ -79,7 +79,11 @@ viewer 只读，operator 可执行有限状态操作，admin 仍受其渠道范�
 
 `POST /api/access/session/revoke` 撤销当前 SSO 会话；全局管理员也可使用 `POST /api/identity-proxy/sessions/revoke` 按 sessionFingerprint 撤销。原始 subject/session 不保存或返回，撤销持久化，修改角色映射不会清除撤销记录。SSO 不自动授予数据面权限。
 
-OIDC 登录、Passkey 和双因素认证由外置身份代理及其 IdP 执行；Yunqi 验证可信代理、会话期限、角色范围和撤销状态。Copilot OAuth 仍是上游授权，不是管理员登录。
+Yunqi 可通过 `/auth/oidc/login` 原生发起 OIDC Authorization Code + PKCE S256 登录；也保留外置可信身份代理模式。Passkey 与双因素认证由 IdP 完成，原生模式验证签名 ID Token 的 `amr`/`acr` 是否满足所配认证强度，不能仅凭界面声称已开启 MFA。Copilot OAuth 仍是上游授权，不是管理员登录。
+
+原生 OIDC 默认关闭。浏览器仅保存 `__Host-yunqi-session` 随机会话引用（Secure、HttpOnly、SameSite=Lax），不保存 ID/Access/Refresh Token。`/access` 提供登录、当前身份与撤销退出入口；退出复用 `POST /api/access/session/revoke`。每次请求依据当前 `identityProxy.groupMappings` 重新计算角色与渠道范围，撤销检查沿用同一 local/shared 机制。Cookie 写请求须携带所配控制台 Origin 和 `X-Yunqi-Management-Request: 1`；登录不授予代理调用权限。
+
+本地会话仅驻留当前进程，重启后须重新登录；共享模式把授权流程和会话存入显式 Redis 后端，支持登录回调落到另一节点。后端或撤销 realm 不可用时拒绝认证，不退回本地模式。每主体保留最多 20 个会话，新登录淘汰最旧会话，每小时最多签发 100 个会话；达到签发限制时不淘汰现有会话。会话最多 8 小时且不超过 ID Token 到期时间。Redis 不包含在本地文件备份内，不能单独回滚旧 Redis 快照来恢复会话；共享撤销存储的持久化/禁止驱逐要求仍适用。
 
 `identityProxy.revocationMode` 默认为 `local`，只保证当前节点撤销；`shared` 使用显式配置的 Redis 撤销后端，每次 SSO 鉴权检查共享状态。多节点应使用同一撤销后端和 namespace，并保持身份代理策略一致；后端缺失或读写失败时返回 503，不退回本地放行。身份视图与退出操作会显示撤销范围，不能把本地退出当作全节点撤销。
 
@@ -124,3 +128,16 @@ OIDC 登录、Passkey 和双因素认证由外置身份代理及其 IdP 执行�
 成本页提供远程预置价格的待审、差异和回滚面板。全局管理员使用 `GET /api/presets/prices` 查看，`POST /api/presets/prices/check` 检查来源，`POST /api/presets/prices/approve` 提交 reviewId 与 allowAnomalies，`POST /api/presets/prices/rollback` 提交历史 bundleHash。下载到的价格变化不会自动生效；默认超过 50% 的跳变或计价维度变化需要显式异常确认。审核绑定当前完整 bundle 和来源摘要，过期页面不能覆盖新版本。
 
 审核激活、actor 审计及回滚快照在单一原子文件中保存，失败不发布新状态。包含价格变化的整个预置 bundle 会等待审核；不影响价格选择的纯元数据更新沿用既有更新流程。最多保留 10 个版本，回滚在重启后仍恢复同一完整 bundle，包含模型能力，不只是价格；不重算已结算请求。旧缓存若没有审核依据且价格选择不同，只进入待审，不在启动时静默替换。来源签名、检查时间和发布时间可查看；签名与时间要求见[环境变量](environment.md)。
+
+
+## 稳定调用方成本归因
+
+全局管理员使用 `GET /api/reports/cost?groupBy=principal&type=chat&duration=7d` 按调用方主体聚合。`principalId` 可进一步限定主体，并与 `groupBy=model/user/key` 组合下钻。`user` 参数保留原代理 Key 掩码分组语义，`key` 为上游 Key 掩码；API 默认仍是 `user`，Web 成本页默认选择主体。
+
+记录只从服务端已认证的身份生成域隔离 SHA-256 归因 ID：`p_` 前缀为显式稳定主体，`k_` 为凭证绑定身份。两者均是不透明 ID，响应中的短指纹只作脱敏显示，筛选和 CSV 使用完整 ID。请求头不能指定归因主体，原始 Key、subject、email 和配置中的主体明文不会写入新增归因列。只有为入口 Key 配置相同稳定 principal 的调用才会在轮换后归并；不能凭显示掩码猜测多个静态 Key 属于同一团队。
+
+旧记录和未捕获认证身份的记录统一归到 `unknown`，不会按当前 Key 配置回填或重分配历史。SQLite v12 升级增加默认空值的归因列和主体/时间索引，保留原有费用快照及旧记录。
+
+Web 成本页可从主体进入模型明细，切换其他维度仍保留主体筛选；CSV 同时导出完整归因 ID 与脱敏标签，刷新/切换主体时不会用过期响应覆盖新范围。请求历史支持相同 `principalId` 筛选，游标与该筛选绑定，继续页不能改成其他主体或全量。历史界面沿用报告返回的时间范围与指标保留期，返回结构不含请求正文或认证凭据。
+
+这些报表聚合已持久化的请求指标，沿用既有费用和定价完整性口径，不代替独立预算账本，也不保证多次实时查询构成同一数据库快照。主体、成本和请求历史接口继续要求管理权限；数据面代理 Key 不获得其他主体的报表权限。

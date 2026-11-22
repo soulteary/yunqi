@@ -1,7 +1,9 @@
 package main
 
 import (
+	"github.com/soulteary/yunqi/internal/entrylease"
 	"log"
+	"time"
 
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/metrics"
@@ -50,6 +52,14 @@ func (a *application) initMetrics() {
 		a.vectorsMetricsManager = metrics.NewMetricsManagerWithConfig(a.envCfg.MetricsWindowSize, a.envCfg.MetricsFailureThreshold)
 	}
 	a.traceAffinityManager = session.NewTraceAffinityManager()
+	if a.envCfg.ProxyRedisSharedRouting {
+		shared, err := entrylease.NewRouting(a.envCfg.ProxyRedisURL, a.envCfg.ProxyRedisNamespace, a.envCfg.ProxyRedisRoutingEpoch, time.Duration(a.envCfg.ProxyRedisLeaseSeconds)*time.Second)
+		if err != nil {
+			log.Fatal("初始化共享路由状态失败: routing epoch/configuration unavailable")
+		}
+		a.envCfg.SharedRoutingAdmission = shared
+		a.traceAffinityManager.SetSharedStrict(shared)
+	}
 
 	applyCircuitBreakerConfig := func(cfg config.Config) {
 		requestTimeoutMs := a.envCfg.RequestTimeout

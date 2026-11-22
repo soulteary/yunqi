@@ -50,6 +50,8 @@ export interface KeyMultiplierResponse {
 // ============== 成本报表（Phase 4 Item 2） ==============
 
 export interface CostReportRow {
+  groupLabel?: string
+
   groupKey: string
   totalRequests: number
   successCount: number
@@ -74,8 +76,31 @@ export interface CostReportRow {
 }
 
 export interface CostReportResponse {
-  groupBy: 'user' | 'model' | 'key'
+  groupBy: 'principal' | 'user' | 'model' | 'key'
   apiType: string
   duration: string
+  principalId?: string
+  principalLabel?: string
+  since?: number
+  until?: number
   rows: CostReportRow[]
+}
+
+export interface CostRequestHistoryEntry {
+  id: number
+  timestamp: number
+  type: string
+  principalId: string
+  principalLabel: string
+  model: string
+  channelUid: string
+  correlationId: string
+  success: boolean
+  inputTokens: number
+  outputTokens: number
+}
+export interface CostRequestHistoryPage {
+  records: CostRequestHistoryEntry[]
+  nextCursor?: string
+  retentionDays: number
 }

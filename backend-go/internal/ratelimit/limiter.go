@@ -391,6 +391,22 @@ func (l *ChannelLimiter) notifyConcurrencyChangeLocked() {
 // maxWait 是最长排队等待时间；ctx 支持客户端断开取消。
 // 返回的 error 可能是 ErrInCooldown / ErrAcquireBusy / ErrWindowFull / context.Canceled。
 func (l *ChannelLimiter) Acquire(ctx context.Context, maxWait time.Duration, now time.Time) (release func(), err error) {
+	return l.acquire(ctx, maxWait, now, false, false)
+}
+
+// AcquireDiscovered leaves explicitly configured channel limits to the shared
+// Redis authority. Keep local learned limits, cooldowns and in-flight tracking.
+func (l *ChannelLimiter) AcquireDiscovered(ctx context.Context, maxWait time.Duration, now time.Time) (func(), error) {
+	return l.AcquireWithSharedLimits(ctx, maxWait, now, true, true)
+}
+
+// AcquireWithSharedLimits independently delegates explicit RPM/concurrency
+// dimensions to a shared authority, even if a background refresher reapplies
+// inherited channel defaults. Learned limits and cooldowns remain local.
+func (l *ChannelLimiter) AcquireWithSharedLimits(ctx context.Context, maxWait time.Duration, now time.Time, sharedRPM, sharedConcurrency bool) (func(), error) {
+	return l.acquire(ctx, maxWait, now, sharedRPM, sharedConcurrency)
+}
+func (l *ChannelLimiter) acquire(ctx context.Context, maxWait time.Duration, now time.Time, sharedRPM, sharedConcurrency bool) (release func(), err error) {
 	if l == nil {
 		return func() {}, nil
 	}
@@ -401,12 +417,12 @@ func (l *ChannelLimiter) Acquire(ctx context.Context, maxWait time.Duration, now
 	}
 
 	// 2. 获取令牌（等待期间不占用并发额度，避免排队请求挤占并发槽位）
-	if err := l.acquireToken(ctx, maxWait, now); err != nil {
+	if err := l.acquireToken(ctx, maxWait, now, sharedRPM); err != nil {
 		return func() {}, err
 	}
 
 	// 3. 获取并发额度（拿到令牌后才占槽，确保计数反映真实在途请求数）
-	release, err = l.acquireConcurrency(ctx, maxWait)
+	release, err = l.acquireConcurrency(ctx, maxWait, sharedConcurrency)
 	if err != nil {
 		return func() {}, err
 	}
@@ -426,12 +442,16 @@ func (l *ChannelLimiter) tryCooldown(now time.Time) (release func(), ok bool) {
 }
 
 // acquireConcurrency 获取动态并发额度，支持运行中升降上限、ctx 取消和超时。
-func (l *ChannelLimiter) acquireConcurrency(ctx context.Context, maxWait time.Duration) (func(), error) {
+func (l *ChannelLimiter) acquireConcurrency(ctx context.Context, maxWait time.Duration, discoveredOnly ...bool) (func(), error) {
 	timer := time.NewTimer(maxWait)
 	defer timer.Stop()
 	for {
 		l.mu.Lock()
-		if l.maxConcurrent <= 0 || l.activeRequests < l.maxConcurrent {
+		limit := l.maxConcurrent
+		if len(discoveredOnly) > 0 && discoveredOnly[0] && l.configuredMaxConcurrent > 0 {
+			limit = 0
+		}
+		if limit <= 0 || l.activeRequests < limit {
 			l.activeRequests++
 			l.lastActivity = time.Now()
 			l.mu.Unlock()
@@ -466,11 +486,11 @@ func (l *ChannelLimiter) makeConcurrencyRelease() func() {
 }
 
 // acquireToken 使用滑动窗口检查是否允许请求。需要等待时循环 sleep，支持 ctx/timeout 取消。
-func (l *ChannelLimiter) acquireToken(ctx context.Context, maxWait time.Duration, now time.Time) error {
+func (l *ChannelLimiter) acquireToken(ctx context.Context, maxWait time.Duration, now time.Time, discoveredOnly ...bool) error {
 	l.mu.Lock()
 
-	if l.maxRequests <= 0 {
-		// 不限速
+	if l.maxRequests <= 0 || (len(discoveredOnly) > 0 && discoveredOnly[0] && l.configuredRPM > 0) {
+		// 不限速或显式渠道配置由 Redis 唯一管理
 		l.mu.Unlock()
 		return nil
 	}
@@ -508,6 +528,10 @@ func (l *ChannelLimiter) acquireToken(ctx context.Context, maxWait time.Duration
 			return ErrWindowFull
 		case <-ticker.C:
 			l.mu.Lock()
+			if len(discoveredOnly) > 0 && discoveredOnly[0] && l.configuredRPM > 0 {
+				l.mu.Unlock()
+				return nil
+			}
 			currentNow := time.Now()
 			l.cleanOldTimestampsLocked(currentNow)
 			if len(l.timestamps) < l.maxRequests {

@@ -26,6 +26,7 @@ var namespacePattern = regexp.MustCompile(`^[a-zA-Z0-9:_-]{1,64}$`)
 
 type Manager struct {
 	client      *redis.Client
+	epoch       string
 	namespace   string
 	ttl         time.Duration
 	mu          sync.Mutex
@@ -60,14 +61,50 @@ func (m *Manager) warn() {
 		log.Print("[Proxy-Admission] shared lease unavailable; admission remains fail closed")
 	}
 }
+
+// NewRouting requires a pre-provisioned persistent epoch. It deliberately does
+// not initialize empty Redis state: an ordinary restart must never reset quotas.
+func NewRouting(rawURL, namespace, epoch string, ttl time.Duration) (*Manager, error) {
+	decoded, err := hex.DecodeString(epoch)
+	if err != nil || len(decoded) != 32 {
+		return nil, ErrUnavailable
+	}
+	m, err := New(rawURL, namespace, ttl)
+	if err != nil {
+		return nil, err
+	}
+	m.epoch = epoch
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if current, err := m.client.Get(ctx, m.epochKey()).Result(); err != nil || current != epoch {
+		_ = m.client.Close()
+		return nil, ErrUnavailable
+	}
+	return m, nil
+}
+func (m *Manager) epochKey() string { return m.namespace + ":{routing}:epoch" }
 func (m *Manager) keys(principal string) []string {
 	sum := sha256.Sum256([]byte(principal))
 	base := m.namespace + ":admission:{" + hex.EncodeToString(sum[:]) + "}:"
-	return []string{base + "leases", base + "rpm"}
+	if m.epoch != "" {
+		base = m.namespace + ":{routing}:" + hex.EncodeToString(sum[:]) + ":"
+	}
+	keys := []string{base + "leases", base + "rpm"}
+	if m.epoch != "" {
+		keys = append(keys, m.epochKey())
+	}
+	return keys
 }
 
 // Acquire uses a server-generated nonce, never a caller's request-id header.
 func (m *Manager) Acquire(ctx context.Context, principal string, concurrent, rpm int) (*Lease, time.Duration, error) {
+	return m.AcquireWindow(ctx, principal, concurrent, rpm, time.Minute)
+}
+
+func (m *Manager) AcquireWindow(ctx context.Context, principal string, concurrent, rpm int, window time.Duration) (*Lease, time.Duration, error) {
+	if window < time.Second || window > 24*time.Hour {
+		return nil, 0, ErrUnavailable
+	}
 	if principal == "" || len(principal) > 256 || concurrent < 0 || rpm < 0 {
 		return nil, 0, ErrUnavailable
 	}
@@ -85,7 +122,7 @@ func (m *Manager) Acquire(ctx context.Context, principal string, concurrent, rpm
 	}
 	started := time.Now()
 	call, cancel := context.WithTimeout(ctx, 2*time.Second)
-	result, err := acquireScript.Run(call, m.client, keys, id, m.ttl.Milliseconds(), concurrent, rpm).Int64Slice()
+	result, err := acquireScript.Run(call, m.client, keys, id, m.ttl.Milliseconds(), concurrent, rpm, window.Milliseconds(), m.epoch).Int64Slice()
 	cancel()
 	if err != nil || len(result) != 2 {
 		m.warn()
@@ -127,6 +164,10 @@ type Lease struct {
 	once            sync.Once
 	stop            chan struct{}
 	done            chan struct{}
+	strictMu        sync.Mutex
+	strictKey       string
+	strictValue     string
+	strictTTL       time.Duration
 	watchMu         sync.Mutex
 	watchGeneration uint64
 	watchdog        *time.Timer
@@ -153,7 +194,13 @@ func (l *Lease) renew() {
 		case <-ticker.C:
 			started := time.Now()
 			call, cancel := context.WithTimeout(context.Background(), min(2*time.Second, l.manager.ttl/3))
-			result, err := renewScript.Run(call, l.manager.client, l.keys[:1], l.id, l.manager.ttl.Milliseconds()).Int64()
+			l.strictMu.Lock()
+			keys := append([]string(nil), l.keys...)
+			if l.strictKey != "" {
+				keys = append(keys, l.strictKey, l.manager.epochKey()+":sessions")
+			}
+			result, err := renewScript.Run(call, l.manager.client, keys, l.id, l.manager.ttl.Milliseconds(), l.strictValue, l.strictTTL.Milliseconds(), "", l.manager.epoch).Int64()
+			l.strictMu.Unlock()
 			cancel()
 			if err != nil || result != 1 {
 				l.manager.warn()
@@ -263,4 +310,35 @@ func (m *Manager) AcquireContext(ctx context.Context, principal string, concurre
 		return ctx, nil, retry, err
 	}
 	return WithLease(ctx, lease), lease.ParentDone, 0, nil
+}
+
+// StrictBinding returns the atomic winner. Passing an empty proposal only reads.
+// The active lease renews a bound session even when a stream exceeds idle TTL.
+func (l *Lease) StrictBinding(ctx context.Context, proposal string, idleTTL time.Duration) (string, error) {
+	if l.manager.epoch == "" || idleTTL < l.manager.ttl || len(proposal) > 1024 {
+		return "", ErrUnavailable
+	}
+	l.strictMu.Lock()
+	defer l.strictMu.Unlock()
+	if l.Cause() != nil {
+		return "", ErrLeaseLost
+	}
+	key := l.keys[0] + ":binding"
+	keys := append(append([]string(nil), l.keys...), key, l.manager.epochKey()+":sessions")
+	call, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	value, err := strictBindingScript.Run(call, l.manager.client, keys, l.id, l.manager.ttl.Milliseconds(), proposal, idleTTL.Milliseconds(), "", l.manager.epoch).Text()
+	if err != nil || len(value) > 1024 {
+		l.source.Signal(ErrLeaseLost)
+		return "", ErrUnavailable
+	}
+	l.strictKey, l.strictValue, l.strictTTL = key, value, idleTTL
+	return value, nil
+}
+func (m *Manager) AcquireWindowContext(ctx context.Context, identity string, concurrent, rpm int, window time.Duration) (context.Context, func(), time.Duration, error) {
+	l, retry, err := m.AcquireWindow(ctx, identity, concurrent, rpm, window)
+	if err != nil {
+		return ctx, nil, retry, err
+	}
+	return WithLease(ctx, l), l.ParentDone, 0, nil
 }
