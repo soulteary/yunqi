@@ -321,6 +321,8 @@ func (f ChannelStatusConfigManagerFunc) SetChannelStatus(index int, status strin
 // NamedChannelStatusHandler 返回带固定文案的渠道状态更新 handler。
 func NamedChannelStatusHandler(cfgManager ChannelStatusConfigManager, successMessage string) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		id, err := strconv.Atoi(httpbridge.Param(c, "id"))
 		if err != nil {
 			httpbridge.JSON(c, 400, fiber.Map{"error": "Invalid channel ID"})
@@ -335,7 +337,7 @@ func NamedChannelStatusHandler(cfgManager ChannelStatusConfigManager, successMes
 			return nil
 		}
 
-		if err := cfgManager.SetChannelStatus(id, req.Status); err != nil {
+		if err := setChannelStatusAudited(cfgManager, managementAuditContext, id, req.Status); err != nil {
 			if strings.Contains(err.Error(), "无效的上游索引") {
 				httpbridge.JSON(c, 404, fiber.Map{"error": "Channel not found"})
 			} else {
@@ -366,6 +368,8 @@ func (f PromotionConfigManagerFunc) SetChannelPromotion(index int, duration time
 // NamedChannelPromotionHandler 返回带固定文案的渠道促销期 handler。
 func NamedChannelPromotionHandler(cfgManager PromotionConfigManager, invalidIDMsg, invalidReqMsg, clearedMsg, setMsg string) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		id, err := strconv.Atoi(httpbridge.Param(c, "id"))
 		if err != nil {
 			httpbridge.JSON(c, 400, fiber.Map{"error": invalidIDMsg})
@@ -381,7 +385,7 @@ func NamedChannelPromotionHandler(cfgManager PromotionConfigManager, invalidIDMs
 		}
 
 		duration := time.Duration(req.Duration) * time.Second
-		if err := cfgManager.SetChannelPromotion(id, duration); err != nil {
+		if err := setChannelPromotionAudited(cfgManager, managementAuditContext, id, duration); err != nil {
 			httpbridge.JSON(c, 400, fiber.Map{"error": err.Error()})
 			return nil
 		}
@@ -410,7 +414,12 @@ func SetChannelPromotion(cfgManager ConfigManager) fiber.Handler {
 
 // SetResponsesChannelPromotion 设置 Responses 渠道促销期
 func SetResponsesChannelPromotion(cfgManager ResponsesConfigManager) fiber.Handler {
-	adapter := promotionConfigAdapter(func(index int, duration time.Duration) error {
+	adapter := AuditedPromotionConfigManagerFunc(func(audit config.ManagementAuditContext, index int, duration time.Duration) error {
+		if current, ok := cfgManager.(interface {
+			SetResponsesChannelPromotionAudited(config.ManagementAuditContext, int, time.Duration) error
+		}); ok {
+			return current.SetResponsesChannelPromotionAudited(audit, index, duration)
+		}
 		return cfgManager.SetResponsesChannelPromotion(index, duration)
 	})
 	return NamedChannelPromotionHandler(adapter, "无效的渠道 ID", "无效的请求参数", "Responses 渠道促销期已清除", "Responses 渠道促销期已设置")
@@ -1005,6 +1014,8 @@ func GetChatChannelKeyMetricsHistory(metricsManager *metrics.MetricsManager, cfg
 // ResumeChannelWithKind 恢复指定类型的熔断渠道（重置熔断状态、恢复不可用 Key，保留历史统计）
 func ResumeChannelWithKind(sch *scheduler.ChannelScheduler, cfgManager *config.ConfigManager, kind scheduler.ChannelKind) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		id, err := strconv.Atoi(httpbridge.Param(c, "id"))
 		if err != nil {
 			httpbridge.JSON(c, 400, fiber.Map{"error": "Invalid channel ID"})
@@ -1026,7 +1037,7 @@ func ResumeChannelWithKind(sch *scheduler.ChannelScheduler, cfgManager *config.C
 		}
 
 		result, err := transitions.RestoreAllAndReset(
-			func() (int, error) { return cfgManager.RestoreAllKeys(apiType, id) },
+			func() (int, error) { return cfgManager.RestoreAllKeysAudited(managementAuditContext, apiType, id) },
 			func() { sch.ResetChannelMetrics(id, kind) },
 		)
 		if err != nil {
@@ -1314,4 +1325,38 @@ func summarizeAggregatedBuckets(duration string, buckets []metrics.AggregatedBuc
 		s.AvgSuccessRate = float64(s.TotalSuccess) / float64(s.TotalRequests) * 100
 	}
 	return s
+}
+
+type AuditedChannelStatusConfigManagerFunc func(config.ManagementAuditContext, int, string) error
+
+func (f AuditedChannelStatusConfigManagerFunc) SetChannelStatus(i int, s string) error {
+	return f(config.ManagementAuditContext{}, i, s)
+}
+func (f AuditedChannelStatusConfigManagerFunc) SetChannelStatusAudited(a config.ManagementAuditContext, i int, s string) error {
+	return f(a, i, s)
+}
+func setChannelStatusAudited(manager ChannelStatusConfigManager, audit config.ManagementAuditContext, index int, status string) error {
+	if current, ok := manager.(interface {
+		SetChannelStatusAudited(config.ManagementAuditContext, int, string) error
+	}); ok {
+		return current.SetChannelStatusAudited(audit, index, status)
+	}
+	return manager.SetChannelStatus(index, status)
+}
+
+type AuditedPromotionConfigManagerFunc func(config.ManagementAuditContext, int, time.Duration) error
+
+func (f AuditedPromotionConfigManagerFunc) SetChannelPromotion(i int, d time.Duration) error {
+	return f(config.ManagementAuditContext{}, i, d)
+}
+func (f AuditedPromotionConfigManagerFunc) SetChannelPromotionAudited(a config.ManagementAuditContext, i int, d time.Duration) error {
+	return f(a, i, d)
+}
+func setChannelPromotionAudited(manager PromotionConfigManager, audit config.ManagementAuditContext, index int, duration time.Duration) error {
+	if current, ok := manager.(interface {
+		SetChannelPromotionAudited(config.ManagementAuditContext, int, time.Duration) error
+	}); ok {
+		return current.SetChannelPromotionAudited(audit, index, duration)
+	}
+	return manager.SetChannelPromotion(index, duration)
 }

@@ -46,6 +46,7 @@ GET /api/accounts/:accountUid/deepseek-balance
 GET /api/admin-credentials
 GET /api/advisor/decisions
 GET /api/advisor/stats
+GET /api/audit
 GET /api/autopilot/ab-test-results
 GET /api/autopilot/cost/exchange-rates
 GET /api/autopilot/evaluations

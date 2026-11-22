@@ -29,13 +29,15 @@ func (c *Config) ResolveRacingPolicy(u *UpstreamConfig) bool {
 }
 
 // SetRacingEnabled 更新竞速全局开关并持久化（管理 API PUT /api/racing/config）。
-func (cm *ConfigManager) SetRacingEnabled(enabled bool) error {
+func (cm *ConfigManager) SetRacingEnabledAudited(auditContext ManagementAuditContext, enabled bool) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	if cm.config.Racing == nil {
 		cm.config.Racing = &GlobalRacingConfig{}
 	}
 	cm.config.Racing.Enabled = &enabled
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		cm.mu.Unlock()
 		return err
 	}
@@ -50,4 +52,9 @@ func (cm *ConfigManager) GetRacingEnabled() bool {
 	defer cm.mu.RUnlock()
 	cfg := cm.config
 	return cfg.ResolveRacingPolicy(nil)
+}
+
+// SetRacingEnabled preserves the system/background call contract. HTTP callers use SetRacingEnabledAudited.
+func (cm *ConfigManager) SetRacingEnabled(enabled bool) error {
+	return cm.SetRacingEnabledAudited(ManagementAuditContext{}, enabled)
 }

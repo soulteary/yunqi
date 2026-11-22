@@ -64,12 +64,16 @@ func NewConfigManager(configFile string, backupDir string) (*ConfigManager, erro
 
 // loadConfig 加载配置
 // loadConfig 加载配置
-func (cm *ConfigManager) loadConfig() error {
+func (cm *ConfigManager) loadConfigAudited(auditContext ManagementAuditContext) error {
+	auditContext.configReload = true
+	auditContext.Action = "config.reload"
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 
 	// 如果配置文件不存在，创建默认配置
 	if _, err := os.Stat(cm.configFile); os.IsNotExist(err) {
-		err := cm.createDefaultConfig()
+		err := cm.createDefaultConfigAudited(auditContext)
 		cm.mu.Unlock()
 		return err
 	}
@@ -80,6 +84,8 @@ func (cm *ConfigManager) loadConfig() error {
 		cm.mu.Unlock()
 		return err
 	}
+
+	externalBusinessChanged := cm.auditDiskBusinessDigest != "" && cm.checkAuditPublishedDocument(data) != nil
 
 	var loaded Config
 	autopilotDecodeFallback := false
@@ -102,6 +108,11 @@ func (cm *ConfigManager) loadConfig() error {
 	markExplicitAutoManagedFalse(data, &loaded)
 	// Phase B.2：保存加载前快照用于事件 diff。
 	snapshot := cm.config
+	auditHistoryChanged := false
+	if cm.auditCommitted != nil {
+		auditHistoryChanged = auditDigest(loaded.ManagementAudit) != auditDigest(cm.auditCommitted.ManagementAudit)
+		loaded.ManagementAudit = cloneManagementAudit(cm.auditCommitted.ManagementAudit)
+	}
 	cm.config = loaded
 
 	// Phase 3c 波 3：纯 V3 落盘格式（六数组不再持久化）——加载后立即把 ChannelsV3 投影到
@@ -126,7 +137,7 @@ func (cm *ConfigManager) loadConfig() error {
 	}
 
 	// 兼容旧配置：缺失字段补齐默认值（thinkingCache 等）
-	needSaveDefaults := cm.applyConfigDefaults(data) || autopilotDecodeFallback
+	needSaveDefaults := cm.applyConfigDefaults(data) || autopilotDecodeFallback || auditHistoryChanged
 	// Autopilot 智能路由配置：旧版本升级、缺失值补齐与校验归一化
 	if !autopilotDecodeFallback && cm.applyAutopilotDefaults(data) {
 		needSaveDefaults = true
@@ -206,7 +217,7 @@ func (cm *ConfigManager) loadConfig() error {
 
 	// 如果有默认值迁移或格式迁移，保存配置
 	if needSaveDefaults || needMigration {
-		if err := cm.saveConfigLocked(cm.config); err != nil {
+		if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 			log.Printf("[Config-Migration] 警告: 保存迁移后的配置失败: %v", err)
 			cm.mu.Unlock()
 			return err
@@ -219,7 +230,7 @@ func (cm *ConfigManager) loadConfig() error {
 
 	// 自检：没有配置 key 的渠道自动暂停
 	if cm.validateChannelKeys() {
-		if err := cm.saveConfigLocked(cm.config); err != nil {
+		if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 			log.Printf("[Config-Validate] 警告: 保存自检后的配置失败: %v", err)
 			cm.mu.Unlock()
 			return err
@@ -230,7 +241,7 @@ func (cm *ConfigManager) loadConfig() error {
 	// 逻辑渠道回填：旧配置或 schema 升级时按归组规则重建 LogicalChannels。
 	// 必须在所有迁移完成、validateChannelKeys 之后，避免优先级/UID 变化导致归组视图错位。
 	if ensureLogicalBackfill(&cm.config) {
-		if err := cm.saveConfigLocked(cm.config); err != nil {
+		if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 			log.Printf("[Config-LogicalChannel] 警告: 保存逻辑渠道回填结果失败: %v", err)
 			cm.mu.Unlock()
 			return err
@@ -272,7 +283,19 @@ func (cm *ConfigManager) loadConfig() error {
 		log.Printf("[Config-ChannelName] 启动期已修正 channels/channelsV3 镜像名称")
 	}
 
+	if externalBusinessChanged && !savedDuringLoad {
+		if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
+			cm.mu.Unlock()
+			return err
+		}
+		savedDuringLoad = true
+	}
+	if !savedDuringLoad {
+		cm.recordAuditPublishedDocument(data)
+	}
 	// 成功加载后通知回调（在锁内构造快照，释放锁后通知）
+	committed := cm.config.deepCopy()
+	cm.auditCommitted = &committed
 	cm.fireConfigChangeCallbacks()
 	// Phase B.2：发布 config_reloaded 事件。
 	cm.publishConfigReloaded(&snapshot)
@@ -349,7 +372,9 @@ func decodeConfigWithDefaultAutopilot(rawJSON []byte) (Config, error) {
 }
 
 // createDefaultConfig 创建默认配置
-func (cm *ConfigManager) createDefaultConfig() error {
+func (cm *ConfigManager) createDefaultConfigAudited(auditContext ManagementAuditContext) error {
+	auditContext = auditContext.normalized()
+
 	defaultConfig := Config{
 		Upstream:                 []UpstreamConfig{},
 		CurrentUpstream:          0,
@@ -368,7 +393,7 @@ func (cm *ConfigManager) createDefaultConfig() error {
 		return err
 	}
 
-	return cm.saveConfigLocked(defaultConfig)
+	return cm.saveConfigLockedAudited(auditContext, defaultConfig)
 }
 
 // applyConfigDefaults 应用配置默认值
@@ -1463,7 +1488,23 @@ func (cm *ConfigManager) validateChannelKeys() bool {
 }
 
 // saveConfigLocked 保存配置（已加锁）
-func (cm *ConfigManager) saveConfigLocked(config Config) error {
+func (cm *ConfigManager) saveConfigLockedAudited(auditContext ManagementAuditContext, config Config) (saveErr error) {
+	auditContext = auditContext.normalized()
+
+	defer func() {
+		if saveErr != nil && cm.auditCommitted != nil {
+			cm.config = cm.auditCommitted.deepCopy()
+		}
+	}()
+	if !auditContext.configReload && cm.auditDiskBusinessDigest != "" {
+		disk, err := os.ReadFile(cm.configFile)
+		if err != nil {
+			return err
+		}
+		if err = cm.checkAuditPublishedDocument(disk); err != nil {
+			return err
+		}
+	}
 	if err := normalizeConfigPricing(&config); err != nil {
 		return fmt.Errorf("invalid model pricing: %w", err)
 	}
@@ -1521,6 +1562,9 @@ func (cm *ConfigManager) saveConfigLocked(config Config) error {
 	// C 阶段：逻辑渠道元数据已内嵌在 ChannelsV3。运行时仍保留 LogicalChannels
 	// 供管理 API 查询，但不再把第二份聚合记录写回磁盘。
 	persisted.LogicalChannels = nil
+	if err := cm.attachManagementAudit(auditContext, &persisted, &config); err != nil {
+		return err
+	}
 	data, err := json.MarshalIndent(persisted, "", "  ")
 	if err != nil {
 		return err
@@ -1531,7 +1575,10 @@ func (cm *ConfigManager) saveConfigLocked(config Config) error {
 	}
 	redaction.ObserveJSON(data)
 	cm.recordSelfWrite(data)
+	cm.recordAuditPublishedDocument(data)
 	cm.config = config
+	committed := config.deepCopy()
+	cm.auditCommitted = &committed
 	cm.publishLogicalChannelRebuilt()
 	cm.publishUpstreamChangeIfChanged(&snapshotBeforeWrite)
 	return nil
@@ -1564,10 +1611,12 @@ func (cm *ConfigManager) skipReloadIfSelfWritten() bool {
 }
 
 // SaveConfig 保存配置
-func (cm *ConfigManager) SaveConfig() error {
+func (cm *ConfigManager) SaveConfigAudited(auditContext ManagementAuditContext) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
-	return cm.saveConfigLocked(cm.config)
+	return cm.saveConfigLockedAudited(auditContext, cm.config)
 }
 
 // backupConfig 备份配置
@@ -1622,7 +1671,9 @@ func (cm *ConfigManager) cleanupOldBackups(backupDir string) {
 }
 
 // startWatcher 启动配置目录监听。
-func (cm *ConfigManager) startWatcher() error {
+func (cm *ConfigManager) startWatcherAudited(auditContext ManagementAuditContext) error {
+	auditContext = auditContext.normalized()
+
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		return err
@@ -1705,7 +1756,7 @@ func (cm *ConfigManager) startWatcher() error {
 				if cm.skipReloadIfSelfWritten() {
 					continue
 				}
-				if err := cm.loadConfig(); err != nil {
+				if err := cm.loadConfigAudited(ManagementAuditContext{}); err != nil {
 					log.Printf("[Config-Watcher] 警告: 配置重载失败: %v", err)
 				} else {
 					log.Printf("[Config-Watcher] 配置已重载")
@@ -1783,4 +1834,25 @@ func (cm *ConfigManager) hasConfigChanged(old, new Config) bool {
 		return true
 	}
 	return !bytes.Equal(oldData, newData)
+}
+
+// SaveConfig preserves the system/background call contract. HTTP callers use SaveConfigAudited.
+func (cm *ConfigManager) SaveConfig() error { return cm.SaveConfigAudited(ManagementAuditContext{}) }
+
+// createDefaultConfig preserves the system/background call contract. HTTP callers use createDefaultConfigAudited.
+func (cm *ConfigManager) createDefaultConfig() error {
+	return cm.createDefaultConfigAudited(ManagementAuditContext{})
+}
+
+// loadConfig preserves the system/background call contract. HTTP callers use loadConfigAudited.
+func (cm *ConfigManager) loadConfig() error { return cm.loadConfigAudited(ManagementAuditContext{}) }
+
+// saveConfigLocked preserves the system/background call contract. HTTP callers use saveConfigLockedAudited.
+func (cm *ConfigManager) saveConfigLocked(config Config) error {
+	return cm.saveConfigLockedAudited(ManagementAuditContext{}, config)
+}
+
+// startWatcher preserves the system/background call contract. HTTP callers use startWatcherAudited.
+func (cm *ConfigManager) startWatcher() error {
+	return cm.startWatcherAudited(ManagementAuditContext{})
 }

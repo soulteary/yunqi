@@ -41,6 +41,8 @@ func GetUpstreams(cfgManager *config.ConfigManager) fiber.Handler {
 
 func AddUpstream(cfgManager *config.ConfigManager) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		var req struct {
 			config.UpstreamConfig
 			Placement string `json:"placement"` // 故障转移位置：front（首位）| back（末尾，默认）
@@ -49,7 +51,7 @@ func AddUpstream(cfgManager *config.ConfigManager) fiber.Handler {
 			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
 			return nil
 		}
-		if err := cfgManager.AddVectorsUpstream(req.UpstreamConfig, req.Placement); err != nil {
+		if err := cfgManager.AddVectorsUpstreamAudited(managementAuditContext, req.UpstreamConfig, req.Placement); err != nil {
 			status := http.StatusInternalServerError
 			if errors.Is(err, config.ErrUnsupportedServiceType) || errors.Is(err, config.ErrInvalidEmbeddingCapability) {
 				status = http.StatusBadRequest
@@ -66,6 +68,8 @@ func AddUpstream(cfgManager *config.ConfigManager) fiber.Handler {
 
 func UpdateUpstream(cfgManager *config.ConfigManager, sch *scheduler.ChannelScheduler) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		id, err := strconv.Atoi(httpbridge.Param(c, "id"))
 		if err != nil {
 			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "Invalid upstream ID"})
@@ -86,7 +90,7 @@ func UpdateUpstream(cfgManager *config.ConfigManager, sch *scheduler.ChannelSche
 			}
 		}
 
-		shouldResetMetrics, err := cfgManager.UpdateVectorsUpstream(id, updates)
+		shouldResetMetrics, err := cfgManager.UpdateVectorsUpstreamAudited(managementAuditContext, id, updates)
 		if err != nil {
 			status := http.StatusInternalServerError
 			if errors.Is(err, config.ErrDuplicateChannelName) {
@@ -113,13 +117,15 @@ func UpdateUpstream(cfgManager *config.ConfigManager, sch *scheduler.ChannelSche
 
 func DeleteUpstream(cfgManager *config.ConfigManager, channelScheduler *scheduler.ChannelScheduler) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		id, err := strconv.Atoi(httpbridge.Param(c, "id"))
 		if err != nil {
 			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "Invalid upstream ID"})
 			return nil
 		}
 
-		removed, err := cfgManager.RemoveVectorsUpstream(id)
+		removed, err := cfgManager.RemoveVectorsUpstreamAudited(managementAuditContext, id)
 		if err != nil {
 			status := http.StatusInternalServerError
 			if strings.Contains(err.Error(), "无效") {
@@ -138,6 +144,8 @@ func DeleteUpstream(cfgManager *config.ConfigManager, channelScheduler *schedule
 
 func AddApiKey(cfgManager *config.ConfigManager) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		id, err := strconv.Atoi(httpbridge.Param(c, "id"))
 		if err != nil {
 			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "Invalid upstream ID"})
@@ -152,7 +160,7 @@ func AddApiKey(cfgManager *config.ConfigManager) fiber.Handler {
 			return nil
 		}
 
-		if err := cfgManager.AddVectorsAPIKey(id, req.APIKey); err != nil {
+		if err := cfgManager.AddVectorsAPIKeyAudited(managementAuditContext, id, req.APIKey); err != nil {
 			status := http.StatusInternalServerError
 			if strings.Contains(err.Error(), "无效") {
 				status = http.StatusNotFound
@@ -169,6 +177,8 @@ func AddApiKey(cfgManager *config.ConfigManager) fiber.Handler {
 
 func DeleteApiKey(cfgManager *config.ConfigManager) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		id, err := strconv.Atoi(httpbridge.Param(c, "id"))
 		if err != nil {
 			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "Invalid upstream ID"})
@@ -180,7 +190,7 @@ func DeleteApiKey(cfgManager *config.ConfigManager) fiber.Handler {
 			return nil
 		}
 
-		if err := cfgManager.RemoveVectorsAPIKey(id, apiKey); err != nil {
+		if err := cfgManager.RemoveVectorsAPIKeyAudited(managementAuditContext, id, apiKey); err != nil {
 			status := http.StatusInternalServerError
 			if strings.Contains(err.Error(), "无效") || strings.Contains(err.Error(), "不存在") {
 				status = http.StatusNotFound
@@ -195,12 +205,14 @@ func DeleteApiKey(cfgManager *config.ConfigManager) fiber.Handler {
 
 func MoveApiKeyToTop(cfgManager *config.ConfigManager) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		id, err := strconv.Atoi(httpbridge.Param(c, "id"))
 		if err != nil {
 			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "Invalid upstream ID"})
 			return nil
 		}
-		if err := cfgManager.MoveVectorsAPIKeyToTop(id, httpbridge.Param(c, "apiKey")); err != nil {
+		if err := cfgManager.MoveVectorsAPIKeyToTopAudited(managementAuditContext, id, httpbridge.Param(c, "apiKey")); err != nil {
 			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
 			return nil
 		}
@@ -211,12 +223,14 @@ func MoveApiKeyToTop(cfgManager *config.ConfigManager) fiber.Handler {
 
 func MoveApiKeyToBottom(cfgManager *config.ConfigManager) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		id, err := strconv.Atoi(httpbridge.Param(c, "id"))
 		if err != nil {
 			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "Invalid upstream ID"})
 			return nil
 		}
-		if err := cfgManager.MoveVectorsAPIKeyToBottom(id, httpbridge.Param(c, "apiKey")); err != nil {
+		if err := cfgManager.MoveVectorsAPIKeyToBottomAudited(managementAuditContext, id, httpbridge.Param(c, "apiKey")); err != nil {
 			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
 			return nil
 		}
@@ -227,6 +241,8 @@ func MoveApiKeyToBottom(cfgManager *config.ConfigManager) fiber.Handler {
 
 func ReorderChannels(cfgManager *config.ConfigManager) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		var req struct {
 			Order      []int `json:"order"`
 			Priorities []int `json:"priorities"`
@@ -235,7 +251,7 @@ func ReorderChannels(cfgManager *config.ConfigManager) fiber.Handler {
 			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "Invalid request body"})
 			return nil
 		}
-		if err := cfgManager.ReorderVectorsUpstreams(req.Order, req.Priorities); err != nil {
+		if err := cfgManager.ReorderVectorsUpstreamsAudited(managementAuditContext, req.Order, req.Priorities); err != nil {
 			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
 			return nil
 		}
@@ -245,15 +261,15 @@ func ReorderChannels(cfgManager *config.ConfigManager) fiber.Handler {
 }
 
 func SetChannelStatus(cfgManager *config.ConfigManager) fiber.Handler {
-	adapter := handlers.ChannelStatusConfigManagerFunc(func(index int, status string) error {
-		return cfgManager.SetVectorsChannelStatus(index, status)
+	adapter := handlers.AuditedChannelStatusConfigManagerFunc(func(audit config.ManagementAuditContext, index int, status string) error {
+		return cfgManager.SetVectorsChannelStatusAudited(audit, index, status)
 	})
 	return handlers.NamedChannelStatusHandler(adapter, "Vectors channel status updated")
 }
 
 func SetChannelPromotion(cfgManager *config.ConfigManager) fiber.Handler {
-	adapter := handlers.PromotionConfigManagerFunc(func(index int, duration time.Duration) error {
-		return cfgManager.SetVectorsChannelPromotion(index, duration)
+	adapter := handlers.AuditedPromotionConfigManagerFunc(func(audit config.ManagementAuditContext, index int, duration time.Duration) error {
+		return cfgManager.SetVectorsChannelPromotionAudited(audit, index, duration)
 	})
 	return handlers.NamedChannelPromotionHandler(adapter, "Invalid channel ID", "Invalid request body", "Vectors promotion cleared", "Vectors promotion set")
 }

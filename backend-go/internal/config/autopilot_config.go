@@ -997,11 +997,13 @@ func (cm *ConfigManager) GetAutopilotRouting() AutopilotRoutingConfig {
 
 // SetCostPreferenceMode 更新全局价格偏向模式并持久化。
 // 只修改 Mode，保留已有的 PerTaskClass 覆盖。
-func (cm *ConfigManager) SetCostPreferenceMode(mode string) error {
+func (cm *ConfigManager) SetCostPreferenceModeAudited(auditContext ManagementAuditContext, mode string) error {
+	auditContext = auditContext.normalized()
+
 	normalized := normalizeCostPreferenceMode(mode)
 	cm.mu.Lock()
 	cm.config.AutopilotRouting.CostPreference.Mode = normalized
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		cm.mu.Unlock()
 		return err
 	}
@@ -1012,11 +1014,13 @@ func (cm *ConfigManager) SetCostPreferenceMode(mode string) error {
 
 // SetScenarioMode 更新任务场景预设模式并持久化。
 // 只修改 Mode，保留已有的 Overrides 覆盖项。
-func (cm *ConfigManager) SetScenarioMode(mode string) error {
+func (cm *ConfigManager) SetScenarioModeAudited(auditContext ManagementAuditContext, mode string) error {
+	auditContext = auditContext.normalized()
+
 	normalized := NormalizeScenarioMode(mode)
 	cm.mu.Lock()
 	cm.config.AutopilotRouting.Scenario.Mode = normalized
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		cm.mu.Unlock()
 		return err
 	}
@@ -1027,13 +1031,15 @@ func (cm *ConfigManager) SetScenarioMode(mode string) error {
 
 // SetAutopilotRolloutPercent 更新灰度放量比例并持久化。
 // 仅在 assist/auto 模式下有效，自动校验范围 1-100。
-func (cm *ConfigManager) SetAutopilotRolloutPercent(pct int) error {
+func (cm *ConfigManager) SetAutopilotRolloutPercentAudited(auditContext ManagementAuditContext, pct int) error {
+	auditContext = auditContext.normalized()
+
 	if pct < 1 || pct > 100 {
 		return fmt.Errorf("rolloutPercent 必须在 1-100 之间")
 	}
 	cm.mu.Lock()
 	cm.config.AutopilotRouting.RolloutPercent = pct
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		cm.mu.Unlock()
 		return err
 	}
@@ -1044,10 +1050,12 @@ func (cm *ConfigManager) SetAutopilotRolloutPercent(pct int) error {
 
 // SetABTestEnabled 更新 A/B 测试开关并持久化。
 // enabled=false 时立即停止所有影子请求采样。
-func (cm *ConfigManager) SetABTestEnabled(enabled bool) error {
+func (cm *ConfigManager) SetABTestEnabledAudited(auditContext ManagementAuditContext, enabled bool) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	cm.config.AutopilotRouting.ABTest.Enabled = enabled
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		cm.mu.Unlock()
 		return err
 	}
@@ -1063,7 +1071,9 @@ type ExchangeRateUpdateResult struct {
 	Version  uint64
 }
 
-func (cm *ConfigManager) ApplyExchangeRateUpdate(quotes []ExchangeRateQuote, snapshot ExchangeRateSnapshot, explicitEmpty bool) (ExchangeRateUpdateResult, error) {
+func (cm *ConfigManager) ApplyExchangeRateUpdateAudited(auditContext ManagementAuditContext, quotes []ExchangeRateQuote, snapshot ExchangeRateSnapshot, explicitEmpty bool) (ExchangeRateUpdateResult, error) {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	previous := cm.config.AutopilotRouting.CostOptimization
 	cm.config.AutopilotRouting.CostOptimization.ExchangeRateQuotes = append([]ExchangeRateQuote(nil), quotes...)
@@ -1076,7 +1086,7 @@ func (cm *ConfigManager) ApplyExchangeRateUpdate(quotes []ExchangeRateQuote, sna
 		}
 	}
 	cm.config.AutopilotRouting.CostOptimization.ExchangeRateSnapshot = &snapshotCopy
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		cm.config.AutopilotRouting.CostOptimization = previous
 		cm.mu.Unlock()
 		return ExchangeRateUpdateResult{}, err
@@ -1337,4 +1347,29 @@ func (c AutopilotRoutingConfig) deepCopy() AutopilotRoutingConfig {
 	}
 
 	return cp
+}
+
+// ApplyExchangeRateUpdate preserves the system/background call contract. HTTP callers use ApplyExchangeRateUpdateAudited.
+func (cm *ConfigManager) ApplyExchangeRateUpdate(quotes []ExchangeRateQuote, snapshot ExchangeRateSnapshot, explicitEmpty bool) (ExchangeRateUpdateResult, error) {
+	return cm.ApplyExchangeRateUpdateAudited(ManagementAuditContext{}, quotes, snapshot, explicitEmpty)
+}
+
+// SetABTestEnabled preserves the system/background call contract. HTTP callers use SetABTestEnabledAudited.
+func (cm *ConfigManager) SetABTestEnabled(enabled bool) error {
+	return cm.SetABTestEnabledAudited(ManagementAuditContext{}, enabled)
+}
+
+// SetAutopilotRolloutPercent preserves the system/background call contract. HTTP callers use SetAutopilotRolloutPercentAudited.
+func (cm *ConfigManager) SetAutopilotRolloutPercent(pct int) error {
+	return cm.SetAutopilotRolloutPercentAudited(ManagementAuditContext{}, pct)
+}
+
+// SetCostPreferenceMode preserves the system/background call contract. HTTP callers use SetCostPreferenceModeAudited.
+func (cm *ConfigManager) SetCostPreferenceMode(mode string) error {
+	return cm.SetCostPreferenceModeAudited(ManagementAuditContext{}, mode)
+}
+
+// SetScenarioMode preserves the system/background call contract. HTTP callers use SetScenarioModeAudited.
+func (cm *ConfigManager) SetScenarioMode(mode string) error {
+	return cm.SetScenarioModeAudited(ManagementAuditContext{}, mode)
 }

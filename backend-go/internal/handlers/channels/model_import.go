@@ -103,6 +103,7 @@ func (h *Handler) GetModelImport(c fiber.Ctx) error {
 	return nil
 }
 func (h *Handler) SetModelImportPolicy(c fiber.Ctx) error {
+	managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
 	uid, ok := h.importChannel(c, true)
 	if !ok {
 		return nil
@@ -111,7 +112,7 @@ func (h *Handler) SetModelImportPolicy(c fiber.Ctx) error {
 	if !decodeModelImport(c, &policy, 65536) {
 		return nil
 	}
-	view, err := h.cm.SetModelImportPolicy(uid, httpbridge.GetHeader(c, "If-Match"), policy, middleware.GetAdminActorID(c))
+	view, err := h.cm.SetModelImportPolicyAudited(managementAuditContext, uid, httpbridge.GetHeader(c, "If-Match"), policy, middleware.GetAdminActorID(c))
 	if err != nil {
 		return modelImportError(c, err)
 	}
@@ -120,6 +121,7 @@ func (h *Handler) SetModelImportPolicy(c fiber.Ctx) error {
 	return nil
 }
 func (h *Handler) PreviewModelImport(c fiber.Ctx) error {
+	managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
 	uid, ok := h.importChannel(c, true)
 	if !ok {
 		return nil
@@ -130,7 +132,7 @@ func (h *Handler) PreviewModelImport(c fiber.Ctx) error {
 	if !decodeModelImport(c, &input, 2<<20) {
 		return nil
 	}
-	review, err := h.cm.StageModelImport(uid, input.Models, "operator", httpbridge.GetHeader(c, "If-Match"))
+	review, err := h.cm.StageModelImportAudited(managementAuditContext, uid, input.Models, "operator", httpbridge.GetHeader(c, "If-Match"))
 	if err != nil {
 		return modelImportError(c, err)
 	}
@@ -139,6 +141,7 @@ func (h *Handler) PreviewModelImport(c fiber.Ctx) error {
 	return nil
 }
 func (h *Handler) ApproveModelImport(c fiber.Ctx) error {
+	managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
 	uid, ok := h.importChannel(c, true)
 	if !ok {
 		return nil
@@ -151,7 +154,7 @@ func (h *Handler) ApproveModelImport(c fiber.Ctx) error {
 	if !decodeModelImport(c, &input, 4096) {
 		return nil
 	}
-	view, err := h.cm.ApproveModelImport(uid, input.ReviewID, middleware.GetAdminActorID(c), input.AllowEmpty, input.AllowRemovals)
+	view, err := h.cm.ApproveModelImportAudited(managementAuditContext, uid, input.ReviewID, middleware.GetAdminActorID(c), input.AllowEmpty, input.AllowRemovals)
 	if err != nil {
 		return modelImportError(c, err)
 	}
@@ -161,6 +164,7 @@ func (h *Handler) ApproveModelImport(c fiber.Ctx) error {
 }
 
 func (h *Handler) RemoveModelImport(c fiber.Ctx) error {
+	managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
 	uid, ok := h.importChannel(c, true)
 	if !ok {
 		return nil
@@ -171,7 +175,7 @@ func (h *Handler) RemoveModelImport(c fiber.Ctx) error {
 	if !decodeModelImport(c, &input, 4096) {
 		return nil
 	}
-	view, err := h.cm.RemoveModelImport(uid, httpbridge.GetHeader(c, "If-Match"), middleware.GetAdminActorID(c), input.AllowUnrestricted)
+	view, err := h.cm.RemoveModelImportAudited(managementAuditContext, uid, httpbridge.GetHeader(c, "If-Match"), middleware.GetAdminActorID(c), input.AllowUnrestricted)
 	if err != nil {
 		return modelImportError(c, err)
 	}

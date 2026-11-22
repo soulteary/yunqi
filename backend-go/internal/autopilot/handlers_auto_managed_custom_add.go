@@ -14,6 +14,8 @@ import (
 )
 
 func handleCustomAutoAdd(c fiber.Ctx, deps *AutoManagedDeps, requestKind string, req AutoAddRequest) {
+	managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 	routes, err := normalizeCustomAutoAddRoutes(requestKind, req.Routes)
 	if err != nil {
 		httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
@@ -63,7 +65,7 @@ func handleCustomAutoAdd(c fiber.Ctx, deps *AutoManagedDeps, requestKind string,
 		}, accountUID, baseName, route.ChannelKind, multiRoute, now)
 		additions = append(additions, config.AccountChannelAddition{Kind: route.ChannelKind, Upstream: upstream, Placement: req.Placement})
 	}
-	if err := deps.CfgManager.ApplyAccountChannelChanges(accountUID, nil, additions); err != nil {
+	if err := deps.CfgManager.ApplyAccountChannelChangesAudited(managementAuditContext, accountUID, nil, additions); err != nil {
 		httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": fmt.Sprintf("创建渠道失败: %v", err)})
 		return
 	}
@@ -119,6 +121,8 @@ func appendCredentialsToCustomAccount(
 	routes []AutoAddRouteRequest,
 	accountUID string,
 ) {
+	managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 	channels := deps.CfgManager.GetAccountChannels(accountUID)
 	if len(channels) == 0 {
 		httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": "已有自动托管账号不存在"})
@@ -177,7 +181,7 @@ func appendCredentialsToCustomAccount(
 		return
 	}
 	changed := channelsWithAddedKeys(channels, desiredKeys)
-	if err := deps.CfgManager.ApplyAccountChannelChanges(accountUID, updates, additions); err != nil {
+	if err := deps.CfgManager.ApplyAccountChannelChangesAudited(managementAuditContext, accountUID, updates, additions); err != nil {
 		httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": fmt.Sprintf("追加渠道密钥失败: %v", err)})
 		return
 	}

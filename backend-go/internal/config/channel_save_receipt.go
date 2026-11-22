@@ -29,7 +29,9 @@ func ChannelRevision(channel UpstreamConfig) string {
 
 // UpdateChannelWithReceipt resolves identity, optionally compares the caller's
 // revision, commits and reads the resulting revision under a single write lock.
-func (cm *ConfigManager) UpdateChannelWithReceipt(uid, expectedRevision string, updates UpstreamUpdate) (ChannelSaveReceipt, ChannelLocation, bool, error) {
+func (cm *ConfigManager) UpdateChannelWithReceiptAudited(auditContext ManagementAuditContext, uid, expectedRevision string, updates UpstreamUpdate) (ChannelSaveReceipt, ChannelLocation, bool, error) {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 	for _, kind := range orderedChannelKinds() {
@@ -45,7 +47,7 @@ func (cm *ConfigManager) UpdateChannelWithReceipt(uid, expectedRevision string, 
 			if expectedRevision != "" && strings.Trim(expectedRevision, "\"") != before {
 				return ChannelSaveReceipt{}, loc, false, ErrChannelRevisionConflict
 			}
-			reset, err := cm.updateUpstreamCommonLocked(k, i, updates)
+			reset, err := cm.updateUpstreamCommonLockedAudited(auditContext, k, i, updates)
 			if err != nil {
 				return ChannelSaveReceipt{}, loc, false, err
 			}
@@ -126,4 +128,9 @@ func channelGroupMembersRevision(members []UpstreamConfig) string {
 	data, _ := json.Marshal(members)
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
+}
+
+// UpdateChannelWithReceipt preserves the system/background call contract. HTTP callers use UpdateChannelWithReceiptAudited.
+func (cm *ConfigManager) UpdateChannelWithReceipt(uid, expectedRevision string, updates UpstreamUpdate) (ChannelSaveReceipt, ChannelLocation, bool, error) {
+	return cm.UpdateChannelWithReceiptAudited(ManagementAuditContext{}, uid, expectedRevision, updates)
 }

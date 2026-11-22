@@ -101,6 +101,8 @@ type ABTestEmergencyStopRequest struct {
 // 紧急停止 A/B 测试（通过 ConfigManager 将 Enabled 设为 false 并持久化）。
 func handleABTestEmergencyStop(deps *ABTestDeps) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		// 解析可选 reason
 		var req ABTestEmergencyStopRequest
 		// 忽略绑定错误，reason 是可选字段
@@ -113,7 +115,7 @@ func handleABTestEmergencyStop(deps *ABTestDeps) fiber.Handler {
 
 		// 通过 ConfigManager 持久化关闭 ABTest
 		if deps.CfgManager != nil {
-			if err := deps.CfgManager.SetABTestEnabled(false); err != nil {
+			if err := deps.CfgManager.SetABTestEnabledAudited(managementAuditContext, false); err != nil {
 				log.Printf("[ABTest-EmergencyStop] 持久化关闭失败: %v", err)
 				httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{
 					"error": "持久化关闭 A/B 测试失败，请手动修改配置文件",

@@ -26,6 +26,8 @@ func RegisterIdentityProxyRoutes(router fiber.Router, env *config.EnvConfig, cm 
 		return nil
 	})
 	router.Put("/identity-proxy", func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		if !middleware.AuthorizeAdminAction(c, "identity.configure", "") {
 			return nil
 		}
@@ -64,7 +66,7 @@ func RegisterIdentityProxyRoutes(router fiber.Router, env *config.EnvConfig, cm 
 				return nil
 			}
 		}
-		if err := cm.SetIdentityProxyConfig(cfg); err != nil {
+		if err := cm.SetIdentityProxyConfigAudited(managementAuditContext, cfg); err != nil {
 			httpbridge.JSON(c, 400, fiber.Map{"error": "invalid_identity_proxy_config"})
 			return nil
 		}
@@ -117,6 +119,8 @@ func RegisterIdentityProxyRoutes(router fiber.Router, env *config.EnvConfig, cm 
 }
 
 func revokeIdentitySession(c fiber.Ctx, env *config.EnvConfig, cm *config.ConfigManager, fingerprint string, expires int64) (string, error) {
+	managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 	cfg := cm.IdentityProxySnapshot()
 	scope := cfg.EffectiveRevocationMode()
 	if middleware.GetAdminPrincipal(c).RevocationScope == "shared" {
@@ -140,5 +144,5 @@ func revokeIdentitySession(c fiber.Ctx, env *config.EnvConfig, cm *config.Config
 	} else if scope != "local" {
 		return scope, errors.New("invalid revocation scope")
 	}
-	return scope, cm.RevokeIdentitySessionUntil(fingerprint, expires)
+	return scope, cm.RevokeIdentitySessionUntilAudited(managementAuditContext, fingerprint, expires)
 }

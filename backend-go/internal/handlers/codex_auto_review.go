@@ -19,6 +19,8 @@ func GetCodexAutoReviewMapping(manager *config.ConfigManager) fiber.Handler {
 
 func PutCodexAutoReviewMapping(manager *config.ConfigManager) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		var request struct {
 			Enabled     *bool  `json:"enabled"`
 			TargetModel string `json:"targetModel"`
@@ -32,7 +34,7 @@ func PutCodexAutoReviewMapping(manager *config.ConfigManager) fiber.Handler {
 			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
 			return nil
 		}
-		if err := manager.SetCodexAutoReviewMapping(mapping); err != nil {
+		if err := manager.SetCodexAutoReviewMappingAudited(managementAuditContext, mapping); err != nil {
 			httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": "保存自动审批映射失败"})
 			return nil
 		}

@@ -89,6 +89,9 @@ func WebAuthMiddleware(envCfg *config.EnvConfig, cfgManager *config.ConfigManage
 			if providedKey != "" {
 				authenticateAdminPrincipal(c, envCfg, providedKey)
 			}
+			if !beginAuthenticatedManagementAudit(c, cfgManager) {
+				return nil
+			}
 			if !authorizeManagementRoute(c) {
 				return nil
 			}

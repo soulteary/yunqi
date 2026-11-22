@@ -43,6 +43,8 @@ func GetUpstreams(cfgManager *config.ConfigManager) fiber.Handler {
 // AddUpstream 添加 Responses 上游
 func AddUpstream(cfgManager *config.ConfigManager) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		var req struct {
 			config.UpstreamConfig
 			Placement string `json:"placement"` // 故障转移位置：front（首位）| back（末尾，默认）
@@ -52,7 +54,7 @@ func AddUpstream(cfgManager *config.ConfigManager) fiber.Handler {
 			return nil
 		}
 
-		if err := cfgManager.AddResponsesUpstream(req.UpstreamConfig, req.Placement); err != nil {
+		if err := cfgManager.AddResponsesUpstreamAudited(managementAuditContext, req.UpstreamConfig, req.Placement); err != nil {
 			httpbridge.JSON(c, 500, fiber.Map{"error": err.Error()})
 			return nil
 		}
@@ -64,6 +66,8 @@ func AddUpstream(cfgManager *config.ConfigManager) fiber.Handler {
 // UpdateUpstream 更新 Responses 上游
 func UpdateUpstream(cfgManager *config.ConfigManager, sch *scheduler.ChannelScheduler) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		idStr := httpbridge.Param(c, "id")
 		id, err := strconv.Atoi(idStr)
 		if err != nil {
@@ -85,7 +89,7 @@ func UpdateUpstream(cfgManager *config.ConfigManager, sch *scheduler.ChannelSche
 			}
 		}
 
-		shouldResetMetrics, err := cfgManager.UpdateResponsesUpstream(id, updates)
+		shouldResetMetrics, err := cfgManager.UpdateResponsesUpstreamAudited(managementAuditContext, id, updates)
 		if err != nil {
 			httpbridge.JSON(c, 500, fiber.Map{"error": err.Error()})
 			return nil
@@ -109,6 +113,8 @@ func UpdateUpstream(cfgManager *config.ConfigManager, sch *scheduler.ChannelSche
 // DeleteUpstream 删除 Responses 上游
 func DeleteUpstream(cfgManager *config.ConfigManager, channelScheduler *scheduler.ChannelScheduler) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		idStr := httpbridge.Param(c, "id")
 		id, err := strconv.Atoi(idStr)
 		if err != nil {
@@ -116,7 +122,7 @@ func DeleteUpstream(cfgManager *config.ConfigManager, channelScheduler *schedule
 			return nil
 		}
 
-		removed, err := cfgManager.RemoveResponsesUpstream(id)
+		removed, err := cfgManager.RemoveResponsesUpstreamAudited(managementAuditContext, id)
 		if err != nil {
 			if strings.Contains(err.Error(), "无效的") {
 				httpbridge.JSON(c, 404, fiber.Map{"error": "Upstream not found"})
@@ -136,6 +142,8 @@ func DeleteUpstream(cfgManager *config.ConfigManager, channelScheduler *schedule
 // AddApiKey 添加 Responses 渠道 API 密钥
 func AddApiKey(cfgManager *config.ConfigManager) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		idStr := httpbridge.Param(c, "id")
 		id, err := strconv.Atoi(idStr)
 		if err != nil {
@@ -151,7 +159,7 @@ func AddApiKey(cfgManager *config.ConfigManager) fiber.Handler {
 			return nil
 		}
 
-		if err := cfgManager.AddResponsesAPIKey(id, req.APIKey); err != nil {
+		if err := cfgManager.AddResponsesAPIKeyAudited(managementAuditContext, id, req.APIKey); err != nil {
 			if strings.Contains(err.Error(), "无效的上游索引") {
 				httpbridge.JSON(c, 404, fiber.Map{"error": "Upstream not found"})
 			} else if strings.Contains(err.Error(), "API密钥已存在") {
@@ -172,6 +180,8 @@ func AddApiKey(cfgManager *config.ConfigManager) fiber.Handler {
 // DeleteApiKey 删除 Responses 渠道 API 密钥
 func DeleteApiKey(cfgManager *config.ConfigManager) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		idStr := httpbridge.Param(c, "id")
 		id, err := strconv.Atoi(idStr)
 		if err != nil {
@@ -185,7 +195,7 @@ func DeleteApiKey(cfgManager *config.ConfigManager) fiber.Handler {
 			return nil
 		}
 
-		if err := cfgManager.RemoveResponsesAPIKey(id, apiKey); err != nil {
+		if err := cfgManager.RemoveResponsesAPIKeyAudited(managementAuditContext, id, apiKey); err != nil {
 			if strings.Contains(err.Error(), "无效的上游索引") {
 				httpbridge.JSON(c, 404, fiber.Map{"error": "Upstream not found"})
 			} else if strings.Contains(err.Error(), "API密钥不存在") {
@@ -205,10 +215,12 @@ func DeleteApiKey(cfgManager *config.ConfigManager) fiber.Handler {
 // MoveApiKeyToTop 将 Responses 渠道 API 密钥移到最前面
 func MoveApiKeyToTop(cfgManager *config.ConfigManager) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		id, _ := strconv.Atoi(httpbridge.Param(c, "id"))
 		apiKey := httpbridge.Param(c, "apiKey")
 
-		if err := cfgManager.MoveResponsesAPIKeyToTop(id, apiKey); err != nil {
+		if err := cfgManager.MoveResponsesAPIKeyToTopAudited(managementAuditContext, id, apiKey); err != nil {
 			httpbridge.JSON(c, 400, fiber.Map{"error": err.Error()})
 			return nil
 		}
@@ -220,10 +232,12 @@ func MoveApiKeyToTop(cfgManager *config.ConfigManager) fiber.Handler {
 // MoveApiKeyToBottom 将 Responses 渠道 API 密钥移到最后面
 func MoveApiKeyToBottom(cfgManager *config.ConfigManager) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		id, _ := strconv.Atoi(httpbridge.Param(c, "id"))
 		apiKey := httpbridge.Param(c, "apiKey")
 
-		if err := cfgManager.MoveResponsesAPIKeyToBottom(id, apiKey); err != nil {
+		if err := cfgManager.MoveResponsesAPIKeyToBottomAudited(managementAuditContext, id, apiKey); err != nil {
 			httpbridge.JSON(c, 400, fiber.Map{"error": err.Error()})
 			return nil
 		}
@@ -235,6 +249,8 @@ func MoveApiKeyToBottom(cfgManager *config.ConfigManager) fiber.Handler {
 // ReorderChannels 重新排序 Responses 渠道优先级
 func ReorderChannels(cfgManager *config.ConfigManager) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		var req struct {
 			Order      []int `json:"order"`
 			Priorities []int `json:"priorities"`
@@ -244,7 +260,7 @@ func ReorderChannels(cfgManager *config.ConfigManager) fiber.Handler {
 			return nil
 		}
 
-		if err := cfgManager.ReorderResponsesUpstreams(req.Order, req.Priorities); err != nil {
+		if err := cfgManager.ReorderResponsesUpstreamsAudited(managementAuditContext, req.Order, req.Priorities); err != nil {
 			httpbridge.JSON(c, 400, fiber.Map{"error": err.Error()})
 			return nil
 		}
@@ -331,8 +347,8 @@ func buildPingRequest(upstream config.UpstreamConfig, baseURL string) (*http.Req
 
 // SetChannelStatus 设置 Responses 渠道状态
 func SetChannelStatus(cfgManager *config.ConfigManager) fiber.Handler {
-	adapter := handlers.ChannelStatusConfigManagerFunc(func(index int, status string) error {
-		return cfgManager.SetResponsesChannelStatus(index, status)
+	adapter := handlers.AuditedChannelStatusConfigManagerFunc(func(audit config.ManagementAuditContext, index int, status string) error {
+		return cfgManager.SetResponsesChannelStatusAudited(audit, index, status)
 	})
 	return handlers.NamedChannelStatusHandler(adapter, "Responses 渠道状态已更新")
 }

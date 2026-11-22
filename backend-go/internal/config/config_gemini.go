@@ -54,18 +54,24 @@ func (cm *ConfigManager) GetCurrentGeminiUpstreamWithIndex() (*UpstreamConfig, i
 
 // AddGeminiUpstream 添加 Gemini 上游
 // placements 可选传 "front"（故障转移序列首位），缺省为追加到序列末尾（见 assignChannelPriority）
-func (cm *ConfigManager) AddGeminiUpstream(upstream UpstreamConfig, placements ...string) error {
-	return cm.addUpstreamCommon(ChannelKindRegistry[ChannelKindGemini], upstream, placements...)
+func (cm *ConfigManager) AddGeminiUpstreamAudited(auditContext ManagementAuditContext, upstream UpstreamConfig, placements ...string) error {
+	auditContext = auditContext.normalized()
+
+	return cm.addUpstreamCommonAudited(auditContext, ChannelKindRegistry[ChannelKindGemini], upstream, placements...)
 }
 
 // UpdateGeminiUpstream 更新 Gemini 上游
 // 返回值：shouldResetMetrics 表示是否需要重置渠道指标（熔断状态）
-func (cm *ConfigManager) UpdateGeminiUpstream(index int, updates UpstreamUpdate) (shouldResetMetrics bool, err error) {
-	return cm.updateUpstreamCommon(ChannelKindRegistry[ChannelKindGemini], index, updates)
+func (cm *ConfigManager) UpdateGeminiUpstreamAudited(auditContext ManagementAuditContext, index int, updates UpstreamUpdate) (shouldResetMetrics bool, err error) {
+	auditContext = auditContext.normalized()
+
+	return cm.updateUpstreamCommonAudited(auditContext, ChannelKindRegistry[ChannelKindGemini], index, updates)
 }
 
 // RemoveGeminiUpstream 删除 Gemini 上游
-func (cm *ConfigManager) RemoveGeminiUpstream(index int) (*UpstreamConfig, error) {
+func (cm *ConfigManager) RemoveGeminiUpstreamAudited(auditContext ManagementAuditContext, index int) (*UpstreamConfig, error) {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -78,7 +84,7 @@ func (cm *ConfigManager) RemoveGeminiUpstream(index int) (*UpstreamConfig, error
 
 	cm.clearFailedKeysForUpstream(&removed, "Gemini")
 
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		return nil, err
 	}
 
@@ -87,7 +93,9 @@ func (cm *ConfigManager) RemoveGeminiUpstream(index int) (*UpstreamConfig, error
 }
 
 // AddGeminiAPIKey 添加 Gemini 上游的 API 密钥
-func (cm *ConfigManager) AddGeminiAPIKey(index int, apiKey string) error {
+func (cm *ConfigManager) AddGeminiAPIKeyAudited(auditContext ManagementAuditContext, index int, apiKey string) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -124,7 +132,7 @@ func (cm *ConfigManager) AddGeminiAPIKey(index int, apiKey string) error {
 	}
 	cm.config.GeminiUpstream[index].HistoricalAPIKeys = newHistoricalKeys
 
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		return err
 	}
 
@@ -133,7 +141,9 @@ func (cm *ConfigManager) AddGeminiAPIKey(index int, apiKey string) error {
 }
 
 // RemoveGeminiAPIKey 删除 Gemini 上游的 API 密钥
-func (cm *ConfigManager) RemoveGeminiAPIKey(index int, apiKey string) error {
+func (cm *ConfigManager) RemoveGeminiAPIKeyAudited(auditContext ManagementAuditContext, index int, apiKey string) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -174,7 +184,7 @@ func (cm *ConfigManager) RemoveGeminiAPIKey(index int, apiKey string) error {
 		log.Printf("[Gemini-Key] 上游 [%d] %s: Key %s 已移入历史列表", index, cm.config.GeminiUpstream[index].Name, utils.MaskAPIKey(apiKey))
 	}
 
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		return err
 	}
 
@@ -188,7 +198,9 @@ func (cm *ConfigManager) GetNextGeminiAPIKey(upstream *UpstreamConfig, failedKey
 }
 
 // MoveGeminiAPIKeyToTop 将指定 Gemini 渠道的 API 密钥移到最前面
-func (cm *ConfigManager) MoveGeminiAPIKeyToTop(upstreamIndex int, apiKey string) error {
+func (cm *ConfigManager) MoveGeminiAPIKeyToTopAudited(auditContext ManagementAuditContext, upstreamIndex int, apiKey string) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -210,11 +222,13 @@ func (cm *ConfigManager) MoveGeminiAPIKeyToTop(upstreamIndex int, apiKey string)
 	}
 
 	upstream.APIKeys = append([]string{apiKey}, append(upstream.APIKeys[:index], upstream.APIKeys[index+1:]...)...)
-	return cm.saveConfigLocked(cm.config)
+	return cm.saveConfigLockedAudited(auditContext, cm.config)
 }
 
 // MoveGeminiAPIKeyToBottom 将指定 Gemini 渠道的 API 密钥移到最后面
-func (cm *ConfigManager) MoveGeminiAPIKeyToBottom(upstreamIndex int, apiKey string) error {
+func (cm *ConfigManager) MoveGeminiAPIKeyToBottomAudited(auditContext ManagementAuditContext, upstreamIndex int, apiKey string) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -237,13 +251,15 @@ func (cm *ConfigManager) MoveGeminiAPIKeyToBottom(upstreamIndex int, apiKey stri
 
 	upstream.APIKeys = append(upstream.APIKeys[:index], upstream.APIKeys[index+1:]...)
 	upstream.APIKeys = append(upstream.APIKeys, apiKey)
-	return cm.saveConfigLocked(cm.config)
+	return cm.saveConfigLockedAudited(auditContext, cm.config)
 }
 
 // ReorderGeminiUpstreams 重新排序 Gemini 渠道优先级
 // order 是渠道索引数组，按新的优先级顺序排列（只更新传入的渠道，支持部分排序）
 // priorities 可选：与 order 平行的显式优先级值（统一 LLM 视图按全局位次提交），缺省按位次 1..N
-func (cm *ConfigManager) ReorderGeminiUpstreams(order []int, priorities ...[]int) error {
+func (cm *ConfigManager) ReorderGeminiUpstreamsAudited(auditContext ManagementAuditContext, order []int, priorities ...[]int) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -272,7 +288,7 @@ func (cm *ConfigManager) ReorderGeminiUpstreams(order []int, priorities ...[]int
 		cm.config.GeminiUpstream[idx].Priority = values[i]
 	}
 
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		return err
 	}
 
@@ -281,7 +297,9 @@ func (cm *ConfigManager) ReorderGeminiUpstreams(order []int, priorities ...[]int
 }
 
 // SetGeminiChannelStatus 设置 Gemini 渠道状态
-func (cm *ConfigManager) SetGeminiChannelStatus(index int, status string) error {
+func (cm *ConfigManager) SetGeminiChannelStatusAudited(auditContext ManagementAuditContext, index int, status string) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -301,7 +319,7 @@ func (cm *ConfigManager) SetGeminiChannelStatus(index int, status string) error 
 		log.Printf("[Config-Status] 已清除 Gemini 渠道 [%d] %s 的促销期", index, cm.config.GeminiUpstream[index].Name)
 	}
 
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		return err
 	}
 
@@ -310,7 +328,9 @@ func (cm *ConfigManager) SetGeminiChannelStatus(index int, status string) error 
 }
 
 // SetGeminiChannelPromotion 设置 Gemini 渠道促销期
-func (cm *ConfigManager) SetGeminiChannelPromotion(index int, duration time.Duration) error {
+func (cm *ConfigManager) SetGeminiChannelPromotionAudited(auditContext ManagementAuditContext, index int, duration time.Duration) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -333,7 +353,7 @@ func (cm *ConfigManager) SetGeminiChannelPromotion(index int, duration time.Dura
 		log.Printf("[Config-Promotion] 已设置 Gemini 渠道 [%d] %s 进入促销期，截止: %s", index, cm.config.GeminiUpstream[index].Name, promotionEnd.Format(time.RFC3339))
 	}
 
-	return cm.saveConfigLocked(cm.config)
+	return cm.saveConfigLockedAudited(auditContext, cm.config)
 }
 
 // GetPromotedGeminiChannel 获取当前处于促销期的 Gemini 渠道索引
@@ -347,4 +367,54 @@ func (cm *ConfigManager) GetPromotedGeminiChannel() (int, bool) {
 		}
 	}
 	return -1, false
+}
+
+// AddGeminiAPIKey preserves the system/background call contract. HTTP callers use AddGeminiAPIKeyAudited.
+func (cm *ConfigManager) AddGeminiAPIKey(index int, apiKey string) error {
+	return cm.AddGeminiAPIKeyAudited(ManagementAuditContext{}, index, apiKey)
+}
+
+// AddGeminiUpstream preserves the system/background call contract. HTTP callers use AddGeminiUpstreamAudited.
+func (cm *ConfigManager) AddGeminiUpstream(upstream UpstreamConfig, placements ...string) error {
+	return cm.AddGeminiUpstreamAudited(ManagementAuditContext{}, upstream, placements...)
+}
+
+// MoveGeminiAPIKeyToBottom preserves the system/background call contract. HTTP callers use MoveGeminiAPIKeyToBottomAudited.
+func (cm *ConfigManager) MoveGeminiAPIKeyToBottom(upstreamIndex int, apiKey string) error {
+	return cm.MoveGeminiAPIKeyToBottomAudited(ManagementAuditContext{}, upstreamIndex, apiKey)
+}
+
+// MoveGeminiAPIKeyToTop preserves the system/background call contract. HTTP callers use MoveGeminiAPIKeyToTopAudited.
+func (cm *ConfigManager) MoveGeminiAPIKeyToTop(upstreamIndex int, apiKey string) error {
+	return cm.MoveGeminiAPIKeyToTopAudited(ManagementAuditContext{}, upstreamIndex, apiKey)
+}
+
+// RemoveGeminiAPIKey preserves the system/background call contract. HTTP callers use RemoveGeminiAPIKeyAudited.
+func (cm *ConfigManager) RemoveGeminiAPIKey(index int, apiKey string) error {
+	return cm.RemoveGeminiAPIKeyAudited(ManagementAuditContext{}, index, apiKey)
+}
+
+// RemoveGeminiUpstream preserves the system/background call contract. HTTP callers use RemoveGeminiUpstreamAudited.
+func (cm *ConfigManager) RemoveGeminiUpstream(index int) (*UpstreamConfig, error) {
+	return cm.RemoveGeminiUpstreamAudited(ManagementAuditContext{}, index)
+}
+
+// ReorderGeminiUpstreams preserves the system/background call contract. HTTP callers use ReorderGeminiUpstreamsAudited.
+func (cm *ConfigManager) ReorderGeminiUpstreams(order []int, priorities ...[]int) error {
+	return cm.ReorderGeminiUpstreamsAudited(ManagementAuditContext{}, order, priorities...)
+}
+
+// SetGeminiChannelPromotion preserves the system/background call contract. HTTP callers use SetGeminiChannelPromotionAudited.
+func (cm *ConfigManager) SetGeminiChannelPromotion(index int, duration time.Duration) error {
+	return cm.SetGeminiChannelPromotionAudited(ManagementAuditContext{}, index, duration)
+}
+
+// SetGeminiChannelStatus preserves the system/background call contract. HTTP callers use SetGeminiChannelStatusAudited.
+func (cm *ConfigManager) SetGeminiChannelStatus(index int, status string) error {
+	return cm.SetGeminiChannelStatusAudited(ManagementAuditContext{}, index, status)
+}
+
+// UpdateGeminiUpstream preserves the system/background call contract. HTTP callers use UpdateGeminiUpstreamAudited.
+func (cm *ConfigManager) UpdateGeminiUpstream(index int, updates UpstreamUpdate) (shouldResetMetrics bool, err error) {
+	return cm.UpdateGeminiUpstreamAudited(ManagementAuditContext{}, index, updates)
 }

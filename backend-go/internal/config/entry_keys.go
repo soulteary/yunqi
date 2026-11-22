@@ -124,7 +124,9 @@ func (cm *ConfigManager) FindEntryKey(raw string) (EntryKey, bool) {
 
 // PutEntryKey atomically persists a policy or a rotation. Rotation disables the
 // old credential and installs a fresh digest with the same stable principal.
-func (cm *ConfigManager) PutEntryKey(key EntryKey, rotateFrom string) error {
+func (cm *ConfigManager) PutEntryKeyAudited(auditContext ManagementAuditContext, key EntryKey, rotateFrom string) error {
+	auditContext = auditContext.normalized()
+
 	if rotateFrom != "" && rotateFrom == key.ID {
 		return errors.New("rotation requires a new key identity")
 	}
@@ -169,11 +171,16 @@ func (cm *ConfigManager) PutEntryKey(key EntryKey, rotateFrom string) error {
 	}
 	previous := cm.config.EntryKeys
 	cm.config.EntryKeys = next
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		cm.config.EntryKeys = previous
 		cm.mu.Unlock()
 		return err
 	}
 	cm.fireConfigChangeCallbacks()
 	return nil
+}
+
+// PutEntryKey preserves the system/background call contract. HTTP callers use PutEntryKeyAudited.
+func (cm *ConfigManager) PutEntryKey(key EntryKey, rotateFrom string) error {
+	return cm.PutEntryKeyAudited(ManagementAuditContext{}, key, rotateFrom)
 }

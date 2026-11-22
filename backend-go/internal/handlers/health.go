@@ -61,7 +61,9 @@ func SetVersionInfo(version, build, commit string) {
 // SaveConfigHandler 配置保存处理器
 func SaveConfigHandler(cfgManager *config.ConfigManager) fiber.Handler {
 	return func(c fiber.Ctx) error {
-		if err := cfgManager.SaveConfig(); err != nil {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
+		if err := cfgManager.SaveConfigAudited(managementAuditContext); err != nil {
 			httpbridge.JSON(c, 500, fiber.Map{
 				"status":    "error",
 				"message":   "配置保存失败",

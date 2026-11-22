@@ -14,6 +14,8 @@ import (
 
 func handleSetVolcengineAccessKey(deps *AutoManagedDeps) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		if deps == nil || deps.CfgManager == nil {
 			httpbridge.JSON(c, http.StatusServiceUnavailable, fiber.Map{"error": "配置管理器不可用"})
 			return nil
@@ -61,11 +63,11 @@ func handleSetVolcengineAccessKey(deps *AutoManagedDeps) fiber.Handler {
 			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
 			return nil
 		}
-		if err := deps.CfgManager.SetManagedAccountVolcengineAccessKey(accountUID, credentialUID, req.AccessKeyID, req.SecretAccessKey); err != nil {
+		if err := deps.CfgManager.SetManagedAccountVolcengineAccessKeyAudited(managementAuditContext, accountUID, credentialUID, req.AccessKeyID, req.SecretAccessKey); err != nil {
 			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
 			return nil
 		}
-		if err := deps.CfgManager.SetManagedAccountVolcenginePlan(accountUID, credentialUID, plan.Plan, plan.Tier, plan.Status); err != nil {
+		if err := deps.CfgManager.SetManagedAccountVolcenginePlanAudited(managementAuditContext, accountUID, credentialUID, plan.Plan, plan.Tier, plan.Status); err != nil {
 			httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": err.Error()})
 			return nil
 		}
@@ -78,10 +80,10 @@ func handleSetVolcengineAccessKey(deps *AutoManagedDeps) fiber.Handler {
 		if usage.Error != "" {
 			log.Printf("[Volcengine-Usage] 查询套餐用量失败: account=%s credential=%s err=%s", accountUID, credentialUID, usage.Error)
 		}
-		if err := deps.CfgManager.SetManagedAccountVolcenginePlanUsage(accountUID, credentialUID, usage); err != nil {
+		if err := deps.CfgManager.SetManagedAccountVolcenginePlanUsageAudited(managementAuditContext, accountUID, credentialUID, usage); err != nil {
 			log.Printf("[Volcengine-Usage] 保存套餐用量失败: %v", err)
 		}
-		if err := deps.CfgManager.SetManagedAccountVolcenginePlanBuckets(accountUID, credentialUID, buckets); err != nil {
+		if err := deps.CfgManager.SetManagedAccountVolcenginePlanBucketsAudited(managementAuditContext, accountUID, credentialUID, buckets); err != nil {
 			log.Printf("[Volcengine-Usage] 保存套餐桶快照失败: %v", err)
 		}
 		if usage.Error == "" {
@@ -107,13 +109,15 @@ func handleSetVolcengineAccessKey(deps *AutoManagedDeps) fiber.Handler {
 
 func handleClearVolcengineAccessKey(deps *AutoManagedDeps) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		if deps == nil || deps.CfgManager == nil {
 			httpbridge.JSON(c, http.StatusServiceUnavailable, fiber.Map{"error": "配置管理器不可用"})
 			return nil
 		}
 		accountUID := strings.TrimSpace(httpbridge.Param(c, "accountUid"))
 		credentialUID := strings.TrimSpace(httpbridge.Param(c, "credentialUid"))
-		if err := deps.CfgManager.ClearManagedAccountVolcengineAccessKey(accountUID, credentialUID); err != nil {
+		if err := deps.CfgManager.ClearManagedAccountVolcengineAccessKeyAudited(managementAuditContext, accountUID, credentialUID); err != nil {
 			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": err.Error()})
 			return nil
 		}
@@ -126,6 +130,8 @@ const volcenginePlanUsageTTL = 5 * time.Minute
 
 func handleRefreshVolcenginePlanUsage(deps *AutoManagedDeps) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		if deps == nil || deps.CfgManager == nil {
 			httpbridge.JSON(c, http.StatusServiceUnavailable, fiber.Map{"error": "配置管理器不可用"})
 			return nil
@@ -165,11 +171,11 @@ func handleRefreshVolcenginePlanUsage(deps *AutoManagedDeps) fiber.Handler {
 			}
 			usage = u
 		}
-		if saveErr := deps.CfgManager.SetManagedAccountVolcenginePlanUsage(accountUID, credentialUID, usage); saveErr != nil {
+		if saveErr := deps.CfgManager.SetManagedAccountVolcenginePlanUsageAudited(managementAuditContext, accountUID, credentialUID, usage); saveErr != nil {
 			log.Printf("[Volcengine-Usage] 保存套餐用量失败: %v", saveErr)
 		}
 		if len(buckets) > 0 {
-			if saveErr := deps.CfgManager.SetManagedAccountVolcenginePlanBuckets(accountUID, credentialUID, buckets); saveErr != nil {
+			if saveErr := deps.CfgManager.SetManagedAccountVolcenginePlanBucketsAudited(managementAuditContext, accountUID, credentialUID, buckets); saveErr != nil {
 				log.Printf("[Volcengine-Usage] 保存套餐桶快照失败: %v", saveErr)
 			}
 		}

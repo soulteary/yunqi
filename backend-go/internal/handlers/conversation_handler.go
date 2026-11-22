@@ -180,6 +180,8 @@ type UpdateConversationSettingsRequest struct {
 // UpdateConversationSettings 更新驾驶舱设置
 func UpdateConversationSettings(deps *ConversationHandlerDeps) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		var req UpdateConversationSettingsRequest
 		if err := httpbridge.BindJSON(c, &req); err != nil {
 			httpbridge.JSON(c, http.StatusBadRequest, fiber.Map{"error": "invalid request: " + err.Error()})
@@ -190,7 +192,7 @@ func UpdateConversationSettings(deps *ConversationHandlerDeps) fiber.Handler {
 			ttl := *req.OverrideTTLMinutes
 
 			// 更新配置文件（内部会标准化为有效选项，不合适的值使用默认 30 分钟）
-			if err := deps.ConfigManager.SetOverrideTTLMinutes(ttl); err != nil {
+			if err := deps.ConfigManager.SetOverrideTTLMinutesAudited(managementAuditContext, ttl); err != nil {
 				httpbridge.JSON(c, http.StatusInternalServerError, fiber.Map{"error": "failed to update config: " + err.Error()})
 				return nil
 			}

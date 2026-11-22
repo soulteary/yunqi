@@ -115,6 +115,10 @@ func TestChannelPatchManualAndManagedRoundTrip(t *testing.T) {
 			}
 			got := loaded.GetConfig().Upstream[0]
 			_ = loaded.Close()
+			// A second manager may persist canonical migration defaults; synchronize this writer.
+			if err := cm.loadConfig(); err != nil {
+				t.Fatal(err)
+			}
 			if !got.FastMode || got.RequestTimeoutMs != 1234 || got.AutoBlacklistBalance == nil || *got.AutoBlacklistBalance || got.CostMultiplier == nil || *got.CostMultiplier != 2.5 || got.CustomHeaders["x-extra"] != "keep" || got.OutboundNetwork == nil || got.OutboundNetwork.ProxyMode != "direct" {
 				t.Fatalf("rename lost settings: %+v", got)
 			}
@@ -130,6 +134,10 @@ func TestChannelPatchManualAndManagedRoundTrip(t *testing.T) {
 			}
 			got = loaded.GetConfig().Upstream[0]
 			_ = loaded.Close()
+			// A second manager may persist canonical migration defaults; synchronize this writer.
+			if err := cm.loadConfig(); err != nil {
+				t.Fatal(err)
+			}
 			if got.FastMode || got.RequestTimeoutMs != 0 || got.AutoBlacklistBalance != nil || !got.IsAutoBlacklistBalanceEnabled() || got.CostMultiplier != nil || len(got.CustomHeaders) != 0 {
 				t.Fatalf("clear did not persist: %+v", got)
 			}

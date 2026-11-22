@@ -230,6 +230,8 @@ func handleMultiChannel(
 		false,
 		agentRole,
 		func(c fiber.Ctx, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
+			managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 			upstream := selection.Upstream
 			channelIndex := selection.ChannelIndex
 			if upstream == nil {
@@ -258,7 +260,7 @@ func handleMultiChannel(
 					return buildOperationRequest(c, upstreamCopy, upstreamCopy.BaseURL, apiKey, bodyBytes, model, operation, contentType)
 				},
 				func(apiKey string) {
-					_ = cfgManager.DeprioritizeAPIKey(apiKey)
+					_ = cfgManager.DeprioritizeAPIKeyAudited(managementAuditContext, apiKey)
 				},
 				func(url string) {
 					channelScheduler.MarkURLFailure(scheduler.ChannelKindImages, channelIndex, url)
@@ -305,6 +307,8 @@ func handleSingleChannel(
 	contentType string,
 	isStream bool,
 ) {
+	managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 	upstream, channelIndex, err := cfgManager.GetCurrentImagesUpstreamWithIndex()
 	if err != nil {
 		imagesErrorResponse(c, http.StatusServiceUnavailable, "No Images upstream configured", "service_unavailable", "service_unavailable")
@@ -338,7 +342,7 @@ func handleSingleChannel(
 			return buildOperationRequest(c, upstreamCopy, upstreamCopy.BaseURL, apiKey, bodyBytes, model, operation, contentType)
 		},
 		func(apiKey string) {
-			_ = cfgManager.DeprioritizeAPIKey(apiKey)
+			_ = cfgManager.DeprioritizeAPIKeyAudited(managementAuditContext, apiKey)
 		},
 		nil,
 		nil,

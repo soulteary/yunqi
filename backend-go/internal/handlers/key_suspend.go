@@ -13,6 +13,8 @@ import (
 // Body: {"apiKey": "sk-xxx"}
 func SuspendAPIKey(cfgManager *config.ConfigManager, apiType string) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		idStr := httpbridge.Param(c, "id")
 		id, err := strconv.Atoi(idStr)
 		if err != nil {
@@ -28,7 +30,7 @@ func SuspendAPIKey(cfgManager *config.ConfigManager, apiType string) fiber.Handl
 			return nil
 		}
 
-		if err := cfgManager.SuspendKey(apiType, id, req.APIKey); err != nil {
+		if err := cfgManager.SuspendKeyAudited(managementAuditContext, apiType, id, req.APIKey); err != nil {
 			httpbridge.JSON(c, 400, fiber.Map{"error": err.Error()})
 			return nil
 		}
@@ -45,6 +47,8 @@ func SuspendAPIKey(cfgManager *config.ConfigManager, apiType string) fiber.Handl
 // Body: {"apiKey": "sk-xxx"}
 func ResumeAPIKey(cfgManager *config.ConfigManager, apiType string) fiber.Handler {
 	return func(c fiber.Ctx) error {
+		managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 		idStr := httpbridge.Param(c, "id")
 		id, err := strconv.Atoi(idStr)
 		if err != nil {
@@ -60,7 +64,7 @@ func ResumeAPIKey(cfgManager *config.ConfigManager, apiType string) fiber.Handle
 			return nil
 		}
 
-		if err := cfgManager.ResumeKey(apiType, id, req.APIKey); err != nil {
+		if err := cfgManager.ResumeKeyAudited(managementAuditContext, apiType, id, req.APIKey); err != nil {
 			httpbridge.JSON(c, 400, fiber.Map{"error": err.Error()})
 			return nil
 		}

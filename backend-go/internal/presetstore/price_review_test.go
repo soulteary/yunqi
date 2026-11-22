@@ -365,3 +365,30 @@ func TestPriceUpdaterRejectsOversizedIndexWithoutChangingActiveOrPending(t *test
 		t.Fatal("oversized index changed active or pending review")
 	}
 }
+
+func TestManagementAuditPriceOperationPersistsWithActivation(t *testing.T) {
+	before := pricedTestBundle("2026.07.10-1", 1)
+	incoming := pricedTestBundle("2026.07.10-2", 1.1)
+	server := newPresetTestServer(t, incoming, presetTestServerOptions{})
+	defer server.Close()
+	cache := t.TempDir()
+	updater := NewPresetUpdater(NewPresetStore(before), UpdaterConfig{IndexURL: server.URL + "/index.json", CacheDir: cache, AllowInsecureForTesting: true})
+	if err := updater.CheckOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	review := updater.PriceReviewState().Pending.ReviewID
+	if err := updater.ApprovePriceReview("admin:test", review, true, "op_price"); err != nil {
+		t.Fatal(err)
+	}
+	audit := updater.PriceReviewState().Audit
+	if len(audit) != 1 || audit[0].OperationID != "op_price" {
+		t.Fatal("price activation lost management operation")
+	}
+	restarted := NewPresetUpdater(NewPresetStore(before), UpdaterConfig{CacheDir: cache})
+	if err := restarted.LoadCacheAtStartup(); err != nil {
+		t.Fatal(err)
+	}
+	if got := restarted.PriceReviewState().Audit; len(got) != 1 || got[0].OperationID != "op_price" {
+		t.Fatal("price operation not part of atomic review state")
+	}
+}

@@ -68,18 +68,24 @@ func (cm *ConfigManager) GetCurrentImagesUpstreamWithIndex() (*UpstreamConfig, i
 
 // AddImagesUpstream 添加 Images 上游
 // placements 可选传 "front"（故障转移序列首位），缺省为追加到序列末尾（见 assignChannelPriority）
-func (cm *ConfigManager) AddImagesUpstream(upstream UpstreamConfig, placements ...string) error {
-	return cm.addUpstreamCommon(ChannelKindRegistry[ChannelKindImages], upstream, placements...)
+func (cm *ConfigManager) AddImagesUpstreamAudited(auditContext ManagementAuditContext, upstream UpstreamConfig, placements ...string) error {
+	auditContext = auditContext.normalized()
+
+	return cm.addUpstreamCommonAudited(auditContext, ChannelKindRegistry[ChannelKindImages], upstream, placements...)
 }
 
 // UpdateImagesUpstream 更新 Images 上游
 // 返回值：shouldResetMetrics 表示是否需要重置渠道指标（熔断状态）
-func (cm *ConfigManager) UpdateImagesUpstream(index int, updates UpstreamUpdate) (shouldResetMetrics bool, err error) {
-	return cm.updateUpstreamCommon(ChannelKindRegistry[ChannelKindImages], index, updates)
+func (cm *ConfigManager) UpdateImagesUpstreamAudited(auditContext ManagementAuditContext, index int, updates UpstreamUpdate) (shouldResetMetrics bool, err error) {
+	auditContext = auditContext.normalized()
+
+	return cm.updateUpstreamCommonAudited(auditContext, ChannelKindRegistry[ChannelKindImages], index, updates)
 }
 
 // RemoveImagesUpstream 删除 Images 上游
-func (cm *ConfigManager) RemoveImagesUpstream(index int) (*UpstreamConfig, error) {
+func (cm *ConfigManager) RemoveImagesUpstreamAudited(auditContext ManagementAuditContext, index int) (*UpstreamConfig, error) {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -92,7 +98,7 @@ func (cm *ConfigManager) RemoveImagesUpstream(index int) (*UpstreamConfig, error
 
 	cm.clearFailedKeysForUpstream(&removed, "Images")
 
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		return nil, err
 	}
 
@@ -101,7 +107,9 @@ func (cm *ConfigManager) RemoveImagesUpstream(index int) (*UpstreamConfig, error
 }
 
 // AddImagesAPIKey 添加 Images 上游的 API 密钥
-func (cm *ConfigManager) AddImagesAPIKey(index int, apiKey string) error {
+func (cm *ConfigManager) AddImagesAPIKeyAudited(auditContext ManagementAuditContext, index int, apiKey string) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -136,7 +144,7 @@ func (cm *ConfigManager) AddImagesAPIKey(index int, apiKey string) error {
 	}
 	cm.config.ImagesUpstream[index].HistoricalAPIKeys = newHistoricalKeys
 
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		return err
 	}
 
@@ -145,7 +153,9 @@ func (cm *ConfigManager) AddImagesAPIKey(index int, apiKey string) error {
 }
 
 // RemoveImagesAPIKey 删除 Images 上游的 API 密钥
-func (cm *ConfigManager) RemoveImagesAPIKey(index int, apiKey string) error {
+func (cm *ConfigManager) RemoveImagesAPIKeyAudited(auditContext ManagementAuditContext, index int, apiKey string) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -184,7 +194,7 @@ func (cm *ConfigManager) RemoveImagesAPIKey(index int, apiKey string) error {
 		log.Printf("[Images-Key] 上游 [%d] %s: Key %s 已移入历史列表", index, cm.config.ImagesUpstream[index].Name, utils.MaskAPIKey(apiKey))
 	}
 
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		return err
 	}
 
@@ -198,7 +208,9 @@ func (cm *ConfigManager) GetNextImagesAPIKey(upstream *UpstreamConfig, failedKey
 }
 
 // MoveImagesAPIKeyToTop 将指定 Images 渠道的 API 密钥移到最前面
-func (cm *ConfigManager) MoveImagesAPIKeyToTop(upstreamIndex int, apiKey string) error {
+func (cm *ConfigManager) MoveImagesAPIKeyToTopAudited(auditContext ManagementAuditContext, upstreamIndex int, apiKey string) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -220,11 +232,13 @@ func (cm *ConfigManager) MoveImagesAPIKeyToTop(upstreamIndex int, apiKey string)
 	}
 
 	upstream.APIKeys = append([]string{apiKey}, append(upstream.APIKeys[:index], upstream.APIKeys[index+1:]...)...)
-	return cm.saveConfigLocked(cm.config)
+	return cm.saveConfigLockedAudited(auditContext, cm.config)
 }
 
 // MoveImagesAPIKeyToBottom 将指定 Images 渠道的 API 密钥移到最后面
-func (cm *ConfigManager) MoveImagesAPIKeyToBottom(upstreamIndex int, apiKey string) error {
+func (cm *ConfigManager) MoveImagesAPIKeyToBottomAudited(auditContext ManagementAuditContext, upstreamIndex int, apiKey string) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -247,13 +261,15 @@ func (cm *ConfigManager) MoveImagesAPIKeyToBottom(upstreamIndex int, apiKey stri
 
 	upstream.APIKeys = append(upstream.APIKeys[:index], upstream.APIKeys[index+1:]...)
 	upstream.APIKeys = append(upstream.APIKeys, apiKey)
-	return cm.saveConfigLocked(cm.config)
+	return cm.saveConfigLockedAudited(auditContext, cm.config)
 }
 
 // ReorderImagesUpstreams 重新排序 Images 渠道优先级
 // order 是渠道索引数组，按新的优先级顺序排列（只更新传入的渠道，支持部分排序）
 // priorities 可选：与 order 平行的显式优先级值，缺省按位次 1..N
-func (cm *ConfigManager) ReorderImagesUpstreams(order []int, priorities ...[]int) error {
+func (cm *ConfigManager) ReorderImagesUpstreamsAudited(auditContext ManagementAuditContext, order []int, priorities ...[]int) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -280,7 +296,7 @@ func (cm *ConfigManager) ReorderImagesUpstreams(order []int, priorities ...[]int
 		cm.config.ImagesUpstream[idx].Priority = values[i]
 	}
 
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		return err
 	}
 
@@ -289,7 +305,9 @@ func (cm *ConfigManager) ReorderImagesUpstreams(order []int, priorities ...[]int
 }
 
 // SetImagesChannelStatus 设置 Images 渠道状态
-func (cm *ConfigManager) SetImagesChannelStatus(index int, status string) error {
+func (cm *ConfigManager) SetImagesChannelStatusAudited(auditContext ManagementAuditContext, index int, status string) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -308,7 +326,7 @@ func (cm *ConfigManager) SetImagesChannelStatus(index int, status string) error 
 		log.Printf("[Config-Status] 已清除 Images 渠道 [%d] %s 的促销期", index, cm.config.ImagesUpstream[index].Name)
 	}
 
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		return err
 	}
 
@@ -317,7 +335,9 @@ func (cm *ConfigManager) SetImagesChannelStatus(index int, status string) error 
 }
 
 // SetImagesChannelPromotion 设置 Images 渠道促销期
-func (cm *ConfigManager) SetImagesChannelPromotion(index int, duration time.Duration) error {
+func (cm *ConfigManager) SetImagesChannelPromotionAudited(auditContext ManagementAuditContext, index int, duration time.Duration) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -339,7 +359,7 @@ func (cm *ConfigManager) SetImagesChannelPromotion(index int, duration time.Dura
 		log.Printf("[Config-Promotion] 已设置 Images 渠道 [%d] %s 进入促销期，截止: %s", index, cm.config.ImagesUpstream[index].Name, promotionEnd.Format(time.RFC3339))
 	}
 
-	return cm.saveConfigLocked(cm.config)
+	return cm.saveConfigLockedAudited(auditContext, cm.config)
 }
 
 // GetPromotedImagesChannel 获取当前处于促销期的 Images 渠道索引
@@ -353,4 +373,54 @@ func (cm *ConfigManager) GetPromotedImagesChannel() (int, bool) {
 		}
 	}
 	return -1, false
+}
+
+// AddImagesAPIKey preserves the system/background call contract. HTTP callers use AddImagesAPIKeyAudited.
+func (cm *ConfigManager) AddImagesAPIKey(index int, apiKey string) error {
+	return cm.AddImagesAPIKeyAudited(ManagementAuditContext{}, index, apiKey)
+}
+
+// AddImagesUpstream preserves the system/background call contract. HTTP callers use AddImagesUpstreamAudited.
+func (cm *ConfigManager) AddImagesUpstream(upstream UpstreamConfig, placements ...string) error {
+	return cm.AddImagesUpstreamAudited(ManagementAuditContext{}, upstream, placements...)
+}
+
+// MoveImagesAPIKeyToBottom preserves the system/background call contract. HTTP callers use MoveImagesAPIKeyToBottomAudited.
+func (cm *ConfigManager) MoveImagesAPIKeyToBottom(upstreamIndex int, apiKey string) error {
+	return cm.MoveImagesAPIKeyToBottomAudited(ManagementAuditContext{}, upstreamIndex, apiKey)
+}
+
+// MoveImagesAPIKeyToTop preserves the system/background call contract. HTTP callers use MoveImagesAPIKeyToTopAudited.
+func (cm *ConfigManager) MoveImagesAPIKeyToTop(upstreamIndex int, apiKey string) error {
+	return cm.MoveImagesAPIKeyToTopAudited(ManagementAuditContext{}, upstreamIndex, apiKey)
+}
+
+// RemoveImagesAPIKey preserves the system/background call contract. HTTP callers use RemoveImagesAPIKeyAudited.
+func (cm *ConfigManager) RemoveImagesAPIKey(index int, apiKey string) error {
+	return cm.RemoveImagesAPIKeyAudited(ManagementAuditContext{}, index, apiKey)
+}
+
+// RemoveImagesUpstream preserves the system/background call contract. HTTP callers use RemoveImagesUpstreamAudited.
+func (cm *ConfigManager) RemoveImagesUpstream(index int) (*UpstreamConfig, error) {
+	return cm.RemoveImagesUpstreamAudited(ManagementAuditContext{}, index)
+}
+
+// ReorderImagesUpstreams preserves the system/background call contract. HTTP callers use ReorderImagesUpstreamsAudited.
+func (cm *ConfigManager) ReorderImagesUpstreams(order []int, priorities ...[]int) error {
+	return cm.ReorderImagesUpstreamsAudited(ManagementAuditContext{}, order, priorities...)
+}
+
+// SetImagesChannelPromotion preserves the system/background call contract. HTTP callers use SetImagesChannelPromotionAudited.
+func (cm *ConfigManager) SetImagesChannelPromotion(index int, duration time.Duration) error {
+	return cm.SetImagesChannelPromotionAudited(ManagementAuditContext{}, index, duration)
+}
+
+// SetImagesChannelStatus preserves the system/background call contract. HTTP callers use SetImagesChannelStatusAudited.
+func (cm *ConfigManager) SetImagesChannelStatus(index int, status string) error {
+	return cm.SetImagesChannelStatusAudited(ManagementAuditContext{}, index, status)
+}
+
+// UpdateImagesUpstream preserves the system/background call contract. HTTP callers use UpdateImagesUpstreamAudited.
+func (cm *ConfigManager) UpdateImagesUpstream(index int, updates UpstreamUpdate) (shouldResetMetrics bool, err error) {
+	return cm.UpdateImagesUpstreamAudited(ManagementAuditContext{}, index, updates)
 }

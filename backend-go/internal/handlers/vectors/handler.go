@@ -160,6 +160,8 @@ func handleVectorsFailover(
 		agentRole,
 		newEmbeddingCompatibilityFilter(c, model, dimensions),
 		func(c fiber.Ctx, selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
+			managementAuditContext := config.ManagementAuditFromContext(httpbridge.Request(c).Context())
+
 			upstream := selection.Upstream
 			channelIndex := selection.ChannelIndex
 			if upstream == nil {
@@ -188,7 +190,7 @@ func handleVectorsFailover(
 					return buildProviderRequest(c, upstreamCopy, upstreamCopy.BaseURL, apiKey, common.GetEffectiveRequestBody(c, bodyBytes), model)
 				},
 				func(apiKey string) {
-					_ = cfgManager.DeprioritizeAPIKey(apiKey)
+					_ = cfgManager.DeprioritizeAPIKeyAudited(managementAuditContext, apiKey)
 				},
 				func(url string) {
 					channelScheduler.MarkURLFailure(scheduler.ChannelKindVectors, channelIndex, url)

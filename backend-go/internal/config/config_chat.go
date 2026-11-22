@@ -54,18 +54,24 @@ func (cm *ConfigManager) GetCurrentChatUpstreamWithIndex() (*UpstreamConfig, int
 
 // AddChatUpstream 添加 Chat 上游
 // placements 可选传 "front"（故障转移序列首位），缺省为追加到序列末尾（见 assignChannelPriority）
-func (cm *ConfigManager) AddChatUpstream(upstream UpstreamConfig, placements ...string) error {
-	return cm.addUpstreamCommon(ChannelKindRegistry[ChannelKindChat], upstream, placements...)
+func (cm *ConfigManager) AddChatUpstreamAudited(auditContext ManagementAuditContext, upstream UpstreamConfig, placements ...string) error {
+	auditContext = auditContext.normalized()
+
+	return cm.addUpstreamCommonAudited(auditContext, ChannelKindRegistry[ChannelKindChat], upstream, placements...)
 }
 
 // UpdateChatUpstream 更新 Chat 上游
 // 返回值：shouldResetMetrics 表示是否需要重置渠道指标（熔断状态）
-func (cm *ConfigManager) UpdateChatUpstream(index int, updates UpstreamUpdate) (shouldResetMetrics bool, err error) {
-	return cm.updateUpstreamCommon(ChannelKindRegistry[ChannelKindChat], index, updates)
+func (cm *ConfigManager) UpdateChatUpstreamAudited(auditContext ManagementAuditContext, index int, updates UpstreamUpdate) (shouldResetMetrics bool, err error) {
+	auditContext = auditContext.normalized()
+
+	return cm.updateUpstreamCommonAudited(auditContext, ChannelKindRegistry[ChannelKindChat], index, updates)
 }
 
 // RemoveChatUpstream 删除 Chat 上游
-func (cm *ConfigManager) RemoveChatUpstream(index int) (*UpstreamConfig, error) {
+func (cm *ConfigManager) RemoveChatUpstreamAudited(auditContext ManagementAuditContext, index int) (*UpstreamConfig, error) {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -78,7 +84,7 @@ func (cm *ConfigManager) RemoveChatUpstream(index int) (*UpstreamConfig, error) 
 
 	cm.clearFailedKeysForUpstream(&removed, "chat")
 
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		return nil, err
 	}
 
@@ -87,7 +93,9 @@ func (cm *ConfigManager) RemoveChatUpstream(index int) (*UpstreamConfig, error) 
 }
 
 // AddChatAPIKey 添加 Chat 上游的 API 密钥
-func (cm *ConfigManager) AddChatAPIKey(index int, apiKey string) error {
+func (cm *ConfigManager) AddChatAPIKeyAudited(auditContext ManagementAuditContext, index int, apiKey string) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -122,7 +130,7 @@ func (cm *ConfigManager) AddChatAPIKey(index int, apiKey string) error {
 	}
 	cm.config.ChatUpstream[index].HistoricalAPIKeys = newHistoricalKeys
 
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		return err
 	}
 
@@ -131,7 +139,9 @@ func (cm *ConfigManager) AddChatAPIKey(index int, apiKey string) error {
 }
 
 // RemoveChatAPIKey 删除 Chat 上游的 API 密钥
-func (cm *ConfigManager) RemoveChatAPIKey(index int, apiKey string) error {
+func (cm *ConfigManager) RemoveChatAPIKeyAudited(auditContext ManagementAuditContext, index int, apiKey string) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -170,7 +180,7 @@ func (cm *ConfigManager) RemoveChatAPIKey(index int, apiKey string) error {
 		log.Printf("[Chat-Key] 上游 [%d] %s: Key %s 已移入历史列表", index, cm.config.ChatUpstream[index].Name, utils.MaskAPIKey(apiKey))
 	}
 
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		return err
 	}
 
@@ -184,7 +194,9 @@ func (cm *ConfigManager) GetNextChatAPIKey(upstream *UpstreamConfig, failedKeys 
 }
 
 // MoveChatAPIKeyToTop 将指定 Chat 渠道的 API 密钥移到最前面
-func (cm *ConfigManager) MoveChatAPIKeyToTop(upstreamIndex int, apiKey string) error {
+func (cm *ConfigManager) MoveChatAPIKeyToTopAudited(auditContext ManagementAuditContext, upstreamIndex int, apiKey string) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -206,11 +218,13 @@ func (cm *ConfigManager) MoveChatAPIKeyToTop(upstreamIndex int, apiKey string) e
 	}
 
 	upstream.APIKeys = append([]string{apiKey}, append(upstream.APIKeys[:index], upstream.APIKeys[index+1:]...)...)
-	return cm.saveConfigLocked(cm.config)
+	return cm.saveConfigLockedAudited(auditContext, cm.config)
 }
 
 // MoveChatAPIKeyToBottom 将指定 Chat 渠道的 API 密钥移到最后面
-func (cm *ConfigManager) MoveChatAPIKeyToBottom(upstreamIndex int, apiKey string) error {
+func (cm *ConfigManager) MoveChatAPIKeyToBottomAudited(auditContext ManagementAuditContext, upstreamIndex int, apiKey string) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -233,13 +247,15 @@ func (cm *ConfigManager) MoveChatAPIKeyToBottom(upstreamIndex int, apiKey string
 
 	upstream.APIKeys = append(upstream.APIKeys[:index], upstream.APIKeys[index+1:]...)
 	upstream.APIKeys = append(upstream.APIKeys, apiKey)
-	return cm.saveConfigLocked(cm.config)
+	return cm.saveConfigLockedAudited(auditContext, cm.config)
 }
 
 // ReorderChatUpstreams 重新排序 Chat 渠道优先级
 // order 是渠道索引数组，按新的优先级顺序排列（只更新传入的渠道，支持部分排序）
 // priorities 可选：与 order 平行的显式优先级值（统一 LLM 视图按全局位次提交），缺省按位次 1..N
-func (cm *ConfigManager) ReorderChatUpstreams(order []int, priorities ...[]int) error {
+func (cm *ConfigManager) ReorderChatUpstreamsAudited(auditContext ManagementAuditContext, order []int, priorities ...[]int) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -266,7 +282,7 @@ func (cm *ConfigManager) ReorderChatUpstreams(order []int, priorities ...[]int) 
 		cm.config.ChatUpstream[idx].Priority = values[i]
 	}
 
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		return err
 	}
 
@@ -275,7 +291,9 @@ func (cm *ConfigManager) ReorderChatUpstreams(order []int, priorities ...[]int) 
 }
 
 // SetChatChannelStatus 设置 Chat 渠道状态
-func (cm *ConfigManager) SetChatChannelStatus(index int, status string) error {
+func (cm *ConfigManager) SetChatChannelStatusAudited(auditContext ManagementAuditContext, index int, status string) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -294,7 +312,7 @@ func (cm *ConfigManager) SetChatChannelStatus(index int, status string) error {
 		log.Printf("[Config-Status] 已清除 Chat 渠道 [%d] %s 的促销期", index, cm.config.ChatUpstream[index].Name)
 	}
 
-	if err := cm.saveConfigLocked(cm.config); err != nil {
+	if err := cm.saveConfigLockedAudited(auditContext, cm.config); err != nil {
 		return err
 	}
 
@@ -303,7 +321,9 @@ func (cm *ConfigManager) SetChatChannelStatus(index int, status string) error {
 }
 
 // SetChatChannelPromotion 设置 Chat 渠道促销期
-func (cm *ConfigManager) SetChatChannelPromotion(index int, duration time.Duration) error {
+func (cm *ConfigManager) SetChatChannelPromotionAudited(auditContext ManagementAuditContext, index int, duration time.Duration) error {
+	auditContext = auditContext.normalized()
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -325,7 +345,7 @@ func (cm *ConfigManager) SetChatChannelPromotion(index int, duration time.Durati
 		log.Printf("[Config-Promotion] 已设置 Chat 渠道 [%d] %s 进入促销期，截止: %s", index, cm.config.ChatUpstream[index].Name, promotionEnd.Format(time.RFC3339))
 	}
 
-	return cm.saveConfigLocked(cm.config)
+	return cm.saveConfigLockedAudited(auditContext, cm.config)
 }
 
 // GetPromotedChatChannel 获取当前处于促销期的 Chat 渠道索引
@@ -339,4 +359,54 @@ func (cm *ConfigManager) GetPromotedChatChannel() (int, bool) {
 		}
 	}
 	return -1, false
+}
+
+// AddChatAPIKey preserves the system/background call contract. HTTP callers use AddChatAPIKeyAudited.
+func (cm *ConfigManager) AddChatAPIKey(index int, apiKey string) error {
+	return cm.AddChatAPIKeyAudited(ManagementAuditContext{}, index, apiKey)
+}
+
+// AddChatUpstream preserves the system/background call contract. HTTP callers use AddChatUpstreamAudited.
+func (cm *ConfigManager) AddChatUpstream(upstream UpstreamConfig, placements ...string) error {
+	return cm.AddChatUpstreamAudited(ManagementAuditContext{}, upstream, placements...)
+}
+
+// MoveChatAPIKeyToBottom preserves the system/background call contract. HTTP callers use MoveChatAPIKeyToBottomAudited.
+func (cm *ConfigManager) MoveChatAPIKeyToBottom(upstreamIndex int, apiKey string) error {
+	return cm.MoveChatAPIKeyToBottomAudited(ManagementAuditContext{}, upstreamIndex, apiKey)
+}
+
+// MoveChatAPIKeyToTop preserves the system/background call contract. HTTP callers use MoveChatAPIKeyToTopAudited.
+func (cm *ConfigManager) MoveChatAPIKeyToTop(upstreamIndex int, apiKey string) error {
+	return cm.MoveChatAPIKeyToTopAudited(ManagementAuditContext{}, upstreamIndex, apiKey)
+}
+
+// RemoveChatAPIKey preserves the system/background call contract. HTTP callers use RemoveChatAPIKeyAudited.
+func (cm *ConfigManager) RemoveChatAPIKey(index int, apiKey string) error {
+	return cm.RemoveChatAPIKeyAudited(ManagementAuditContext{}, index, apiKey)
+}
+
+// RemoveChatUpstream preserves the system/background call contract. HTTP callers use RemoveChatUpstreamAudited.
+func (cm *ConfigManager) RemoveChatUpstream(index int) (*UpstreamConfig, error) {
+	return cm.RemoveChatUpstreamAudited(ManagementAuditContext{}, index)
+}
+
+// ReorderChatUpstreams preserves the system/background call contract. HTTP callers use ReorderChatUpstreamsAudited.
+func (cm *ConfigManager) ReorderChatUpstreams(order []int, priorities ...[]int) error {
+	return cm.ReorderChatUpstreamsAudited(ManagementAuditContext{}, order, priorities...)
+}
+
+// SetChatChannelPromotion preserves the system/background call contract. HTTP callers use SetChatChannelPromotionAudited.
+func (cm *ConfigManager) SetChatChannelPromotion(index int, duration time.Duration) error {
+	return cm.SetChatChannelPromotionAudited(ManagementAuditContext{}, index, duration)
+}
+
+// SetChatChannelStatus preserves the system/background call contract. HTTP callers use SetChatChannelStatusAudited.
+func (cm *ConfigManager) SetChatChannelStatus(index int, status string) error {
+	return cm.SetChatChannelStatusAudited(ManagementAuditContext{}, index, status)
+}
+
+// UpdateChatUpstream preserves the system/background call contract. HTTP callers use UpdateChatUpstreamAudited.
+func (cm *ConfigManager) UpdateChatUpstream(index int, updates UpstreamUpdate) (shouldResetMetrics bool, err error) {
+	return cm.UpdateChatUpstreamAudited(ManagementAuditContext{}, index, updates)
 }
