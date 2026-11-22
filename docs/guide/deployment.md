@@ -58,3 +58,5 @@ WantedBy=multi-user.target
 ## 环境变量
 
 配置统一见[环境变量指南](environment.md)，服务模板及 Linux、macOS、Windows 操作步骤见[服务部署指南](../service/README.md)。
+
+完整状态的离线备份、校验与隔离恢复流程见[备份与恢复](recovery.md)。

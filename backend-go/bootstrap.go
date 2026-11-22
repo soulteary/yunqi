@@ -28,6 +28,7 @@ import (
 	"github.com/soulteary/yunqi/internal/ratelimit"
 	"github.com/soulteary/yunqi/internal/scheduler"
 	"github.com/soulteary/yunqi/internal/session"
+	"github.com/soulteary/yunqi/internal/statebundle"
 	"github.com/soulteary/yunqi/internal/telemetry"
 	"github.com/soulteary/yunqi/internal/thinkingcache"
 	"github.com/soulteary/yunqi/internal/warmup"
@@ -92,6 +93,12 @@ func runService(cliOpts cliOptions) {
 		fmt.Fprintf(os.Stderr, "解析运行时路径失败: %v\n", err)
 		os.Exit(2)
 	}
+
+	stateLock, err := statebundle.Acquire(paths.ConfigPath, paths.StateDir)
+	if err != nil {
+		log.Fatal("运行时状态目录不可用: ", err)
+	}
+	defer stateLock.Close()
 
 	// 初始化日志系统（必须在其他初始化之前）
 	logCfg := &logger.Config{

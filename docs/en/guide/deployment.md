@@ -58,3 +58,5 @@ See `docs/service/com.yunqi.gateway.plist` for reference.
 ## Environment Variables
 
 Configuration is documented in the [environment guide](environment.md). Service templates and Linux/macOS/Windows procedures are in the [service guide](../../service/README.md) (Chinese).
+
+See [Complete state recovery](recovery.md) for offline backups, verification and isolated restore rehearsals.
