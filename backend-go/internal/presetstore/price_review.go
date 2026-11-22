@@ -513,7 +513,7 @@ func (u *PresetUpdater) PriceReviewState() PriceReviewState {
 			policyErr = u.validateSourceFreshness(state.Pending.SourceIndex, time.Now())
 		}
 		if policyErr != nil {
-			proposal.PolicyError = policyErr.Error()
+			proposal.PolicyError = "source_policy_rejected"
 		}
 		result.Pending = &proposal
 	}
@@ -727,11 +727,17 @@ func (u *PresetUpdater) validAutomaticCache(bundle *PresetBundle, state priceRev
 	if state.RollbackBlockedThrough != "" && compareDataVersion(bundle.DataVersion, state.RollbackBlockedThrough) <= 0 {
 		return false
 	}
-	if approved := u.approvedPriceBundle(); approved != nil {
-		approvedVersion, err := pricingVersion(approved)
-		if err != nil || approvedVersion != version {
-			return false
-		}
+	baseline := u.store.Get()
+	if compareDataVersion(bundle.DataVersion, baseline.DataVersion) <= 0 {
+		return false
 	}
+	if approved := u.approvedPriceBundle(); approved != nil {
+		baseline = approved
+	}
+	baselineVersion, err := pricingVersion(baseline)
+	if err != nil || baselineVersion != version {
+		return false
+	}
+
 	return true
 }

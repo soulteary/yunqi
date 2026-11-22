@@ -57,7 +57,7 @@ func TestPriceUpdaterStagesApprovalAndDurableWholeBundleRollback(t *testing.T) {
 	if err != nil || info.Mode().Perm() != 0600 {
 		t.Fatalf("audit file mode=%v err=%v", info, err)
 	}
-	restarted := NewPresetUpdater(NewPresetStore(before), UpdaterConfig{CacheDir: cache})
+	restarted := NewPresetUpdater(NewPresetStore(pricedTestBundle("2026.07.10-9", 99)), UpdaterConfig{CacheDir: cache})
 	if err := restarted.LoadCacheAtStartup(); err != nil || restarted.store.DataVersion() != incoming.DataVersion {
 		t.Fatalf("approved bundle lost on restart: %v", err)
 	}
@@ -265,5 +265,37 @@ func TestEmptyModelRegistryUsesActualEmbeddedPricingFallback(t *testing.T) {
 	b, err := pricingVersion(fallback)
 	if err != nil || a != b {
 		t.Fatal("fingerprint diverges from runtime embedded registry fallback")
+	}
+}
+
+func TestAutomaticCacheReceiptCannotOverrideNewerOrDifferentBaseline(t *testing.T) {
+	for _, tc := range []struct {
+		baselineVersion string
+		baselinePrice   float64
+		pending         bool
+	}{{"9", 9, true}, {"9", 1, false}, {"1", 9, true}} {
+		cache := t.TempDir()
+		a := pricedTestBundle("1", 1)
+		b := pricedTestBundle("2", 1)
+		b.ModelRegistry.UpstreamCapabilities[0].ContextWindowTokens = 200000
+		source := newPresetTestServer(t, b, presetTestServerOptions{})
+		updater := NewPresetUpdater(NewPresetStore(a), UpdaterConfig{CacheDir: cache, IndexURL: source.URL + "/index.json", AllowInsecureForTesting: true})
+		if err := updater.CheckOnce(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		source.Close()
+		if updater.priceDiskSnapshot().ApprovedBundleHash != "" || updater.priceDiskSnapshot().CachedSource == nil {
+			t.Fatal("fixture must be automatic, not an explicit approval")
+		}
+		baseline := pricedTestBundle(tc.baselineVersion, tc.baselinePrice)
+		baseline.ModelRegistry.UpstreamCapabilities[0].ContextWindowTokens = 900000
+		restarted := NewPresetUpdater(NewPresetStore(baseline), UpdaterConfig{CacheDir: cache})
+		if err := restarted.LoadCacheAtStartup(); err != nil {
+			t.Fatal(err)
+		}
+		state := restarted.PriceReviewState()
+		if bundleHash(restarted.store.Get()) != bundleHash(baseline) || (state.Pending != nil) != tc.pending {
+			t.Fatalf("automatic receipt overrode new baseline or lacked review: %+v", state)
+		}
 	}
 }

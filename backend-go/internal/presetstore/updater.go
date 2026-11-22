@@ -396,7 +396,7 @@ func (u *PresetUpdater) loop(ctx context.Context, ready chan<- struct{}, done ch
 
 	close(ready)
 	if err := u.CheckOnce(ctx); err != nil {
-		log.Printf("[PresetUpdater-Start] 首次检查失败: %v", err)
+		log.Printf("[PresetUpdater-Start] source_check_failed")
 	}
 
 	ticker := time.NewTicker(u.config.Interval)
@@ -412,7 +412,7 @@ func (u *PresetUpdater) loop(ctx context.Context, ready chan<- struct{}, done ch
 			u.nextCheckAt = &next
 			u.mu.Unlock()
 			if err := u.CheckOnce(ctx); err != nil {
-				log.Printf("[PresetUpdater-Loop] 周期检查失败: %v", err)
+				log.Printf("[PresetUpdater-Loop] source_check_failed")
 			}
 		}
 	}
@@ -604,7 +604,7 @@ func (u *PresetUpdater) finishCheck(at time.Time, err error, updated bool) {
 	next := at.Add(u.config.Interval)
 	u.nextCheckAt = &next
 	if err != nil {
-		u.lastError = err.Error()
+		u.lastError = "source_check_failed"
 		return
 	}
 	u.lastError = ""

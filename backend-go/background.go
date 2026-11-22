@@ -52,7 +52,7 @@ func (a *application) startPresetUpdater() {
 		CacheDir: a.paths.PresetCacheDir,
 	})
 	if err := a.presetUpdater.LoadCacheAtStartup(); err != nil && !os.IsNotExist(err) {
-		log.Printf("[PresetUpdater-Cache] 缓存不可用，继续使用内置预置: %v", err)
+		log.Printf("[PresetUpdater-Cache] cache_load_failed; continuing with embedded presets")
 	}
 	a.presetUpdater.Start(context.Background())
 }

@@ -62,14 +62,21 @@ func PriceReview(updater *presetstore.PresetUpdater, operation string) fiber.Han
 		state := updater.PriceReviewState()
 		if err != nil {
 			status := http.StatusInternalServerError
+			code := "price_review_failed"
+			if operation == "check" {
+				code = "source_check_failed"
+			}
 			if errors.Is(err, presetstore.ErrPriceReviewConflict) {
+				code = "price_review_conflict"
 				status = 409
 			} else if errors.Is(err, presetstore.ErrPriceRollbackUnavailable) {
 				status = 404
+				code = "price_rollback_unavailable"
 			} else if errors.Is(err, presetstore.ErrPriceAnomalyAck) {
 				status = 400
+				code = "price_anomaly_ack_required"
 			}
-			httpbridge.JSON(c, status, fiber.Map{"error": err.Error(), "persisted": false, "state": state})
+			httpbridge.JSON(c, status, fiber.Map{"error": code, "code": code, "persisted": false, "state": state})
 			return nil
 		}
 		httpbridge.JSON(c, 200, fiber.Map{"persisted": operation == "approve" || operation == "rollback", "state": state})
