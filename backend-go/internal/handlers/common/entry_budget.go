@@ -28,19 +28,19 @@ import (
 )
 
 func budgetProtocol(req *http.Request, upstream *config.UpstreamConfig) string {
-	path := req.URL.Path
+	path := strings.TrimRight(strings.ToLower(req.URL.Path), "/")
 	switch {
-	case strings.Contains(path, "/models/") && strings.Contains(path, ":"):
+	case strings.HasSuffix(path, ":generatecontent") || strings.HasSuffix(path, ":streamgeneratecontent"):
 		return "gemini"
-	case strings.Contains(path, "/chat/completions"):
+	case strings.HasSuffix(path, "/chat/completions"):
 		return "chat"
 	case strings.HasSuffix(path, "/messages"):
 		return "messages"
-	case strings.Contains(path, "/responses"):
+	case strings.HasSuffix(path, "/responses") || strings.HasSuffix(path, "/responses/compact"):
 		return "responses"
-	case strings.Contains(path, "/embeddings"):
+	case strings.HasSuffix(path, "/embeddings"):
 		return "vectors"
-	case strings.Contains(path, "/images/"):
+	case strings.HasSuffix(path, "/images/generations") || strings.HasSuffix(path, "/images/edits") || strings.HasSuffix(path, "/images/variations"):
 		return "images"
 	}
 	switch upstream.ServiceType {
@@ -63,6 +63,9 @@ func budgetHasMedia(value interface{}) bool {
 		}
 	case map[string]interface{}:
 		for key, item := range v {
+			if key == "tools" || key == "tool_choice" || key == "response_format" {
+				continue
+			}
 			switch strings.ToLower(key) {
 			case "image_url", "input_audio", "audio", "video", "inlinedata", "filedata", "modalities", "responsemodalities", "mime_type", "mimetype":
 				return true
@@ -73,6 +76,35 @@ func budgetHasMedia(value interface{}) bool {
 				}
 			}
 			if budgetHasMedia(item) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// Hosted tools have per-call/storage/search fees outside the token price schema.
+// Inspect tool declarations only: client function/custom schemas may legitimately
+// contain any of these words without asking the provider to run a hosted tool.
+func budgetHasUnpricedServerTools(value interface{}) bool {
+	root, ok := value.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	tools, _ := root["tools"].([]interface{})
+	for _, item := range tools {
+		tool, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		kind, _ := tool["type"].(string)
+		kind = strings.ToLower(kind)
+		if kind == "web_search" || strings.HasPrefix(kind, "web_search_") || kind == "file_search" || kind == "code_interpreter" || kind == "image_generation" || strings.HasPrefix(kind, "web_fetch_") || strings.HasPrefix(kind, "code_execution_") {
+			return true
+		}
+		for key := range tool {
+			switch strings.ReplaceAll(strings.ToLower(key), "_", "") {
+			case "googlesearch", "googlesearchretrieval", "enterprisesearch", "enterprisewebsearch", "urlcontext", "codeexecution", "googlemaps", "retrieval":
 				return true
 			}
 		}
@@ -102,13 +134,13 @@ func beginEntryBudget(req *http.Request, upstream *config.UpstreamConfig, env *c
 		return nil, nil, protocol, entrybudget.ErrPricing
 	}
 	var parsed interface{}
-	if json.Unmarshal(body, &parsed) != nil || budgetHasMedia(parsed) || protocol == "images" {
+	if json.Unmarshal(body, &parsed) != nil || budgetHasMedia(parsed) || budgetHasUnpricedServerTools(parsed) || protocol == "images" {
 		return nil, nil, protocol, entrybudget.ErrPricing
 	}
 	model := gjson.GetBytes(body, "model").String()
 	if model == "" && protocol == "gemini" {
-		if _, suffix, ok := strings.Cut(req.URL.Path, "/models/"); ok {
-			model, _, _ = strings.Cut(suffix, ":")
+		if index := strings.LastIndex(req.URL.Path, "/models/"); index >= 0 {
+			model, _, _ = strings.Cut(req.URL.Path[index+len("/models/"):], ":")
 		}
 	}
 	if model == "" {
@@ -179,6 +211,8 @@ func beginEntryBudget(req *http.Request, upstream *config.UpstreamConfig, env *c
 }
 
 func rawBudgetCounter(raw map[string]json.RawMessage, paths ...string) (int64, bool) {
+	var result int64
+	found := false
 	for _, path := range paths {
 		current := raw
 		parts := strings.Split(path, ".")
@@ -192,7 +226,12 @@ func rawBudgetCounter(raw map[string]json.RawMessage, paths ...string) (int64, b
 				if err != nil || number < 0 || number > int64(math.MaxInt/4) {
 					return 0, false
 				}
-				return number, true
+				if found && result != number {
+					return 0, false
+				}
+				result = number
+				found = true
+				break
 			}
 			var nested map[string]json.RawMessage
 			if json.Unmarshal(value, &nested) != nil {
@@ -201,8 +240,9 @@ func rawBudgetCounter(raw map[string]json.RawMessage, paths ...string) (int64, b
 			current = nested
 		}
 	}
-	return 0, false
+	return result, found
 }
+
 func rawBudgetOptionalCounter(raw map[string]json.RawMessage, paths ...string) (int64, bool) {
 	n, ok := rawBudgetCounter(raw, paths...)
 	if ok {
@@ -225,7 +265,7 @@ func (r *usageCapture) billingUsage(protocol string) (*types.Usage, bool) {
 		r.captureJSON(r.pending)
 	}
 	r.pending = nil
-	if r.truncated || r.overflow || len(r.raw) == 0 || r.stream && !r.terminal {
+	if r.truncated || r.overflow || len(r.raw) == 0 || r.stream && !r.terminals[protocol] {
 		return nil, false
 	}
 	var input, output, cache, creation int64
@@ -235,13 +275,32 @@ func (r *usageCapture) billingUsage(protocol string) (*types.Usage, bool) {
 		input, inputOK = rawBudgetCounter(r.raw, "promptTokenCount")
 		output, outputOK = rawBudgetCounter(r.raw, "candidatesTokenCount")
 		thoughts, thoughtsOK := rawBudgetOptionalCounter(r.raw, "thoughtsTokenCount")
-		countersValid = countersValid && thoughtsOK
-		if total, ok := rawBudgetCounter(r.raw, "totalTokenCount"); ok && inputOK && total >= input {
-			output = total - input
-			outputOK = true
-		} else if outputOK {
-			output += thoughts
+		toolInput, toolOK := rawBudgetOptionalCounter(r.raw, "toolUsePromptTokenCount")
+		// Additional tool-use input cannot be charged at the output token rate.
+		if !thoughtsOK || !toolOK || toolInput > 0 {
+			return nil, false
 		}
+		if _, exists := r.raw["totalTokenCount"]; exists {
+			total, totalOK := rawBudgetCounter(r.raw, "totalTokenCount")
+			if !totalOK || !inputOK || total < input {
+				return nil, false
+			}
+			if outputOK {
+				if total != input+output+thoughts {
+					return nil, false
+				}
+			} else {
+				if _, present := r.raw["candidatesTokenCount"]; present {
+					return nil, false
+				}
+				output = total - input - thoughts
+				if output < 0 {
+					return nil, false
+				}
+				outputOK = true
+			}
+		}
+
 		var cacheOK bool
 		cache, cacheOK = rawBudgetOptionalCounter(r.raw, "cachedContentTokenCount")
 		countersValid = countersValid && cacheOK
@@ -313,7 +372,17 @@ func (b *budgetResponseBody) Close() error {
 		if creation == 0 {
 			creation = int64(usage.CacheCreation5mInputTokens + usage.CacheCreation1hInputTokens)
 		}
-		cost, complete := metrics.CalculateTokenCostUSDWithPricingAndStatus(b.pricing, int64(usage.InputTokens), int64(usage.OutputTokens), creation, int64(usage.CacheReadInputTokens))
+		// Canonical Gemini output is candidate-only, matching native protocol usage.
+		// The legacy token helper has no reasoning dimension, so add raw thoughts
+		// exactly once here until F47's Usage-aware helper replaces this adapter.
+		output := int64(usage.OutputTokens)
+		if b.protocol == "gemini" {
+			var raw map[string]json.RawMessage
+			_ = json.Unmarshal(usage.Provenance.RawUsage, &raw)
+			thoughts, _ := rawBudgetCounter(raw, "thoughtsTokenCount")
+			output += thoughts
+		}
+		cost, complete := metrics.CalculateTokenCostUSDWithPricingAndStatus(b.pricing, int64(usage.InputTokens), output, creation, int64(usage.CacheReadInputTokens))
 		if !complete {
 			_ = b.attempt.Complete(nil, "unpriced_provider_usage")
 			return

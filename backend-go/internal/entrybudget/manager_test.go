@@ -2,6 +2,7 @@ package entrybudget
 
 import (
 	"context"
+	"fmt"
 	"github.com/soulteary/yunqi/internal/requestscope"
 	"path/filepath"
 	"testing"
@@ -99,5 +100,48 @@ func TestBudgetRetryAndRacingAllProviderAttemptsSettleOneLogicalRequest(t *testi
 	records, err := store.Requests(context.Background(), p.PrincipalID, 10)
 	if err != nil || len(records) != 1 || records[0].Reason != "conservative_usage_unavailable" {
 		t.Fatalf("logical audit %+v %v", records, err)
+	}
+}
+
+func TestBudgetManagerCloseHasOneDeadlineForAllSessions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ledger.db")
+	m := NewManager(path)
+	p := testPolicy(t, 100, 100)
+	for i := 0; i < 10; i++ {
+		if _, err := m.Start(context.Background(), p, fmt.Sprintf("close-%d", i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	other, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Close()
+	tx, err := other.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`UPDATE budget_cycles SET spent=spent`); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	start := time.Now()
+	go func() { _ = m.Close(); close(done) }()
+	select {
+	case <-done:
+		_ = tx.Rollback()
+		select {
+		case <-m.cleanupDone:
+		case <-time.After(time.Second):
+			t.Fatal("cleanup did not complete after lock release")
+		}
+		if time.Since(start) > 3*time.Second {
+			t.Fatal("shutdown exceeded one shared deadline")
+		}
+	case <-time.After(3 * time.Second):
+		_ = tx.Rollback()
+		<-done
+		t.Fatal("locked store made shutdown scale with session count")
 	}
 }

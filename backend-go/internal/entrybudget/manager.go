@@ -19,16 +19,18 @@ var ErrShutdown = fmt.Errorf("entry budget runtime stopped")
 type sessionKey struct{}
 
 type Manager struct {
-	mu       sync.Mutex
-	path     string
-	store    *Store
-	sessions map[string]*Session
-	closed   bool
-	now      func() time.Time
+	mu          sync.Mutex
+	path        string
+	store       *Store
+	sessions    map[string]*Session
+	closed      bool
+	closeCtx    context.Context
+	cleanupDone chan struct{}
+	now         func() time.Time
 }
 
 func NewManager(path string) *Manager {
-	return &Manager{path: path, sessions: make(map[string]*Session), now: time.Now}
+	return &Manager{path: path, sessions: make(map[string]*Session), now: time.Now, cleanupDone: make(chan struct{})}
 }
 func (m *Manager) Store() (*Store, error) {
 	m.mu.Lock()
@@ -82,20 +84,39 @@ func (m *Manager) Close() error {
 		return nil
 	}
 	m.closed = true
+	closeCtx, closeCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer closeCancel()
+	m.closeCtx = closeCtx
 	var sessions []*Session
 	for _, s := range m.sessions {
 		sessions = append(sessions, s)
 	}
 	store := m.store
 	m.mu.Unlock()
+	// Cancellation is immediate for every actual upstream, even if SQLite is
+	// locked. SQLite busy handlers can outlive context cancellation, so waiting
+	// for database cleanup must share one hard deadline rather than N deadlines.
 	for _, s := range sessions {
-		s.scope.Cancel(ErrShutdown)
-		s.finalize()
+		s.scope.Signal(ErrShutdown)
 	}
-	if store != nil {
-		return store.Close()
+	done := m.cleanupDone
+	go func() {
+		defer close(done)
+		for _, s := range sessions {
+			s.scope.ParentDone()
+			s.finalize()
+		}
+		if store != nil {
+			_ = store.Close()
+		}
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-closeCtx.Done():
+		return ErrUnavailable
 	}
-	return nil
+
 }
 
 type Session struct {
@@ -157,7 +178,13 @@ func (s *Session) finalize() {
 		case ErrUnavailable:
 			reason = "budget_storage_unavailable"
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		s.manager.mu.Lock()
+		parent := s.manager.closeCtx
+		s.manager.mu.Unlock()
+		if parent == nil {
+			parent = context.Background()
+		}
+		ctx, cancel := context.WithTimeout(parent, 5*time.Second)
 		err := s.store.Finalize(ctx, s.ID, reason, s.manager.now())
 		cancel()
 		if err != nil {

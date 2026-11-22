@@ -38,6 +38,7 @@ func Open(path string) (*Store, error) {
 		`CREATE TABLE IF NOT EXISTS budget_cycles(principal TEXT NOT NULL,period TEXT NOT NULL,period_start INTEGER NOT NULL,spent INTEGER NOT NULL DEFAULT 0 CHECK(spent>=0),reserved INTEGER NOT NULL DEFAULT 0 CHECK(reserved>=0),PRIMARY KEY(principal,period,period_start))`,
 		`CREATE TABLE IF NOT EXISTS budget_requests(id TEXT PRIMARY KEY,principal TEXT NOT NULL,period TEXT NOT NULL,period_start INTEGER NOT NULL,period_end INTEGER NOT NULL,policy TEXT NOT NULL,created_at INTEGER NOT NULL,lease_until INTEGER NOT NULL,status TEXT NOT NULL DEFAULT 'pending',held INTEGER NOT NULL DEFAULT 0 CHECK(held>=0),charged INTEGER NOT NULL DEFAULT 0 CHECK(charged>=0),reason TEXT NOT NULL DEFAULT '',settled_at INTEGER NOT NULL DEFAULT 0)`,
 		`CREATE INDEX IF NOT EXISTS budget_requests_window ON budget_requests(principal,period,status,settled_at)`,
+		`CREATE INDEX IF NOT EXISTS budget_requests_owner_created ON budget_requests(principal,created_at DESC,id DESC)`,
 		`CREATE INDEX IF NOT EXISTS budget_requests_expiry ON budget_requests(status,lease_until)`,
 		`CREATE TABLE IF NOT EXISTS budget_attempts(id TEXT PRIMARY KEY,request_id TEXT NOT NULL REFERENCES budget_requests(id),model TEXT NOT NULL,channel_uid TEXT NOT NULL,pricing_version TEXT NOT NULL,pricing TEXT NOT NULL,quote INTEGER NOT NULL CHECK(quote>=0),held INTEGER NOT NULL CHECK(held>=0),charged INTEGER NOT NULL DEFAULT 0 CHECK(charged>=0),status TEXT NOT NULL DEFAULT 'pending',reason TEXT NOT NULL DEFAULT '',usage_source TEXT NOT NULL DEFAULT 'unknown',billing_usage TEXT NOT NULL DEFAULT '{}')`,
 		`CREATE INDEX IF NOT EXISTS budget_attempts_request ON budget_attempts(request_id)`,
@@ -418,4 +419,13 @@ func (s *Store) Attempts(ctx context.Context, id string) ([]AttemptRecord, error
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+func (s *Store) RequestOwned(ctx context.Context, id, principal string) (bool, error) {
+	var exists int
+	err := s.db.QueryRowContext(ctx, `SELECT 1 FROM budget_requests WHERE id=? AND principal=?`, id, principal).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
 }
