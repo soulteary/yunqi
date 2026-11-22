@@ -23,6 +23,7 @@ import (
 const (
 	defaultUpdaterInterval = 30 * time.Minute
 	defaultShardSizeLimit  = 2 << 20
+	defaultIndexSizeLimit  = 1 << 20
 	defaultHTTPTimeout     = 10 * time.Second
 )
 
@@ -294,7 +295,7 @@ func (u *PresetUpdater) CheckOnce(ctx context.Context) error {
 		return err
 	}
 
-	indexBytes, err := u.fetchBytes(ctx, indexURL.String(), 0)
+	indexBytes, err := u.fetchBytes(ctx, indexURL.String(), defaultIndexSizeLimit)
 	if err != nil {
 		err = fmt.Errorf("[PresetUpdater-Check] 拉取 index 失败: %w", err)
 		u.finishCheck(startedAt, err, false)

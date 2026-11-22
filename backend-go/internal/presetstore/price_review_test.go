@@ -3,8 +3,11 @@ package presetstore
 import (
 	"context"
 	"crypto/ed25519"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -331,5 +334,34 @@ func TestPriceChangeUnionLimitRoundTripsPendingAfterRestart(t *testing.T) {
 	}
 	if bundleHash(restarted.store.Get()) != bundleHash(after) {
 		t.Fatal("restored approval did not activate exact candidate")
+	}
+}
+
+func TestPriceUpdaterRejectsOversizedIndexWithoutChangingActiveOrPending(t *testing.T) {
+	before := pricedTestBundle("2026.07.10-1", 1)
+	next := pricedTestBundle("2026.07.10-2", 3)
+	oversized := []byte(`{"padding":"` + strings.Repeat("x", defaultIndexSizeLimit) + `"}`)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write(oversized) }))
+	defer server.Close()
+	store := NewPresetStore(before)
+	updater := NewPresetUpdater(store, UpdaterConfig{IndexURL: server.URL + "/index.json", CacheDir: t.TempDir(), AllowInsecureForTesting: true})
+	if _, err := updater.stagePriceReview(next, &PresetIndex{DataVersion: next.DataVersion}, []byte("prior-source"), false); err != nil {
+		t.Fatal(err)
+	}
+	pendingBefore, _ := json.Marshal(updater.PriceReviewState().Pending)
+	diskBefore, err := os.ReadFile(filepath.Join(updater.config.CacheDir, priceReviewFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := updater.CheckOnce(context.Background()); err == nil || !strings.Contains(err.Error(), "1048576") {
+		t.Fatalf("oversized index accepted: %v", err)
+	}
+	pendingAfter, _ := json.Marshal(updater.PriceReviewState().Pending)
+	diskAfter, err := os.ReadFile(filepath.Join(updater.config.CacheDir, priceReviewFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store.DataVersion() != before.DataVersion || string(pendingBefore) != string(pendingAfter) || string(diskBefore) != string(diskAfter) {
+		t.Fatal("oversized index changed active or pending review")
 	}
 }
