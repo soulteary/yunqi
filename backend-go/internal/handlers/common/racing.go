@@ -400,7 +400,7 @@ func RunRacingAttempt(
 	in RacingAttemptInput,
 ) (*scheduler.SelectionResult, MultiChannelAttemptResult) {
 	hub := getRacingHub()
-	if !shouldArmRacing(c, hub, in.CfgManager, in.Kind, in.Selection, in.HasImageContent) {
+	if in.SelectionOptions.StrictSession != nil || !shouldArmRacing(c, hub, in.CfgManager, in.Kind, in.Selection, in.HasImageContent) {
 		return in.Selection, trySelectedChannel(c, in.Selection)
 	}
 	if in.Ctx == nil {

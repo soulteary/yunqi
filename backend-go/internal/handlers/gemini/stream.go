@@ -526,7 +526,7 @@ func handleStreamSuccess(
 	var totalUsage *types.Usage
 	var streamErr error
 	logBuffer := common.NewLimitedLogBuffer(common.MaxUpstreamResponseLogBytes)
-	streamLoggingEnabled := envCfg.EnableResponseLogs && envCfg.IsDevelopment()
+	streamLoggingEnabled := envCfg.ShouldLogResponseBodies()
 
 	common.LogUpstreamResponseHeaders(c, resp, envCfg, "Gemini")
 
@@ -561,7 +561,7 @@ func handleStreamSuccess(
 		responseTime := time.Since(startTime).Milliseconds()
 		common.RequestLogf(c, "[Gemini-Stream-Timing] 流式响应完成: %dms", responseTime)
 		if logBuffer.Len() > 0 {
-			common.RequestLogf(c, "[Gemini-Stream] 上游流式响应原始内容:\n%s", logBuffer.String())
+			common.RequestLogf(c, "[Gemini-Stream] 上游流式响应原始内容:\n%s", common.ResponseBodyTextForLog(logBuffer.String()))
 		}
 	}
 

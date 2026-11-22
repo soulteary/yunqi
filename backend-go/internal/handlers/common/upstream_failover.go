@@ -1098,6 +1098,7 @@ func TryUpstreamWithAllKeys(
 					endQueue()
 					if rlErr != nil {
 						telemetry.Event(httpbridge.Request(c).Context(), "limiter", "scope")
+						recordLocalDiagnostic(c, upstream.ChannelUID, selection.KeyUID, apiKey, executionAPIType, "limiter", "gateway")
 						lastError = rlErr
 						RequestLogf(c, "[%s-RateLimit] 渠道限速器拦截: %v，尝试下一个 Key/渠道", apiType, rlErr)
 						failedKeys[apiKey] = true
@@ -1112,6 +1113,7 @@ func TryUpstreamWithAllKeys(
 					endQueue()
 					if rlErr != nil {
 						telemetry.Event(httpbridge.Request(c).Context(), "limiter", "scope")
+						recordLocalDiagnostic(c, upstream.ChannelUID, selection.KeyUID, apiKey, executionAPIType, "limiter", "gateway")
 						lastError = rlErr
 						RequestLogf(c, "[%s-RateLimit] Key/Quota 限速器拦截: scope=%s, err=%v，尝试下一个 Key/渠道", apiType, selection.LimiterScope, rlErr)
 						failedKeys[apiKey] = true
@@ -1134,6 +1136,8 @@ func TryUpstreamWithAllKeys(
 
 			req, err := buildRequest(c, upstreamCopy, apiKey)
 			if err != nil {
+				_ = recordFinalConversion(c, requestBody, nil, apiType, upstreamCopy.ServiceType)
+				recordLocalDiagnostic(c, upstream.ChannelUID, selection.KeyUID, apiKey, executionAPIType, "build", "gateway")
 				// buildRequest 失败通常是客户端参数问题或本地构建错误
 				// 不应污染熔断统计，直接返回错误
 				RequestLogf(c, "[%s-BuildRequest] 请求构建失败: %v", apiType, err)
@@ -1144,6 +1148,9 @@ func TryUpstreamWithAllKeys(
 			// 该步骤位于 provider 转换之后，因此跨协议路由不会再丢失 effort。
 			if resolvedAttemptTarget != nil {
 				applyResolvedEffortToProviderRequest(req, resolvedAttemptTarget, upstreamCopy, executionKind)
+			}
+			if err := recordFinalConversion(c, requestBody, req, apiType, upstreamCopy.ServiceType); err != nil {
+				return false, "", 0, nil, nil, err
 			}
 			originalReasoningEffort := extractReasoningEffortForLog(requestBody)
 			actualAttemptModel, actualReasoningEffort := extractActualRequestLogDetails(req)
@@ -1237,6 +1244,12 @@ func TryUpstreamWithAllKeys(
 			// interfaceType 记录实际执行协议：联邦 sibling 必须归属到 chat/responses，
 			// 否则日志会把 chat 上的尝试错误地展示成 messages 渠道的尝试。
 			logOpts = append(logOpts, func(log *metrics.ChannelLog) {
+				log.Diagnostics = telemetry.DiagnosticsFromContext(httpbridge.Request(c).Context())
+				log.ChannelUID = upstream.ChannelUID
+				log.KeyUID = selection.KeyUID
+				if log.KeyUID == "" {
+					log.KeyUID = diagnosticKeyUID(apiKey)
+				}
 				log.TimingSource = telemetry.Timing(httpbridge.Request(c).Context())
 				log.OTLPTraceID = telemetry.TraceID(httpbridge.Request(c).Context())
 			})
@@ -1334,6 +1347,9 @@ func TryUpstreamWithAllKeys(
 					model, actualAttemptModel, mappingNote, utils.MaskAPIKey(apiKey))
 			}
 			resp, err := SendRequestWithLifecycleTrace(req, requestUpstream, envCfg, isStream, apiType, lifecycleTrace)
+			if resp != nil {
+				channelLogStore.Update(metricsKey, logRequestID, func(log *metrics.ChannelLog) { log.UpstreamRequestID = diagnosticUpstreamRequestID(resp.Header) })
+			}
 			if err != nil {
 				lastError = err
 				// 竞速败出：被赢家取消（SendRequest 阶段），不计失败不 failover。
@@ -1482,12 +1498,12 @@ func TryUpstreamWithAllKeys(
 					if isBalanceError && restrictModel != "" {
 						// 余额/配额类：降级为 (Key,模型) 组合级限制，保留该 Key 对其他模型的调度；
 						// 仅当限制覆盖全部模型（白名单精确判定 / 阈值）时才升级为整 Key 拉黑。
-						blacklistMessage := blResult.Message
+						blacklistMessage, recoverAt := blacklistEvidenceForLog(apiType, resp.StatusCode, respBodyBytes, blResult)
 						if strings.EqualFold(apiType, "Vectors") {
 							blacklistMessage = errorBodySummaryForLog(apiType, resp.StatusCode, respBodyBytes)
 						}
 						if HandleBalanceClassKeyFailure(cfgManager, upstream, executionAPIType, executionIndex,
-							apiKey, restrictModel, blResult.Reason, blacklistMessage, blResult.RecoverAt) {
+							apiKey, restrictModel, blResult.Reason, blacklistMessage, recoverAt) {
 							RequestLogf(c, "[%s-Blacklist] 渠道 %s 模型 %s 余额/配额受限已覆盖全部模型，升级整 Key 拉黑 (Key: %s)",
 								apiType, upstream.Name, restrictModel, utils.MaskAPIKey(apiKey))
 							// 升级拉黑意味着整把 Key 不可用，写入 global 桶。
@@ -1496,11 +1512,11 @@ func TryUpstreamWithAllKeys(
 						// 未升级时不记熔断：配额类按约定不进熔断（recordModelCircuitFailure 文档），
 						// 持久化组合限制本身已阻断该组合调度。
 					} else if !isBalanceError || upstream.IsAutoBlacklistBalanceEnabled() {
-						blacklistMessage := blResult.Message
+						blacklistMessage, recoverAt := blacklistEvidenceForLog(apiType, resp.StatusCode, respBodyBytes, blResult)
 						if strings.EqualFold(apiType, "Vectors") {
 							blacklistMessage = errorBodySummaryForLog(apiType, resp.StatusCode, respBodyBytes)
 						}
-						if err := cfgManager.BlacklistKeyWithRecoverAt(executionAPIType, executionIndex, apiKey, blResult.Reason, blacklistMessage, blResult.RecoverAt); err != nil {
+						if err := cfgManager.BlacklistKeyWithRecoverAt(executionAPIType, executionIndex, apiKey, blResult.Reason, blacklistMessage, recoverAt); err != nil {
 							RequestLogf(c, "[%s-Blacklist] 拉黑 Key 失败: %v", apiType, err)
 						}
 						// 认证/权限错误写入 global 桶：整把 Key 不可用，所有模型都受影响。
@@ -1787,7 +1803,7 @@ func TryUpstreamWithAllKeys(
 					}
 
 					// 记录渠道日志
-					channelErrorInfo := string(respBodyBytes)
+					channelErrorInfo := errorBodySummaryForLog(apiType, resp.StatusCode, respBodyBytes)
 					if strings.EqualFold(apiType, "Vectors") {
 						channelErrorInfo = errorBodySummaryForLog(apiType, resp.StatusCode, respBodyBytes)
 					}
@@ -1838,7 +1854,7 @@ func TryUpstreamWithAllKeys(
 
 				// 非 failover 错误，记录失败指标后返回（请求已处理）
 				clientStatusCode := normalizeUpstreamErrorStatus(resp.StatusCode, respBodyBytes)
-				channelErrorInfo := string(respBodyBytes)
+				channelErrorInfo := errorBodySummaryForLog(apiType, resp.StatusCode, respBodyBytes)
 				if strings.EqualFold(apiType, "Vectors") {
 					errorSummary := errorBodySummaryForLog(apiType, resp.StatusCode, respBodyBytes)
 					channelErrorInfo = errorSummary
@@ -1893,6 +1909,9 @@ func TryUpstreamWithAllKeys(
 				usage, err = withStreamTerminalGuard(c, resp, providers.ActualServiceType(c, upstreamCopy.ServiceType), apiType, func() (*types.Usage, error) { return handleSuccess(c, resp, upstreamCopy, apiKey, attemptBody) })
 			} else {
 				usage, err = handleSuccess(c, resp, upstreamCopy, apiKey, attemptBody)
+			}
+			if err != nil {
+				channelLogStore.Update(metricsKey, logRequestID, func(log *metrics.ChannelLog) { log.ErrorSource = diagnosticStreamErrorSource(err) })
 			}
 			if lifecycleTrace.finishFirstContentWait != nil {
 				lifecycleTrace.finishFirstContentWait()
@@ -1982,8 +2001,8 @@ func TryUpstreamWithAllKeys(
 						metricsManager.RecordRequestFinalizeFailureWithClass(currentBaseURL, apiKey, metricsServiceType, requestID, metrics.FailureClassNonRetryable)
 					})
 					channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, metricsServiceType, executionKind)
-					CompleteLog(channelLogStore, metricsKey, logRequestID, http.StatusBadRequest, false, rejected.Error(), isRetryAttempt)
-					RequestLogf(c, "[%s-RequestRejected] 上游以流内错误拒绝请求 (Key: %s): %s", apiType, utils.MaskAPIKey(apiKey), rejected.Error())
+					CompleteLog(channelLogStore, metricsKey, logRequestID, http.StatusBadRequest, false, rejected.LogString(apiType), isRetryAttempt)
+					RequestLogf(c, "[%s-RequestRejected] 上游以流内错误拒绝请求 (Key: %s): %s", apiType, utils.MaskAPIKey(apiKey), rejected.LogString(apiType))
 					// 预检阶段 SSE 头未写：先按客户端协议写出错误体再返回，兑现
 					// handled=true 的「已向客户端写回响应」契约，避免终态错误空 200。
 					RespondUpstreamRequestRejected(c, apiType, rejected)
@@ -2974,7 +2993,7 @@ func rewriteOutboundEffort(body []byte, target *autopilot.ResolvedRouteTarget, u
 	if err != nil {
 		return body, false
 	}
-	return effortBody, true
+	return preserveOutboundSchemaBytes(body, effortBody), true
 }
 
 // applyResolvedEffortToProviderRequest 原地更新最终出站 HTTP 请求并保持 GetBody 可重放。

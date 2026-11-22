@@ -149,6 +149,7 @@
   "pingResponsesChannel",
   "pingVectorsChannel",
   "pollCopilotAccessToken",
+  "previewChannelRequest",
   "provisionNewApiSubscription",
   "refreshCompshareConsoleCookie",
   "refreshEndpointTokenPlanUsage",

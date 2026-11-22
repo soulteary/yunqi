@@ -1,6 +1,7 @@
 package common
 
 import (
+	"github.com/soulteary/yunqi/internal/config"
 	"strings"
 	"testing"
 
@@ -8,6 +9,11 @@ import (
 )
 
 func TestRecordChannelLog_TruncatesAndMasks(t *testing.T) {
+	cm := bodyLoggingTestManager(t)
+	if _, err := cm.UpdateBodyLogging("test:legacy-diagnostic", "", config.BodyLoggingSettings{ResponseBodies: true}); err != nil {
+		t.Fatal(err)
+	}
+
 	store := metrics.NewChannelLogStore()
 	longError := strings.Repeat("x", 260)
 
@@ -215,6 +221,11 @@ func TestRecordChannelLogWithSource_MapsRacingSupersededToRacingLostStatus(t *te
 }
 
 func TestCompleteLog_NormalizesEmptyStreamErrorInfo(t *testing.T) {
+	cm := bodyLoggingTestManager(t)
+	if _, err := cm.UpdateBodyLogging("test:legacy-diagnostic", "", config.BodyLoggingSettings{ResponseBodies: true}); err != nil {
+		t.Fatal(err)
+	}
+
 	store := metrics.NewChannelLogStore()
 	requestID := CreatePendingLog(store, "test-metrics-key-5", 0, "test-channel", "model-a", "", "", "", "sk-test-secret", "https://example.com", "Messages", "", metrics.RequestSourceProxy, nil, "")
 

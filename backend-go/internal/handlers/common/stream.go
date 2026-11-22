@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"regexp"
 	"sort"
 	"strings"
@@ -64,6 +65,14 @@ func (e *UpstreamRequestRejectedError) Error() string {
 	default:
 		return fmt.Sprintf("upstream rejected the request (%s)", e.reasonLabel())
 	}
+}
+
+func (e *UpstreamRequestRejectedError) LogString(apiType string) string {
+	if e == nil {
+		return "upstream rejected the request"
+	}
+	body, _ := json.Marshal(map[string]any{"error": map[string]any{"type": e.Type, "code": e.Code, "message": e.Message}})
+	return errorBodySummaryForLog(apiType, http.StatusBadRequest, body)
 }
 
 func (e *UpstreamRequestRejectedError) reasonLabel() string {

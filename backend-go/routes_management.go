@@ -98,7 +98,12 @@ func (a *application) registerManagementRoutes(apiGroup fiber.Router) {
 	apiGroup.Put("/conversations/settings", handlers.UpdateConversationSettings(convDeps))
 
 	apiGroup.Get("/metrics/prometheus", a.monitoring.Serve)
+	apiGroup.Get("/logging/body", handlers.GetBodyLogging(a.cfgManager, a.envCfg))
+	apiGroup.Put("/logging/body", handlers.UpdateBodyLogging(a.cfgManager, a.envCfg))
+	apiGroup.Get("/logging/body/export", handlers.DownloadBodyLogs(a.envCfg, a.paths.LogDir))
+
 	apiGroup.Get("/reports/requests", handlers.GetRequestHistory(a.metricsStore))
+	apiGroup.Get("/reports/request-timeline/:id", a.monitoring.ServeDiagnostic)
 	// Phase 4 Item 2: 成本报表 API（按 user/model/key 分组聚合）
 	apiGroup.Get("/reports/cost", handlers.GetCostReport(&handlers.CostReportDeps{
 		MetricsManagers: map[string]*metrics.MetricsManager{
