@@ -19,6 +19,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/errutil"
+	"github.com/soulteary/yunqi/internal/handlers/common"
 	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/middleware"
 	"github.com/soulteary/yunqi/internal/scheduler"
@@ -312,7 +313,7 @@ func serveResponseCreateOverWebSocketWithControl(ctx context.Context, parent fib
 		active.start(cancel)
 		defer active.finish()
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, httpbridge.Request(parent).URL.RequestURI(), bytes.NewReader(requestBody))
+	req, err := http.NewRequestWithContext(common.WithoutUsageDrain(ctx), http.MethodPost, httpbridge.Request(parent).URL.RequestURI(), bytes.NewReader(requestBody))
 	if err != nil {
 		return nil, err
 	}

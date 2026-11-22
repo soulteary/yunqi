@@ -1346,11 +1346,18 @@ func TryUpstreamWithAllKeys(
 					apiType, executionIndex, upstream.Name, executionAPIType, currentBaseURL,
 					model, actualAttemptModel, mappingNote, utils.MaskAPIKey(apiKey))
 			}
+			req, drainLifetime := prepareUsageDrainRequest(req, envCfg, isStream, gateFromContext(c) != nil)
+			if drainLifetime != nil {
+				defer drainLifetime.close()
+			}
 			resp, err := SendRequestWithLifecycleTrace(req, requestUpstream, envCfg, isStream, apiType, lifecycleTrace)
 			if resp != nil {
 				channelLogStore.Update(metricsKey, logRequestID, func(log *metrics.ChannelLog) { log.UpstreamRequestID = diagnosticUpstreamRequestID(resp.Header) })
 			}
 			if err != nil {
+				if drainLifetime != nil {
+					drainLifetime.close()
+				}
 				lastError = err
 				// 竞速败出：被赢家取消（SendRequest 阶段），不计失败不 failover。
 				if isRacingSuperseded(c, err) {
@@ -1903,12 +1910,39 @@ func TryUpstreamWithAllKeys(
 			// 竞速场景分支响应头经分支 writer 隔离（racingBranchWriter），无并发写
 			// 竞争；claim 败者的头随 Discard 丢弃，不会并入真实客户端 writer。
 			writeEchoMappingHeaders(c, cfgManager, appliedMappedModel, actualAttemptModel, model)
+
+			var drainSetupErr error
+			if drainLifetime != nil {
+				drainSetupErr = utils.DecompressResponseBodyIfNeeded(resp)
+			}
 			capture := &usageCapture{ReadCloser: resp.Body, stream: strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream")}
 			resp.Body = capture
-			if isStream {
+			var drainBody *usageDrainBody
+			if drainLifetime != nil && drainSetupErr == nil {
+				drainBody = newUsageDrainBody(capture, drainLifetime)
+				resp.Body = drainBody
+			}
+			originalWriter := httpbridge.Writer(c)
+			if drainBody != nil {
+				httpbridge.SetWriter(c, &usageDrainWriter{ResponseWriter: originalWriter, client: drainLifetime.client})
+			}
+			if drainSetupErr != nil {
+				usage = nil
+				err = fmt.Errorf("%w: invalid upstream compression", ErrInvalidResponseBody)
+			} else if isStream {
 				usage, err = withStreamTerminalGuard(c, resp, providers.ActualServiceType(c, upstreamCopy.ServiceType), apiType, func() (*types.Usage, error) { return handleSuccess(c, resp, upstreamCopy, apiKey, attemptBody) })
 			} else {
 				usage, err = handleSuccess(c, resp, upstreamCopy, apiKey, attemptBody)
+			}
+			if drainBody != nil {
+				httpbridge.SetWriter(c, originalWriter)
+			}
+
+			if drainBody != nil && drainLifetime.client.Err() != nil {
+				usage = drainBody.finalUsage(providers.ActualServiceType(c, upstreamCopy.ServiceType))
+				err = drainLifetime.client.Err()
+			} else if drainBody != nil {
+				_ = drainBody.Close()
 			}
 			if err != nil {
 				channelLogStore.Update(metricsKey, logRequestID, func(log *metrics.ChannelLog) { log.ErrorSource = diagnosticStreamErrorSource(err) })
