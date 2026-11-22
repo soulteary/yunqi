@@ -244,3 +244,5 @@ make build
 ### 隔离测试中的兼容性学习状态
 
 协议 handler 测试使用纯内存共享兼容性缓存；需要验证持久化时，应显式使用 `t.TempDir()` 下的路径。不要在源码包下创建或提交 `.config/channel_compat.json`：它是运行时状态，不是测试 fixture。
+
+社区参考改动、分批提交和回归证据见[社区参考改进记录](community-improvements.md)。
