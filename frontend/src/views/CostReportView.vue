@@ -7,20 +7,10 @@
         <span class="text-h5 font-weight-bold">{{ t('costReport.title') }}</span>
       </div>
       <div class="d-flex ga-2">
-        <v-btn
-          variant="tonal"
-          prepend-icon="mdi-refresh"
-          :loading="loading"
-          @click="fetchReport"
-        >
+        <v-btn variant="tonal" prepend-icon="mdi-refresh" :loading="loading" @click="fetchReport">
           {{ t('costReport.refresh') }}
         </v-btn>
-        <v-btn
-          variant="tonal"
-          prepend-icon="mdi-download"
-          :disabled="rows.length === 0"
-          @click="exportCSV"
-        >
+        <v-btn variant="tonal" prepend-icon="mdi-download" :disabled="rows.length === 0" @click="exportCSV">
           {{ t('costReport.exportCsv') }}
         </v-btn>
       </div>
@@ -40,7 +30,7 @@
             :color="groupBy === opt.value ? 'primary' : undefined"
             :variant="groupBy === opt.value ? 'flat' : 'outlined'"
             size="small"
-            @click="groupBy = opt.value; fetchReport()"
+            @click="selectGroup(opt.value)"
           >
             {{ opt.label }}
           </v-chip>
@@ -55,7 +45,7 @@
             :color="duration === opt.value ? 'primary' : undefined"
             :variant="duration === opt.value ? 'flat' : 'outlined'"
             size="small"
-            @click="duration = opt.value; fetchReport()"
+            @click="selectDuration(opt.value)"
           >
             {{ opt.label }}
           </v-chip>
@@ -75,6 +65,20 @@
         />
       </v-card-text>
     </v-card>
+
+    <div class="text-caption text-medium-emphasis mb-3">{{ t('costReport.principalHint') }}</div>
+    <div v-if="principalFilter" class="d-flex align-center ga-2 mb-3">
+      <v-chip size="small">{{ principalFilterLabel }}</v-chip>
+      <v-btn size="small" variant="text" @click="clearPrincipal">{{ t('costReport.clearPrincipal') }}</v-btn>
+      <v-btn
+        size="small"
+        variant="text"
+        :loading="historyLoading"
+        :disabled="!reportReady || loading"
+        @click="loadPrincipalHistory(true)"
+        >{{ t('costReport.viewRequests') }}</v-btn
+      >
+    </div>
 
     <!-- Summary cards -->
     <v-row class="mb-4">
@@ -102,7 +106,9 @@
           <div :class="['text-h6 font-weight-bold', { 'text-warning': !pricingComplete }]">
             {{ formatCost(totalListCostUSD, pricingComplete, 4) }}
           </div>
-          <div v-if="!pricingComplete" class="text-caption text-warning">{{ t('costReport.incompletePricingHint') }}</div>
+          <div v-if="!pricingComplete" class="text-caption text-warning">
+            {{ t('costReport.incompletePricingHint') }}
+          </div>
         </v-card>
       </v-col>
       <v-col cols="6" sm="3">
@@ -150,7 +156,10 @@
         <tbody>
           <tr v-for="row in rows" :key="row.groupKey">
             <td class="text-left">
-              <v-chip size="small" variant="tonal" color="primary">{{ row.groupKey || t('costReport.emptyGroup') }}</v-chip>
+              <v-chip size="small" variant="tonal" color="primary">{{ rowLabel(row) }}</v-chip>
+              <v-btn v-if="groupBy === 'principal'" size="x-small" variant="text" @click="selectPrincipal(row)">{{
+                t('costReport.modelsForPrincipal')
+              }}</v-btn>
             </td>
             <td class="text-right">{{ formatNumber(row.totalRequests) }}</td>
             <td class="text-right">
@@ -197,7 +206,8 @@
                   color="primary"
                   :title="t('costReport.costBreakdown.configuredMultiplier')"
                 >
-                  {{ t('costReport.costBreakdown.configuredMultiplier') }} {{ formatNumber(row.configuredMultiplierCount || 0) }}
+                  {{ t('costReport.costBreakdown.configuredMultiplier') }}
+                  {{ formatNumber(row.configuredMultiplierCount || 0) }}
                 </v-chip>
                 <v-chip
                   v-if="(row.subscriptionCostCount || 0) > 0"
@@ -223,6 +233,35 @@
         </tbody>
       </v-table>
     </v-card>
+    <v-card v-if="principalFilter && historyRows.length" class="mt-4" variant="outlined">
+      <v-card-text>{{ t('costReport.requestHistoryTitle') }} · {{ principalFilterLabel }}</v-card-text>
+      <v-table>
+        <thead>
+          <tr>
+            <th>{{ t('costReport.historyTime') }}</th>
+            <th>{{ t('costReport.groupBy.model') }}</th>
+            <th>{{ t('costReport.historyResult') }}</th>
+            <th>{{ t('costReport.csv.principalLabel') }}</th>
+            <th>{{ t('costReport.historyCorrelation') }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="record in historyRows" :key="record.id">
+            <td>{{ new Date(record.timestamp * 1000).toISOString() }}</td>
+            <td>{{ record.model || t('costReport.emptyGroup') }}</td>
+            <td>{{ record.success ? t('costReport.historySuccess') : t('costReport.historyFailure') }}</td>
+            <td>
+              {{ record.principalLabel === 'unknown' ? t('costReport.unknownPrincipal') : record.principalLabel }}
+            </td>
+            <td>{{ record.correlationId }}</td>
+          </tr>
+        </tbody>
+      </v-table>
+      <v-btn v-if="historyCursor" variant="text" :loading="historyLoading" @click="loadPrincipalHistory(false)">{{
+        t('costReport.moreRequests')
+      }}</v-btn>
+    </v-card>
+    <div v-if="historyError" class="text-error mt-2">{{ t('costReport.historyError') }}</div>
   </div>
 </template>
 
@@ -230,22 +269,33 @@
 import { ref, computed, onMounted } from 'vue'
 import PriceReviewPanel from '@/components/PriceReviewPanel.vue'
 import { api } from '@/services/api'
-import type { CostReportRow } from '@/services/api-types'
+import type { CostReportRow, CostRequestHistoryEntry } from '@/services/api-types'
 import { useI18n } from '@/i18n'
 import { serializeCsv } from '@/utils/csv'
 
 const { t } = useI18n()
 
 const loading = ref(false)
+const reportReady = ref(false)
 const rows = ref<CostReportRow[]>([])
-const groupBy = ref('user')
+const groupBy = ref('principal')
+const principalFilter = ref('')
+const principalFilterLabel = ref('')
+const historyRows = ref<CostRequestHistoryEntry[]>([])
+const historyCursor = ref('')
+const historyLoading = ref(false)
+const historyError = ref(false)
+let reportGeneration = 0
+let historyGeneration = 0
+let reportRange = { since: 0, until: 0 }
 const duration = ref('7d')
 const apiType = ref('messages')
 
 const groupByOptions = [
+  { label: t('costReport.groupBy.principal'), value: 'principal' },
   { label: t('costReport.groupBy.user'), value: 'user' },
   { label: t('costReport.groupBy.model'), value: 'model' },
-  { label: t('costReport.groupBy.key'), value: 'key' },
+  { label: t('costReport.groupBy.key'), value: 'key' }
 ]
 
 const durationOptions = [
@@ -253,7 +303,7 @@ const durationOptions = [
   { label: '7d', value: '7d' },
   { label: '30d', value: '30d' },
   { label: '90d', value: '90d' },
-  { label: '365d', value: '365d' },
+  { label: '365d', value: '365d' }
 ]
 
 const apiTypeOptions = [
@@ -262,7 +312,7 @@ const apiTypeOptions = [
   { label: t('costReport.apiType.chat'), value: 'chat' },
   { label: t('costReport.apiType.gemini'), value: 'gemini' },
   { label: t('costReport.apiType.images'), value: 'images' },
-  { label: t('costReport.apiType.vectors'), value: 'vectors' },
+  { label: t('costReport.apiType.vectors'), value: 'vectors' }
 ]
 
 const groupByLabel = computed(() => {
@@ -273,7 +323,9 @@ const totalRequests = computed(() => rows.value.reduce((s, r) => s + r.totalRequ
 const totalSuccess = computed(() => rows.value.reduce((s, r) => s + r.successCount, 0))
 const totalInputTokens = computed(() => rows.value.reduce((s, r) => s + r.inputTokens, 0))
 const totalListCostUSD = computed(() => rows.value.reduce((s, r) => s + r.listCostUSD, 0))
-const totalCompressionSaved = computed(() => rows.value.reduce((s, r) => s + ((r.originalTokensSaved ?? 0) - (r.compressedTokensAfter ?? 0)), 0))
+const totalCompressionSaved = computed(() =>
+  rows.value.reduce((s, r) => s + ((r.originalTokensSaved ?? 0) - (r.compressedTokensAfter ?? 0)), 0)
+)
 const pricingComplete = computed(() => rows.value.every(isPricingComplete))
 const successRate = computed(() => {
   if (totalRequests.value === 0) return '0.0'
@@ -307,16 +359,86 @@ function pricingHint(row: CostReportRow): string {
   return t('costReport.pricingHintGeneric')
 }
 
+function rowLabel(row: CostReportRow): string {
+  if (groupBy.value === 'principal' && row.groupKey === 'unknown') return t('costReport.unknownPrincipal')
+  return row.groupLabel || row.groupKey || t('costReport.emptyGroup')
+}
+
+function selectGroup(value: string) {
+  groupBy.value = value
+  void fetchReport()
+}
+function selectDuration(value: string) {
+  duration.value = value
+  void fetchReport()
+}
+
+function selectPrincipal(row: CostReportRow) {
+  principalFilter.value = row.groupKey
+  principalFilterLabel.value = rowLabel(row)
+  groupBy.value = 'model'
+  void fetchReport()
+}
+
+function clearPrincipal() {
+  principalFilter.value = ''
+  principalFilterLabel.value = ''
+  groupBy.value = 'principal'
+  void fetchReport()
+}
+
 async function fetchReport() {
+  const generation = ++reportGeneration
+  ++historyGeneration
   loading.value = true
+  reportReady.value = false
+  rows.value = []
+  historyRows.value = []
+  historyCursor.value = ''
+  historyError.value = false
+  historyLoading.value = false
   try {
-    const resp = await api.getCostReport(groupBy.value, duration.value, apiType.value)
+    const resp = await api.getCostReport(groupBy.value, duration.value, apiType.value, principalFilter.value)
+    if (generation !== reportGeneration) return
     rows.value = resp.rows || []
+    const until = Math.floor(Date.now() / 1000)
+    const seconds = Number.parseInt(duration.value) * (duration.value.endsWith('d') ? 86400 : 3600)
+    reportRange = { since: resp.since ?? until - seconds, until: resp.until ?? until }
+    reportReady.value = true
   } catch (e) {
+    if (generation !== reportGeneration) return
     console.error('[CostReport] failed to fetch report:', e)
     rows.value = []
   } finally {
-    loading.value = false
+    if (generation === reportGeneration) loading.value = false
+  }
+}
+
+async function loadPrincipalHistory(reset: boolean) {
+  if (!principalFilter.value || loading.value || !reportReady.value) return
+  const generation = ++historyGeneration
+  const report = reportGeneration
+  historyLoading.value = true
+  historyError.value = false
+  if (reset) {
+    historyRows.value = []
+    historyCursor.value = ''
+  }
+  try {
+    const page = await api.getCostRequestHistory(
+      principalFilter.value,
+      apiType.value,
+      reportRange.since,
+      reportRange.until,
+      historyCursor.value
+    )
+    if (generation !== historyGeneration || report !== reportGeneration) return
+    historyRows.value = [...historyRows.value, ...page.records]
+    historyCursor.value = page.nextCursor || ''
+  } catch {
+    if (generation === historyGeneration) historyError.value = true
+  } finally {
+    if (generation === historyGeneration) historyLoading.value = false
   }
 }
 
@@ -340,13 +462,19 @@ function exportCSV() {
     t('costReport.csv.configuredMultiplierCount'),
     t('costReport.csv.subscriptionCostCount'),
     t('costReport.csv.unpricedCostCount'),
+    t('costReport.csv.principalId'),
+    t('costReport.csv.principalLabel')
   ]
   const csvRows = rows.value.map(r => [
-    r.groupKey, r.totalRequests, r.successCount,
-    r.inputTokens, r.outputTokens, r.cacheCreationTokens,
+    r.groupKey,
+    r.totalRequests,
+    r.successCount,
+    r.inputTokens,
+    r.outputTokens,
+    r.cacheCreationTokens,
     r.cacheReadTokens,
-    (r.originalTokensSaved ?? 0),
-    ((r.originalTokensSaved ?? 0) - (r.compressedTokensAfter ?? 0)),
+    r.originalTokensSaved ?? 0,
+    (r.originalTokensSaved ?? 0) - (r.compressedTokensAfter ?? 0),
     r.listCostUSD.toFixed(6),
     isPricingComplete(r) ? t('costReport.pricingStatus.complete') : t('costReport.pricingStatus.partial'),
     r.unpricedModels?.join(' | ') || '',
@@ -354,6 +482,8 @@ function exportCSV() {
     r.configuredMultiplierCount || 0,
     r.subscriptionCostCount || 0,
     r.unpricedCostCount || 0,
+    groupBy.value === 'principal' ? r.groupKey : principalFilter.value,
+    groupBy.value === 'principal' ? rowLabel(r) : principalFilterLabel.value
   ])
 
   const csv = serializeCsv([headers, ...csvRows])

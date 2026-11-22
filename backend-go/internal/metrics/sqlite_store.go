@@ -378,8 +378,31 @@ func initSchema(db *sql.DB) error {
 			}
 		}
 	}
+	var principalVersion int
+	if err := db.QueryRow("PRAGMA user_version").Scan(&principalVersion); err != nil {
+		return err
+	}
+	if principalVersion < 12 {
+		tx, err := db.Begin()
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		if _, err = tx.Exec("ALTER TABLE request_records ADD COLUMN principal_id TEXT NOT NULL DEFAULT ''"); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("principal attribution migration: %w", err)
+		}
+		if _, err = tx.Exec("CREATE INDEX IF NOT EXISTS idx_history_principal_id ON request_records(api_type,principal_id,timestamp DESC,id DESC)"); err != nil {
+			return err
+		}
+		if _, err = tx.Exec("PRAGMA user_version = 12"); err != nil {
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
 	// Filter-specific keyset indexes do not reserve a schema version.
-	for _, column := range []string{"model,", "channel_uid,", "correlation_id,"} {
+	for _, column := range []string{"model,", "channel_uid,", "correlation_id,", "principal_id,"} {
 		name := strings.ReplaceAll(column, ",", "")
 		if _, err := db.Exec("CREATE INDEX IF NOT EXISTS idx_history_" + name + " ON request_records(api_type," + column + "timestamp DESC,id DESC)"); err != nil {
 			return fmt.Errorf("history index: %w", err)
@@ -816,8 +839,8 @@ func (s *SQLiteStore) batchInsertRecords(records []PersistentRecord) error {
 		 channel_uid, route_model, key_uid, subscription_uid, exchange_snapshot_version,
 		 list_cost_usd, effective_cost_usd, effective_cost_available, effective_cost_reason, consumption_policy,
 			 compressed, original_tokens, compressed_tokens, compression_savings_percent, compression_technique, compression_fallback_reason,
-			 correlation_id, usage_provenance, pricing_version_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 correlation_id, usage_provenance, pricing_version_id, principal_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return err
@@ -837,7 +860,7 @@ func (s *SQLiteStore) batchInsertRecords(records []PersistentRecord) error {
 			r.ChannelUID, r.RouteModel, r.KeyUID, r.SubscriptionUID, r.ExchangeSnapshotVersion,
 			r.ListCostUSD, r.EffectiveCostUSD, effectiveAvailable, r.EffectiveCostReason, r.ConsumptionPolicy,
 			r.Compressed, r.OriginalTokens, r.CompressedTokens, r.CompressionSavingsPct, r.CompressionTechnique, r.CompressionFallbackReason,
-			r.CorrelationID, marshalUsageProvenance(r.UsageProvenance), r.PricingVersionID,
+			r.CorrelationID, marshalUsageProvenance(r.UsageProvenance), r.PricingVersionID, storedPrincipalID(r.PrincipalID),
 		)
 		if err != nil {
 			return err
@@ -854,7 +877,7 @@ func (s *SQLiteStore) LoadRecords(since time.Time, apiType string) ([]Persistent
 		       key_uid, subscription_uid, exchange_snapshot_version, list_cost_usd, effective_cost_usd,
 		       effective_cost_available, effective_cost_reason, consumption_policy,
 		       compressed, original_tokens, compressed_tokens, compression_savings_percent, compression_technique, compression_fallback_reason,
-		       correlation_id, usage_provenance, pricing_version_id
+		       correlation_id, usage_provenance, pricing_version_id, principal_id
 		FROM request_records
 		WHERE timestamp >= ? AND api_type = ?
 		ORDER BY timestamp ASC
@@ -880,7 +903,7 @@ func (s *SQLiteStore) LoadRecords(since time.Time, apiType string) ([]Persistent
 			&r.ChannelUID, &r.RouteModel, &keyUID, &subscriptionUID, &version, &listCost, &effectiveCost,
 			&effectiveAvailable, &effectiveReason, &consumptionPolicy,
 			&r.Compressed, &r.OriginalTokens, &r.CompressedTokens, &r.CompressionSavingsPct, &r.CompressionTechnique, &r.CompressionFallbackReason,
-			&r.CorrelationID, &provenance, &r.PricingVersionID,
+			&r.CorrelationID, &provenance, &r.PricingVersionID, &r.PrincipalID,
 		)
 		if err != nil {
 			return nil, err
@@ -1455,14 +1478,34 @@ type CostReportRow struct {
 }
 
 // QueryCostReport 按指定维度聚合成本数据。
-// groupBy 支持 "user"（按 proxy_key_mask）、"model"（按 model）、"key"（按 key_mask）。
+// groupBy 支持 "principal"（不透明认证主体，旧行 unknown）、"user"（代理 Key 掩码）、"model"、"key"（上游 Key 掩码）。
 // 返回聚合行列表，按总请求数降序排列。
 func (s *SQLiteStore) QueryCostReport(apiType string, since time.Time, groupBy string) ([]CostReportRow, error) {
+	return s.queryCostReport(apiType, since, time.Time{}, groupBy, "")
+}
+func (s *SQLiteStore) QueryCostReportForPrincipal(apiType string, since time.Time, groupBy, principal string) ([]CostReportRow, error) {
+	if !ValidPrincipalAttributionID(principal) {
+		return nil, fmt.Errorf("invalid principal filter")
+	}
+	return s.queryCostReport(apiType, since, time.Time{}, groupBy, principal)
+}
+
+// QueryCostReportInRange uses one frozen inclusive time interval for summaries
+// and their model breakdowns. Legacy direct methods retain their old contract.
+func (s *SQLiteStore) QueryCostReportInRange(apiType string, since, until time.Time, groupBy, principal string) ([]CostReportRow, error) {
+	if until.IsZero() || (principal != "" && !ValidPrincipalAttributionID(principal)) {
+		return nil, fmt.Errorf("invalid cost report scope")
+	}
+	return s.queryCostReport(apiType, since, until, groupBy, principal)
+}
+func (s *SQLiteStore) queryCostReport(apiType string, since, until time.Time, groupBy, principal string) ([]CostReportRow, error) {
 	s.flushMu.Lock()
 	s.flushBufferLocked()
 	s.flushMu.Unlock()
 	var groupExpr string
 	switch groupBy {
+	case "principal":
+		groupExpr = "COALESCE(NULLIF(principal_id,''),'unknown')"
 	case "user":
 		groupExpr = "proxy_key_mask"
 	case "model":
@@ -1471,6 +1514,20 @@ func (s *SQLiteStore) QueryCostReport(apiType string, since time.Time, groupBy s
 		groupExpr = "key_mask"
 	default:
 		groupExpr = "proxy_key_mask"
+	}
+	whereExtra := ""
+	args := []any{apiType, since.Unix()}
+	if !until.IsZero() {
+		whereExtra += " AND timestamp <= ?"
+		args = append(args, until.Unix())
+	}
+	if principal != "" {
+		whereExtra += " AND principal_id = ?"
+		args = append(args, storedPrincipalID(principal))
+	}
+	having := " HAVING group_key <> ''"
+	if principal != "" {
+		having = ""
 	}
 	query := fmt.Sprintf(`
 		SELECT %s AS group_key,
@@ -1488,10 +1545,10 @@ func (s *SQLiteStore) QueryCostReport(apiType string, since time.Time, groupBy s
 			COALESCE(SUM(CASE WHEN compressed = 1 THEN compressed_tokens ELSE 0 END), 0),
 			SUM(CASE WHEN compression_fallback_reason <> '' THEN 1 ELSE 0 END)
 		FROM request_records
-		WHERE api_type = ? AND timestamp >= ?
-		GROUP BY group_key HAVING group_key <> '' ORDER BY COUNT(*) DESC
-	`, groupExpr)
-	rows, err := s.db.Query(query, apiType, since.Unix())
+		WHERE api_type = ? AND timestamp >= ?%s
+		GROUP BY group_key%s ORDER BY COUNT(*) DESC
+	`, groupExpr, whereExtra, having)
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("查询成本报表失败: %w", err)
 	}
@@ -1524,13 +1581,33 @@ type ModelCostBreakdownRow struct {
 // QueryModelCostBreakdown 按模型与是否已有成本快照分组，保留用量与定价完整性查询。
 // 用于 handler 层计算 ListCostUSD / EffectiveCostUSD（需要逐模型定价）。
 // filterGroupKey 按 groupBy 对应列精确匹配；空字符串表示不过滤。
-func (s *SQLiteStore) QueryModelCostBreakdown(apiType string, since time.Time, groupBy string, filterGroupKey string) ([]ModelCostBreakdownRow, error) {
+func (s *SQLiteStore) QueryModelCostBreakdown(apiType string, since time.Time, groupBy, filterGroupKey string) ([]ModelCostBreakdownRow, error) {
+	return s.queryModelCostBreakdown(apiType, since, time.Time{}, groupBy, filterGroupKey, "")
+}
+
+// QueryModelCostBreakdownForPrincipal matches its row group exactly, including
+// an empty legacy model/key group; it never broadens an empty key to all rows.
+func (s *SQLiteStore) QueryModelCostBreakdownForPrincipal(apiType string, since time.Time, groupBy, filterGroupKey, principal string) ([]ModelCostBreakdownRow, error) {
+	if !ValidPrincipalAttributionID(principal) {
+		return nil, fmt.Errorf("invalid principal filter")
+	}
+	return s.queryModelCostBreakdown(apiType, since, time.Time{}, groupBy, filterGroupKey, principal)
+}
+func (s *SQLiteStore) QueryModelCostBreakdownInRange(apiType string, since, until time.Time, groupBy, filterGroupKey, principal string) ([]ModelCostBreakdownRow, error) {
+	if until.IsZero() || (principal != "" && !ValidPrincipalAttributionID(principal)) {
+		return nil, fmt.Errorf("invalid cost report scope")
+	}
+	return s.queryModelCostBreakdown(apiType, since, until, groupBy, filterGroupKey, principal)
+}
+func (s *SQLiteStore) queryModelCostBreakdown(apiType string, since, until time.Time, groupBy string, filterGroupKey, principal string) ([]ModelCostBreakdownRow, error) {
 	s.flushMu.Lock()
 	s.flushBufferLocked()
 	s.flushMu.Unlock()
 
 	var groupExpr string
 	switch groupBy {
+	case "principal":
+		groupExpr = "COALESCE(NULLIF(principal_id,''),'unknown')"
 	case "user":
 		groupExpr = "proxy_key_mask"
 	case "model":
@@ -1544,11 +1621,23 @@ func (s *SQLiteStore) QueryModelCostBreakdown(apiType string, since time.Time, g
 	var whereExtra string
 	var args []interface{}
 	args = append(args, apiType, since.Unix())
-	if filterGroupKey != "" {
-		whereExtra = fmt.Sprintf(" AND %s = ?", groupExpr)
+	if !until.IsZero() {
+		whereExtra += " AND timestamp <= ?"
+		args = append(args, until.Unix())
+	}
+	if filterGroupKey != "" || principal != "" {
+		whereExtra += fmt.Sprintf(" AND %s = ?", groupExpr)
 		args = append(args, filterGroupKey)
 	}
 
+	if principal != "" {
+		whereExtra += " AND principal_id = ?"
+		args = append(args, storedPrincipalID(principal))
+	}
+	having := " HAVING model <> ''"
+	if principal != "" || groupBy == "principal" {
+		having = ""
+	}
 	query := fmt.Sprintf(`
 		SELECT
 			model, list_cost_usd IS NOT NULL,
@@ -1558,9 +1647,8 @@ func (s *SQLiteStore) QueryModelCostBreakdown(apiType string, since time.Time, g
 			SUM(cache_read_tokens) AS cache_read_tokens
 		FROM request_records
 		WHERE api_type = ? AND timestamp >= ?%s
-		GROUP BY model, list_cost_usd IS NOT NULL
-		HAVING model <> ''
-	`, whereExtra)
+		GROUP BY model, list_cost_usd IS NOT NULL%s
+	`, whereExtra, having)
 
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
