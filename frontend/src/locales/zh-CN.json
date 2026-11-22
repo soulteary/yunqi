@@ -1774,5 +1774,10 @@
   "costReport.historyFailure": "失败",
   "costReport.historyError": "请求历史加载失败。",
   "costReport.csv.principalId": "主体归因 ID",
-  "costReport.csv.principalLabel": "主体脱敏标签"
+  "costReport.csv.principalLabel": "主体脱敏标签",
+  "channelEditor.desktopModels.title": "Claude Desktop 模型适配",
+  "channelEditor.desktopModels.hint": "为每个模型选择 Desktop 兼容层级。模型 ID、路由和实际能力保持不变；不指定可清除继承的层级。",
+  "channelEditor.desktopModels.none": "不指定",
+  "channelEditor.desktopModels.modelId": "添加模型 ID",
+  "channelEditor.desktopModels.add": "添加"
 }

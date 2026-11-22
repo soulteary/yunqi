@@ -21,6 +21,7 @@ const IMMUTABLE_CHANNEL_FIELDS = [
   'disabledKeyModels',
   'historicalApiKeys',
   'modelCapabilities',
+  'claudeDesktopModelTiers',
   'embeddingCapabilities',
   'defaultCapability',
   'customHeaders',

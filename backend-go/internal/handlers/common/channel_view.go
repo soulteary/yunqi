@@ -26,6 +26,7 @@ func BuildChannelView(up config.UpstreamConfig, index int) fiber.Map {
 		"remark":                        up.Remark,
 		"website":                       up.Website,
 		"insecureSkipVerify":            up.InsecureSkipVerify,
+		"claudeDesktopModelTiers":       config.ClaudeDesktopModelTiersForView(up),
 		"modelCapabilities":             up.ModelCapabilities,
 		"embeddingCapabilities":         up.EmbeddingCapabilities,
 		"defaultCapability":             up.DefaultCapability,

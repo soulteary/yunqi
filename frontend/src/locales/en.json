@@ -1774,5 +1774,10 @@
   "costReport.historyFailure": "Failure",
   "costReport.historyError": "Request history could not be loaded.",
   "costReport.csv.principalId": "Principal attribution ID",
-  "costReport.csv.principalLabel": "Principal label"
+  "costReport.csv.principalLabel": "Principal label",
+  "channelEditor.desktopModels.title": "Claude Desktop model mapping",
+  "channelEditor.desktopModels.hint": "Choose a Desktop tier per model. Model IDs, routing, and capabilities stay unchanged. None clears an inherited tier.",
+  "channelEditor.desktopModels.none": "None",
+  "channelEditor.desktopModels.modelId": "Add model ID",
+  "channelEditor.desktopModels.add": "Add"
 }

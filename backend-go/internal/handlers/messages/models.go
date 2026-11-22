@@ -723,6 +723,15 @@ func normalizeModelEntry(model ModelEntry, upstream *config.UpstreamConfig, glob
 	if model.MaxOutputTokens == 0 && resolved.Capability.MaxOutputTokens > 0 {
 		model.MaxOutputTokens = resolved.Capability.MaxOutputTokens
 	}
+	if upstream != nil {
+		if tier, configured := upstream.ClaudeDesktopModelTiers[model.ID]; configured {
+			model.AnthropicFamilyTier = normalizeAnthropicFamilyTier(tier)
+			if model.AnthropicFamilyTier == "" {
+				model.IsFamilyDefault = false
+			}
+			return model
+		}
+	}
 	if tier := normalizeAnthropicFamilyTier(resolved.Capability.AnthropicFamilyTier); tier != "" {
 		model.AnthropicFamilyTier = tier
 	} else {
@@ -828,12 +837,7 @@ func markAnthropicFamilyDefaults(models []ModelEntry) {
 }
 
 func normalizeAnthropicFamilyTier(tier string) string {
-	switch tier = strings.ToLower(strings.TrimSpace(tier)); tier {
-	case "sonnet", "opus", "haiku", "fable", "mythos":
-		return tier
-	default:
-		return ""
-	}
+	return config.NormalizeClaudeDesktopTier(tier)
 }
 
 func anthropicFamilyTierForModel(requestModel, actualModel, displayName string) string {
