@@ -657,28 +657,7 @@ func cloneCapability(src UpstreamModelCapability) UpstreamModelCapability {
 			dst.Capabilities[key] = value
 		}
 	}
-	if src.Pricing != nil {
-		pricing := *src.Pricing
-		if pricing.InputCacheHitPrice != nil {
-			v := *pricing.InputCacheHitPrice
-			pricing.InputCacheHitPrice = &v
-		}
-		if pricing.InputCacheMissPrice != nil {
-			v := *pricing.InputCacheMissPrice
-			pricing.InputCacheMissPrice = &v
-		}
-		if pricing.OutputPrice != nil {
-			v := *pricing.OutputPrice
-			pricing.OutputPrice = &v
-		}
-		if len(src.Pricing.Tiers) > 0 {
-			pricing.Tiers = make([]ModelPricingTier, len(src.Pricing.Tiers))
-			for i, tier := range src.Pricing.Tiers {
-				pricing.Tiers[i] = clonePricingTier(tier)
-			}
-		}
-		dst.Pricing = &pricing
-	}
+	dst.Pricing = SnapshotModelPricing(src.Pricing)
 	if src.ParamConstraints != nil {
 		constraints := *src.ParamConstraints
 		if len(src.ParamConstraints.FixedParams) > 0 {
@@ -799,26 +778,9 @@ func convertRuntimeCapabilities(preset *presetstore.ModelRegistryPreset) map[str
 			}
 		}
 		if entry.Pricing != nil {
-			capability.Pricing = &ModelPricing{
-				Unit:                coalesceString(entry.Pricing.Unit, preset.PricingUnit),
-				Currency:            entry.Pricing.Currency,
-				InputCacheHitPrice:  cloneFloatPointer(entry.Pricing.InputCacheHitPrice),
-				InputCacheMissPrice: cloneFloatPointer(entry.Pricing.InputCacheMissPrice),
-				OutputPrice:         cloneFloatPointer(entry.Pricing.OutputPrice),
-			}
-			if len(entry.Pricing.Tiers) > 0 {
-				capability.Pricing.Tiers = make([]ModelPricingTier, len(entry.Pricing.Tiers))
-				for i, tier := range entry.Pricing.Tiers {
-					capability.Pricing.Tiers[i] = ModelPricingTier{
-						Label:               tier.Label,
-						InputTokensAbove:    tier.InputTokensAbove,
-						InputTokensUpTo:     tier.InputTokensUpTo,
-						InputCacheHitPrice:  cloneFloatPointer(tier.InputCacheHitPrice),
-						InputCacheMissPrice: cloneFloatPointer(tier.InputCacheMissPrice),
-						OutputPrice:         cloneFloatPointer(tier.OutputPrice),
-					}
-				}
-			}
+			capability.Pricing = SnapshotModelPricing(entry.Pricing)
+			capability.Pricing.Unit = coalesceString(entry.Pricing.Unit, preset.PricingUnit)
+			capability.Pricing.VersionID = PricingVersionID(capability.Pricing)
 		}
 		if entry.ParamConstraints != nil {
 			capability.ParamConstraints = &ModelParamConstraints{
@@ -935,7 +897,8 @@ func ResolveMappedUpstreamCapability(requestModel, mappedModel string, upstream 
 	return resolveUpstreamCapabilityForModels(requestModel, actualModel, upstream, global, false)
 }
 
-func resolveUpstreamCapabilityForModels(requestModel, actualModel string, upstream *UpstreamConfig, global map[string]UpstreamModelCapability, allowRequestModelFallback bool) ResolvedUpstreamCapability {
+func resolveUpstreamCapabilityForModels(requestModel, actualModel string, upstream *UpstreamConfig, global map[string]UpstreamModelCapability, allowRequestModelFallback bool) (result ResolvedUpstreamCapability) {
+	defer func() { result.Capability = cloneCapability(result.Capability) }()
 	if resolved := resolveUpstreamCapabilityExact(requestModel, actualModel, upstream, global, allowRequestModelFallback); resolved.Known {
 		return resolved
 	}

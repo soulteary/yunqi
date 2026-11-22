@@ -190,7 +190,9 @@ func (m *MetricsManager) recordRequestConnectedInternal(baseURL, apiKey, service
 		metrics.pendingHistoryIdx = make(map[uint64]int)
 	}
 
+	pricing := config.SnapshotModelPricing(config.ResolveUpstreamCapability(actualModel, nil, nil).Capability.Pricing)
 	metrics.requestHistory = append(metrics.requestHistory, RequestRecord{
+		ListPricing: pricing, PricingVersionID: config.PricingVersionID(pricing),
 		ChannelUID:   channelUID,
 		RouteModel:   routeModel,
 		Model:        actualModel,
@@ -239,7 +241,8 @@ func (m *MetricsManager) RecordRequestConnectedWithCostContext(baseURL, apiKey, 
 	record.SubscriptionUID = cost.SubscriptionUID
 	record.ExchangeSnapshotVersion = cost.ExchangeSnapshotVersion
 	record.ListCostUSD = cost.ListCostUSD
-	record.ListPricing = cost.ListPricing
+	record.ListPricing = config.SnapshotModelPricing(cost.ListPricing)
+	record.PricingVersionID = config.PricingVersionID(record.ListPricing)
 	record.EffectiveCostMultiplier = cost.EffectiveCostMultiplier
 	record.EffectiveCostAvailable = cost.EffectiveCostAvailable
 	record.EffectiveCostReason = cost.EffectiveCostReason
@@ -388,9 +391,15 @@ func (m *MetricsManager) RecordRequestFinalizeOutcome(baseURL, apiKey, serviceTy
 				// 请求开始时固化的完整口径标价（渠道覆盖 → 全局 → 内置）：
 				// 与调度评分/请求成本读同一份价格，避免渠道级或全局级
 				// 价格覆盖只影响调度、不影响指标记录成本。
-				record.ListCostUSD = CalculateTokenCostUSDWithPricing(record.ListPricing, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens)
+				var priced bool
+				record.ListCostUSD, priced = CalculateUsageCostUSDWithPricingAndStatus(record.ListPricing, usage)
+				if !priced {
+					record.EffectiveCostAvailable = false
+					record.EffectiveCostReason = "pricing_dimensions_missing"
+				}
 			} else {
-				record.ListCostUSD, _ = m.calculateRecordListCost(record.Model, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens)
+				record.EffectiveCostAvailable = false
+				record.EffectiveCostReason = "pricing_snapshot_missing"
 			}
 		}
 		if record.EffectiveCostAvailable {
@@ -400,6 +409,7 @@ func (m *MetricsManager) RecordRequestFinalizeOutcome(baseURL, apiKey, serviceTy
 		if m.store != nil {
 			m.store.AddRecord(PersistentRecord{
 				UsageProvenance:           record.UsageProvenance,
+				PricingVersionID:          record.PricingVersionID,
 				ChannelUID:                record.ChannelUID,
 				RouteModel:                record.RouteModel,
 				MetricsKey:                metrics.MetricsKey,
@@ -446,6 +456,7 @@ func (m *MetricsManager) RecordRequestFinalizeOutcome(baseURL, apiKey, serviceTy
 
 	if m.store != nil {
 		m.store.AddRecord(PersistentRecord{
+			PricingVersionID:    record.PricingVersionID,
 			MetricsKey:          metrics.MetricsKey,
 			BaseURL:             metrics.BaseURL,
 			KeyMask:             metrics.KeyMask,
