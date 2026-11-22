@@ -72,3 +72,62 @@ func TestIdentityProxyRevocationsPersistAndPolicyEditsCannotClearThem(t *testing
 		}
 	}
 }
+
+func TestIdentityProxyOmittedRevocationModeNeverDowngradesShared(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"upstream":[]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cm, err := NewConfigManager(path, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cm.Close()
+	if err := cm.SetIdentityProxyConfig(IdentityProxyConfig{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := cm.IdentityProxySnapshot().RevocationMode; got != "local" {
+		t.Fatalf("new default %q", got)
+	}
+	if err := cm.SetIdentityProxyConfig(IdentityProxyConfig{RevocationMode: "shared"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := cm.SetIdentityProxyConfig(IdentityProxyConfig{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := cm.IdentityProxySnapshot().RevocationMode; got != "shared" {
+		t.Fatalf("legacy client downgraded to %q", got)
+	}
+	if err := cm.SetIdentityProxyConfig(IdentityProxyConfig{RevocationMode: "invalid"}); err == nil {
+		t.Fatal("invalid scope accepted")
+	}
+	if err := cm.SetIdentityProxyConfig(IdentityProxyConfig{RevocationMode: "local"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := cm.IdentityProxySnapshot().RevocationMode; got != "local" {
+		t.Fatalf("explicit local not applied %q", got)
+	}
+}
+
+func TestIdentityRevocationEpochSurvivesLegacySavesAndLocalMode(t *testing.T) {
+	cm, err := NewConfigManager(t.TempDir()+"/config.json", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cm.Close()
+	epoch := strings.Repeat("a", 64)
+	if err := cm.SetIdentityProxyConfig(IdentityProxyConfig{RevocationMode: "shared", RevocationEpoch: epoch}); err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range []string{"", "local", "", "shared"} {
+		if err := cm.SetIdentityProxyConfig(IdentityProxyConfig{RevocationMode: mode}); err != nil {
+			t.Fatal(err)
+		}
+		if cm.IdentityProxySnapshot().RevocationEpoch != epoch {
+			t.Fatalf("mode %q erased epoch", mode)
+		}
+	}
+	if err := cm.SetIdentityProxyConfig(IdentityProxyConfig{RevocationEpoch: strings.Repeat("b", 64)}); err == nil {
+		t.Fatal("bound epoch replaced")
+	}
+}

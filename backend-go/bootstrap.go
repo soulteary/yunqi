@@ -20,6 +20,7 @@ import (
 	"github.com/soulteary/yunqi/internal/handlers"
 	"github.com/soulteary/yunqi/internal/healthcheck"
 	"github.com/soulteary/yunqi/internal/httpclient"
+	"github.com/soulteary/yunqi/internal/identitysession"
 	"github.com/soulteary/yunqi/internal/logger"
 	"github.com/soulteary/yunqi/internal/metrics"
 	"github.com/soulteary/yunqi/internal/presetstore"
@@ -116,6 +117,14 @@ func runService(cliOpts cliOptions) {
 		envCfg.ProxyRedisAdmission = shared
 		defer shared.Close()
 	}
+	if envCfg.IdentityProxyRevocationRedisURL != "" {
+		backend, backendErr := identitysession.New(envCfg.IdentityProxyRevocationRedisURL, envCfg.IdentityProxyRevocationRedisNamespace)
+		if backendErr != nil {
+			log.Fatal("初始化共享身份撤销失败: invalid Redis revocation configuration")
+		}
+		envCfg.IdentityProxyRevocations = backend
+		defer backend.Close()
+	}
 	envCfg.BudgetManager = entrybudget.NewManager(filepath.Join(filepath.Dir(paths.ConfigPath), "entry-budget.db"))
 	defer envCfg.BudgetManager.Close()
 	cfgManager, err := config.NewConfigManager(paths.ConfigPath, paths.BackupDir)
@@ -123,6 +132,7 @@ func runService(cliOpts cliOptions) {
 		log.Fatalf("初始化配置管理器失败: %v", err)
 	}
 	defer errutil.IgnoreDeferred(cfgManager.Close)
+	initializeIdentityRevocationSync(envCfg, cfgManager)
 
 	a := &application{envCfg: envCfg, paths: paths, cfgManager: cfgManager}
 	a.initTelemetry()

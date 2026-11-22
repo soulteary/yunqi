@@ -13,6 +13,7 @@ import (
 const ContextKeyAdminPrincipal = "adminPrincipal"
 
 type AdminPrincipal struct {
+	RevocationScope    string   `json:"revocationScope,omitempty"`
 	Source             string   `json:"source,omitempty"`
 	SessionExpiresAt   int64    `json:"sessionExpiresAt,omitempty"`
 	SessionFingerprint string   `json:"sessionFingerprint,omitempty"`
