@@ -82,6 +82,8 @@ const (
 
 // RequestRecord 带时间戳的请求记录（扩展版，支持 Token、Cache 和失败分类数据）。
 type RequestRecord struct {
+	PrincipalID string // opaque authenticated caller identity; empty for legacy/unknown
+
 	PricingVersionID         string
 	UsageProvenance          *types.UsageProvenance
 	ChannelUID               string // 渠道稳定标识，breakerscope 三元组之一
@@ -399,6 +401,7 @@ func (m *MetricsManager) loadFromStore() error {
 			metrics := m.getOrCreateKeyLocked(r.BaseURL, r.MetricsKey, r.KeyMask)
 
 			metrics.requestHistory = append(metrics.requestHistory, RequestRecord{
+				PrincipalID:              r.PrincipalID,
 				UsageProvenance:          r.UsageProvenance,
 				Model:                    r.Model,
 				Timestamp:                r.Timestamp,

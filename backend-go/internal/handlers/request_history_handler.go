@@ -24,7 +24,10 @@ func GetRequestHistory(store *metrics.SQLiteStore) fiber.Handler {
 		if e1 != nil || e2 != nil || e3 != nil || since < 0 || until < since || limit < 1 || limit > 200 {
 			return reply(400, fiber.Map{"error": "since/until 必须为 Unix 秒，limit 为 1–200"})
 		}
-		q := metrics.RequestHistoryQuery{APIType: httpbridge.Query(c, "type", "messages"), Model: httpbridge.Query(c, "model", ""), ChannelUID: httpbridge.Query(c, "channelUid", ""), CorrelationID: httpbridge.Query(c, "correlationId", ""), Since: time.Unix(since, 0), Until: time.Unix(until, 0), Limit: limit, Cursor: httpbridge.Query(c, "cursor", "")}
+		q := metrics.RequestHistoryQuery{PrincipalID: httpbridge.Query(c, "principalId", ""), APIType: httpbridge.Query(c, "type", "messages"), Model: httpbridge.Query(c, "model", ""), ChannelUID: httpbridge.Query(c, "channelUid", ""), CorrelationID: httpbridge.Query(c, "correlationId", ""), Since: time.Unix(since, 0), Until: time.Unix(until, 0), Limit: limit, Cursor: httpbridge.Query(c, "cursor", "")}
+		if q.PrincipalID != "" && !metrics.ValidPrincipalAttributionID(q.PrincipalID) {
+			return reply(400, fiber.Map{"error": "无效的 principalId"})
+		}
 		// Validate input errors separately without exposing database diagnostics.
 		switch q.APIType {
 		case "messages", "responses", "chat", "gemini", "images", "vectors":

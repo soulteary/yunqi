@@ -1320,6 +1320,7 @@ func TryUpstreamWithAllKeys(
 
 			// TCP 建连开始即计数：将活跃度统计提前到发起上游请求之前；同时关联 proxyKeyMask 用于成本报表持久化
 			costContext := buildRequestCostContext(cfgManager, upstream, selection, actualAttemptModel, consumptionPolicy)
+			costContext.PrincipalID = metrics.PrincipalAttributionID(middleware.GetPrincipalID(c))
 			requestID := metricsManager.RecordRequestConnectedWithCostContext(currentBaseURL, apiKey, metricsServiceType, upstream.ChannelUID, actualAttemptModel, model, proxyKeyMask, costContext)
 			// 用户请求关联 ID 随 pending 记录落 SQLite：聚合侧 COUNT(DISTINCT correlation_id)
 			// 得出真实用户请求数，与上游尝试数对照可见竞速/failover 放大倍数。

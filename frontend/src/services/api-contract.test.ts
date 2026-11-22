@@ -163,3 +163,22 @@ describe('shared request behavior', () => {
     expect(await service.getChannels()).toBeNull()
   })
 })
+
+describe('principal cost attribution contract', () => {
+  it('preserves opaque principal scope and cursor in both report and history URLs', async () => {
+    const principal = 'p_' + 'a'.repeat(64)
+    const service = new ApiService()
+    await service.getCostReport('model', '30d', 'chat', principal)
+    const report = new URL(String(fetchMock.mock.calls[0][0]), 'https://local.invalid')
+    expect(report.pathname).toBe('/api/reports/cost')
+    expect(report.searchParams.get('principalId')).toBe(principal)
+    expect(report.searchParams.get('groupBy')).toBe('model')
+    await service.getCostRequestHistory(principal, 'chat', 10, 20, 'cursor+value/=')
+    const history = new URL(String(fetchMock.mock.calls[1][0]), 'https://local.invalid')
+    expect(history.pathname).toBe('/api/reports/requests')
+    expect(history.searchParams.get('principalId')).toBe(principal)
+    expect(history.searchParams.get('since')).toBe('10')
+    expect(history.searchParams.get('until')).toBe('20')
+    expect(history.searchParams.get('cursor')).toBe('cursor+value/=')
+  })
+})
