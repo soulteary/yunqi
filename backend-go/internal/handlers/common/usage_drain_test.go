@@ -17,6 +17,7 @@ import (
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/httpbridge"
 	"github.com/soulteary/yunqi/internal/scheduler"
+	"github.com/soulteary/yunqi/internal/telemetry"
 	"github.com/soulteary/yunqi/internal/types"
 	"github.com/soulteary/yunqi/internal/warmup"
 )
@@ -87,16 +88,24 @@ func TestUsageDrainDefaultImmediatelyCancelsHTTP(t *testing.T) {
 }
 
 func TestExecutorUsageDrainKeepsFinalUsageAndNeverWritesAfterCancel(t *testing.T) {
-	for _, compressed := range []bool{false, true} {
-		t.Run(map[bool]string{false: "plain", true: "gzip"}[compressed], func(t *testing.T) { testExecutorUsageDrainKeepsFinalUsage(t, compressed) })
+	for _, tc := range []struct {
+		name                              string
+		compressed, wrongMime, incomplete bool
+	}{{name: "plain"}, {name: "gzip", compressed: true}, {name: "wrong-mime", wrongMime: true}, {name: "incomplete-zero", incomplete: true}, {name: "gzip-incomplete-zero", compressed: true, incomplete: true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			testExecutorUsageDrainKeepsFinalUsage(t, tc.compressed, tc.wrongMime, tc.incomplete)
+		})
 	}
 }
-func testExecutorUsageDrainKeepsFinalUsage(t *testing.T, compressed bool) {
+func testExecutorUsageDrainKeepsFinalUsage(t *testing.T, compressed, wrongMime, incomplete bool) {
 	final := make(chan struct{})
 	serverClosed := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer close(serverClosed)
 		w.Header().Set("Content-Type", "text/event-stream")
+		if wrongMime {
+			w.Header().Set("Content-Type", "application/json")
+		}
 		var output io.Writer = w
 		var zip *gzip.Writer
 		if compressed {
@@ -115,7 +124,11 @@ func testExecutorUsageDrainKeepsFinalUsage(t *testing.T, compressed bool) {
 		case <-r.Context().Done():
 			return
 		}
-		_, _ = io.WriteString(output, "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":3,\"total_tokens\":10}}\n\ndata: [DONE]\n\n")
+		if incomplete {
+			_, _ = io.WriteString(output, `data: {"choices":[],"usage":{"prompt_tokens":7,"completion_tokens":0,"total_tokens":7}}`+"\n\n")
+		} else {
+			_, _ = io.WriteString(output, "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":3,\"total_tokens\":10}}\n\ndata: [DONE]\n\n")
+		}
 	}))
 	defer server.Close()
 	cm, sched, mm, cleanup := newTestFailoverDependencies(t, config.UpstreamConfig{Name: "drain", BaseURL: server.URL, APIKeys: []string{"test"}, Status: "active", ServiceType: "openai"})
@@ -125,37 +138,58 @@ func testExecutorUsageDrainKeepsFinalUsage(t *testing.T, compressed bool) {
 	defer cancel()
 	raw := []byte(`{"model":"m","stream":true,"max_tokens":16}`)
 	w := httptest.NewRecorder()
-	c, _ := httpbridge.TestContext(w)
-	httpbridge.SetRequest(c, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(raw)).WithContext(client))
 	env := config.NewEnvConfig()
 	env.UsageDrainTimeoutMs = 500
 	env.ServiceContext = context.Background()
-	handled, _, _, _, usage, err := TryUpstreamWithAllKeys(c, env, cm, sched, scheduler.ChannelKindChat, "Chat", mm, up, []warmup.URLLatencyResult{{URL: server.URL}}, raw, nil, true,
-		func(*config.UpstreamConfig, map[string]bool) (string, error) { return "test", nil }, func(c fiber.Ctx, _ *config.UpstreamConfig, _ string) (*http.Request, error) {
-			req, e := http.NewRequestWithContext(httpbridge.Request(c).Context(), http.MethodPost, server.URL+"/v1/chat/completions", bytes.NewReader(raw))
-			if compressed && e == nil {
-				req.Header.Set("Accept-Encoding", "gzip")
-			}
-			return req, e
-		}, func(string) {}, func(string) {}, func(string) {},
-		func(c fiber.Ctx, resp *http.Response, _ *config.UpstreamConfig, _ string, _ []byte) (*types.Usage, error) {
-			defer resp.Body.Close()
-			buffer := make([]byte, 1024)
-			if _, e := resp.Body.Read(buffer); e != nil {
-				return nil, e
-			}
-			cancel()
-			if _, e := httpbridge.Writer(c).Write([]byte("must not write")); !errors.Is(e, context.Canceled) {
-				t.Fatalf("late write allowed: %v", e)
-			}
-			close(final)
-			return nil, client.Err()
-		}, "m", "", 0, nil)
-	if !handled || !errors.Is(err, context.Canceled) || usage == nil || usage.InputTokens != 7 || usage.OutputTokens != 3 || w.Body.Len() != 0 {
+	registry := telemetry.NewRegistry()
+	app := httpbridge.NewApp()
+	app.Use(registry.Middleware())
+	var handled bool
+	var usage *types.Usage
+	var err error
+	app.Post("/v1/chat/completions", func(c fiber.Ctx) error {
+		handled, _, _, _, usage, err = TryUpstreamWithAllKeys(c, env, cm, sched, scheduler.ChannelKindChat, "Chat", mm, up, []warmup.URLLatencyResult{{URL: server.URL}}, raw, nil, true,
+			func(*config.UpstreamConfig, map[string]bool) (string, error) { return "test", nil }, func(c fiber.Ctx, _ *config.UpstreamConfig, _ string) (*http.Request, error) {
+				req, e := http.NewRequestWithContext(httpbridge.Request(c).Context(), http.MethodPost, server.URL+"/v1/chat/completions", bytes.NewReader(raw))
+				if compressed && e == nil {
+					req.Header.Set("Accept-Encoding", "gzip")
+				}
+				return req, e
+			}, func(string) {}, func(string) {}, func(string) {},
+			func(c fiber.Ctx, resp *http.Response, _ *config.UpstreamConfig, _ string, _ []byte) (*types.Usage, error) {
+				defer resp.Body.Close()
+				buffer := make([]byte, 1024)
+				if _, e := resp.Body.Read(buffer); e != nil {
+					return nil, e
+				}
+				cancel()
+				if _, e := httpbridge.Writer(c).Write([]byte("must not write")); !errors.Is(e, context.Canceled) {
+					t.Fatalf("late write allowed: %v", e)
+				}
+				close(final)
+				return nil, client.Err()
+			}, "m", "", 0, nil)
+		return nil
+	})
+	httpbridge.Handler(app).ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(raw)).WithContext(client))
+	wantInput, wantOutput, wantSource := 7, 3, "provider"
+	if incomplete {
+		wantInput = 0
+		wantOutput = 0
+		wantSource = "unknown"
+	}
+	if !handled || !errors.Is(err, context.Canceled) || usage == nil || usage.InputTokens != wantInput || usage.OutputTokens != wantOutput || w.Body.Len() != 0 {
 		t.Fatalf("handled=%v usage=%#v err=%v body=%q", handled, usage, err, w.Body.String())
 	}
-	if usage.Provenance == nil || usage.Provenance.UsageSource != "provider" || !strings.Contains(string(usage.Provenance.RawUsage), "completion_tokens") {
+	if usage.Provenance == nil || usage.Provenance.UsageSource != wantSource || !strings.Contains(string(usage.Provenance.RawUsage), "completion_tokens") {
 		t.Fatalf("raw provenance missing: %#v", usage.Provenance)
+	}
+	diagnostic, ok := registry.LookupDiagnostic(w.Header().Get("X-Yunqi-Request-Id"))
+	if !ok || !diagnostic.Canceled || diagnostic.UsageAfterCancel == nil || diagnostic.UsageAfterCancel.Complete == incomplete || diagnostic.UsageAfterCancel.InputTokens != wantInput || diagnostic.UsageAfterCancel.OutputTokens != wantOutput || diagnostic.UsageAfterCancel.UsageSource != wantSource {
+		t.Fatalf("no-budget canceled usage not queryable: %#v", diagnostic)
+	}
+	if incomplete && (usage.Provenance.Reason != "client_cancel_usage_drain_incomplete" || diagnostic.UsageAfterCancel.Reason != "client_cancel_usage_drain_incomplete") {
+		t.Fatalf("incomplete reason lost: returned=%#v diagnostic=%#v", usage.Provenance, diagnostic.UsageAfterCancel)
 	}
 	<-serverClosed
 }
@@ -291,7 +325,7 @@ func TestUsageDrainFinalUsageWithoutNewlinePreservesZero(t *testing.T) {
 	_, state := prepareUsageDrainRequest(req, &config.EnvConfig{UsageDrainTimeoutMs: 100, ServiceContext: context.Background()}, true, false)
 	defer state.close()
 	cancel()
-	raw := `data: {"choices":[],"usage":{"prompt_tokens":7,"completion_tokens":0}}`
+	raw := `data: {"choices":[{"finish_reason":"stop"}],"usage":{"prompt_tokens":7,"completion_tokens":0}}`
 	body := newUsageDrainBody(&usageCapture{ReadCloser: io.NopCloser(strings.NewReader(raw)), stream: true}, state)
 	usage := body.finalUsage("chat")
 	if usage.InputTokens != 7 || usage.OutputTokens != 0 || usage.Provenance.UsageSource != "provider" || !strings.Contains(string(usage.Provenance.RawUsage), `"completion_tokens":0`) {
@@ -320,5 +354,38 @@ func TestUsageDrainFinishedPumpWithEOFChunkAndSmallReads(t *testing.T) {
 		if actual.String() != expected {
 			t.Fatalf("finished pump truncated small Read: got=%d want=%d", actual.Len(), len(expected))
 		}
+	}
+}
+
+func drainedFixtureUsage(t *testing.T, raw, protocol string) *types.Usage {
+	t.Helper()
+	client, cancel := context.WithCancel(context.Background())
+	req, _ := http.NewRequestWithContext(client, http.MethodPost, "https://example.invalid", strings.NewReader(`{"max_tokens":16}`))
+	_, state := prepareUsageDrainRequest(req, &config.EnvConfig{UsageDrainTimeoutMs: 500, ServiceContext: context.Background()}, true, false)
+	t.Cleanup(state.close)
+	cancel()
+	body := newUsageDrainBody(&usageCapture{ReadCloser: io.NopCloser(strings.NewReader(raw)), stream: true}, state)
+	return body.finalUsage(protocol)
+}
+func TestUsageDrainRequiresSourceTerminalNotInterimZeroOrTransportEOF(t *testing.T) {
+	for _, tc := range []struct{ protocol, raw string }{
+		{"openai", `data: {"choices":[],"usage":{"prompt_tokens":7,"completion_tokens":0}}`},
+		{"responses", `data: {"type":"response.created","response":{"usage":{"input_tokens":7,"output_tokens":0}}}` + "\n\ndata: [DONE]\n\n"},
+		{"claude", `data: {"type":"message_start","message":{"usage":{"input_tokens":7,"output_tokens":0}}}`},
+		{"gemini", `data: {"candidates":[{"finishReason":"FINISH_REASON_UNSPECIFIED"}],"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":0,"totalTokenCount":7}}`},
+	} {
+		t.Run(tc.protocol, func(t *testing.T) {
+			usage := drainedFixtureUsage(t, tc.raw, tc.protocol)
+			if usage.Provenance == nil || usage.Provenance.UsageSource != "unknown" || usage.Provenance.Reason != "client_cancel_usage_drain_incomplete" {
+				t.Fatalf("interim EOF became final: %#v", usage.Provenance)
+			}
+		})
+	}
+}
+func TestUsageDrainClaudeNativeNestedCacheTTL(t *testing.T) {
+	raw := `data: {"type":"message_start","message":{"usage":{"input_tokens":7,"output_tokens":0,"cache_read_input_tokens":4,"cache_creation_input_tokens":11,"cache_creation":{"ephemeral_5m_input_tokens":3,"ephemeral_1h_input_tokens":8}}}}` + "\n\n" + `data: {"type":"message_delta","usage":{"output_tokens":2}}` + "\n\n" + `data: {"type":"message_stop"}` + "\n\n"
+	usage := drainedFixtureUsage(t, raw, "claude")
+	if usage.InputTokens != 7 || usage.OutputTokens != 2 || usage.CacheReadInputTokens != 4 || usage.CacheCreationInputTokens != 11 || usage.CacheCreation5mInputTokens != 3 || usage.CacheCreation1hInputTokens != 8 || usage.CacheTTL != "mixed" || usage.Provenance.UsageSource != "provider" {
+		t.Fatalf("native nested TTL lost: %#v provenance=%#v", usage, usage.Provenance)
 	}
 }

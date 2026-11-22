@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/soulteary/yunqi/internal/config"
-	"github.com/soulteary/yunqi/internal/converters"
 	"github.com/soulteary/yunqi/internal/httpbridge"
+	"github.com/soulteary/yunqi/internal/telemetry"
 	"github.com/soulteary/yunqi/internal/types"
 	"github.com/tidwall/gjson"
 )
@@ -205,6 +205,9 @@ func (b *usageDrainBody) Read(p []byte) (int, error) {
 	}
 }
 func (b *usageDrainBody) consume(chunk usageDrainChunk, p []byte) (int, error) {
+	if err := b.lifetime.client.Err(); err != nil {
+		return 0, err
+	}
 	n := copy(p, chunk.body)
 	b.remainder = chunk.body[n:]
 	if len(b.remainder) > 0 {
@@ -222,24 +225,23 @@ func (b *usageDrainBody) Close() error {
 }
 func (b *usageDrainBody) finalUsage(protocol string) *types.Usage {
 	<-b.done
-	// Flush a final SSE data line even when the upstream omitted its newline.
-	b.capture.annotate(&types.Usage{}, protocol)
-	b.capture.mu.Lock()
-	raw, _ := json.Marshal(b.capture.raw)
-	b.capture.mu.Unlock()
-	var object map[string]interface{}
-	_ = json.Unmarshal(raw, &object)
-	parsed := converters.ExtractUsageMetrics(object)
-	usage := &types.Usage{InputTokens: parsed.InputTokens, OutputTokens: parsed.OutputTokens, CacheCreationInputTokens: parsed.CacheCreationInputTokens, CacheReadInputTokens: parsed.CacheReadInputTokens, CacheCreation5mInputTokens: parsed.CacheCreation5mInputTokens, CacheCreation1hInputTokens: parsed.CacheCreation1hInputTokens, CacheTTL: parsed.CacheTTL}
-	if parsed.InputTokensDetails != nil {
-		usage.CacheReadInputTokens = parsed.InputTokensDetails.CachedTokens
-	}
-	switch protocol {
-	case "openai", "chat", "responses", "copilot":
-		usage.PromptTokensTotal = parsed.InputTokens
+	protocol = terminalProtocol(protocol)
+	// Share the budget capture's strict source-terminal and canonical counter
+	// rules. Transport EOF or interim output=0 alone cannot prove final usage.
+	usage, known := b.capture.billingUsage(protocol)
+	if usage == nil {
+		usage = &types.Usage{}
 	}
 	b.capture.annotate(usage, protocol)
-	if !errors.Is(b.pumpErr, io.EOF) {
+	switch {
+	case usage.CacheCreation5mInputTokens > 0 && usage.CacheCreation1hInputTokens > 0:
+		usage.CacheTTL = "mixed"
+	case usage.CacheCreation1hInputTokens > 0:
+		usage.CacheTTL = "1h"
+	case usage.CacheCreation5mInputTokens > 0:
+		usage.CacheTTL = "5m"
+	}
+	if !known || !errors.Is(b.pumpErr, io.EOF) {
 		usage.Provenance.UsageSource = "unknown"
 		usage.Provenance.Reason = "client_cancel_usage_drain_incomplete"
 	}
@@ -273,4 +275,12 @@ func (w *usageDrainWriter) Flush() {
 	if w.client.Err() == nil {
 		w.ResponseWriter.Flush()
 	}
+}
+
+func recordUsageAfterCancel(ctx context.Context, attemptID string, usage *types.Usage) {
+	if usage == nil {
+		return
+	}
+	p := usage.AccountingProvenance()
+	telemetry.DiagnosticsFromContext(ctx).SetUsageAfterCancel(telemetry.DiagnosticUsageSummary{AttemptID: attemptID, Protocol: p.Protocol, UsageSource: p.UsageSource, Complete: p.UsageSource == "provider", Reason: p.Reason, InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, CacheReadInputTokens: usage.CacheReadInputTokens, CacheCreationInputTokens: usage.CacheCreationInputTokens, CacheCreation5mInputTokens: usage.CacheCreation5mInputTokens, CacheCreation1hInputTokens: usage.CacheCreation1hInputTokens, CacheTTL: usage.CacheTTL})
 }

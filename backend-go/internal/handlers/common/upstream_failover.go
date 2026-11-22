@@ -1929,6 +1929,7 @@ func TryUpstreamWithAllKeys(
 			resp.Body = capture
 			var drainBody *usageDrainBody
 			if drainLifetime != nil && drainSetupErr == nil {
+				capture.stream = true // the request is streaming even if the provider mislabels Content-Type
 				drainBody = newUsageDrainBody(capture, drainLifetime)
 				resp.Body = drainBody
 			}
@@ -1948,8 +1949,10 @@ func TryUpstreamWithAllKeys(
 				httpbridge.SetWriter(c, originalWriter)
 			}
 
-			if drainBody != nil && drainLifetime.client.Err() != nil {
-				usage = drainBody.finalUsage(providers.ActualServiceType(c, upstreamCopy.ServiceType))
+			drainedCancellation := drainBody != nil && drainLifetime.client.Err() != nil
+			if drainedCancellation {
+				usage = drainBody.finalUsage(budgetProtocol(req, requestUpstream))
+				recordUsageAfterCancel(httpbridge.Request(c).Context(), logRequestID, usage)
 				err = drainLifetime.client.Err()
 			} else if drainBody != nil {
 				_ = drainBody.Close()
@@ -1960,7 +1963,9 @@ func TryUpstreamWithAllKeys(
 			if lifecycleTrace.finishFirstContentWait != nil {
 				lifecycleTrace.finishFirstContentWait()
 			}
-			capture.annotate(usage, providers.ActualServiceType(c, upstreamCopy.ServiceType))
+			if !drainedCancellation {
+				capture.annotate(usage, providers.ActualServiceType(c, upstreamCopy.ServiceType))
+			}
 			// 上下文窗口自学习（放宽侧）：2xx 完成即实证该渠道×协议×模型可承载本次输入，
 			// 棘轮只升不降。失败/取消/空响应不学习（err 非 nil 时内部直接返回）。
 			MaybeRecordContextWindowProven(c, apiType, upstreamCopy, executionKind, attemptModel, usage, err)
