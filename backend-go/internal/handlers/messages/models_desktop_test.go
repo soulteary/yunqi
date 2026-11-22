@@ -10,6 +10,7 @@ import (
 
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/httpbridge"
+	"github.com/soulteary/yunqi/internal/scheduler"
 )
 
 func TestModelEntryDesktopWireMetadata(t *testing.T) {
@@ -164,5 +165,23 @@ func TestNormalizeModelEntryDesktopTierPrecedence(t *testing.T) {
 	response := buildModelsResponse([]ModelEntry{{ID: "a", AnthropicFamilyTier: "sonnet"}, {ID: "b", AnthropicFamilyTier: "sonnet", IsFamilyDefault: true}})
 	if !response.Data[0].IsFamilyDefault || response.Data[1].IsFamilyDefault {
 		t.Fatalf("multiple defaults in one tier: %+v", response.Data)
+	}
+}
+
+func TestParseModelsResponseDesktopInputWindow(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		window     int
+		supports1m bool
+	}{
+		{"provider limit below registry", `{"data":[{"id":"claude-sonnet-4-6","context_window":1048576,"max_input_tokens":200000}]}`, 200000, false},
+		{"provider window without a registry entry", `{"data":[{"id":"custom-window-model","max_input_tokens":1048576}]}`, 1048576, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			models := parseModelsResponseForKind([]byte(tc.body), &config.UpstreamConfig{ServiceType: "claude"}, nil, scheduler.ChannelKindMessages)
+			if len(models) != 1 || models[0].ContextWindow != tc.window || models[0].Supports1M != tc.supports1m {
+				t.Fatalf("unexpected provider window metadata: %+v", models)
+			}
+		})
 	}
 }
