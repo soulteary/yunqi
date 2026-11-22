@@ -41,21 +41,22 @@ type DiagnosticAttempt struct {
 	DurationMs        int64  `json:"durationMs"`
 }
 type RequestDiagnostic struct {
-	ID                string              `json:"id"`
-	CorrelationID     string              `json:"correlationId,omitempty"`
-	OTLPTraceID       string              `json:"otlpTraceId,omitempty"`
-	AutopilotTraceUID string              `json:"autopilotTraceUid,omitempty"`
-	Endpoint          string              `json:"endpoint"`
-	StartedAt         time.Time           `json:"startedAt"`
-	StatusCode        int                 `json:"statusCode"`
-	TerminalOutcome   string              `json:"terminalOutcome,omitempty"`
-	Completed         bool                `json:"completed"`
-	Canceled          bool                `json:"canceled"`
-	Attempts          []DiagnosticAttempt `json:"attempts"`
-	Events            []DiagnosticEvent   `json:"events"`
-	DroppedAttempts   int                 `json:"droppedAttempts"`
-	DroppedEvents     int                 `json:"droppedEvents"`
-	PhaseTiming       *PhaseSnapshot      `json:"phaseTiming,omitempty"`
+	UsageAfterCancel  *DiagnosticUsageSummary `json:"usageAfterCancel,omitempty"`
+	ID                string                  `json:"id"`
+	CorrelationID     string                  `json:"correlationId,omitempty"`
+	OTLPTraceID       string                  `json:"otlpTraceId,omitempty"`
+	AutopilotTraceUID string                  `json:"autopilotTraceUid,omitempty"`
+	Endpoint          string                  `json:"endpoint"`
+	StartedAt         time.Time               `json:"startedAt"`
+	StatusCode        int                     `json:"statusCode"`
+	TerminalOutcome   string                  `json:"terminalOutcome,omitempty"`
+	Completed         bool                    `json:"completed"`
+	Canceled          bool                    `json:"canceled"`
+	Attempts          []DiagnosticAttempt     `json:"attempts"`
+	Events            []DiagnosticEvent       `json:"events"`
+	DroppedAttempts   int                     `json:"droppedAttempts"`
+	DroppedEvents     int                     `json:"droppedEvents"`
+	PhaseTiming       *PhaseSnapshot          `json:"phaseTiming,omitempty"`
 }
 type Diagnostics struct {
 	mu     sync.Mutex
@@ -214,6 +215,10 @@ func (d *Diagnostics) Snapshot() RequestDiagnostic {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	v := d.data
+	if v.UsageAfterCancel != nil {
+		summary := *v.UsageAfterCancel
+		v.UsageAfterCancel = &summary
+	}
 	v.Attempts = append([]DiagnosticAttempt{}, v.Attempts...)
 	v.Events = append([]DiagnosticEvent{}, v.Events...)
 	v.PhaseTiming = d.timing.Snapshot()

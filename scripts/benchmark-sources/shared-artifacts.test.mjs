@@ -110,6 +110,7 @@ test('CLI returns nonzero for stale artifacts without modifying or repairing the
   const rootDir = fixture(t)
   cpSync(join(repoRoot, 'scripts/generate-preset-manifest.mjs'), join(rootDir, 'scripts/generate-preset-manifest.mjs'), { recursive: true })
   cpSync(join(repoRoot, 'scripts/generate-channel-presets.mjs'), join(rootDir, 'scripts/generate-channel-presets.mjs'))
+  cpSync(join(repoRoot, 'scripts/preset-signing.mjs'), join(rootDir, 'scripts/preset-signing.mjs'))
   const command = join(rootDir, 'scripts/generate-preset-manifest.mjs')
   assert.equal(spawnSync(process.execPath, [command], { encoding: 'utf8' }).status, 0)
   assert.equal(spawnSync(process.execPath, [command, '--check'], { encoding: 'utf8' }).status, 0)

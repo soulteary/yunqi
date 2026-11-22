@@ -1,3 +1,4 @@
+import type { PriceReviewResponse } from '../types/price-review'
 import type { NetworkInterface, NetworkDiagnosis, OutboundNetworkConfig } from '../types/network'
 import type { ApiClient } from './client'
 import type { PresetBundle, ProviderTemplatesResponse } from '../types/presets'
@@ -11,6 +12,10 @@ import type {
 
 export function createSystemApi(client: ApiClient) {
   return {
+    async getPriceReview(): Promise<PriceReviewResponse> { return client.request('/presets/prices') },
+    async checkPresetPrices(): Promise<PriceReviewResponse> { return client.request('/presets/prices/check', { method: 'POST' }, 60000) },
+    async approvePresetPrices(reviewId: string, allowAnomalies: boolean): Promise<PriceReviewResponse> { return client.request('/presets/prices/approve', { method: 'POST', body: JSON.stringify({ reviewId, allowAnomalies }) }) },
+    async rollbackPresetPrices(bundleHash: string): Promise<PriceReviewResponse> { return client.request('/presets/prices/rollback', { method: 'POST', body: JSON.stringify({ bundleHash }) }) },
     async getNetworkInterfaces(): Promise<{ interfaces: NetworkInterface[] }> {
       return client.request('/network/interfaces')
     },

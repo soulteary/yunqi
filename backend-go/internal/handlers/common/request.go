@@ -357,7 +357,7 @@ func SendRequestWithLifecycleTrace(req *http.Request, upstream *config.UpstreamC
 	if attempt != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		// Normalize before the billing observer so explicit compression is captured
 		// as provider JSON/SSE. The utility is idempotent for protocol handlers.
-		if decodeErr := utils.DecompressResponseBodyIfNeeded(resp); decodeErr != nil {
+		if decodeErr := prepareDecodedUsageResponse(resp); decodeErr != nil {
 			_ = resp.Body.Close()
 			_ = attempt.Complete(nil, "response_decompression_failed")
 			binding.Close()
@@ -365,7 +365,9 @@ func SendRequestWithLifecycleTrace(req *http.Request, upstream *config.UpstreamC
 		}
 	}
 	if attempt != nil {
-		capture := &usageCapture{ReadCloser: resp.Body, stream: strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream"), raw: make(map[string]json.RawMessage)}
+		// MIME cannot downgrade a streaming request. Keep the stricter SSE
+		// mode for existing non-stream clients bridged to an SSE upstream.
+		capture := &usageCapture{ReadCloser: resp.Body, stream: isStream || strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream"), raw: make(map[string]json.RawMessage)}
 		resp.Body = &budgetResponseBody{capture: capture, attempt: attempt, pricing: pricing, protocol: protocol, status: resp.StatusCode}
 	}
 	resp.Body = requestscope.WrapBody(req.Context(), resp.Body, binding)

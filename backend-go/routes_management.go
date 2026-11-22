@@ -48,6 +48,10 @@ func (a *application) registerManagementRoutes(apiGroup fiber.Router) {
 	// 预置数据（订阅来源分类等），前端表单选项来源；独立于 autopilot 开关。
 	apiGroup.Get("/presets", presetstore.Handler(presetstore.Default()))
 	apiGroup.Get("/presets/status", presetstore.StatusHandler(a.presetUpdater))
+	apiGroup.Get("/presets/prices", handlers.PriceReview(a.presetUpdater, "state"))
+	apiGroup.Post("/presets/prices/check", handlers.PriceReview(a.presetUpdater, "check"))
+	apiGroup.Post("/presets/prices/approve", handlers.PriceReview(a.presetUpdater, "approve"))
+	apiGroup.Post("/presets/prices/rollback", handlers.PriceReview(a.presetUpdater, "rollback"))
 
 	// 配额真相快照：全部渠道的来源分级/headroom/窗口重置时间/饱和状态。
 	// autopilot 关闭时 quotaManager 为 nil，返回空列表（fail-open）。

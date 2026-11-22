@@ -1,0 +1,18 @@
+{
+  "publicKey": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=",
+  "index": {
+    "schemaVersion": 1,
+    "dataVersion": "test-20261122",
+    "publishedAt": "2026-11-22T00:00:00.100Z",
+    "shards": [
+      {
+        "kind": "modelRegistry",
+        "url": "./models?variant=a&b=<tag>",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "sizeBytes": 42
+      }
+    ],
+    "signingKeyId": "test-release",
+    "signature": "k0tvZtc5lIEp2IOtfKi2oojUlbL3Zl3xAjFgOr03PxiCcNazCwe7W3VLgajVB7XbgJSQc6Bg7H1Bq/WdvcQACQ=="
+  }
+}

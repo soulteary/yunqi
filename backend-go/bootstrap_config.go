@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"log"
+	"net/url"
 	"os"
 	"time"
 
@@ -159,7 +160,12 @@ func (a *application) initConversations() {
 }
 
 func initializeCredentialRedaction(env *config.EnvConfig) func() {
-	keys := []string{env.ProxyAccessKey, env.GetAdminAccessKey(), env.IdentityProxySecret}
+	keys := []string{env.ProxyAccessKey, env.GetAdminAccessKey(), env.IdentityProxySecret, env.ProxyRedisURL}
+	if parsed, err := url.Parse(env.ProxyRedisURL); err == nil && parsed.User != nil {
+		if password, ok := parsed.User.Password(); ok {
+			keys = append(keys, password)
+		}
+	}
 	keys = append(keys, env.ExtraProxyAccessKeys...)
 	if secret := os.Getenv("IDENTITY_PROXY_SECRET"); secret != "" {
 		keys = append(keys, secret)

@@ -1346,11 +1346,18 @@ func TryUpstreamWithAllKeys(
 					apiType, executionIndex, upstream.Name, executionAPIType, currentBaseURL,
 					model, actualAttemptModel, mappingNote, utils.MaskAPIKey(apiKey))
 			}
+			req, drainLifetime := prepareUsageDrainRequest(req, envCfg, isStream, gateFromContext(c) != nil)
+			if drainLifetime != nil {
+				defer drainLifetime.close()
+			}
 			resp, err := SendRequestWithLifecycleTrace(req, requestUpstream, envCfg, isStream, apiType, lifecycleTrace)
 			if resp != nil {
 				channelLogStore.Update(metricsKey, logRequestID, func(log *metrics.ChannelLog) { log.UpstreamRequestID = diagnosticUpstreamRequestID(resp.Header) })
 			}
 			if err != nil {
+				if drainLifetime != nil {
+					drainLifetime.close()
+				}
 				lastError = err
 				if isEntryBudgetError(err) {
 					channelLogStore.Update(metricsKey, logRequestID, func(log *metrics.ChannelLog) { log.ErrorSource = "gateway" })
@@ -1359,7 +1366,7 @@ func TryUpstreamWithAllKeys(
 						metricsManager.RecordRequestFinalizeIgnored(currentBaseURL, apiKey, metricsServiceType, requestID)
 					})
 					channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, metricsServiceType, executionKind)
-					CompleteLog(channelLogStore, metricsKey, logRequestID, 0, false, "entry budget rejected", isRetryAttempt)
+					CompleteLog(channelLogStore, metricsKey, logRequestID, 0, false, "entry admission rejected", isRetryAttempt)
 					return false, "", 0, nil, nil, err
 				}
 				// 竞速败出：被赢家取消（SendRequest 阶段），不计失败不 failover。
@@ -1913,12 +1920,41 @@ func TryUpstreamWithAllKeys(
 			// 竞速场景分支响应头经分支 writer 隔离（racingBranchWriter），无并发写
 			// 竞争；claim 败者的头随 Discard 丢弃，不会并入真实客户端 writer。
 			writeEchoMappingHeaders(c, cfgManager, appliedMappedModel, actualAttemptModel, model)
-			capture := &usageCapture{ReadCloser: resp.Body, stream: strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream")}
+
+			// Capture decoded provider usage even when post-cancel drain is disabled.
+			// The helper clears encoding metadata, so handler decompression stays idempotent.
+			compressionSetupErr := prepareDecodedUsageResponse(resp)
+			capture := &usageCapture{ReadCloser: resp.Body, stream: isStream || strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream")}
 			resp.Body = capture
-			if isStream {
+			var drainBody *usageDrainBody
+			if drainLifetime != nil && compressionSetupErr == nil {
+				capture.stream = true // the request is streaming even if the provider mislabels Content-Type
+				drainBody = newUsageDrainBody(capture, drainLifetime)
+				resp.Body = drainBody
+			}
+			originalWriter := httpbridge.Writer(c)
+			if drainBody != nil {
+				httpbridge.SetWriter(c, &usageDrainWriter{ResponseWriter: originalWriter, client: drainLifetime.client})
+			}
+			if compressionSetupErr != nil {
+				usage = nil
+				err = fmt.Errorf("%w: invalid upstream compression", ErrInvalidResponseBody)
+			} else if isStream {
 				usage, err = withStreamTerminalGuard(c, resp, providers.ActualServiceType(c, upstreamCopy.ServiceType), apiType, func() (*types.Usage, error) { return handleSuccess(c, resp, upstreamCopy, apiKey, attemptBody) })
 			} else {
 				usage, err = handleSuccess(c, resp, upstreamCopy, apiKey, attemptBody)
+			}
+			if drainBody != nil {
+				httpbridge.SetWriter(c, originalWriter)
+			}
+
+			drainedCancellation := drainBody != nil && drainLifetime.client.Err() != nil
+			if drainedCancellation {
+				usage = drainBody.finalUsage(budgetProtocol(req, requestUpstream))
+				recordUsageAfterCancel(httpbridge.Request(c).Context(), logRequestID, usage)
+				err = drainLifetime.client.Err()
+			} else if drainBody != nil {
+				_ = drainBody.Close()
 			}
 			if err != nil {
 				channelLogStore.Update(metricsKey, logRequestID, func(log *metrics.ChannelLog) { log.ErrorSource = diagnosticStreamErrorSource(err) })
@@ -1926,7 +1962,9 @@ func TryUpstreamWithAllKeys(
 			if lifecycleTrace.finishFirstContentWait != nil {
 				lifecycleTrace.finishFirstContentWait()
 			}
-			capture.annotate(usage, providers.ActualServiceType(c, upstreamCopy.ServiceType))
+			if !drainedCancellation {
+				capture.annotate(usage, providers.ActualServiceType(c, upstreamCopy.ServiceType))
+			}
 			// 上下文窗口自学习（放宽侧）：2xx 完成即实证该渠道×协议×模型可承载本次输入，
 			// 棘轮只升不降。失败/取消/空响应不学习（err 非 nil 时内部直接返回）。
 			MaybeRecordContextWindowProven(c, apiType, upstreamCopy, executionKind, attemptModel, usage, err)
@@ -1986,18 +2024,18 @@ func TryUpstreamWithAllKeys(
 					// Handled=false：外层竞速编排据闸门赢家返回实际服务分支的结果。
 					return false, "", 0, nil, usage, err
 				}
+				if isStream && streamingUserID != "" {
+					channelScheduler.UpdateConversationStatus(kind, streamingUserID, "active")
+				}
 				if cause := budgetScopeCause(httpbridge.Request(c).Context()); cause != nil {
 					measureRequestFinalize(c, func() {
 						metricsManager.RecordRequestFinalizeIgnored(currentBaseURL, apiKey, metricsServiceType, requestID)
 					})
 					channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, metricsServiceType, executionKind)
 					channelLogStore.Update(metricsKey, logRequestID, func(log *metrics.ChannelLog) { log.ErrorSource = "gateway" })
-					CompleteLog(channelLogStore, metricsKey, logRequestID, 0, false, "entry budget resource expired", isRetryAttempt)
+					CompleteLog(channelLogStore, metricsKey, logRequestID, 0, false, "entry admission resource expired", isRetryAttempt)
 					HandleEntryBudgetError(c, cause)
 					return true, "", 0, nil, usage, cause
-				}
-				if isStream && streamingUserID != "" {
-					channelScheduler.UpdateConversationStatus(kind, streamingUserID, "active")
 				}
 				lastError = err
 				// 区分客户端错误和渠道故障；errors.As 匹配 rejected，防止未来
