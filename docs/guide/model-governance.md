@@ -66,7 +66,7 @@
 GET /api/channels/:uid/model-import?protocol=chat
 ```
 
-返回 `channelUid`、`revision`、`state`、`unrestrictedOnRemove`，同时返回 `ETag`，不包含供应商地址和密钥。`state` 包含策略、已批准目录、待审记录及有界审核历史。`unrestrictedOnRemove` 表示移除策略是否会恢复不限模型的旧行为。
+返回 `channelUid`、`revision`、`configured`、`state`、`unrestrictedOnRemove`，同时返回 `ETag`，不包含供应商地址和密钥。`configured` 表示该渠道是否已经持久化治理策略；为 `false` 时须先保存草稿，再从审核面板启动发现。`state` 包含策略、已批准目录、待审记录及有界审核历史。`unrestrictedOnRemove` 表示移除策略是否会恢复不限模型的旧行为。
 
 ### 保存完整策略
 

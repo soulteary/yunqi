@@ -10,12 +10,12 @@
 | --- | --- | --- | --- |
 | 01 状态恢复 | 配置备份不包含完整账本、SQLite WAL 和价格安全状态 | 双目录排他锁、完整本地状态冷备、逐文件校验、数据库完整性验证、新目录恢复 | [#99](https://github.com/soulteary/yunqi/pull/99) 已合并；外部 Redis/IdP 仍须协调快照，不会自动重载部署 |
 | 02 共享预算 | 各节点独立 SQLite 无法约束团队总预算 | Redis 原子预留/结算、精确整数金额、逐尝试价格与 usage、不变账单归档、已有本地余额切换保护 | [#102](https://github.com/soulteary/yunqi/pull/102) 已合并；后续一致性修复 [#104](https://github.com/soulteary/yunqi/pull/104) 也已合并；默认仍为本地账本 |
-| 03 原生身份 | OIDC 登录和 MFA/Passkey 全部依赖外置代理 | Yunqi 原生 AuthCode + PKCE、服务端会话、AMR/ACR 强度校验、角色范围和共享撤销 | [#100](https://github.com/soulteary/yunqi/pull/100) 已合并；原生登录使用 `/access` 安全门户，Vue 管理页仍使用管理凭证；MFA/Passkey 由 IdP 执行，可信代理继续可用 |
+| 03 原生身份 | 缺少原生 OIDC 登录及服务端会话，认证强度依赖可信代理断言 | Yunqi 原生 AuthCode + PKCE、服务端会话、AMR/ACR 强度校验、角色范围和共享撤销 | [#100](https://github.com/soulteary/yunqi/pull/100) 已合并；原生登录使用 `/access` 安全门户，Vue 管理页仍使用管理凭证；MFA/Passkey 由 IdP 执行，可信代理继续可用 |
 | 04 共享路由 | 渠道限额与严格会话绑定各节点独立 | 共享显式渠道 RPM/并发、发送前原子会话绑定、活跃 Body 续租、状态丢失拒绝放行 | [#101](https://github.com/soulteary/yunqi/pull/101) 已合并；Key/Quota 与发现值保留本地保护，不复制 Responses 完整历史 |
 | 05 路由评估 | 缺少固定样本下的质量、成本和延迟对照 | 独立质量标签与实际成本、分层门槛、P95、平均重试、持久化证据与内容摘要重放 | [#103](https://github.com/soulteary/yunqi/pull/103) 已合并；只进入人工复审，不自动改变在线策略 |
 | 06 主体成本 | Key 轮换后难以统一长期成本归因 | 稳定主体与凭证身份分域、持久化归因、模型/Key/请求下钻及 CSV 对齐 | [#106](https://github.com/soulteary/yunqi/pull/106) 已合并；旧记录保留 unknown，不从脱敏 Key 猜测归属 |
-| 07 模型治理 | 模型发现、导入纳入规则、名称映射与端点信息未形成统一审核流程 | 渠道级导入策略、规范化、差异预览与审核应用、统一 endpoint 元数据 | [#107](https://github.com/soulteary/yunqi/pull/107) 验证中；以实际接入的协议与探测证据为准 |
-| 08 统一审计 | 不同管理模块各自审计，配置变更缺少统一 actor 与操作关联 | 显式 actor/operationId、配置与成功审计原子保存、请求意图/结果和有界查询 | [#105](https://github.com/soulteary/yunqi/pull/105) 验证中；历史与字段差异脱敏，不把 HTTP 接受等同于后台任务完成 |
+| 07 模型治理 | 模型发现、导入纳入规则、名称映射与端点信息未形成统一审核流程 | 渠道级导入策略、规范化、差异预览与审核应用、统一 endpoint 元数据 | [#107](https://github.com/soulteary/yunqi/pull/107) 已合并；以实际接入的协议与探测证据为准 |
+| 08 统一审计 | 不同管理模块各自审计，配置变更缺少统一 actor 与操作关联 | 显式 actor/operationId、配置与成功审计原子保存、请求意图/结果和有界查询 | [#105](https://github.com/soulteary/yunqi/pull/105) 已合并；历史与字段差异脱敏，不把 HTTP 接受等同于后台任务完成 |
 
 ## 问题修正
 
@@ -40,28 +40,37 @@
 | 重试均值误命名为比例 | 每请求多次重试时指标可超过 1，含义不清 | 使用 meanRetries，覆盖平均 1.5 次与重试请求占比 0.5 的区别 | 05 / #103 |
 | 新 API 未纳入路由契约清单 | 完整 CI 无法确认路由表兼容 | 显式更新三条评估路由，验证生产 Web/API 与开发模式 | 05 / #103 |
 | 成本记录缺少模型或价格为 NULL | 未知计量可能被误当作已知零成本，汇总完整性失真 | 保留 unknown 归因和 partial 状态；覆盖缺失模型、NULL 价格及不完整计量，避免把未知金额计作完整成本 | 06 / #106 |
-| 成本下钻与导出的截止时间不一致 | 同一筛选条件下分页、汇总与 CSV 可能包含不同记录 | 统一 `until` 时间边界，验证请求下钻、汇总和导出使用相同截止口径 | 06 / #106 |
+| 成本汇总声明的截止时间与 SQL 不一致 | 未来时间记录进入汇总，却不在返回的历史范围内 | 每次报告请求开始时冻结 `until`，汇总与定价明细同时限制上界；覆盖未来记录，不承诺跨查询数据库快照 | 06 / #106 |
 | 模型发现使自己的草稿审核过期 | 未启用草稿仍自动写白名单，或 staging 后学习指纹，改变同轮审核的源版本 | 保存治理策略后发现只生成待审目录，暂停同轮自动白名单、指纹与新协议写入；首次草稿发现可批准，外部并发修改仍返回 409；显式移除策略恢复旧自动行为 | 07 / #107 |
 | 模型别名、报价与实际执行身份不一致 | 精确审核别名可能被家族映射替换，或借用其他模型的价格与窗口 | 精确别名优先，虚拟/联邦模型最终 raw ID 必须在审核目录；真实 HTTP、报价原始价格、图片 multipart、向量与 Gemini URI 回归 | 07 / #107 |
-| 统一审计回滚重复执行撤销 | 中心回滚与调用方撤销叠加，可能破坏恢复后的配置 | 明确中心回滚的唯一职责，覆盖失败保存及重复 undo 边界；提交与完整 CI 待最终整合记录 | 08 / #105 |
-| 审计保留窗口未识别旧游标 | 早于保留下限的 cursor 可能被当作连续历史查询，掩盖已裁剪记录 | 校验 retention floor 与旧 cursor 边界，明确历史已裁剪；提交与完整 CI 待最终整合记录 | 08 / #105 |
-| 外部 ACL 变更混入仅审计写盘 | audit-only 保存可能将外部权限变化一并写回运行配置 | 为仅追加审计的持久化增加外部 ACL 变化 guard，拒绝夹带权限改动；提交与完整 CI 待最终整合记录 | 08 / #105 |
+| 别名覆盖显式上下文溢出重定向 | 调度已选择大窗口，执行时却改回原小窗口模型 | 区分普通别名与显式溢出重定向，保留且校验已批准的最终执行模型 | 07 / #107 |
+| 未保存治理策略就从审核面板启动发现 | 默认空表单未标为修改，发现可能沿用自动写配置的旧流程 | 读取状态返回 `configured`，未持久化策略时要求先保存草稿；界面按钮回归 | 07 / #107 |
+| 旧发现路径漏用治理保护 | staging 错误被忽略，仍自动启用协议并报告成功 | 旧路径与正常路径使用相同错误处理和治理保护，覆盖发现期间外部配置变化 | 07 / #107 |
+| 探测期间启用治理后旧任务仍自动写配置 | 启动快照无策略，结束时会按旧行为覆盖刚保存的草稿边界 | 自动发现写入在配置锁内验证源版本、当前治理状态与目标身份；过期结果拒绝发布，不盲目刷新版本 | 07 / #107 |
+| 隔离 Redis 测试只等 socket 文件出现 | Redis 尚不能处理命令就发布端口，预算初始化回归偶发 EOF | 私有 socket 必须返回真实 PONG，检测总超时和子进程退出，失败输出私有日志；确定性旧行为失败，真实双节点预算与就绪用例连续 20 轮通过；不重试生产账本写事务 | 验证补充 / #108 |
+| 统一审计回滚重复执行撤销 | 中心回滚与调用方撤销叠加，可能破坏恢复后的配置 | 移除依赖修改后列表的增量 undo，使用完整快照恢复；覆盖首个及已有逻辑渠道创建、更新、删除失败，失败事务不发布配置或成功审计 | 08 / #105 |
+| 审计保留窗口未识别旧游标 | 早于保留下限的 cursor 可能被当作连续历史查询，掩盖已裁剪记录 | 在游标中保留首屏 retention floor，覆盖记录部分淘汰、全部淘汰及旧版本缺少该字段；过期 cursor 返回 409，要求重新获取历史 | 08 / #105 |
+| 仅审计写盘吞掉待重载的外部 ACL 变化 | 未发布的业务编辑被误标为本次自身写盘，运行时权限仍旧 | 比较磁盘原始业务文档与已发布摘要，有待重载改动时拒绝 audit-only 写盘；未知字段及大整数差异也参与 guard，覆盖外部 ACL 待重载和正常连续自身写入 | 08 / #105 |
+| 账号事务 helper 提取丢失 HTTP actor | 本轮模型与审计合流后，HTTP 管理变更可能被误记为后台 system | HTTP 入口显式转交审计上下文到锁内 helper，发现入口使用独立 system 包装；验证账号写入、单渠道发现写入及操作身份不串用；这是本轮合流问题 | 08 补充 / #105 |
 
 ## 分批提交与验证
 
-表中只列本轮功能与修复提交；同步 main 的 merge 提交保留在对应 PR 的完整提交列表中，不重复当作新功能。未合并批次的最终提交、CI 和状态会在本轮完成后补齐。
+表中只列本轮功能与修复提交；同步 main 的 merge 提交保留在对应 PR 的完整提交列表中，不重复当作新功能。本轮各功能批次均已通过完整 CI 并合并；验证所用 head 与 main 合并提交同时保留，方便追溯合流结果。
 
 | 批次 | 功能与修复 commit | 本项目 PR | 回归与完整 CI |
 | --- | --- | --- | --- |
 | 01 | [23dc804](https://github.com/soulteary/yunqi/commit/23dc804ac8694a8494932c16f21471e417b29b49)：冷备与隔离恢复；[7a6977c](https://github.com/soulteary/yunqi/commit/7a6977c655da3588ec0fd384e3e04973651cac74)：相对路径与锁别名 | [#99 commits](https://github.com/soulteary/yunqi/pull/99/commits) | WAL、split paths、损坏、穿越、活动目录拒绝通过；[完整 Verify](https://github.com/soulteary/yunqi/actions/runs/44992303383) 通过 |
 | 02 | [74899dc](https://github.com/soulteary/yunqi/commit/74899dcc528b6d94f3c1a036c4a8185cefec29a9)：共享账本；[c854f17](https://github.com/soulteary/yunqi/commit/c854f17c8f3f632dad48edaa195c152432041518)：增量初始化扫描 | [#102 commits](https://github.com/soulteary/yunqi/pull/102/commits) | 真实 Redis 双节点预算、逐尝试结算、大整数、归档与状态丢失通过；[完整 Verify](https://github.com/soulteary/yunqi/actions/runs/44993310368) 通过；后续并发修复单独记录 |
 | 02 补充 | [697d4b9](https://github.com/soulteary/yunqi/commit/697d4b934d023e068f4066fc005aa71bffeb4c59)：WATCH 读取一致性、提交前取消及有界抖动 | [#104 commits](https://github.com/soulteary/yunqi/pull/104/commits) | 首次/已初始化主体各 20 并发、各 20 轮；两种确定性竞态、父取消/短 deadline、独立结算通过；[完整 Verify](https://github.com/soulteary/yunqi/actions/runs/44996353737) 通过 |
+| 验证补充 | [e5ce139](https://github.com/soulteary/yunqi/commit/e5ce1396752c511de993d7358c255d10b0b3b4ac)：隔离 Redis 协议就绪检测 | [#108 commits](https://github.com/soulteary/yunqi/pull/108/commits) | 旧 Stat 条件确定性失败；两项就绪用例与真实双 HTTP 节点预算连续 20 轮通过；[完整 Verify](https://github.com/soulteary/yunqi/actions/runs/45002955274) 通过；[d595cd3](https://github.com/soulteary/yunqi/commit/d595cd3972af9913c6a3993a2a9903f097ad04aa) 已合并 |
 | 03 | [5885e2e](https://github.com/soulteary/yunqi/commit/5885e2e00e41b5b00275afb97af142c37bc31485)：原生 OIDC；[10adfe3](https://github.com/soulteary/yunqi/commit/10adfe30b217a75e7ebbbff16e989f48e5579ee1)：匿名流程容量；[2edd44f](https://github.com/soulteary/yunqi/commit/2edd44f14c2ff1f132901862f1ab970f786ba421)：撤销生命周期 | [#100 commits](https://github.com/soulteary/yunqi/pull/100/commits) | fake TLS IdP、跨节点会话、重放、策略收紧、退出与容量回归通过；[完整 Verify](https://github.com/soulteary/yunqi/actions/runs/44996929484) 通过 |
 | 04 | [ef3c3be](https://github.com/soulteary/yunqi/commit/ef3c3be96c1ea680457a7d3e303ebcdfa2fae478)：共享路由；[9decc76](https://github.com/soulteary/yunqi/commit/9decc760e2667e3b06e32ae66eba0ff12454af5b)：RPM 单一所有权 | [#101 commits](https://github.com/soulteary/yunqi/pull/101/commits) | 真实 Redis 独立节点、首次原子绑定、断连/续租、状态丢失及容量恢复通过；[完整 Verify](https://github.com/soulteary/yunqi/actions/runs/44994509959) 通过 |
 | 05 | [eaa01b2](https://github.com/soulteary/yunqi/commit/eaa01b2695a95831acdef9b2cb2821b325096266)：固定样本评估；[56a658a](https://github.com/soulteary/yunqi/commit/56a658a0ca1d21c6246f6c17e24db0c713a0f693)：路由契约清单 | [#103 commits](https://github.com/soulteary/yunqi/pull/103/commits) | 分层、未知计量、重放、权限、持久化和 HTTP 保存导出通过；预算并发问题单列 #104 修复；[完整 Verify](https://github.com/soulteary/yunqi/actions/runs/44997667250) 通过 |
 | 06 | [ac53904](https://github.com/soulteary/yunqi/commit/ac53904088e510386884fd82bf68b67c08dac0fa)：稳定主体成本归因、下钻与未知计量边界 | [#106 commits](https://github.com/soulteary/yunqi/pull/106/commits) | 轮换归因、模型/Key/请求下钻、NULL 价格与 partial、`until` 和 CSV 对齐回归；[完整 Verify](https://github.com/soulteary/yunqi/actions/runs/44999683781) 通过并合并 |
-| 07 | [db29751](https://github.com/soulteary/yunqi/commit/db29751d424eea2c9bc3c1a42d51865a29478f9d)：目录审核与原始执行身份；[2d9ebb8](https://github.com/soulteary/yunqi/commit/2d9ebb83cf0324a5ecb6ec474bff7ee3c400eced)：安全退出治理；[5c5d4f9](https://github.com/soulteary/yunqi/commit/5c5d4f945498ee66eb199a2879991dd8f4be1fef)：独立管理面板 | [#107 commits](https://github.com/soulteary/yunqi/pull/107/commits) | 本地目录版本、真实 HTTP/raw ID、模型缓存、报价、媒体构造、权限与 UI 竞态回归通过；PR 完整 CI 验证中 |
-| 08 | 最终审计整合提交待定 | [#105 commits](https://github.com/soulteary/yunqi/pull/105/commits) | 中心 rollback、保留下限、外部 ACL guard 及模型四项 mutator 的最终提交和完整 CI 待定 |
+| 07 | [db29751](https://github.com/soulteary/yunqi/commit/db29751d424eea2c9bc3c1a42d51865a29478f9d)：目录审核与原始执行身份；[2d9ebb8](https://github.com/soulteary/yunqi/commit/2d9ebb83cf0324a5ecb6ec474bff7ee3c400eced)：安全退出治理；[5c5d4f9](https://github.com/soulteary/yunqi/commit/5c5d4f945498ee66eb199a2879991dd8f4be1fef)：独立管理面板 | [#107 commits](https://github.com/soulteary/yunqi/pull/107/commits) | 目录版本、真实 HTTP/raw ID、模型缓存、报价、媒体构造、权限与 UI 竞态回归通过；最终 head [7cfc825](https://github.com/soulteary/yunqi/commit/7cfc825436da1520e43abd6288468c974583fbb2) 的[完整 Verify](https://github.com/soulteary/yunqi/actions/runs/45002978965) 通过；[837e158](https://github.com/soulteary/yunqi/commit/837e158d93d5c3e45d4d96a511156f91eb62d80d) 已合并 |
+| 07 补充 | [e95a52d](https://github.com/soulteary/yunqi/commit/e95a52d3bec7a97df2d72ec7b9e0050b2604d8e0)：溢出模型、持久化草稿、旧发现路径及锁内版本保护 | [#107 commits](https://github.com/soulteary/yunqi/pull/107/commits) | 四类问题均先复现失败；config、autopilot、真实执行回归及 22 项前端测试通过，旧发现测试使用真实加载后的完整快照；随最终 head 的[完整 Verify](https://github.com/soulteary/yunqi/actions/runs/45002978965) 通过并合并 |
+| 08 | [1066644](https://github.com/soulteary/yunqi/commit/10666445f127a049fb0db85f269a54d1688f5884)：原子配置历史；[644f1ea](https://github.com/soulteary/yunqi/commit/644f1ea46c6e0c399dcca77336981cf203b8b001)：HTTP 主体、查询及领域关联；[28956f3](https://github.com/soulteary/yunqi/commit/28956f3c80ff6f7db2ead86b82315ec20048339b)：审计契约；[d640277](https://github.com/soulteary/yunqi/commit/d640277e687232d98277aab8d7823bfca8c6eee2)：回滚与冻结保留下界；[f508d12](https://github.com/soulteary/yunqi/commit/f508d1219caf3b664e6c6544e981a1d88fbff5ea)：模型四事务审计 | [#105 commits](https://github.com/soulteary/yunqi/pull/105/commits) | 原子回滚、保留窗口部分/全部淘汰及旧游标、外部 ACL guard、模型四项事务（策略、预览、批准、移除）的 actor/system 隔离和真实 HTTP 三阶段回归通过；最终 head [85ed887](https://github.com/soulteary/yunqi/commit/85ed887bc85bf4de1a85317ba37da1b9b5b9778d) 的[完整 Verify](https://github.com/soulteary/yunqi/actions/runs/45003020851) 通过；[8c64425](https://github.com/soulteary/yunqi/commit/8c64425d6580caa8876e6a08af37e251d7ba388f) 已合并 |
+| 08 补充 | [914b19c](https://github.com/soulteary/yunqi/commit/914b19cb82485f1b20088fcf2ab3528b477d7a18)：账户 HTTP actor 与发现 system helper 分离 | [#105 commits](https://github.com/soulteary/yunqi/pull/105/commits) | 修复本轮 helper 提取的身份合流问题，账号事务保留显式管理主体，账号及单渠道自动发现维持 system；回归通过，随[完整 Verify](https://github.com/soulteary/yunqi/actions/runs/45003020851) 通过并合并 |
 
 所有功能提交的正文使用完整的 `https://github.com/<owner>/<repo>/issues/<id>` 或 `/pull/<id>` 链接并保留编号。参考外部项目时用 `Refs` 和实际语义说明；只有在相应仓库确实完成问题处理时才用 `Closes`，避免误关闭外部 issue。对既有实现只参考设计或回归场景时，应明确写出没有直接移植的部分。
 
