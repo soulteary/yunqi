@@ -313,6 +313,8 @@ yunqi --config ~/.config/yunqi/config.json --statedir ~/.local/state/yunqi --log
 | `info` | 2 | 信息日志（默认） | 常规操作、状态变化 |
 | `debug` | 3 | 调试日志（最低优先级） | 详细调试信息、敏感数据 |
 
+**正文约束**：`ENV=development`、debug 等级或 `ENABLE_*_LOGS=true` 都不会单独启用正文。请先通过 `GET /api/logging/body` 核对 `effective`；正文策略 API 与变更审计见 [API](api.md)。
+
 **等级控制规则**：设置 `LOG_LEVEL=info` 时，会输出 `error`、`warn`、`info` 级别的日志，但不输出 `debug` 级别。
 
 #### 日志控制机制
@@ -342,20 +344,20 @@ if envCfg.EnableRequestLogs {
 ##### 3. 环境门控（开发专用）
 ```go
 // 代码示例
-if envCfg.EnableRequestLogs && envCfg.IsDevelopment() {
+if envCfg.ShouldLogRequestBodies() {
     log.Printf("📄 原始请求体:\n%s", formattedBody)
 }
 ```
 - **适用场景**：敏感/详细信息（请求体、请求头等）
-- **控制变量**：`ENV=development`
+- **控制条件**：`ENV=development` 与对应日志开关；正文还须已审计的 requestBodies/responseBodies 策略。
 
 #### 日志输出对照表
 
 | 日志内容 | 控制条件 | 等效等级 | 生产环境 | 开发环境 |
 |---------|---------|---------|---------|---------|
-| `📄 原始请求体` | `EnableRequestLogs && IsDevelopment()` | debug | ❌ 不输出 | ✅ 输出 |
+| `📄 原始请求体` | `ShouldLogRequestBodies()`（含正文审计策略） | debug | ❌ 不输出 | 显式启用后输出 |
 | `📋 实际请求头` | `EnableRequestLogs && IsDevelopment()` | debug | ❌ 不输出 | ✅ 输出 |
-| `📦 响应体` | `EnableResponseLogs && IsDevelopment()` | debug | ❌ 不输出 | ✅ 输出 |
+| `📦 响应体` | `ShouldLogResponseBodies()`（含正文审计策略） | debug | ❌ 不输出 | 显式启用后输出 |
 | `📥 收到请求` | `EnableRequestLogs` | info | ⚙️ 可配置 | ✅ 输出 |
 | `⏱️ 响应完成` | `EnableResponseLogs` | info | ⚙️ 可配置 | ✅ 输出 |
 | `🎯 使用上游` | `ShouldLog("info")` | info | ⚙️ 可配置 | ✅ 输出 |
@@ -372,7 +374,7 @@ LOG_LEVEL=debug
 ENABLE_REQUEST_LOGS=true
 ENABLE_RESPONSE_LOGS=true
 ```
-- ✅ 输出所有日志，包括完整请求体、请求头、响应体
+- ✅ 开启详细元数据日志；正文仍须通过审计策略独立启用，并受脱敏和字节上限约束
 - ✅ 适合本地开发调试
 - ⚠️ 可能包含敏感信息，不要在生产环境使用
 
@@ -653,7 +655,7 @@ ENABLE_RESPONSE_LOGS=true
 ENABLE_WEB_UI=true
 ```
 - ⚠️ 适合：故障排查时临时启用
-- ⚠️ 注意：会输出完整响应内容，增加日志量
+- ⚠️ 注意：显式启用正文策略后输出受限、脱敏的响应内容，增加日志量
 - 🔄 建议：问题解决后立即恢复标准配置
 
 #### 4.4 开发环境配置
@@ -757,7 +759,7 @@ ENABLE_RESPONSE_LOGS=true
 #### 故障排查时的安全做法
 ```bash
 # ✅ 推荐：临时开启详细日志，排查完成后恢复
-ENABLE_RESPONSE_LOGS=true  # 临时启用
+ENABLE_RESPONSE_LOGS=true  # 仍须通过正文策略 API 显式启用 responseBodies
 
 # 🔄 排查完成后立即恢复
 ENABLE_RESPONSE_LOGS=false
@@ -897,7 +899,7 @@ curl -H "x-api-key: ${ADMIN_ACCESS_KEY:-$PROXY_ACCESS_KEY}" http://localhost:300
 #### 看不到请求体/响应体
 **症状**：日志中没有详细的请求/响应内容
 
-**原因**：详细内容只在开发环境 (`ENV=development`) 输出
+**原因**：正文默认关闭；需要 development、对应日志开关，以及全局管理员通过 `PUT /api/logging/body` 显式启用的已审计正文策略。
 
 **解决方案**：
 ```env
@@ -936,3 +938,46 @@ echo $ENV  # 必须是 development
 - **项目架构**: 参见 [架构说明](./architecture.md)
 - **快速开始**: 参见 [快速开始](./getting-started.md)
 - **贡献指南**: 参见 [贡献指南](./contributing.md)
+
+## 可选治理与可观测性策略
+
+这些变量在服务启动时读取，修改后由部署方安排生效；配置 JSON 的在线保存不等同于重新读取环境变量。
+
+| 变量 | 默认值与含义 |
+| --- | --- |
+| `PROXY_MAX_CONCURRENCY` | 0，不限；按认证入口主体限制完整 HTTP/SSE/WS 轮次的并发 |
+| `PROXY_PRINCIPAL_IDS` | 可选旧入口 Key→稳定主体映射，用于旋转后的持续身份；托管入口 Key 自带稳定 PrincipalID |
+| `IDENTITY_PROXY_SECRET` | 未配置；可信身份代理共享密钥，至少 32 字节，还须配置受信 CIDR/issuer/组映射/allowedOrigins |
+| `YUNQI_STRICT_SESSION_AFFINITY` | false；显式稳定会话按入口主体、协议及 main/subagent 原子绑定渠道 UID |
+| `YUNQI_OUTBOUND_ALLOWED_HOSTS` | 空，保留已有主机兼容性；可设逗号分隔主机/通配主机白名单 |
+| `YUNQI_OUTBOUND_ALLOWED_PORTS` | 空，不额外收窄；可设逗号分隔端口白名单 |
+| `YUNQI_OUTBOUND_BLOCK_PRIVATE` | false；启用时阻止私网/回环等目标 |
+| `YUNQI_OUTBOUND_PRIVATE_CIDRS` | 空；阻止私网时允许的明确 CIDR 例外 |
+| `YUNQI_OTLP_ENABLED` | false；启用 OTLP/HTTP protobuf trace 导出 |
+| `YUNQI_OTLP_ENDPOINT` | 启用后的默认值为 `http://127.0.0.1:4318/v1/traces`，接受完整 traces URL |
+| `YUNQI_OTLP_SAMPLE_RATIO` | 0.1，范围 0–1；0 不导出 span |
+| `YUNQI_OTLP_PROPAGATE_UPSTREAM` | true（仅启用 OTLP 后生效）；是否向供应商传播网关 traceparent |
+| `OTEL_SERVICE_NAME` | yunqi；导出的服务名 |
+| `USAGE_DRAIN_TIMEOUT_MS` | 0（关闭）；客户端断开后限时读取 usage，最大 5000 毫秒 |
+
+出站策略覆盖实际拨号、DNS 结果、重定向和代理连接；云元数据地址始终阻止。私网阻止默认关闭，因此现有本地模型/企业私网渠道不会因升级自动失效。OTLP 也走同一出站策略，若开启私网限制，本地 collector 需要相应例外。
+
+严格会话需要显式会话 ID，例如 `Session_id`、`Conversation_id`、`X-Claude-Code-Session-Id` 或既有显式 body 身份；不使用匿名 prompt 指纹。缺主体/会话返回 400，容量满返回 503。每进程最多 4096 条，30 分钟无活动过期，在途 lease 不过期；失败、渠道禁用或删除不触发迁移。该状态在重启后清空，多节点需入口会话粘性，不是分布式会话绑定。默认普通亲和行为保持。
+
+OTLP 也接受 `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`，或 `OTEL_EXPORTER_OTLP_ENDPOINT` 加 `/v1/traces`；YUNQI_OTLP_ENDPOINT 优先。标准 OTEL_EXPORTER_OTLP_TRACES_HEADERS/OTEL_EXPORTER_OTLP_HEADERS 可提供 collector 认证。客户端使用系统 TLS 信任与网关出站策略，不使用 SDK 自建证书客户端；导出无重定向/重试，超时 2 秒，队列 512、批次 64，关闭最多 5 秒。只导出固定协议/状态/阶段及受限关联 ID，不导出 prompt、模型、URL、正文、凭证、baggage 或传入 tracestate。导出异常不阻塞请求，健康状态可从 Prometheus 查看。
+
+正文日志策略不使用新增环境开关：仍由 `ENV`、`ENABLE_REQUEST_LOGS`、`ENABLE_RESPONSE_LOGS` 提供原有门控，并要求管理员经 `/api/logging/body` 独立显式启用正文；默认关闭。策略、实际 effective 状态、字节上限、轮转保留期与 actor 审计以该 API 为准，不能仅凭日志等级判断是否会记录正文。
+
+断客 usage drain 仅适用于显式输出上限不超过 1024 token 的普通 HTTP 流式请求，最多读取 1 MiB；不用于 WebSocket 控制取消或竞速分支。客户端断开后不再写回客户端，只限时等待供应商计量。原请求 deadline、服务退出、预算或租约取消仍优先终止上游。缺少真实协议终态的 usage 标为不完整，不能因读到 EOF 就当作完整计费；诊断摘要仍保持取消结果，不记请求成功。
+
+预置更新器的 `PRESET_TRUSTED_ED25519_KEYS` 接受 key ID 到 Base64 Ed25519 公钥的 JSON 对象。未配置时可检查未签名来源，但会明确显示未验证；配置可信公钥后拒绝未签名、未知 key 和错误签名，审核时按当前公钥重新验证，不能绕过已撤销 key。来源 digest 绑定下载的索引与分片校验链。
+
+跨节点入口限额由 `PROXY_REDIS_URL` 显式启用，支持 redis/rediss；未设置仍使用本地准入。`PROXY_REDIS_NAMESPACE` 默认 yunqi，同一限额域的节点必须使用相同 namespace、稳定主体 ID 和限额策略；独立网关应使用不同 namespace。`PROXY_REDIS_MAX_RPM` 默认为 0（不额外限制），`PROXY_REDIS_LEASE_SECONDS` 默认 30，允许 5–300 秒。入口并发由 `PROXY_MAX_CONCURRENCY` 设置每主体上限，共享租约限制各节点的总和，不按 Key 重试重复消耗逻辑请求 RPM。
+
+Redis 不可用或续约失效时拒绝准入并取消受影响上游，不退回本地放行；活跃 Body（含后台计量读取）结束前保留租约。异常进程退出后等待 Redis 租约过期回收，不立即假定请求结束。
+
+Redis 此处只共享入口并发/RPM，不复制配置或 SQLite 预算账本，也不改变严格会话的进程内绑定。独立预算数据库分别计算余额，不能视为统一团队预算；多副本部署需为同一预算主体保持单一账本入口。Redis 应保留在途租约状态，不能依赖清空或驱逐 key 回收额度；Redis 租约不能撤销供应商已开始的调用。
+
+共享 SSO 撤销使用独立的 `IDENTITY_PROXY_REVOCATION_REDIS_URL` 与 `IDENTITY_PROXY_REVOCATION_REDIS_NAMESPACE`，并需在身份代理配置中显式选择 `revocationMode=shared`。该 URL 遵循全局出站限制，凭证不参与管理 JSON 展示；配置 URL 本身不会把默认 local 模式自动改为 shared。各节点应先配置可用后端，再统一启用共享模式。
+
+`PRESET_SOURCE_MAX_AGE`、`PRESET_SOURCE_FUTURE_SKEW` 使用 Go duration（如 `168h`、`5m`），默认 0 保持时间门槛未启用。远程更新检查和审核时若启用时间校验，需要有效发布时间，拒绝过旧或超过允许时钟偏差的来源；审核等待期间也会重新检查。即使未设时间门槛，待审来源仍显示发布时间和检查时间，不能将检查成功等同于来源新鲜。
