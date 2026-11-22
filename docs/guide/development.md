@@ -6,6 +6,7 @@
 > - 架构设计：[architecture.md](architecture.md)
 > - 环境变量：[environment.md](environment.md)
 > - 发布流程：[release.md](release.md)
+> - 模型目录治理：[model-governance.md](model-governance.md)
 
 ## 环境准备
 
