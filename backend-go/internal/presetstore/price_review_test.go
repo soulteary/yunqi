@@ -299,3 +299,37 @@ func TestAutomaticCacheReceiptCannotOverrideNewerOrDifferentBaseline(t *testing.
 		}
 	}
 }
+
+func TestPriceChangeUnionLimitRoundTripsPendingAfterRestart(t *testing.T) {
+	before := pricedTestBundle("1", 1)
+	after := pricedTestBundle("2", 2)
+	before.ModelRegistry.UpstreamCapabilities[0].Patterns = nil
+	after.ModelRegistry.UpstreamCapabilities[0].Patterns = nil
+	for i := 0; i < 2049; i++ {
+		before.ModelRegistry.UpstreamCapabilities[0].Patterns = append(before.ModelRegistry.UpstreamCapabilities[0].Patterns, fmt.Sprintf("old-model-%04d", i))
+		after.ModelRegistry.UpstreamCapabilities[0].Patterns = append(after.ModelRegistry.UpstreamCapabilities[0].Patterns, fmt.Sprintf("new-model-%04d", i))
+	}
+	updater := NewPresetUpdater(NewPresetStore(before), UpdaterConfig{CacheDir: t.TempDir()})
+	staged, err := updater.stagePriceReview(after, &PresetIndex{DataVersion: after.DataVersion}, []byte("bulk-model-change"), false)
+	if err != nil || !staged {
+		t.Fatalf("stage failed: %v", err)
+	}
+	state := updater.PriceReviewState()
+	if state.Pending == nil || state.Pending.ChangeCount != 4098 || !state.Pending.PreviewTruncated || len(state.Pending.Changes) != 500 {
+		t.Fatal("source union or preview limit is incorrect")
+	}
+	restarted := NewPresetUpdater(NewPresetStore(before), UpdaterConfig{CacheDir: updater.config.CacheDir})
+	if err := restarted.loadPriceDisk(); err != nil {
+		t.Fatalf("a successfully staged proposal failed restart: %v", err)
+	}
+	restored := restarted.PriceReviewState()
+	if restored.Pending == nil || restored.Pending.ChangeCount != 4098 || restored.Pending.ReviewID != state.Pending.ReviewID {
+		t.Fatal("pending proposal changed across restart")
+	}
+	if err := restarted.ApprovePriceReview("owner", restored.Pending.ReviewID, true); err != nil {
+		t.Fatalf("restored proposal cannot be approved: %v", err)
+	}
+	if bundleHash(restarted.store.Get()) != bundleHash(after) {
+		t.Fatal("restored approval did not activate exact candidate")
+	}
+}

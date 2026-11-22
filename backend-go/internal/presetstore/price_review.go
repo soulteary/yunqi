@@ -20,6 +20,8 @@ import (
 )
 
 const priceReviewFile = "price-review.json"
+const maxPriceSourcePatterns = 4096
+const maxPriceChangeCount = 2 * maxPriceSourcePatterns
 const maxPriceHistoryBytes = 16 << 20
 const maxPriceReviewBytes = 32 << 20
 
@@ -188,7 +190,7 @@ func pricingMap(bundle *PresetBundle) (map[string]*pricingtypes.Pricing, error) 
 		data, _ := json.Marshal(pricing)
 		count += len(capability.Patterns)
 		size += (len(data) + 64) * len(capability.Patterns)
-		if count > 4096 || size > 4<<20 {
+		if count > maxPriceSourcePatterns || size > 4<<20 {
 			return nil, errors.New("price review model/byte limit exceeded")
 		}
 		for _, pattern := range capability.Patterns {
@@ -460,7 +462,7 @@ func (u *PresetUpdater) loadPriceDisk() error {
 		if state.Pending.Bundle == nil || state.Pending.SourceIndex == nil || state.Pending.SourceIndex.DataVersion != state.Pending.Bundle.DataVersion {
 			return errors.New("pending price source version mismatch")
 		}
-		if len(state.Pending.Proposal.Changes) > 500 || state.Pending.Proposal.ChangeCount > 4096 {
+		if len(state.Pending.Proposal.Changes) > 500 || state.Pending.Proposal.ChangeCount > maxPriceChangeCount {
 			return errors.New("price proposal limit exceeded")
 		}
 		if Validate(state.Pending.Bundle) != nil || bundleHash(state.Pending.Bundle) == "" {
