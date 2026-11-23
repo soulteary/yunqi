@@ -99,27 +99,35 @@ Claude Desktop can populate the model picker in two ways:
 - **Model discovery (automatic, on by default)**: requests `{Gateway base URL}/v1/models`. Yunqi implements this endpoint. Desktop filters model IDs that do not match its Claude naming rules unless the gateway supplies a valid `anthropic_family_tier`.
 - **Model list (manual)**: click **Add model** to list model IDs one by one. This overrides discovery, and the **first entry is the default model**.
 
-Non-Claude models can use a manual list or an explicit tier selected in Yunqi:
+Open **Service & client setup → Client model mappings**:
 
-1. Open the channel editor and find **Claude Desktop model mapping** under **Basic information**.
-2. The list contains models discovered or configured on its Messages route. Use **Add model ID** when no inventory is available.
-3. Choose `Sonnet`, `Opus`, `Haiku`, `Fable`, or `Mythos` for each model. For example, select `Sonnet` for `deepseek-v4-pro` and `Haiku` for `deepseek-flash`.
-4. Save the editor, then repeat Desktop's connection test. Cancelling the editor does not submit these changes.
+1. Select **Claude Desktop**.
+2. Each of `Haiku`, `Sonnet`, `Opus`, `Fable`, and `Mythos` has a target-model dropdown populated from active Messages channels. Several tiers can share one model.
+3. Click **Save mappings**, then repeat Desktop's connection test. **Not mapped** removes a slot. Switching clients preserves unsaved drafts.
 
-**None** clears an inherited compatibility tier for that model. Reopen the editor to check saved values. This is a client compatibility slot: it does not change model IDs, routing, provider identity, context limits, pricing, or verified protocol support, and it does not establish equivalence with Claude. Yunqi assigns no tier to DeepSeek by default. The first model in each tier is its default. Verify Messages inference and tool use separately.
-
-The editor stores a separate `claudeDesktopModelTiers` map on the channel, so no capability overrides or manual capability copies are required. A Messages protocol member can contain:
+For example, map Haiku to `deepseek-flash` and all other tiers to `deepseek-v4-pro`. The global configuration stores client slots as keys:
 
 ```json
 {
-  "claudeDesktopModelTiers": {
-    "deepseek-v4-pro": "sonnet",
-    "deepseek-flash": "haiku"
+  "clientModelMappings": {
+    "claude-desktop": {
+      "haiku": "deepseek-flash",
+      "sonnet": "deepseek-v4-pro",
+      "opus": "deepseek-v4-pro",
+      "fable": "deepseek-v4-pro",
+      "mythos": "deepseek-v4-pro"
+    }
   }
 }
 ```
 
-Inherited wildcard tier rules appear separately as read-only text; dropdowns edit actual model IDs. Existing `anthropicFamilyTier` values in `modelCapabilities` remain supported. Dedicated values take precedence; an empty string explicitly clears inherited metadata. Removing the key from the map instead restores the old configuration or upstream metadata. Editing these settings does not run paid inference tests.
+Discovery adds distinct aliases such as `yunqi-claude-desktop-haiku`, carrying the corresponding `anthropic_family_tier`. Messages and token-count requests resolve aliases to actual targets before normal scheduling, entry permissions, model admission and capability checks. Aliases preserve actual context limits, prices, provider identity and protocol verification; a tier does not establish equivalence with Claude.
+
+Targets come from declared models, enabled-key model inventories or approved imports in active default-route channels, filtered by channel model rules. Wildcard-only configurations need concrete model declarations first. Prefix-only channels retain their separate access boundary. Saved unavailable targets remain visible but cannot resolve. Normal scheduling chooses among active channels serving the same target.
+
+The same area supports independent profiles for **Claude Code** (five tiers, Messages), **Codex** (Default, Responses) and **OpenCode** (Default / Small, Chat). Use the displayed `yunqi-...` aliases in the setup wizard or client model settings. For example, set Claude Code's `ANTHROPIC_DEFAULT_HAIKU_MODEL` to `yunqi-claude-code-haiku`; Codex can use `yunqi-codex-default`; OpenCode can use `yunqi/yunqi-opencode-default` and `yunqi/yunqi-opencode-small`.
+
+Legacy channel `claudeDesktopModelTiers` and `modelCapabilities.anthropicFamilyTier` continue working until a global profile is saved. Exact legacy tiers can populate the new editor. After saving, global Desktop slots control discovery tiers. Empty configurations persist, so clearing a mapping survives reload. Original channel settings remain intact. Opening the editor does not run inference tests.
 
 The HTTP response includes `anthropic_family_tier`, `is_family_default`, `supports_1m`, and `max_input_tokens`, retaining the existing camelCase fields. The configuration key `anthropicFamilyTier` and the HTTP discovery fields belong to different interfaces. Check the running instance with:
 

@@ -99,27 +99,35 @@ Claude Desktop 提供两种方式填充模型选择器：
 - **Model discovery（自动发现，默认开启）**：自动请求 `{Gateway base URL}/v1/models` 拉取模型列表。Yunqi 已实现该端点。Claude Desktop 会过滤非 Claude 风格的模型 ID；只有名称符合客户端规则，或网关返回有效的 `anthropic_family_tier` 时，才会进入自动发现结果。
 - **Model list（手动列表）**：点击 **Add model** 逐个添加模型 ID，会覆盖自动发现的结果，**第一项为默认模型**。
 
-非 Claude 模型可以继续使用手动列表，也可以在 Yunqi 界面配置自动发现：
+在 Yunqi 的「服务与接入」页面，使用独立的「客户端模型映射」区域配置：
 
-1. 打开渠道的「编辑」窗口，在「基础信息」找到「Claude Desktop 模型适配」。
-2. 列表会显示 Messages 路由已发现或已配置的模型。没有清单时，可用「添加模型 ID」补入实际 ID。
-3. 在每个模型的下拉框中选择 `Sonnet`、`Opus`、`Haiku`、`Fable` 或 `Mythos`。例如为 `deepseek-v4-pro` 选择 `Sonnet`，为 `deepseek-flash` 选择 `Haiku`。
-4. 点击窗口底部的「保存」，再运行 Desktop 的连接测试。取消编辑不会下发这些设置。
+1. 客户端选择 **Claude Desktop**。
+2. `Haiku`、`Sonnet`、`Opus`、`Fable`、`Mythos` 各占一行，从当前激活的 Messages 渠道模型中选择目标。多个档位可以使用同一个模型。
+3. 点击「保存映射」，再执行 Desktop 连接测试。选择「不映射」会删除该档位的映射；切换客户端保留未保存的草稿。
 
-「不指定」会清除该模型继承的兼容 tier；设置保存后可重新打开窗口核对。这里的 tier 是客户端兼容槽位，不改变模型 ID、上游路由、供应商身份、上下文、价格或协议验证状态，也不表示 DeepSeek 具备 Claude 的所有能力。Yunqi 不会默认给 DeepSeek 分配 tier；同一 tier 下按列表顺序选择一个默认项。仍需单独验证 Messages 推理和工具调用。
-
-界面通过渠道的独立 `claudeDesktopModelTiers` 字段保存，不需要编辑 `modelCapabilities` 或手动复制模型能力。例如，Messages 协议成员的配置包含：
+例如，`Haiku` 指向 `deepseek-flash`，其余四档均可指向 `deepseek-v4-pro`。映射保存在全局配置，方向为客户端档位到实际模型：
 
 ```json
 {
-  "claudeDesktopModelTiers": {
-    "deepseek-v4-pro": "sonnet",
-    "deepseek-flash": "haiku"
+  "clientModelMappings": {
+    "claude-desktop": {
+      "haiku": "deepseek-flash",
+      "sonnet": "deepseek-v4-pro",
+      "opus": "deepseek-v4-pro",
+      "fable": "deepseek-v4-pro",
+      "mythos": "deepseek-v4-pro"
+    }
   }
 }
 ```
 
-旧版 `modelCapabilities` 中的通配 tier 规则会单独只读展示；下拉框只编辑具体模型 ID。旧版 `anthropicFamilyTier` 仍可读取；新的独立设置优先，空字符串表示显式清除继承值。若要仅移除独立覆盖、恢复旧配置或上游的自动元数据，可从该映射中删除对应键。界面操作不会触发收费推理测试。
+模型发现会额外提供 `yunqi-claude-desktop-haiku` 等独立别名，并带对应 `anthropic_family_tier`。使用别名的 Messages 请求及 token 计数请求先解析到实际目标，再执行原有渠道选择、入口权限、模型准入和能力检查。映射不改变目标的实际上下文、价格、供应商身份或协议验证状态；客户端档位不表示与 Claude 能力等价。
+
+下拉列表来自默认入口下激活渠道声明的模型、启用 Key 的模型清单或已批准的导入目录，并应用渠道模型白名单。仅有通配规则时，需要先在渠道中声明具体模型；前缀专用渠道保持独立，不通过全局别名暴露。已保存但当前不可用的目标会保留显示，无法通过该别名发起请求。相同目标的多个激活渠道继续由调度器选择。
+
+同一区域也支持 **Claude Code**（五个档位，Messages）、**Codex**（Default，Responses）和 **OpenCode**（Default / Small，Chat）。它们的映射互相独立；把界面显示的 `yunqi-...` 别名填入接入向导或客户端相应模型设置。例如 Claude Code 可将 `ANTHROPIC_DEFAULT_HAIKU_MODEL` 设为 `yunqi-claude-code-haiku`，Codex 可使用 `yunqi-codex-default`，OpenCode 可使用 `yunqi/yunqi-opencode-default` 和 `yunqi/yunqi-opencode-small`。
+
+旧渠道 `claudeDesktopModelTiers` 和 `modelCapabilities.anthropicFamilyTier` 在未保存新配置时继续沿用。旧的精确 tier 可在新编辑区回显；首次保存后，全局 Desktop 映射负责发现的档位，空配置也会持久化，避免重载后恢复已清除的旧设置。旧渠道配置不被改写。配置页面本身不执行推理测试。
 
 模型发现响应使用 `anthropic_family_tier`、`is_family_default`、`supports_1m` 和 `max_input_tokens`；原有驼峰字段继续保留。配置 JSON 中的 `anthropicFamilyTier` 与 HTTP 响应中的下划线字段属于不同接口。可用以下请求检查当前运行实例：
 
