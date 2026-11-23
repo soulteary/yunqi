@@ -40,6 +40,10 @@ func Handler(envCfg *config.EnvConfig, cfgManager *config.ConfigManager, channel
 		if err != nil {
 			return nil
 		}
+		bodyBytes, err = common.ApplyClientModelMapping(c, cfgManager, bodyBytes, "messages")
+		if err != nil {
+			return nil
+		}
 
 		earlyAffinityBody := common.NormalizeMetadataUserID(bodyBytes)
 		earlyUserID := utils.ExtractUnifiedSessionID(c, earlyAffinityBody)
@@ -1102,6 +1106,10 @@ func CountTokensHandler(envCfg *config.EnvConfig, cfgManager *config.ConfigManag
 		bodyBytes, err := common.ReadRequestBody(c, envCfg.MaxRequestBodySize)
 		if err != nil {
 			// ReadRequestBody 已经返回了错误响应
+			return nil
+		}
+		bodyBytes, err = common.ApplyClientModelMapping(c, cfgManager, bodyBytes, "messages")
+		if err != nil {
 			return nil
 		}
 		httpbridge.SetValue(c, "requestBodyBytes", bodyBytes)

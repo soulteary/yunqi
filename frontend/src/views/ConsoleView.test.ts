@@ -22,6 +22,7 @@ function render() {
     global: {
       stubs: {
         ...stubs,
+        ClientModelMappings: { template: '<section data-testid="client-model-mappings" />' },
         VBtn: { template: '<button><slot /></button>' },
         VSelect: {
           props: ['modelValue', 'items'],
@@ -53,6 +54,7 @@ describe('Web service console', () => {
     await view.get('select').setValue('codex')
     expect(view.get('pre').text()).not.toContain('model_context_window')
     expect(view.text()).toContain('不能扩展上游模型的实际容量')
+    expect(view.find('[data-testid="client-model-mappings"]').exists()).toBe(true)
     const context = view.get('[data-test="codex-context-window"] input')
     await context.setValue('1000000')
     expect(view.get('pre').text()).toContain('model_context_window = 1000000')

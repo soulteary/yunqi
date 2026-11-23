@@ -68,6 +68,10 @@ func CompactHandler(
 		if err != nil {
 			return nil
 		}
+		bodyBytes, err = common.ApplyClientModelMapping(c, cfgManager, bodyBytes, "responses")
+		if err != nil {
+			return nil
+		}
 
 		// 提取对话标识用于 Trace 亲和性
 		userID := utils.ExtractUnifiedSessionID(c, bodyBytes)

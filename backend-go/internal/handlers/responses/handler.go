@@ -44,6 +44,10 @@ func Handler(
 		if err != nil {
 			return nil
 		}
+		bodyBytes, err = common.ApplyClientModelMapping(c, cfgManager, bodyBytes, "responses")
+		if err != nil {
+			return nil
+		}
 
 		// 入口保留原始请求体；按渠道在发往上游前决定是否规范化 metadata.user_id
 		httpbridge.SetValue(c, "requestBodyBytes", bodyBytes)

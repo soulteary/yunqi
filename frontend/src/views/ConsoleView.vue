@@ -6,6 +6,7 @@ import { useAuthStore } from '@/stores/auth'
 import type { ConsoleStatus } from '@/services/console-types'
 import { clientConfig, type ClientKind } from '@/utils/client-setup'
 import CodexAutoReviewSetup from '@/components/CodexAutoReviewSetup.vue'
+import ClientModelMappings from '@/components/ClientModelMappings.vue'
 const { locale } = useI18n()
 const zh = computed(() => locale.value === 'zh-CN')
 const auth = useAuthStore()
@@ -119,6 +120,7 @@ function diagnostics() {
       <v-btn to="/health" variant="text">{{ zh ? '健康与排障' : 'Health & diagnostics' }}</v-btn>
       <v-btn to="/conversations" variant="text">{{ zh ? '请求与调度记录' : 'Requests & routing' }}</v-btn>
     </v-card>
+    <ClientModelMappings />
     <h2 class="text-h6 mb-3">{{ zh ? '接入向导' : 'Connect a client' }}</h2>
     <p class="mb-3">
       {{

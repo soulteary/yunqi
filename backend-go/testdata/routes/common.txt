@@ -78,6 +78,7 @@ GET /api/chat/ping
 GET /api/chat/ping/:id
 GET /api/cockpit/overview
 GET /api/compat-cache
+GET /api/console/client-model-mappings
 GET /api/console/codex-auto-review
 GET /api/console/status
 GET /api/conversations
@@ -438,6 +439,7 @@ PUT /api/budgets
 PUT /api/channels/:uid
 PUT /api/channels/:uid/model-import/policy
 PUT /api/chat/channels/:id
+PUT /api/console/client-model-mappings
 PUT /api/console/codex-auto-review
 PUT /api/conversations/settings
 PUT /api/entry-keys/:id

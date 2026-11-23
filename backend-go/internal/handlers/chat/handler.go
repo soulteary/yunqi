@@ -39,6 +39,10 @@ func Handler(
 		if err != nil {
 			return nil
 		}
+		bodyBytes, err = common.ApplyClientModelMapping(c, cfgManager, bodyBytes, "chat")
+		if err != nil {
+			return nil
+		}
 		httpbridge.SetValue(c, "requestBodyBytes", bodyBytes)
 
 		// 解析请求中的关键字段

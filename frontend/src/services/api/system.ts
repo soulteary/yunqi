@@ -22,6 +22,12 @@ export function createSystemApi(client: ApiClient) {
     async diagnoseNetwork(settings: { baseUrl?: string; channelUid?: string; proxyUrl?: string; proxyPreferDirect?: boolean; insecureSkipVerify?: boolean; outboundNetwork?: OutboundNetworkConfig | null }): Promise<{ results: NetworkDiagnosis[] }> {
       return client.request('/network/diagnose', { method: 'POST', body: JSON.stringify(settings) })
     },
+    async getClientModelMappings(): Promise<import('../types/client-model-mappings').ClientMappingState> {
+      return client.request('/console/client-model-mappings')
+    },
+    async setClientModelMappings(mappings: import('../types/client-model-mappings').ClientModelMappings): Promise<import('../types/client-model-mappings').ClientMappingState> {
+      return client.request('/console/client-model-mappings', { method: 'PUT', body: JSON.stringify({ mappings }) })
+    },
     async getConsoleStatus(): Promise<ConsoleStatus> {
       return client.request('/console/status')
     },
