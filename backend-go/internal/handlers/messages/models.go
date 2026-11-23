@@ -119,6 +119,12 @@ func ModelsHandler(envCfg *config.EnvConfig, cfgManager *config.ConfigManager, c
 				httpbridge.JSON(c, http.StatusOK, withClientModelAliases(c, cfgManager, response))
 				return nil
 			}
+			// A mapped model can be declared only in a Key inventory or capability
+			// override, with no concrete supportedModels fallback entries.
+			if mapped := withClientModelAliases(c, cfgManager, buildModelsResponse(nil)); len(mapped.Data) > 0 {
+				httpbridge.JSON(c, http.StatusOK, mapped)
+				return nil
+			}
 			if hasModelsDiscoveryCandidate(req) {
 				httpbridge.JSON(c, http.StatusServiceUnavailable, fiber.Map{
 					"error": fiber.Map{

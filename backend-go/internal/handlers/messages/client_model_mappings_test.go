@@ -202,3 +202,17 @@ func TestClientMappingDiscoveryIncludesTargetsMissingFromSnapshot(t *testing.T) 
 		}
 	}
 }
+
+func TestClientMappingDiscoveryFallbackWithKeyInventory(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusServiceUnavailable) }))
+	defer server.Close()
+	cm := setupModelsConfigManager(t, config.Config{Upstream: []config.UpstreamConfig{{Name: "key-inventory", BaseURL: server.URL, Status: "active", APIKeys: []string{"test"}, ServiceType: "claude", SupportedModels: []string{"*"}, APIKeyConfigs: []config.APIKeyConfig{{Models: []string{"target"}}}, ModelCapabilities: map[string]config.UpstreamModelCapability{"target": {ContextWindowTokens: 200000}}}}, ClientModelMappings: config.ClientModelMappings{"claude-desktop": {"sonnet": "target"}}})
+	router := newModelsRouterForAggregate(&config.EnvConfig{ProxyAccessKey: "test-key"}, cm, newModelsTestScheduler(cm))
+	req := httptest.NewRequest("GET", "/v1/models", nil)
+	req.Header.Set("x-api-key", "test-key")
+	rec := httptest.NewRecorder()
+	httpbridge.Handler(router).ServeHTTP(rec, req)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "yunqi-claude-desktop-sonnet") {
+		t.Fatalf("key inventory fallback: %d %s", rec.Code, rec.Body.String())
+	}
+}
