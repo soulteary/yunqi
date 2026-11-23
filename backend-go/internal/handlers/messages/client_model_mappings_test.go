@@ -83,6 +83,25 @@ func TestClientMappingsDiscoveryAndRealMessagesRouting(t *testing.T) {
 			t.Fatalf("alias leaked upstream: %s", model)
 		}
 	}
+
+	// Existing restricted entry keys authorize the actual target, not its alias.
+	for _, tc := range []struct {
+		models []string
+		status int
+	}{
+		{[]string{"deepseek-v4-pro"}, 200},
+		{[]string{"not-the-target"}, 403},
+		{[]string{"yunqi-claude-desktop-sonnet"}, 403},
+	} {
+		env.ManagedProxyKeyLookup = func(string) (config.EntryKey, bool) {
+			return config.EntryKey{ID: "restricted", PrincipalID: "principal", Models: tc.models}, true
+		}
+		rec = request("POST", "/v1/messages", `{"model":"yunqi-claude-desktop-sonnet","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`)
+		if rec.Code != tc.status {
+			t.Fatalf("target ACL %v: %d %s", tc.models, rec.Code, rec.Body.String())
+		}
+	}
+	env.ManagedProxyKeyLookup = nil
 	// Cached discovery must immediately reflect a clear, without stale aliases.
 	if err := cm.SetClientModelMappingsAudited(config.ManagementAuditContext{}, config.ClientModelMappings{"claude-desktop": {}}); err != nil {
 		t.Fatal(err)
@@ -138,5 +157,48 @@ func TestClientProfilesKeepDesktopDiscoverySeparate(t *testing.T) {
 	}
 	if len(result.Data) != 1 || result.Data[0].AnthropicFamilyTier != "sonnet" {
 		t.Fatalf("another client changed Desktop discovery: %+v", result.Data)
+	}
+}
+
+func TestClientMappingDiscoveryIncludesTargetsMissingFromSnapshot(t *testing.T) {
+	cm := setupModelsConfigManager(t, config.Config{Upstream: []config.UpstreamConfig{
+		{Name: "first", BaseURL: "https://first.invalid", Status: "active", APIKeys: []string{"test"}, ServiceType: "claude", SupportedModels: []string{"unrelated"}},
+		{Name: "third", BaseURL: "https://third.invalid", Status: "active", APIKeys: []string{"test"}, ServiceType: "claude", SupportedModels: []string{"target"}, ModelCapabilities: map[string]config.UpstreamModelCapability{"target": {ContextWindowTokens: 200000}}},
+	}, ClientModelMappings: config.ClientModelMappings{"claude-desktop": {"sonnet": "target"}}})
+	cfg := cm.GetConfig()
+	router := httpbridge.NewApp()
+	handler := func(c fiber.Ctx) error {
+		result := withClientModelAliases(c, cm, buildModelsResponse([]ModelEntry{{ID: "unrelated"}}))
+		httpbridge.JSON(c, 200, result)
+		return nil
+	}
+	router.Get("/v1/models", handler)
+	router.Get("/:routePrefix/v1/models", handler)
+	for _, tc := range []struct {
+		path, pin string
+		found     bool
+	}{
+		{"/v1/models", "", true}, {"/v1/models", cfg.Upstream[1].Name, true}, {"/v1/models", cfg.Upstream[0].Name, false}, {"/private/v1/models", "", false},
+	} {
+		req := httptest.NewRequest("GET", tc.path, nil)
+		req.Header.Set("X-Channel", tc.pin)
+		rec := httptest.NewRecorder()
+		httpbridge.Handler(router).ServeHTTP(rec, req)
+		var result ModelsResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, model := range result.Data {
+			if model.ID == "yunqi-claude-desktop-sonnet" {
+				found = true
+				if model.ContextWindow != 200000 || model.Supports1M {
+					t.Fatalf("configured target capabilities: %+v", model)
+				}
+			}
+		}
+		if found != tc.found {
+			t.Fatalf("path=%s pin=%s alias found=%v expected=%v", tc.path, tc.pin, found, tc.found)
+		}
 	}
 }

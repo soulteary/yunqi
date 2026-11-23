@@ -99,8 +99,10 @@
 | 独立客户端映射入口 | 从渠道编辑弹窗移到「服务与接入」；Desktop / Claude Code 的五个档位各自选择激活渠道模型；Codex / OpenCode 使用独立用途槽位 | 前端固定档位、共享目标、切换草稿、显式保存、失败与登录切换测试 | Yunqi [#115](https://github.com/soulteary/yunqi/pull/115) 的交互修正 |
 | 多个档位共用一个目标 | 每档保留独立 Yunqi 别名，发现、模型详情与实际请求解析一致；继续执行目标模型的准入、权限和调度 | 五个档位映射同一 DeepSeek 模型的发现及真实 HTTP 转发回归；跨协议和前缀隔离 | [anthropics/claude-code#88345](https://github.com/anthropics/claude-code/issues/88345) 的网关模型发现与能力元数据问题，作为兼容背景；不声称修复客户端自身 |
 | 持久化与兼容 | 精确旧配置回显，新配置保存前不改旧渠道；空映射持久化；停用目标不再解析；其他客户端的别名不混入 Desktop 发现 | 保存/重载/清空、快照隔离、导入白名单、不可用目标与客户端隔离回归 | 延续 Yunqi [#114](https://github.com/soulteary/yunqi/pull/114) 的模型发现契约 |
+| 本批复审：入口 ACL 在别名解析前执行 | 先完成大小和解压检查，再解析到实际目标，之后执行首次模型 ACL；原读取入口的权限语义保留 | 先复现受限 Key 的误拒绝，再验证实际目标白名单放行、目标不在白名单及仅别名在白名单时拒绝；覆盖各客户端协议 | [#117 复审修正](https://github.com/soulteary/yunqi/pull/117/commits) |
+| 本批复审：限量采集遗漏映射目标 | 从当前活跃且符合路由与渠道筛选的配置补齐遗漏目标的别名，能力来源仍为实际目标配置 | 先复现部分发现结果缺少有效档位，再验证配置回退、X-Channel 筛选和前缀隔离 | [#117 复审修正](https://github.com/soulteary/yunqi/pull/117/commits) |
 
-实现与回归提交：[d355ba2](https://github.com/soulteary/yunqi/commit/d355ba2bef177ec6574ad31692a598b6a23a4d8e)。文档另批提交，随同一个 PR 交付；提交说明保留上述参考链接。具体配置见 [Claude Desktop 接入](clients/claude-desktop.md)。
+实现与回归提交：[d355ba2](https://github.com/soulteary/yunqi/commit/d355ba2bef177ec6574ad31692a598b6a23a4d8e)。文档及复审修正另批提交，随 [PR #117](https://github.com/soulteary/yunqi/pull/117) 交付；提交说明保留上述参考链接。具体配置见 [Claude Desktop 接入](clients/claude-desktop.md)。
 
 ## 后续维护
 

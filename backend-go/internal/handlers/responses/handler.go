@@ -40,11 +40,7 @@ func Handler(
 
 		// 读取原始请求体
 		maxBodySize := envCfg.MaxRequestBodySize
-		bodyBytes, err := common.ReadRequestBody(c, maxBodySize)
-		if err != nil {
-			return nil
-		}
-		bodyBytes, err = common.ApplyClientModelMapping(c, cfgManager, bodyBytes, "responses")
+		bodyBytes, err := common.ReadClientRequestBody(c, maxBodySize, cfgManager, "responses")
 		if err != nil {
 			return nil
 		}

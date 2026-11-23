@@ -11,6 +11,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/soulteary/yunqi/internal/config"
 	"github.com/soulteary/yunqi/internal/httpbridge"
+	"github.com/soulteary/yunqi/internal/middleware"
 )
 
 func TestClientModelMappingProtocolAndRequestBoundaries(t *testing.T) {
@@ -44,12 +45,15 @@ func TestClientModelMappingProtocolAndRequestBoundaries(t *testing.T) {
 	} {
 		t.Run(tc.alias+tc.kind+tc.path, func(t *testing.T) {
 			router := httpbridge.NewApp()
+			env := &config.EnvConfig{ProxyAccessKey: "test-key", ManagedProxyKeyLookup: func(string) (config.EntryKey, bool) {
+				return config.EntryKey{ID: "restricted", PrincipalID: "principal", Models: []string{"target", "actual-model"}}, true
+			}}
 			handler := func(c fiber.Ctx) error {
-				body, err := ReadRequestBody(c, 1<<20)
-				if err != nil {
+				middleware.AuthenticateProxy(c, env)
+				if httpbridge.IsAborted(c) {
 					return nil
 				}
-				mapped, err := ApplyClientModelMapping(c, cm, body, tc.kind)
+				mapped, err := ReadClientRequestBody(c, 1<<20, cm, tc.kind)
 				if err != nil {
 					return nil
 				}
@@ -59,6 +63,7 @@ func TestClientModelMappingProtocolAndRequestBoundaries(t *testing.T) {
 			router.Post("/v1/test", handler)
 			router.Post("/:routePrefix/v1/test", handler)
 			req := httptest.NewRequest("POST", tc.path, strings.NewReader(`{"model":"`+tc.alias+`","stream":true,"messages":[{"role":"user","content":"unaltered"}]}`))
+			req.Header.Set("x-api-key", "test-key")
 			rec := httptest.NewRecorder()
 			httpbridge.Handler(router).ServeHTTP(rec, req)
 			if rec.Code != tc.status {

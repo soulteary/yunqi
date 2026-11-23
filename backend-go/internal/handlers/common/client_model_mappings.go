@@ -27,3 +27,8 @@ func ApplyClientModelMapping(c fiber.Ctx, manager *config.ConfigManager, body []
 	}
 	return mapped, nil
 }
+
+// ReadClientRequestBody applies target mapping before the shared model ACL.
+func ReadClientRequestBody(c fiber.Ctx, maxBodySize int64, manager *config.ConfigManager, kind string) ([]byte, error) {
+	return readRequestBody(c, maxBodySize, func(body []byte) ([]byte, error) { return ApplyClientModelMapping(c, manager, body, kind) })
+}
