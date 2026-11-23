@@ -64,7 +64,7 @@ func CompactHandler(
 
 		// 读取请求体
 		maxBodySize := envCfg.MaxRequestBodySize
-		bodyBytes, err := common.ReadRequestBody(c, maxBodySize)
+		bodyBytes, err := common.ReadClientRequestBody(c, maxBodySize, cfgManager, "responses")
 		if err != nil {
 			return nil
 		}

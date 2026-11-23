@@ -1408,6 +1408,8 @@ type CircuitBreakerConfig struct {
 }
 
 type Config struct {
+	ClientModelMappings ClientModelMappings `json:"clientModelMappings,omitzero"`
+
 	ManagementAudit *ManagementAuditState `json:"managementAudit,omitempty"`
 
 	PrincipalBudgets []entrybudget.Policy   `json:"principalBudgets,omitempty"`
@@ -1545,6 +1547,7 @@ func (cm *ConfigManager) GetConfig() Config {
 
 	// 深拷贝整个 Config 结构体
 	cloned := cm.config
+	cloned.ClientModelMappings = CloneClientModelMappings(cm.config.ClientModelMappings)
 	// History is available only through the explicit global-admin audit API.
 	// Excluding it keeps hot-path configuration snapshots independent of retention size.
 	cloned.ManagementAudit = nil

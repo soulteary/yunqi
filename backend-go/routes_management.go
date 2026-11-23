@@ -45,6 +45,8 @@ func (a *application) registerManagementRoutes(apiGroup fiber.Router) {
 	apiGroup.Post("/network/diagnose", handlers.DiagnoseNetwork(a.cfgManager))
 	discoveryModelFetchers := buildChannelDiscoveryModelFetchers(a.cfgManager)
 	apiGroup.Get("/console/status", handlers.ConsoleStatus(a.envCfg, a.cfgManager))
+	apiGroup.Get("/console/client-model-mappings", handlers.GetClientModelMappings(a.cfgManager))
+	apiGroup.Put("/console/client-model-mappings", handlers.PutClientModelMappings(a.cfgManager))
 	apiGroup.Get("/console/codex-auto-review", handlers.GetCodexAutoReviewMapping(a.cfgManager))
 	apiGroup.Put("/console/codex-auto-review", handlers.PutCodexAutoReviewMapping(a.cfgManager))
 	apiGroup.Post("/copilot/oauth/device/code", copilot.RequestDeviceCode())

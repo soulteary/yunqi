@@ -109,14 +109,20 @@ func ModelsHandler(envCfg *config.EnvConfig, cfgManager *config.ConfigManager, c
 			if cached, ok := cache.Get(cacheKey); ok {
 				log.Printf("[Models] 实时发现失败，返回缓存: routePrefix=%q, channel=%q, merged=%d",
 					req.routePrefix, req.channelName, len(cached.Data))
-				httpbridge.JSON(c, http.StatusOK, cached)
+				httpbridge.JSON(c, http.StatusOK, withClientModelAliases(c, cfgManager, cached))
 				return nil
 			}
 			if configuredModels := configuredModelsFromAllKinds(req); len(configuredModels) > 0 {
 				response := buildModelsResponse(configuredModels)
 				log.Printf("[Models] 实时发现失败，返回配置模型回退: routePrefix=%q, channel=%q, merged=%d",
 					req.routePrefix, req.channelName, len(response.Data))
-				httpbridge.JSON(c, http.StatusOK, response)
+				httpbridge.JSON(c, http.StatusOK, withClientModelAliases(c, cfgManager, response))
+				return nil
+			}
+			// A mapped model can be declared only in a Key inventory or capability
+			// override, with no concrete supportedModels fallback entries.
+			if mapped := withClientModelAliases(c, cfgManager, buildModelsResponse(nil)); len(mapped.Data) > 0 {
+				httpbridge.JSON(c, http.StatusOK, mapped)
 				return nil
 			}
 			if hasModelsDiscoveryCandidate(req) {
@@ -142,7 +148,7 @@ func ModelsHandler(envCfg *config.EnvConfig, cfgManager *config.ConfigManager, c
 
 		log.Printf("[Models] 合并完成: messages=%d, responses=%d, chat=%d, gemini=%d, images=%d, vectors=%d, merged=%d",
 			len(messagesModels), len(responsesModels), len(chatModels), len(geminiModels), len(imagesModels), len(vectorsModels), len(mergedModels))
-		httpbridge.JSON(c, http.StatusOK, response)
+		httpbridge.JSON(c, http.StatusOK, withClientModelAliases(c, cfgManager, response))
 		return nil
 	}
 }
@@ -221,6 +227,15 @@ func ModelsDetailHandler(envCfg *config.EnvConfig, cfgManager *config.ConfigMana
 					"type":    "invalid_request_error",
 				},
 			})
+			return nil
+		}
+
+		if _, reserved := cfgManager.ResolveClientModelAlias(modelID, ""); reserved {
+			if entry, ok := clientAliasDetail(c, cfgManager, channelScheduler, modelID); ok {
+				httpbridge.JSON(c, http.StatusOK, entry)
+			} else {
+				httpbridge.JSON(c, http.StatusNotFound, fiber.Map{"error": fiber.Map{"type": "not_found_error", "message": "Client model mapping is unavailable"}})
+			}
 			return nil
 		}
 

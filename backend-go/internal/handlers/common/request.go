@@ -112,6 +112,12 @@ type RequestLifecycleTrace struct {
 // 返回: (bodyBytes, error)
 // 如果请求体过大，会自动返回 413 错误并排空剩余数据
 func ReadRequestBody(c fiber.Ctx, maxBodySize int64) ([]byte, error) {
+	return readRequestBody(c, maxBodySize, nil)
+}
+
+// readRequestBody resolves a trusted model transform after size/decompression
+// checks and before the first model ACL check, then restores the effective body.
+func readRequestBody(c fiber.Ctx, maxBodySize int64, transform func([]byte) ([]byte, error)) ([]byte, error) {
 	limitedReader := io.LimitReader(httpbridge.Request(c).Body, maxBodySize+1)
 	bodyBytes, err := io.ReadAll(limitedReader)
 	if err != nil {
@@ -138,6 +144,12 @@ func ReadRequestBody(c fiber.Ctx, maxBodySize int64) ([]byte, error) {
 		if int64(len(bodyBytes)) > maxBodySize {
 			httpbridge.JSON(c, 413, fiber.Map{"error": fmt.Sprintf("Request body too large after decompression, maximum size is %d MB", maxBodySize/1024/1024)})
 			return nil, fmt.Errorf("request body too large after decompression")
+		}
+	}
+	if transform != nil {
+		bodyBytes, err = transform(bodyBytes)
+		if err != nil {
+			return nil, err
 		}
 	}
 	var requestModel struct {

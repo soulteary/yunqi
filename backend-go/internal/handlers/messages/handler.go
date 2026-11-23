@@ -36,7 +36,7 @@ func Handler(envCfg *config.EnvConfig, cfgManager *config.ConfigManager, channel
 		startTime := time.Now()
 
 		// 读取请求体
-		bodyBytes, err := common.ReadRequestBody(c, envCfg.MaxRequestBodySize)
+		bodyBytes, err := common.ReadClientRequestBody(c, envCfg.MaxRequestBodySize, cfgManager, "messages")
 		if err != nil {
 			return nil
 		}
@@ -1099,7 +1099,7 @@ func CountTokensHandler(envCfg *config.EnvConfig, cfgManager *config.ConfigManag
 		}
 
 		// 使用统一的请求体读取函数，应用大小限制
-		bodyBytes, err := common.ReadRequestBody(c, envCfg.MaxRequestBodySize)
+		bodyBytes, err := common.ReadClientRequestBody(c, envCfg.MaxRequestBodySize, cfgManager, "messages")
 		if err != nil {
 			// ReadRequestBody 已经返回了错误响应
 			return nil
