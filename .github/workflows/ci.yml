@@ -9,9 +9,9 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: backend-go/go.mod
           cache-dependency-path: backend-go/go.sum
@@ -25,7 +25,7 @@ jobs:
       - name: Embed frontend
         run: bash scripts/embed-frontend.sh
       - name: Cache isolated Redis test binary
-        uses: actions/cache@v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/yunqi-test-redis/bin
           key: redis-test-${{ runner.os }}-${{ runner.arch }}-8.10.2-b9ffee22-libc-v1

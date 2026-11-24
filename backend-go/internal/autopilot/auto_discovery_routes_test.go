@@ -301,12 +301,13 @@ func TestTriggerDiscoveryEnablesDetectedProtocolRoutes(t *testing.T) {
 	modelStore.ReplaceActiveBindings(inventory.ModelProfileBindings)
 
 	source := cfgManager.GetConfig().ResponsesUpstream[0]
-	if !runner.TriggerDiscovery(source.ChannelUID, &source, cfgManager) {
+	channelUID := source.ChannelUID
+	if !runner.TriggerDiscovery(channelUID, &source, cfgManager) {
 		t.Fatal("TriggerDiscovery 应启动发现")
 	}
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		task := runner.GetTask(source.ChannelUID)
+		task := runner.GetTask(channelUID)
 		if task != nil && task.Status != DiscoveryStatusRunning {
 			if task.Status != DiscoveryStatusDone {
 				t.Fatalf("发现状态=%s, error=%s", task.Status, task.Error)
@@ -315,7 +316,7 @@ func TestTriggerDiscoveryEnablesDetectedProtocolRoutes(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if task := runner.GetTask(source.ChannelUID); task == nil || task.Status == DiscoveryStatusRunning {
+	if task := runner.GetTask(channelUID); task == nil || task.Status == DiscoveryStatusRunning {
 		t.Fatal("发现任务未在超时前完成")
 	}
 

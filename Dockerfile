@@ -1,8 +1,8 @@
 # --- 阶段 1: 准备 Bun 运行时（使用构建平台架构，避免 QEMU）---
-FROM --platform=$BUILDPLATFORM oven/bun:alpine AS bun-runtime
+FROM --platform=$BUILDPLATFORM oven/bun:1.4.5-alpine@sha256:da816670775f4c2b4e990b6b1847cf5540dcdc721a42033dd331ce7a88ba6a3b AS bun-runtime
 
 # --- 阶段 2: 构建阶段（使用构建平台架构，Go 交叉编译目标平台）---
-FROM --platform=$BUILDPLATFORM golang:1.27.4-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27.4-alpine3.24@sha256:70bd7ddea8b6cbe5d6943cde279d6b67feb10cc924fb9100d1d8757c1575b280 AS builder
 
 ARG VERSION
 ARG TARGETOS
@@ -39,7 +39,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     GOFLAGS="-buildvcs=false -p=1" VERSION=${VERSION} make build
 
 # --- 阶段 3: 运行时 ---
-FROM alpine:latest AS runtime
+FROM alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf AS runtime
 
 WORKDIR /app
 

@@ -40,7 +40,7 @@
         <!-- 展开面板是兄弟 flex item 而非块内子元素：卡片保持原位填空行，面板独占下一行 -->
         <v-expand-transition>
           <div v-if="expandedProviderId === card.id" class="provider-expand">
-            <slot name="expand" :provider-id="card.id" :card="card"></slot>
+            <slot name="expand" :provider-id="card.id" :card="card" />
           </div>
         </v-expand-transition>
       </template>

@@ -1,8 +1,8 @@
 # --- 阶段 1: 准备 Bun 运行时（使用构建平台架构，避免 QEMU）---
-FROM --platform=$BUILDPLATFORM docker.1ms.run/oven/bun:alpine AS bun-runtime
+FROM --platform=$BUILDPLATFORM docker.1ms.run/oven/bun:1.4.5-alpine AS bun-runtime
 
 # --- 阶段 2: 构建阶段（使用构建平台架构，Go 交叉编译目标平台）---
-FROM --platform=$BUILDPLATFORM docker.1ms.run/library/golang:1.26-alpine AS builder
+FROM --platform=$BUILDPLATFORM docker.1ms.run/library/golang:1.27.4-alpine3.24 AS builder
 
 ARG VERSION
 ARG TARGETOS
@@ -42,7 +42,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     GOFLAGS="-buildvcs=false -p=1" VERSION=${VERSION} make build
 
 # --- 阶段 3: 运行时 ---
-FROM docker.1ms.run/library/alpine:latest AS runtime
+FROM docker.1ms.run/library/alpine:3.24.4 AS runtime
 
 WORKDIR /app
 

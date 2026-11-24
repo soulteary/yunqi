@@ -1,9 +1,9 @@
 <template>
   <VMenu ref="menu" :model-value="modelValue" @update:model-value="emit('update:modelValue', $event)">
     <template #activator="slotProps">
-      <slot name="activator" v-bind="slotProps"></slot>
+      <slot name="activator" v-bind="slotProps" />
     </template>
-    <slot></slot>
+    <slot />
   </VMenu>
 </template>
 
